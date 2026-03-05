@@ -183,7 +183,10 @@
 </div>
 
 <script>
-const PROXY = u => 'https://corsproxy.io/?url=' + encodeURIComponent(u);
+const PROXIES = [
+  u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+];
 const MEN = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
 const MES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -203,22 +206,25 @@ const SHEETS = {
 // ── FETCH SHEET ────────────────────────────────────────────────────
 async function fetchSheet(sheetId, sheetName) {
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
-    const r = await fetch(PROXY(url), {signal: controller.signal});
-    clearTimeout(timeout);
-    const txt = await r.text();
-    const match = txt.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/);
-    if (!match) throw new Error(`"${sheetName}" no accesible`);
-    const json = JSON.parse(match[1]);
-    if (!json.table) throw new Error(`"${sheetName}" vacío`);
-    return json.table;
-  } catch(e) {
-    clearTimeout(timeout);
-    console.warn(`Error cargando ${sheetName}:`, e.message);
-    return {rows:[], cols:[]};
+  for (const proxyFn of PROXIES) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
+    try {
+      const r = await fetch(proxyFn(url), {signal: controller.signal});
+      clearTimeout(timeout);
+      const txt = await r.text();
+      const match = txt.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/);
+      if (!match) continue;
+      const json = JSON.parse(match[1]);
+      if (!json.table) continue;
+      return json.table;
+    } catch(e) {
+      clearTimeout(timeout);
+      console.warn(`Proxy fallito per ${sheetName}:`, e.message);
+    }
   }
+  console.warn(`${sheetName} non caricato`);
+  return {rows:[], cols:[]};
 }
 
 function rows(table) {
@@ -310,14 +316,18 @@ setInterval(updateClock, 30000);
 // ── MAIN ───────────────────────────────────────────────────────────
 async function main() {
   try {
-    const [tParam, tInv, tRepo, tMov, tOC, tVC] = await Promise.all([
-      fetchSheet(ID_MAESTRO, SHEETS.PARAMETROS),
-      fetchSheet(ID_MAESTRO, SHEETS.INVENTARIO_BC),
-      fetchSheet(ID_MAESTRO, SHEETS.REPOSICION_BC),
-      fetchSheet(ID_MAESTRO, SHEETS.MOVIMIENTOS_BC),
-      fetchSheet(ID_MAESTRO, SHEETS.OC_LOG),
-      fetchSheet(ID_MAESTRO, SHEETS.VENTAS_CONSOLIDADO),
-    ]);
+    document.querySelector('.loading-txt').textContent = 'Cargando PARAMETROS...';
+    const tParam = await fetchSheet(ID_MAESTRO, SHEETS.PARAMETROS);
+    document.querySelector('.loading-txt').textContent = 'Cargando Inventario...';
+    const tInv = await fetchSheet(ID_MAESTRO, SHEETS.INVENTARIO_BC);
+    document.querySelector('.loading-txt').textContent = 'Cargando Reposicion...';
+    const tRepo = await fetchSheet(ID_MAESTRO, SHEETS.REPOSICION_BC);
+    document.querySelector('.loading-txt').textContent = 'Cargando Movimientos...';
+    const tMov = await fetchSheet(ID_MAESTRO, SHEETS.MOVIMIENTOS_BC);
+    document.querySelector('.loading-txt').textContent = 'Cargando OC_Log...';
+    const tOC = await fetchSheet(ID_MAESTRO, SHEETS.OC_LOG);
+    document.querySelector('.loading-txt').textContent = 'Cargando Ventas...';
+    const tVC = await fetchSheet(ID_MAESTRO, SHEETS.VENTAS_CONSOLIDADO);
 
     // ── PARAMETROS ─────────────────────────────────────────────────
     const rParam = rowsRaw(tParam);
@@ -604,21 +614,4 @@ async function main() {
                 <span class="tbl-sku">${r[0]||'—'}</span>
                 <span class="tbl-d">${r[4]||r[3]||'—'}</span>
                 <span style="font-size:11px;color:var(--accent)">${r[2]||'—'}</span>
-                <span class="tbl-n">${r[5]!=null?r[5]:'—'} ${r[6]||''}</span>
-                <span style="text-align:center"><span class="tbl-est ${cls}">${label}</span></span>
-              </div>`;
-            }).join('')
-        }
-      </div>
-    </div>
-
-    <!-- ALERTAS -->
-    <div class="sec-label">ALERTAS ACTIVAS</div>
-    <div class="card">
-      <div class="al-list">
-        ${alertas.length === 0
-          ? `<div class="no-alertas">✓ Sin alertas activas — operación normal</div>`
-          : alertas.map(a => `
-            <div class="al-item al-${a.nivel}">
-              <span class="al-icon">${a.icon}</span>
-              <div><div class="al-
+                <spa
