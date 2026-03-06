@@ -396,18 +396,29 @@ async function main() {
     // Cols: A=SKU, B=Descripcion, C=Seccion, D=Descripcion UPC,
     //       E=Inv UPC, F=Inv UO, G=Costo UTM, H=Valor Inv $,
     //       I=Stock Min UPC, J=Stock Max UPC, K=Estado, L=Inv UTM
-    const rInv = rowsRaw(tInv).slice(1).filter(r => r[0]);
+    // gviz: para columnas con formato $, c.v puede ser null → usamos c.f
+    const tInvRaw = tInv && tInv.rows ? tInv.rows.map(r => r.c ? r.c.map(c => ({
+      v: c ? c.v : null,
+      f: c ? c.f : null
+    })) : []) : [];
+    const rInv = tInvRaw.slice(1).filter(r => r[0] && (r[0].v || r[0].f));
     let valorInv = 0, stockCritico = 0, stockQuiebre = 0, totalSKU = rInv.length;
-    rInv.forEach(r => {
-      const estado = String(r[10]||'').toUpperCase().trim(); // col K = indice 10
-      const valor = toNum(r[7]);                              // col H = indice 7
-      valorInv += valor; // suma todos, incluyendo negativos si los hay
-      // Acepta variantes: CRITICO, CRÍTICO, CRITICO, etc.
+    rInv.forEach((r, i) => {
+      // col K (indice 10) = Estado — usar f o v
+      const estadoRaw = r[10] ? (r[10].v || r[10].f || '') : '';
+      const estado = String(estadoRaw).toUpperCase().trim();
+      // col H (indice 7) = Valor Inv $ — gviz puede dar v=null y f="$162,000"
+      const valorCell = r[7] ? r[7] : null;
+      const valorRaw = valorCell ? (valorCell.v !== null && valorCell.v !== undefined ? valorCell.v : valorCell.f) : 0;
+      const valor = toNum(valorRaw);
+      valorInv += valor;
+      if (i < 3) console.log('INV debug row', i, '| estado:', estado, '| valorRaw:', valorRaw, '| valor:', valor);
       const esCritico = estado.includes('CRITICO') || estado.includes('CRTICO');
       const esQuiebre = estado.includes('QUIEBRE');
       if (esCritico) stockCritico++;
       if (esQuiebre) stockQuiebre++;
     });
+    console.log('INV totals | valorInv:', valorInv, '| totalSKU:', totalSKU, '| critico:', stockCritico, '| quiebre:', stockQuiebre);
 
     // ── REPOSICION BC ─────────────────────────────────────────────
     // Cols: A=SKU, B=Desc SKU, C=Desc UPC, D=Proveedores,
