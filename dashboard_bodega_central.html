@@ -345,17 +345,24 @@ async function main() {
     const bonoBajo    = parseFloat(String(P['Bono BC bajo']||'').replace(/[$,.]/g,''))  || 40000;
 
     // ── VENTAS CONSOLIDADO ─────────────────────────────────────────
+    // Col A = "Mar-2026" (texto), Col D = Budget $, Col E = Venta Real $
+    // Soporta múltiples locales (Candelaria, Riesco, etc.) — suma todo el mes
     const rVC = rowsRaw(tVC).slice(1).filter(r => r[0]);
     const now = new Date();
-    const mesActual = MEN[now.getMonth()].charAt(0).toUpperCase() + MEN[now.getMonth()].slice(1) + '-' + now.getFullYear();
+    // Construir prefijo mes: "Mar-2026", "Apr-2026", etc.
+    const mesPrefijo = MEN[now.getMonth()].charAt(0).toUpperCase() + MEN[now.getMonth()].slice(1) + '-' + now.getFullYear();
 
     let totalBudget = 0, totalVentaReal = 0;
-    const vcMes = rVC.filter(r => r[0] && String(r[0]).includes(String(now.getFullYear())));
+    // Filtrar filas donde col A contiene el mes actual (ej: "Mar-2026")
+    // Excluir filas de totales/consolidados (col B vacía o col C = "Consolidata"/"Marzo")
+    const vcMes = rVC.filter(r => {
+      const mesCell = String(r[0]||'');
+      const localCell = String(r[1]||'').trim();
+      return mesCell.includes(mesPrefijo) && localCell !== '';
+    });
     vcMes.forEach(r => {
-      const bud = toNum(r[3]);
-      const vta = toNum(r[4]);
-      totalBudget += bud;
-      totalVentaReal += vta;
+      totalBudget    += toNum(r[3]); // col D = Budget $
+      totalVentaReal += toNum(r[4]); // col E = Venta Real $
     });
 
     // ── OC LOG ────────────────────────────────────────────────────
@@ -384,11 +391,14 @@ async function main() {
     const rInv = rowsRaw(tInv).slice(1).filter(r => r[0]);
     let valorInv = 0, stockCritico = 0, stockQuiebre = 0, totalSKU = rInv.length;
     rInv.forEach(r => {
-      const estado = String(r[10]||'').toUpperCase(); // col K = indice 10
-      const valor = toNum(r[7]);                       // col H = indice 7
-      if (valor > 0) valorInv += valor;
-      if (estado === 'CRITICO') stockCritico++;
-      if (estado === 'QUIEBRE') stockQuiebre++;
+      const estado = String(r[10]||'').toUpperCase().trim(); // col K = indice 10
+      const valor = toNum(r[7]);                              // col H = indice 7
+      valorInv += valor; // suma todos, incluyendo negativos si los hay
+      // Acepta variantes: CRITICO, CRÍTICO, CRITICO, etc.
+      const esCritico = estado.includes('CRITICO') || estado.includes('CRTICO');
+      const esQuiebre = estado.includes('QUIEBRE');
+      if (esCritico) stockCritico++;
+      if (esQuiebre) stockQuiebre++;
     });
 
     // ── REPOSICION BC ─────────────────────────────────────────────
@@ -523,9 +533,9 @@ async function main() {
         <div class="v-sub">${ocTotal} OC emitidas</div>
       </div>
       <div class="v-card v-accent-navy">
-        <div class="v-label">Costo / Ventas</div>
-        <div class="v-big ${semCosto}">${fmtPct(kostoRatio)}</div>
-        <div class="v-sub">Objetivo &lt;${fmtPct(costoAlto)}</div>
+        <div class="v-label">Entregas del Mes</div>
+        <div class="v-big ${semEntregas}">${entregas.length}</div>
+        <div class="v-sub">${entregasConDiff.length} con diferencia · ${entregasPend.length} pendientes</div>
       </div>
     </div>
 
