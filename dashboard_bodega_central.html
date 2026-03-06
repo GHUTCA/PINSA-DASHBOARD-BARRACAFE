@@ -243,7 +243,14 @@ function rows(table) {
 
 function rowsRaw(table) {
   if (!table || !table.rows) return [];
-  return table.rows.map(r => r.c ? r.c.map(c => c ? c.v : null) : []);
+  return table.rows.map(r => r.c ? r.c.map(c => {
+    if (!c) return null;
+    // gviz: colonne valuta/numero formattate hanno c.v=null e valore in c.f
+    // Usiamo c.v se è un numero, altrimenti proviamo c.f
+    if (c.v !== null && c.v !== undefined) return c.v;
+    if (c.f !== null && c.f !== undefined) return c.f;
+    return null;
+  }) : []);
 }
 
 // Estrae valore numerico — gestisce $162,000 (americano) e $1.000.000 (cileno)
@@ -356,9 +363,10 @@ async function main() {
     // Filtrar filas donde col A contiene el mes actual (ej: "Mar-2026")
     // Excluir filas de totales/consolidados (col B vacía o col C = "Consolidata"/"Marzo")
     const vcMes = rVC.filter(r => {
-      const mesCell = String(r[0]||'');
+      const mesCell = String(r[0]||'').trim();
       const localCell = String(r[1]||'').trim();
-      return mesCell.includes(mesPrefijo) && localCell !== '';
+      // Filtra righe del mese corrente con Local compilato (esclude totali)
+      return mesCell === mesPrefijo && localCell !== '';
     });
     vcMes.forEach(r => {
       totalBudget    += toNum(r[3]); // col D = Budget $
