@@ -186,72 +186,39 @@
 const MEN = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
 const MES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-// ── IDs GOOGLE SHEETS ──────────────────────────────────────────────
-const ID_MAESTRO = '1FVSx9Wgq8GgTgGe-MK_ie_lVvpldLbty0UTvyyWUaA4';
-
-// Nombres de fogli en MAESTRO
-const SHEETS = {
-  PARAMETROS:         'PARAMETROS',
-  INVENTARIO_BC:      'Inventario_BC',
-  REPOSICION_BC:      'Reposicion_BC',
-  MOVIMIENTOS_BC:     'Movimientos_BC',
-  OC_LOG:             'OC_Log',
-  VENTAS_CONSOLIDADO: 'Ventas_Consolidado',
+// ── URLs CSV via corsproxy.io (igual que otros dashboards PINSA) ──
+const CSV_URLS = {
+  PARAMETROS:         'https://corsproxy.io/?url=https://docs.google.com/spreadsheets/d/1FVSx9Wgq8GgTgGe-MK_ie_lVvpldLbty0UTvyyWUaA4/export?format=csv&gid=58421555',
+  INVENTARIO_BC:      'https://corsproxy.io/?url=https://docs.google.com/spreadsheets/d/1FVSx9Wgq8GgTgGe-MK_ie_lVvpldLbty0UTvyyWUaA4/export?format=csv&gid=1137336805',
+  REPOSICION_BC:      'https://corsproxy.io/?url=https://docs.google.com/spreadsheets/d/1FVSx9Wgq8GgTgGe-MK_ie_lVvpldLbty0UTvyyWUaA4/export?format=csv&gid=850680206',
+  OC_LOG:             'https://corsproxy.io/?url=https://docs.google.com/spreadsheets/d/1FVSx9Wgq8GgTgGe-MK_ie_lVvpldLbty0UTvyyWUaA4/export?format=csv&gid=1913197636',
+  MOVIMIENTOS_BC:     'https://corsproxy.io/?url=https://docs.google.com/spreadsheets/d/1FVSx9Wgq8GgTgGe-MK_ie_lVvpldLbty0UTvyyWUaA4/export?format=csv&gid=426615388',
+  VENTAS_CONSOLIDADO: 'https://corsproxy.io/?url=https://docs.google.com/spreadsheets/d/1FVSx9Wgq8GgTgGe-MK_ie_lVvpldLbty0UTvyyWUaA4/export?format=csv&gid=80416264',
 };
 
-// ── FETCH SHEET ────────────────────────────────────────────────────
-// Intenta fetch directo (gviz soporta CORS si el sheet es público).
-// Si falla, lanza error para que main() lo capture y muestre mensaje claro.
-async function fetchSheet(sheetId, sheetName) {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
-  let txt = '';
-  try {
-    const r = await fetch(url, {signal: controller.signal});
-    clearTimeout(timeout);
-    if (!r.ok) throw new Error(`HTTP ${r.status} en hoja "${sheetName}"`);
-    txt = await r.text();
-  } catch(e) {
-    clearTimeout(timeout);
-    // Si es error de red/CORS, intentar via proxy como fallback
-    const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    try {
-      const r2 = await fetch(proxy, {signal: new AbortController().signal});
-      txt = await r2.text();
-    } catch(e2) {
-      throw new Error(`No se pudo cargar "${sheetName}". Verifica que CONTROL_MAESTRO_2026 esté compartido como "Cualquier persona con el enlace puede ver".`);
+// ── FETCH CSV via corsproxy.io (igual que dashboards Candelaria) ──
+function parseCSV(txt) {
+  const lines = txt.split(/\r?\n/);
+  return lines.map(l => {
+    const cols = []; let cur = '', inQ = false;
+    for (let i = 0; i < l.length; i++) {
+      if (l[i] === '"') { inQ = !inQ; }
+      else if (l[i] === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+      else cur += l[i];
     }
-  }
-  const match = txt.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/);
-  if (!match) {
-    // gviz devuelve HTML de error si el sheet no es público
-    if (txt.includes('Sign in') || txt.includes('accounts.google')) {
-      throw new Error(`Acceso denegado en "${sheetName}". El Google Sheet debe ser PÚBLICO (Compartir → Cualquier persona con el enlace → Lector).`);
-    }
-    console.warn(`${sheetName}: respuesta inesperada`, txt.slice(0,200));
-    return {rows:[], cols:[]};
-  }
-  const json = JSON.parse(match[1]);
-  return json.table || {rows:[], cols:[]};
+    cols.push(cur.trim());
+    return cols;
+  });
 }
 
-function rows(table) {
-  if (!table || !table.rows) return [];
-  return table.rows.map(r => r.c ? r.c.map(c => c ? (c.f !== undefined && c.f !== null ? c.f : c.v) : null) : []);
+async function fetchCSV(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return parseCSV(await r.text());
 }
 
-function rowsRaw(table) {
-  if (!table || !table.rows) return [];
-  return table.rows.map(r => r.c ? r.c.map(c => {
-    if (!c) return null;
-    // gviz: colonne valuta/numero formattate hanno c.v=null e valore in c.f
-    // Usiamo c.v se è un numero, altrimenti proviamo c.f
-    if (c.v !== null && c.v !== undefined) return c.v;
-    if (c.f !== null && c.f !== undefined) return c.f;
-    return null;
-  }) : []);
-}
+// Con CSV, los datos ya son arrays de arrays — rowsRaw simplemente los devuelve
+function rowsRaw(t) { return Array.isArray(t) ? t : []; }
 
 // Estrae valore numerico — gestisce $162,000 (americano) e $1.000.000 (cileno)
 function toNum(v) {
@@ -327,18 +294,17 @@ setInterval(updateClock, 30000);
 async function main() {
   try {
     const [tParam, tInv, tRepo, tOC, tMov, tVC] = await Promise.all([
-      fetchSheet(ID_MAESTRO, SHEETS.PARAMETROS),
-      fetchSheet(ID_MAESTRO, SHEETS.INVENTARIO_BC),
-      fetchSheet(ID_MAESTRO, SHEETS.REPOSICION_BC),
-      fetchSheet(ID_MAESTRO, SHEETS.OC_LOG),
-      fetchSheet(ID_MAESTRO, SHEETS.MOVIMIENTOS_BC),
-      fetchSheet(ID_MAESTRO, SHEETS.VENTAS_CONSOLIDADO),
+      fetchCSV(CSV_URLS.PARAMETROS),
+      fetchCSV(CSV_URLS.INVENTARIO_BC),
+      fetchCSV(CSV_URLS.REPOSICION_BC),
+      fetchCSV(CSV_URLS.OC_LOG),
+      fetchCSV(CSV_URLS.MOVIMIENTOS_BC),
+      fetchCSV(CSV_URLS.VENTAS_CONSOLIDADO),
     ]);
 
     // ── PARAMETROS ─────────────────────────────────────────────────
-    const rParam = rowsRaw(tParam);
     let P = {};
-    rParam.forEach(r => { if (r[0]) P[r[0]] = r[1]; });
+    tParam.slice(1).forEach(r => { if (r[0]) P[String(r[0]).trim()] = r[1]; });
 
     const costoAlto   = parseFloat(P['Costo Máximo Alto (25%)']) || 0.25;
     const costoMedio  = parseFloat(P['Costo Máximo Medio (30%)']) || 0.30;
@@ -354,7 +320,7 @@ async function main() {
     // ── VENTAS CONSOLIDADO ─────────────────────────────────────────
     // Col A = "Mar-2026" (texto), Col D = Budget $, Col E = Venta Real $
     // Soporta múltiples locales (Candelaria, Riesco, etc.) — suma todo el mes
-    const rVC = rowsRaw(tVC).slice(1).filter(r => r[0]);
+    const rVC = tVC.slice(1).filter(r => r[0]);
     const now = new Date();
     // Construir prefijo mes: "Mar-2026", "Apr-2026", etc.
     const mesPrefijo = MEN[now.getMonth()].charAt(0).toUpperCase() + MEN[now.getMonth()].slice(1) + '-' + now.getFullYear();
@@ -377,7 +343,7 @@ async function main() {
     // TODO: Compras sin OC — actualmente solo suma OC_Log.
     // TODO: Validar KPI Abastecimiento con datos reales.
     // A=Fecha(data), B=Nº OC, C=Proveedor, D=Nº Items, E=Total $, F=Link PDF, G=Estado
-    const rOCAll = rowsRaw(tOC);
+    const rOCAll = tOC;
     const rOC = rOCAll.filter(r => r && r[1] && String(r[1]).includes('OC-'));
     let totalCompras = 0, ocPendientes = 0, ocEnviadas = 0, ocTotal = rOC.length;
     rOC.forEach(r => {
@@ -392,43 +358,22 @@ async function main() {
     const kostoRatio = totalVentaReal > 0 ? totalCompras / totalVentaReal : 0;
     const semCosto = semaforo(kostoRatio, costoAlto, costoMedio);
 
-    // ── INVENTARIO BC ─────────────────────────────────────────────
-    // Cols: A=SKU, B=Descripcion, C=Seccion, D=Descripcion UPC,
-    //       E=Inv UPC, F=Inv UO, G=Costo UTM, H=Valor Inv $,
-    //       I=Stock Min UPC, J=Stock Max UPC, K=Estado, L=Inv UTM
-    // Estrategia: leer TODAS las filas de gviz directamente desde tInv.rows
-    // Para cada celda: preferir c.v si es número, sino c.f (formato texto)
-    const getCellVal = c => {
-      if (!c) return null;
-      if (c.v !== null && c.v !== undefined) return c.v;
-      if (c.f !== null && c.f !== undefined) return c.f;
-      return null;
-    };
-    const allInvRows = tInv && tInv.rows ? tInv.rows : [];
-    // Log diagnostico completo
-    console.log('allInvRows total:', allInvRows.length);
-    allInvRows.slice(0,5).forEach((r,i) => {
-      console.log('RAW row', i, '| r.c:', r.c ? 'ok' : 'NULL', '| SKU cell:', r.c ? JSON.stringify(r.c[0]) : 'n/a', '| Valor cell:', r.c ? JSON.stringify(r.c[7]) : 'n/a');
-    });
-    // Incluir filas con r.c=null como filas vacías (no filtrarlas antes del slice)
-    const rInv = allInvRows.slice(1).filter(r => r.c && r.c[0] && (getCellVal(r.c[0]) !== null && getCellVal(r.c[0]) !== ''));
+    // ── INVENTARIO BC (CSV) ───────────────────────────────────────
+    // Cols: [0]SKU [1]Desc [2]Seccion [3]DescUPC [4]InvUPC [5]InvUO
+    //       [6]CostoUTM [7]ValorInv$ [8]StockMin [9]StockMax [10]Estado [11]InvUTM
+    const rInv = tInv.slice(1).filter(r => r[0] && r[0] !== '');
     let valorInv = 0, stockCritico = 0, stockQuiebre = 0, totalSKU = rInv.length;
     rInv.forEach(r => {
-      const estado = String(getCellVal(r.c[10]) || '').toUpperCase().trim();
-      const valorRaw = getCellVal(r.c[7]);
-      const valor = toNum(valorRaw);
-      valorInv += valor;
-      const esCritico = estado.includes('CRITICO') || estado.includes('CRTICO');
-      const esQuiebre = estado.includes('QUIEBRE');
-      if (esCritico) stockCritico++;
-      if (esQuiebre) stockQuiebre++;
+      const estado = String(r[10]||'').toUpperCase().trim();
+      valorInv += toNum(r[7]);
+      if (estado.includes('CRITICO')) stockCritico++;
+      if (estado.includes('QUIEBRE')) stockQuiebre++;
     });
-    console.log('INV totals | valorInv:', valorInv, '| totalSKU:', totalSKU, '| critico:', stockCritico, '| quiebre:', stockQuiebre);
 
     // ── REPOSICION BC ─────────────────────────────────────────────
     // Cols: A=SKU, B=Desc SKU, C=Desc UPC, D=Proveedores,
     //       E=Inv UPC, F=Stock Min, G=Stock Max, H=Estado
-    const rRepo = rowsRaw(tRepo).slice(1).filter(r => r[0]);
+    const rRepo = tRepo.slice(1).filter(r => r[0]);
     const criticos = rRepo.filter(r => String(r[7]||'').toUpperCase() === 'CRITICO'); // col H = indice 7
 
     // ── MOVIMIENTOS BC — solo Entrega BLocal ─────────────────────
@@ -436,7 +381,7 @@ async function main() {
     //       F=SKU, G=Descripcion, H=Q UPC, I=Q UTM, J=Q UO,
     //       K=Q UTM Entregada, L=Q UTM_Neta, M=Estado Confirmacion,
     //       N=Q UO Confirmada, O=Delta, P=Costo UTM, Q=Costo Total
-    const rMov = rowsRaw(tMov).filter(r => r && String(r[2]||'').includes('Entrega BLocal'));
+    const rMov = tMov.slice(1).filter(r => r && String(r[2]||'').includes('Entrega BLocal'));
     const entregasSinDiff = rMov.filter(r => String(r[12]||'').toUpperCase() === 'RECIBIDO');
     const entregasConDiff = rMov.filter(r => String(r[12]||'').toUpperCase() === 'DIFERENCIA');
     const entregasPend    = rMov.filter(r => String(r[12]||'').toUpperCase().includes('PEND') || String(r[12]||'').toUpperCase() === 'ENVIADO');
