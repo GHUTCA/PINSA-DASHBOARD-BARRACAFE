@@ -287,6 +287,8 @@ header{
 .ing-list{display:flex;flex-direction:column;gap:1px}
 .ing-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:16px;padding:9px 12px;border-radius:6px;transition:background 0.12s}
 .ing-row:hover{background:var(--p3)}
+.ing-row.ing-sub{padding-left:24px;opacity:0.75}
+.ing-row.ing-sub .ing-name{font-size:12px;color:var(--t2)}
 .ing-name{font-size:13px;color:var(--t1)}
 .ing-qty{font-family:'DM Mono',monospace;font-size:13px;color:var(--t1);text-align:right;white-space:nowrap}
 .ing-um{font-size:10px;color:var(--t3)}
@@ -920,24 +922,25 @@ async function loadData() {
   if (!RECIPES.length) RECIPES = PLACEHOLDER_RECIPES;
 
   // DETALLE — carica ingredienti e fa join su ID_Receta
+  // Colonne: ID_Receta | Orden | SKU_Insumo | Descripcion | Q_lote | UM | Precio_actual | Costo_linea | Es_SubReceta | Notas
   try {
     const detalle = await fetchCSV(GID.DETALLE);
     if (detalle.length) {
-      // Log delle colonne per debug
-      console.log('DETALLE cols:', Object.keys(detalle[0]));
+      // Ordina per Orden prima del join
+      detalle.sort((a,b) => Number(a['Orden']||0) - Number(b['Orden']||0));
       detalle.forEach(d => {
-        // Cerca colonna ID_Receta (con varianti possibili)
-        const rid = (d['ID_Receta'] || d['id_receta'] || d['IDReceta'] || '').trim();
+        const rid = (d['ID_Receta'] || '').trim();
         if (!rid) return;
         const recipe = RECIPES.find(r => r.id === rid);
         if (!recipe) return;
-        // Mappa ingrediente con varianti di nome colonna
         const ing = {
-          n:    (d['Ingrediente'] || d['Nombre'] || d['Nombre_Ing'] || d['Insumo'] || d['nombre'] || '').trim(),
-          qty:  Number(d['Cantidad'] || d['Qty'] || d['Q'] || d['cantidad'] || 0),
-          um:   (d['UM'] || d['Unidad'] || d['unidad'] || d['um'] || '').trim(),
-          costo: Number(d['Costo_unitario'] || d['Costo Unitario'] || d['CostoU'] || d['costo'] || 0) || null,
-          nota: (d['Nota'] || d['Notas'] || d['nota'] || '').trim(),
+          n:    (d['Descripcion'] || '').trim(),
+          qty:  cleanNum(d['Q_lote']),
+          um:   (d['UM'] || '').trim(),
+          costo: cleanNum(d['Precio_actual']) || null,
+          costoLinea: cleanNum(d['Costo_linea']) || null,
+          nota: (d['Notas'] || '').trim(),
+          esSub: d['Es_SubReceta'] === 'TRUE',
         };
         if (ing.n) recipe.ingredientes.push(ing);
       });
@@ -1503,20 +1506,23 @@ function renderRecipe(r) {
     <!-- TAB: INGREDIENTES -->
     <div class="tab-panel on" id="tp-ing">
       <div class="ing-list">
-        ${r.ingredientes.map(i => {
-          const cl = (i.costo && i.qty) ? i.costo*i.qty : null;
-          return `<div class="ing-row">
-            <div class="ing-name">${i.n}</div>
-            <div style="text-align:right">
-              <span class="ing-qty">${i.qty}</span>
-              <span class="ing-um"> ${i.um}</span>
-            </div>
-            ${canCost ? `<div class="ing-costo">${cl ? '$'+Math.round(cl).toLocaleString('es-CL') : '—'}</div>` : ''}
-          </div>`;
-        }).join('')}
-        ${canCost ? `<div class="ing-total-row">
+        ${r.ingredientes.length === 0
+          ? `<div style="padding:20px;text-align:center;color:var(--t3);font-size:11px;letter-spacing:1px;text-transform:uppercase">Sin ingredientes registrados</div>`
+          : r.ingredientes.map(i => {
+            // costoLinea = costo total ya calculado en el sheet; fallback a precio*qty
+            const cl = i.costoLinea || (i.costo && i.qty ? i.costo * i.qty : null);
+            return `<div class="ing-row ${i.esSub ? 'ing-sub' : ''}">
+              <div class="ing-name">${i.esSub ? '↳ ' : ''}${i.n}</div>
+              <div style="text-align:right">
+                <span class="ing-qty">${i.qty}</span>
+                <span class="ing-um"> ${i.um}</span>
+              </div>
+              ${canCost ? `<div class="ing-costo">${cl ? '$'+Math.round(cl).toLocaleString('es-CL') : '—'}</div>` : ''}
+            </div>`;
+          }).join('')}
+        ${canCost && r.ingredientes.length > 0 ? `<div class="ing-total-row">
           <span class="ing-total-lbl">Total ingredientes</span>
-          <span class="ing-total-val">$${r.ingredientes.reduce((s,i)=>s+((i.costo||0)*i.qty),0).toLocaleString('es-CL')}</span>
+          <span class="ing-total-val">$${Math.round(r.ingredientes.reduce((s,i)=>s+(i.costoLinea||(i.costo||0)*i.qty),0)).toLocaleString('es-CL')}</span>
         </div>` : ''}
       </div>
     </div>
