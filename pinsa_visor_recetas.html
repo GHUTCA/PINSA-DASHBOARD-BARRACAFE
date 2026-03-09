@@ -277,9 +277,9 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:50px;background:va
 .sim-autocomplete-item:hover,.sim-autocomplete-item.sel{background:var(--p4);color:var(--tc)}
 
 /* Ingredientes row (5 col) */
-.ing-hdr-row{display:grid;grid-template-columns:1fr 80px 60px 80px 28px;gap:6px;margin-bottom:8px}
+.ing-hdr-row{display:grid;grid-template-columns:1fr 80px 60px 80px 80px 28px;gap:6px;margin-bottom:8px}
 .ing-hdr-row span{font-size:8px;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3)}
-.sim-row{display:grid;grid-template-columns:1fr 80px 60px 80px 28px;gap:6px;margin-bottom:6px;align-items:center}
+.sim-row{display:grid;grid-template-columns:1fr 80px 60px 80px 80px 28px;gap:6px;margin-bottom:6px;align-items:center}
 .sim-add-btn{width:100%;padding:8px;background:transparent;border:1px dashed var(--b2);border-radius:5px;color:var(--t3);font-family:'DM Sans',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;margin-top:6px;transition:all 0.2s}
 .sim-add-btn:hover{border-color:var(--tc);color:var(--tc)}
 .sim-del{background:none;border:none;color:var(--t3);cursor:pointer;font-size:16px;line-height:1;transition:color 0.15s}
@@ -578,7 +578,7 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:50px;background:va
               <div class="sim-panel" id="sim-bloque-ingredientes">
                 <div class="sim-panel-title"><span>02 · Ingredientes</span></div>
                 <div class="ing-hdr-row">
-                  <span>Ingrediente</span><span>Cantidad</span><span>UM</span><span>$/UTM</span><span></span>
+                  <span>Ingrediente</span><span>Cantidad</span><span>UM</span><span>$/UTM</span><span>Total $</span><span></span>
                 </div>
                 <div id="simIngList"></div>
                 <button class="sim-add-btn" onclick="addSimIng()">+ Agregar ingrediente</button>
@@ -1462,15 +1462,23 @@ function addSimIng() {
     <div class="sim-autocomplete-wrap">
       <input class="sim-input" placeholder="Ingrediente" id="si-n-${id}"
         oninput="showAutocomplete(${id},this.value)" autocomplete="off"
-        onblur="setTimeout(()=>hideAutocomplete(${id}),200)">
+        onblur="setTimeout(()=>hideAutocomplete(${id}),150)">
       <div class="sim-autocomplete-list" id="si-ac-${id}"></div>
     </div>
-    <input class="sim-input" type="number" placeholder="0" id="si-q-${id}" min="0" step="any" oninput="calcSim()">
-    <input class="sim-input" id="si-u-${id}" readonly style="background:var(--p5);color:var(--t3);cursor:default;width:52px" placeholder="UTM">
-    <input class="sim-input" type="number" placeholder="$/UTM" id="si-c-${id}" min="0" step="any" oninput="calcSim()" title="Costo por UTM (autofill desde BD_INSUMOS)">
+    <input class="sim-input" type="number" placeholder="0" id="si-q-${id}" min="0" step="any" oninput="updateTotal(${id});calcSim()">
+    <input class="sim-input" id="si-u-${id}" readonly style="background:var(--p5);color:var(--t2);cursor:default;font-size:11px;text-align:center" placeholder="—">
+    <input class="sim-input" type="number" placeholder="0" id="si-c-${id}" min="0" step="any" oninput="updateTotal(${id});calcSim()" style="font-size:11px">
+    <span id="si-t-${id}" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--t2);text-align:right;padding:0 4px">—</span>
     <button class="sim-del" onclick="delSimIng(${id})">×</button>`;
   list.appendChild(div);
   document.getElementById(`si-n-${id}`).focus();
+}
+
+function updateTotal(id) {
+  const q=parseFloat(document.getElementById(`si-q-${id}`)?.value)||0;
+  const c=parseFloat(document.getElementById(`si-c-${id}`)?.value)||0;
+  const t=document.getElementById(`si-t-${id}`);
+  if(t) t.textContent=(q&&c)?'$'+Math.round(q*c).toLocaleString('es-CL'):'—';
 }
 
 function showAutocomplete(id, val) {
@@ -1479,7 +1487,8 @@ function showAutocomplete(id, val) {
   const lower=val.toLowerCase();
   const matches=INSUMOS_DB.filter(x=>x.n.toLowerCase().includes(lower)).slice(0,10);
   if(!matches.length){ac.classList.remove('open');return;}
-  ac.innerHTML=matches.map(m=>`<div class="sim-autocomplete-item" onclick="selectInsumo(${id},${JSON.stringify(m.n)},${JSON.stringify(m.u)},${m.p});">${m.n} <span style="color:var(--t3);font-size:10px">${m.u} · $${m.p}</span></div>`).join('');
+  // onmousedown con preventDefault evita che il blur scatti prima del click
+  ac.innerHTML=matches.map(m=>`<div class="sim-autocomplete-item" onmousedown="event.preventDefault();selectInsumo(${id},${JSON.stringify(m.n)},${JSON.stringify(m.u)},${m.p})">${m.n} <span style="color:var(--t3);font-size:10px">${m.u} · $${m.p}</span></div>`).join('');
   ac.classList.add('open');
 }
 
@@ -1493,8 +1502,9 @@ function selectInsumo(id, nombre, utm, precio) {
   document.getElementById(`si-u-${id}`).value=utm;
   document.getElementById(`si-c-${id}`).value=precio;
   hideAutocomplete(id);
-  document.getElementById(`si-q-${id}`).focus();
+  updateTotal(id);
   calcSim();
+  setTimeout(()=>document.getElementById(`si-q-${id}`)?.focus(),50);
 }
 
 function delSimIng(id){
@@ -1557,6 +1567,7 @@ function calcSim() {
     const q=parseFloat(document.getElementById(`si-q-${ing.id}`)?.value)||0;
     const c=parseFloat(document.getElementById(`si-c-${ing.id}`)?.value)||0;
     totalCosto+=q*c;
+    updateTotal(ing.id);
   });
   // Costo unitario correcto: costo_total / (q_lote * rendimiento)
   const qLote=parseFloat(document.getElementById('simQLote')?.value)||1;
