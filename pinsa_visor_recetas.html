@@ -2115,6 +2115,38 @@ function collectFormData() {
 // ══════════════════════════════════════════════
 // GUARDAR / EDITAR
 // ══════════════════════════════════════════════
+// ── WebApp caller via form submit (bypassa CORS) ──────────
+function callWebApp(payload) {
+  return new Promise((resolve) => {
+    const url = WEBAPP_URL;
+    // Crea un form nascosto che fa POST diretto — bypassa CORS
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = url;
+    form.target = '_webapp_iframe';
+    form.style.display = 'none';
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'data';
+    input.value = JSON.stringify(payload);
+    form.appendChild(input);
+    // Iframe target
+    let iframe = document.getElementById('_webapp_iframe');
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.name = '_webapp_iframe';
+      iframe.id = '_webapp_iframe';
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+    }
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+    // Assume successo dopo 2s (non possiamo leggere risposta cross-origin)
+    setTimeout(() => resolve({ ok: true }), 2000);
+  });
+}
+
 async function saveSim() {
   const nombre=document.getElementById('simNombre').value.trim();
   if(!nombre){showToast('Ingresa un nombre para la receta','err');return;}
@@ -2148,7 +2180,7 @@ async function saveSim() {
     const payload=editId?{action,id:editId,data}:{action,data};
     const url=WEBAPP_URL+'?data='+encodeURIComponent(JSON.stringify(payload));
     try { await fetch(url,{method:'GET',mode:'no-cors'}); } catch(_){}
-    const res={ok:true, id: editId||(data.nombre?'REC-PEND':null)};
+    const res=await callWebApp(payload);
     if(res.ok){
       showToast(`✓ Receta "${nombre}" ${editId?'actualizada':'guardada'} (${res.id||editId})`,'ok');
       // Aggiorna locale
@@ -2301,8 +2333,7 @@ async function deleteRecipe(id) {
     return;
   }
   try {
-    const url=WEBAPP_URL+'?data='+encodeURIComponent(JSON.stringify({action:'eliminar',id}));
-    await fetch(url,{method:'GET'});
+    await callWebApp({action:'eliminar',id});
     RECIPES=RECIPES.filter(r=>r.id!==id);
     showToast('Receta eliminada','ok');
     if(current?.id===id){current=null;document.getElementById('recipeOut').style.display='none';document.getElementById('emptyState').style.display='';}
@@ -2324,8 +2355,7 @@ async function cambiarEstado(id, nuevoEstado) {
     return;
   }
   try {
-    const url=WEBAPP_URL+'?data='+encodeURIComponent(JSON.stringify({action:'editar',id,data:{estado:nuevoEstado}}));
-    await fetch(url,{method:'GET'});
+    await callWebApp({action:'editar',id,data:{estado:nuevoEstado}});
     r.estado=nuevoEstado;showToast(`Estado → ${nuevoEstado}`,'ok');renderMisRecetas();renderList('');
     if(current?.id===id) renderRecipe(r);
   } catch(e){showToast('Error de conexión','err');}
