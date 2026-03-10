@@ -702,8 +702,32 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:50px;background:va
 
                   <!-- Solo costo (PREPARACION) -->
                   <div id="sim-bloque-solo-costo" style="display:none">
-                    <div style="font-size:10px;color:var(--t3);margin:8px 0;line-height:1.5;padding:10px;background:var(--p4);border-radius:6px">
-                      PREPARACION — solo costo, sin precio de venta directo.
+                    <!-- Unidades producidas -->
+                    <div style="margin-bottom:7px;padding:8px 12px;background:var(--p4);border-radius:7px;border:1px solid var(--b1)">
+                      <div style="font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--t3);margin-bottom:4px">Rendimiento del lote</div>
+                      <div style="display:flex;justify-content:space-between;align-items:baseline">
+                        <span style="font-size:11px;color:var(--t2)">Unidades producidas</span>
+                        <span id="sr-prep-unidades" style="font-family:'Inter',sans-serif;font-size:16px;font-weight:300;color:var(--t1)">—</span>
+                      </div>
+                    </div>
+                    <!-- Costo unitario grande -->
+                    <div style="margin-bottom:7px;padding:8px 12px;background:var(--p4);border-radius:7px;border:1px solid var(--b1)">
+                      <div style="font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--t3);margin-bottom:4px">Costo por unidad (CC)</div>
+                      <div id="sr-prep-cu" style="font-family:'Inter',sans-serif;font-size:24px;font-weight:300;letter-spacing:-1px;color:var(--t1);text-align:center">—</div>
+                    </div>
+                    <!-- Precio transfer -->
+                    <div style="padding:8px 12px;background:var(--p4);border-radius:7px;border:1px solid var(--b1)">
+                      <div style="font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--tc);margin-bottom:6px">Precio transfer → locales</div>
+                      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                        <span style="font-size:11px;color:var(--t2)">Precio transfer</span>
+                        <input id="sr-prep-transfer" type="text" inputmode="numeric" pattern="[0-9]*"
+                          placeholder="—" oninput="this.value=this.value.replace(/[^0-9]/g,'');calcPrepTransfer()"
+                          style="background:transparent;border:none;border-bottom:1px solid var(--b2);outline:none;font-family:'Inter',sans-serif;font-size:16px;font-weight:300;color:var(--tc);text-align:right;width:90px;padding:0 0 2px">
+                      </div>
+                      <div style="display:flex;justify-content:space-between;align-items:center">
+                        <span style="font-size:11px;color:var(--t2)">Margen interno CC</span>
+                        <span id="sr-prep-margen" style="font-size:14px;font-weight:300;font-family:'Inter',sans-serif;color:var(--t3)">—</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1004,11 +1028,10 @@ function cleanNum(v) {
 function mapMasterRow(r) {
   const difStr=(r['Dificultad']||'').toLowerCase();
   const difNum=difStr==='alta'?3:difStr==='media'?2:1;
-  const rendPct=parseFloat(r['Rendimiento']||1);
-  const rend=rendPct>1?rendPct/100:rendPct;
   const qLote=cleanNum(r['Q lote std']);
   const costoLote=cleanNum(r['Costo Lote'])||null;
-  const costoU=cleanNum(r['Costo Unitario'])||null||(costoLote&&qLote&&rend?costoLote/(qLote*rend):null);
+  const costoU=cleanNum(r['Costo Unitario'])||null||(costoLote&&qLote?costoLote/qLote:null);
+  const precioTransfer=cleanNum(r['Precio Transfer'])||null;
   const precioV=cleanNum(r['Precio de Venta Unitario'])||null;
   const visRaw=r['Visible para']||'OP,JL,CC,JA,JO,AD';
   return {
@@ -1017,8 +1040,9 @@ function mapMasterRow(r) {
     seccion:r['Seccion']||'', estado:(r['Estado']||'ACTIVA').toUpperCase(),
     formato:r['Formato']||'', t_prep:cleanNum(r['Tiempo Prep min']),
     t_coccion:cleanNum(r['Tiempo Coccion']||r['Tiempo Cocción']), temp:null,
-    dificultad:difNum, rendimiento:rend, url:r['URL_Foto']||null, url_video:r['URL_Video']||null,
+    dificultad:1, url:r['URL_Foto']||null, url_video:r['URL_Video']||null,
     q_lote:qLote||1, unidad:r['Unidad salida']||'unidad', precio_venta:precioV,
+    precio_transfer:precioTransfer,
     costo_u:costoU, costo_lote:costoLote, visible_para:visRaw.replace(/\s/g,''),
     notas_generales:(r['Notas']||'').trim(), ingredientes:[],
     proc:parseProcedimiento(r['Procedimiento']||''),
@@ -1449,8 +1473,35 @@ function populateSimFamilias() {
   sel.innerHTML='<option value="">— Seleccionar —</option>'+
     FAMILIAS_PARAM.map(f=>`<option value="${f}">${f.replace(/_/g,' ')}</option>`).join('');
 }
-function calcQLote() {
-  const peso=parseFloat(document.getElementById('simPesoLote')?.value)||0;
+function calcPrepTransfer(cuOverride) {
+  const transferEl=document.getElementById('sr-prep-transfer');
+  const margenEl=document.getElementById('sr-prep-margen');
+  if(!transferEl||!margenEl) return;
+  const transfer=parseFloat(transferEl.value)||0;
+  // Get costo unitario from DOM if not passed
+  let cu=cuOverride;
+  if(cu===undefined){
+    const qL=parseFloat(document.getElementById('simQLote')?.value)||1;
+    let totalC=0;
+    simIngredients.forEach(ing=>{
+      const q=parseFloat(document.getElementById(`si-q-${ing.id}`)?.value)||0;
+      const c=parseFloat(document.getElementById(`si-c-${ing.id}`)?.value)||0;
+      totalC+=q*c;
+    });
+    cu=qL>0?totalC/qL:0;
+  }
+  if(transfer>0 && cu>0){
+    const mg=transfer-cu;
+    const mgPct=(mg/transfer*100);
+    margenEl.textContent='$'+Math.round(mg).toLocaleString('es-CL')+' · '+mgPct.toFixed(1)+'%';
+    margenEl.style.color=mgPct>=20?'var(--green)':mgPct>=10?'var(--yellow)':'var(--red)';
+  } else {
+    margenEl.textContent='—';
+    margenEl.style.color='var(--t3)';
+  }
+}
+
+function calcQLote() {  const peso=parseFloat(document.getElementById('simPesoLote')?.value)||0;
   const gramaje=parseFloat(document.getElementById('simGramajePorcion')?.value)||0;
   const hint=document.getElementById('sim-qlote-hint');
   if(peso>0 && gramaje>0) {
@@ -1687,6 +1738,16 @@ function calcSim() {
   set('sr-pobj',fmt(pobj));
   set('sr-pobj-iva',pobjIva?'$'+pobjIva.toLocaleString('es-CL'):'—');
 
+  // PREPARACION: aggiorna blocco costo unitario
+  if(isPrepCC) {
+    const qL=parseFloat(document.getElementById('simQLote')?.value)||1;
+    const cuPrep=qL>0?totalCosto/qL:0;
+    set('sr-prep-unidades', qL+' unidades');
+    set('sr-prep-cu', cuPrep>0?'$'+Math.round(cuPrep).toLocaleString('es-CL'):'—');
+    // Transfer: se già inserito, ricalcola margen
+    calcPrepTransfer(cuPrep);
+  }
+
   // Margen in % grande con colore semaforo
   const mgEl=document.getElementById('sr-mg');
   const pFinal=parseFloat(document.getElementById('simPrecio')?.value)||0;
@@ -1733,7 +1794,7 @@ function collectFormData() {
     formato:document.getElementById('simFormato').value||'',
     unidad_salida:document.getElementById('simUnidad').value||'unidad',
     q_lote:parseFloat(document.getElementById('simQLote').value)||1,
-    rendimiento:null,
+    precio_transfer:parseFloat(document.getElementById('sr-prep-transfer')?.value)||null,
     dificultad:document.getElementById('simDificultad').value,
     tiempo_prep:parseInt(document.getElementById('simTPrep').value)||0,
     tiempo_coccion:0,
@@ -1849,6 +1910,8 @@ function editRecipe(id) {
   document.getElementById('simFormato').value=r.formato||'';
   document.getElementById('simUnidad').value=r.unidad||'unidad';
   document.getElementById('simQLote').value=r.q_lote||1;
+  const ptEl=document.getElementById('sr-prep-transfer');
+  if(ptEl) ptEl.value=r.precio_transfer||'';
   // rendimiento rimosso dal form
   document.getElementById('simDificultad').value=r.dificultad===3?'Alta':r.dificultad===2?'Media':'Baja';
   document.getElementById('simTPrep').value=r.t_prep||0;
