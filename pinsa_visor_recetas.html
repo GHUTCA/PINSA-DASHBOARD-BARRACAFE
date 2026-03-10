@@ -574,8 +574,8 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:50px;background:va
                   <div style="font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--tc);margin-bottom:10px">Rendimiento del lote</div>
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
                     <div class="sim-field" style="margin:0">
-                      <div class="sim-lbl">Peso total del lote (gr)</div>
-                      <input class="sim-input" type="number" id="simPesoLote" placeholder="ej. 1000" min="0" step="any" oninput="calcQLote()">
+                      <div class="sim-lbl" style="display:flex;justify-content:space-between">Peso total del lote (gr) <span onclick="const e=document.getElementById('simPesoLote');e._manual=false;e.style.color='var(--t3)';calcPesoLote();" style="cursor:pointer;color:var(--tc);font-size:9px">↺ auto</span></div>
+                      <input class="sim-input" type="number" id="simPesoLote" placeholder="Auto (Gr+CC)" min="0" step="any" oninput="this._manual=true;this.style.color='var(--t1)';calcQLote()" title="Se calcula automáticamente sumando Gr y CC. Edita para ajustar.">
                     </div>
                     <div class="sim-field" style="margin:0">
                       <div class="sim-lbl">Gramaje por porción (gr)</div>
@@ -1473,6 +1473,26 @@ function populateSimFamilias() {
   sel.innerHTML='<option value="">— Seleccionar —</option>'+
     FAMILIAS_PARAM.map(f=>`<option value="${f}">${f.replace(/_/g,' ')}</option>`).join('');
 }
+function calcPesoLote() {
+  // Soma automatica ingredienti in Gr/CC per il peso lote
+  let total=0;
+  let hasGr=false;
+  simIngredients.forEach(ing=>{
+    const q=parseFloat(document.getElementById(`si-q-${ing.id}`)?.value)||0;
+    const u=(document.getElementById(`si-u-${ing.id}`)?.value||'').toLowerCase();
+    if(q>0 && (u==='gr'||u==='cc'||u==='g'||u==='ml')){
+      total+=q;
+      hasGr=true;
+    }
+  });
+  const pesoEl=document.getElementById('simPesoLote');
+  if(pesoEl && hasGr && !pesoEl._manual) {
+    pesoEl.value=Math.round(total);
+    pesoEl.style.color='var(--t3)'; // grigio = calcolato auto
+    calcQLote();
+  }
+}
+
 function calcPrepTransfer(cuOverride) {
   const transferEl=document.getElementById('sr-prep-transfer');
   const margenEl=document.getElementById('sr-prep-margen');
@@ -1633,9 +1653,10 @@ function navAutocomplete(e, id) {
     items[idx].scrollIntoView({block:'nearest'});
   } else if(e.key==='Enter'){
     e.preventDefault();
+    e.stopPropagation();
     const sel=ac.querySelector('.sim-autocomplete-item.sel');
-    if(sel) sel.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));
-    else if(items.length) items[0].dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));
+    const target=sel||items[0];
+    if(target) setTimeout(()=>target.dispatchEvent(new MouseEvent('mousedown',{bubbles:true})),0);
   } else if(e.key==='Escape'){
     hideAutocomplete(id);
   }
@@ -1713,6 +1734,7 @@ function delProcStep(id){
 // CALCULAR SIMULACION
 // ══════════════════════════════════════════════
 function calcSim() {
+  const isPrepCC=document.getElementById('simTipo')?.value==='PREPARACION';
   let totalCosto=0;
   simIngredients.forEach(ing=>{
     const q=parseFloat(document.getElementById(`si-q-${ing.id}`)?.value)||0;
@@ -1738,8 +1760,8 @@ function calcSim() {
   set('sr-pobj',fmt(pobj));
   set('sr-pobj-iva',pobjIva?'$'+pobjIva.toLocaleString('es-CL'):'—');
 
-  // PREPARACION: aggiorna blocco costo unitario
-  if(isPrepCC) {
+  // PREPARACION: aggiorna peso automatico e blocco costo unitario
+  if(isPrepCC) { calcPesoLote();
     const qL=parseFloat(document.getElementById('simQLote')?.value)||1;
     const cuPrep=qL>0?totalCosto/qL:0;
     set('sr-prep-unidades', qL+' unidades');
