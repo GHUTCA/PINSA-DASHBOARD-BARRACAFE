@@ -343,6 +343,7 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:50px;background:va
 #toast{position:fixed;bottom:24px;right:24px;z-index:999;padding:12px 18px;background:var(--p3);border:1px solid var(--b2);border-radius:8px;font-size:12px;color:var(--t1);display:none;animation:toastIn 0.25s ease}
 #toast.ok{border-left:3px solid var(--green)}
 #toast.err{border-left:3px solid var(--red)}
+#toast.info{border-left:3px solid var(--yellow)}
 @keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
 /* Confirm modal */
@@ -2257,13 +2258,29 @@ async function saveSim() {
     try { await fetch(url,{method:'GET',mode:'no-cors'}); } catch(_){}
     const res=await callWebApp(payload);
     if(res.ok){
-      showToast(`✓ Receta "${nombre}" ${editId?'actualizada':'guardada'} (${res.id||editId})`,'ok');
+      const savedId = res.id || editId;
+      showToast(`✓ Receta "${nombre}" ${editId?'actualizada':'guardada'} (${savedId})`,'ok');
       resetSimForm();
-      // Prima ricarica i dati freschi, poi naviga a Recetas
-      setTimeout(async ()=>{
+      // Polling: aspetta che il CSV rifletta la modifica, max 40s
+      (async ()=>{
+        let found = false;
+        for(let i=0; i<20; i++){
+          await new Promise(r=>setTimeout(r,2000));
+          try {
+            const master = await fetchCSV(GID.MASTER, true);
+            const rows = master.filter(r=>r['ID_Receta']);
+            // Cerca la ricetta per ID o per nome se è nuova
+            const hit = savedId
+              ? rows.find(r=>(r['ID_Receta']||'').trim()===savedId.trim())
+              : rows.find(r=>(r['Nombre_Receta']||'').trim().toLowerCase()===nombre.toLowerCase());
+            if(hit){ found=true; break; }
+          } catch(_){}
+          if(i===4) showToast('Sincronizando con Google Sheets…','info');
+        }
         await reloadRecipesFromCSV();
         setSection('recetas',document.getElementById('btn-recetas'));
-      }, 3000);
+        if(!found) showToast('Receta guardada (puede tardar unos segundos en aparecer)','info');
+      })();
     } else {
       showToast('Error: '+(res.error||'desconocido'),'err');
     }
