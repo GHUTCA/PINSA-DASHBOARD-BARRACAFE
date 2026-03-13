@@ -2197,6 +2197,33 @@ function callWebApp(payload) {
   });
 }
 
+async function reloadRecipesFromCSV() {
+  try {
+    const master = await fetchCSV(GID.MASTER);
+    if (master.length) {
+      RECIPES = master.filter(r=>r['ID_Receta']).map(mapMasterRow);
+    }
+    const detalle = await fetchCSV(GID.DETALLE);
+    if (detalle.length) {
+      detalle.sort((a,b)=>Number(a['Orden']||0)-Number(b['Orden']||0));
+      detalle.forEach(d => {
+        const rid=(d['ID_Receta']||'').trim();
+        if(!rid) return;
+        const recipe=RECIPES.find(r=>r.id===rid);
+        if(!recipe) return;
+        const ing={
+          n:(d['Descripcion']||'').trim(), qty:cleanNum(d['Q_Lote']||d['Q_lote']||0),
+          um:(d['UM']||'').trim(), costo:cleanNum(d['Precio_actual'])||null,
+          costoLinea:cleanNum(d['Costo_linea'])||null,
+          nota:(d['Notas']||'').trim(), esSub:d['Es_SubReceta']==='TRUE',
+        };
+        if(ing.n) recipe.ingredientes.push(ing);
+      });
+    }
+    renderList(''); renderMisRecetas(); populateDescSelect();
+  } catch(e) { console.warn('reloadRecipesFromCSV error:',e); }
+}
+
 async function saveSim() {
   const nombre=document.getElementById('simNombre').value.trim();
   if(!nombre){showToast('Ingresa un nombre para la receta','err');return;}
@@ -2233,18 +2260,10 @@ async function saveSim() {
     const res=await callWebApp(payload);
     if(res.ok){
       showToast(`✓ Receta "${nombre}" ${editId?'actualizada':'guardada'} (${res.id||editId})`,'ok');
-      // Aggiorna locale
-      if(editId){
-        const idx=RECIPES.findIndex(r=>r.id===editId);
-        if(idx>=0) RECIPES[idx]={...RECIPES[idx],...mapDataToRecipe(editId,data)};
-      } else {
-        RECIPES.push(mapDataToRecipe(res.id,data));
-      }
       resetSimForm();
-      renderMisRecetas();
-      renderList('');
-      populateDescSelect();
-      setTimeout(()=>setSection('recetas',document.getElementById('btn-recetas')),150);
+      setSection('recetas',document.getElementById('btn-recetas'));
+      // Ricarica CSV freschi dal server per mostrare dati aggiornati
+      setTimeout(()=>reloadRecipesFromCSV(), 1500);
     } else {
       showToast('Error: '+(res.error||'desconocido'),'err');
     }
