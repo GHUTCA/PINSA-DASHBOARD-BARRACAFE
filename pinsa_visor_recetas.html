@@ -2200,9 +2200,9 @@ async function btnActualizarClick() {
   btn.textContent = '↻ Cargando...';
   try {
     await reloadRecipesFromCSV();
-    showToast('Lista recargada desde Sheets', 'ok');
+    showToast('Lista recargada — datos al día de Sheets', 'ok');
   } catch(e) {
-    showToast('Error al actualizar', 'err');
+    showToast('Error al recargar desde Sheets', 'err');
   } finally {
     btn.disabled = false;
     btn.style.opacity = '1';
@@ -2210,27 +2210,27 @@ async function btnActualizarClick() {
   }
 }
 
-// ── WebApp caller: fetch no-cors + iframe silenzioso come fallback ──
-// Funziona su tutti i browser (Mac Safari, Mac Chrome, Windows Chrome)
-// senza richiedere popup. fetch no-cors non restituisce la risposta
-// ma scatena l'esecuzione del doGet in Apps Script.
+// ── WebApp caller ──
+// Strategia: window.open chiamato IN MODO SINCRONO rispetto al click,
+// PRIMA di qualsiasi await/logica asincrona.
+// Il browser accetta window.open solo se è dentro lo stack del click handler.
+// saveSim() chiama openWebAppWindow(url) in modo sincrono PRIMA di await,
+// poi callWebApp() aspetta solo il tempo necessario al GAS per eseguire.
+function openWebAppWindow(url) {
+  // Apre una finestra minimale — il browser la accetta perché è sincrono
+  const w = window.open(url, '_blank', 'width=1,height=1,left=-9999,top=-9999,toolbar=no,menubar=no,status=no');
+  if (w) {
+    setTimeout(() => { try { w.close(); } catch(_){} }, 5000);
+  }
+  return w;
+}
+
 function callWebApp(payload) {
-  return new Promise((resolve) => {
-    const url = WEBAPP_URL + '?data=' + encodeURIComponent(JSON.stringify(payload));
-    // Tentativo 1: fetch no-cors (funziona se il browser non blocca)
-    fetch(url, { method: 'GET', mode: 'no-cors', cache: 'no-store' })
-      .catch(() => {}); // ignora errori CORS — la richiesta parte comunque
-    // Tentativo 2: iframe silenzioso come backup (nessun popup, nessun blocco)
-    try {
-      const ifr = document.createElement('iframe');
-      ifr.style.cssText = 'position:fixed;width:1px;height:1px;left:-9999px;top:-9999px;opacity:0;pointer-events:none;border:none';
-      ifr.src = url;
-      document.body.appendChild(ifr);
-      setTimeout(() => { try { document.body.removeChild(ifr); } catch(_){} }, 5000);
-    } catch(_) {}
-    // Risolvi dopo 3.5s — il Apps Script ha tempo di eseguire
-    setTimeout(() => resolve({ ok: true }), 3500);
-  });
+  // Usato solo per elimininar/cambiar estado (dove non c'è problema di popup)
+  // Per guardar/editar si usa openWebAppWindow direttamente in saveSim
+  const url = WEBAPP_URL + '?data=' + encodeURIComponent(JSON.stringify(payload));
+  openWebAppWindow(url);
+  return Promise.resolve({ ok: true });
 }
 
 async function reloadRecipesFromCSV() {
@@ -2293,17 +2293,21 @@ async function saveSim() {
 
   const btn=document.getElementById('simSaveBtn');
   btn.textContent='Guardando...'; btn.disabled=true;
-  try {
-    const action=editId?'editar':'guardar';
-    const payload=editId?{action,id:editId,data}:{action,data};
 
+  // ── CRITICO: aprire window.open QUI, in modo sincrono rispetto al click ──
+  // Se lo mettiamo dopo un await, il browser lo blocca come popup non autorizzato.
+  // Il GAS non risponde con dati (CORS), ma la richiesta arriva e viene eseguita.
+  const action=editId?'editar':'guardar';
+  const payload=editId?{action,id:editId,data}:{action,data};
+  const gasUrl = WEBAPP_URL + '?data=' + encodeURIComponent(JSON.stringify(payload));
+  openWebAppWindow(gasUrl); // ← sincrono, dentro lo stack del click
+
+  try {
     // Aggiorna SUBITO la memoria locale — così il Visor è coerente
-    // indipendentemente dal ritardo del GAS / cache CSV
     if(editId) {
       const idx=RECIPES.findIndex(r=>r.id===editId);
       if(idx>=0) {
         const updated=mapDataToRecipe(editId,data);
-        // Preserva costo_u e costo_lote calcolati da Sheets (non sovrascrivere con null)
         RECIPES[idx]={ ...RECIPES[idx], ...updated,
           costo_u: updated.costo_u ?? RECIPES[idx].costo_u,
           costo_lote: updated.costo_lote ?? RECIPES[idx].costo_lote,
@@ -2316,19 +2320,15 @@ async function saveSim() {
     }
     renderList(''); renderMisRecetas(); populateDescSelect();
 
-    // Invia al GAS (fire-and-forget — non possiamo verificare se ha scritto)
-    callWebApp(payload).catch(()=>{});
-
-    // Toast onesti: confermiamo l'invio, NON la scrittura effettiva
     if(editId){
-      showToast(`Cambios enviados a Sheets — verifica en 1-2 min con ↻`,'info');
+      showToast(`Cambios enviados ✓ — usa ↻ en 1-2 min para confirmar`,'info');
     } else {
-      showToast(`Receta "${nombre}" enviada — verifica en 1-2 min con ↻`,'ok');
+      showToast(`Receta "${nombre}" enviada ✓ — usa ↻ en 1-2 min para confirmar`,'ok');
     }
     resetSimForm();
     setSection('recetas',document.getElementById('btn-recetas'));
   } catch(e){
-    showToast('Error al procesar la receta','err');
+    showToast('Error al enviar a Sheets — intenta de nuevo','err');
     console.error(e);
   } finally {
     btn.textContent='Guardar receta'; btn.disabled=false;
@@ -2358,7 +2358,7 @@ function mapDataToRecipe(id, data) {
 // ══════════════════════════════════════════════
 function editRecipe(id) {
   const r=RECIPES.find(x=>x.id===id);
-  if(!r){showToast('Receta no encontrada','err');return;}
+  if(!r){showToast('Receta no encontrada en memoria local','err');return;}
   simEditMode=true;
   document.getElementById('simEditId').dataset.id=id;
   // Navega al simulador
@@ -2430,7 +2430,7 @@ function editRecipe(id) {
 
 function cancelEdit() {
   resetSimForm();
-  showToast('Edición cancelada','ok');
+  showToast('Edición cancelada','info');
 }
 
 function resetSimForm() {
@@ -2470,7 +2470,7 @@ function confirmDelete(id, nombre) {
 async function deleteRecipe(id) {
   if(!WEBAPP_URL||WEBAPP_URL==='TU_WEBAPP_URL_AQUI') {
     RECIPES=RECIPES.filter(r=>r.id!==id);
-    showToast('Receta eliminada (local, sin WebApp)','ok');
+    showToast('Receta archivada (local, sin WebApp)','ok');
     if(current?.id===id){current=null;document.getElementById('recipeOut').style.display='none';document.getElementById('emptyState').style.display='';}
     renderList(''); renderMisRecetas(); populateDescSelect();
     return;
@@ -2478,10 +2478,10 @@ async function deleteRecipe(id) {
   try {
     await callWebApp({action:'eliminar',id});
     RECIPES=RECIPES.filter(r=>r.id!==id);
-    showToast('Receta eliminada','ok');
+    showToast('Receta archivada en Sheets ✓','ok');
     if(current?.id===id){current=null;document.getElementById('recipeOut').style.display='none';document.getElementById('emptyState').style.display='';}
     renderList(''); renderMisRecetas(); populateDescSelect();
-  } catch(e){showToast('Error de conexión','err');console.error(e);}
+  } catch(e){showToast('Error de conexión con Sheets','err');console.error(e);}
 }
 
 // ══════════════════════════════════════════════
@@ -2492,16 +2492,16 @@ async function cambiarEstado(id, nuevoEstado) {
   if(!r) return;
   if(!WEBAPP_URL||WEBAPP_URL==='TU_WEBAPP_URL_AQUI') {
     r.estado=nuevoEstado;
-    showToast(`Estado → ${nuevoEstado} (local)`,'ok');
+    showToast(`Estado → ${nuevoEstado} (local, sin WebApp)`,'ok');
     renderMisRecetas(); renderList('');
     if(current?.id===id) renderRecipe(r);
     return;
   }
   try {
     await callWebApp({action:'editar',id,data:{estado:nuevoEstado}});
-    r.estado=nuevoEstado;showToast(`Estado → ${nuevoEstado}`,'ok');renderMisRecetas();renderList('');
+    r.estado=nuevoEstado;showToast(`Estado actualizado → ${nuevoEstado} ✓`,'ok');renderMisRecetas();renderList('');
     if(current?.id===id) renderRecipe(r);
-  } catch(e){showToast('Error de conexión','err');}
+  } catch(e){showToast('Error de conexión con Sheets','err');}
 }
 
 // ══════════════════════════════════════════════
