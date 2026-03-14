@@ -438,7 +438,7 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:50px;background:va
               <option value="todas">Todas las familias</option>
             </select>
           </div>
-          <button onclick="reloadRecipesFromCSV().then(()=>showToast('Lista actualizada','ok'))" style="width:100%;margin-top:8px;padding:6px 12px;background:transparent;border:1.5px solid #C4622D;border-radius:6px;color:#C4622D;font-family:'DM Sans',sans-serif;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:all 0.2s" onmouseover="this.style.background='rgba(196,98,45,0.12)'" onmouseout="this.style.background='transparent'">↻ Actualizar lista</button>
+          <button id="btnActualizar" onclick="btnActualizarClick()" style="width:100%;margin-top:8px;padding:6px 12px;background:transparent;border:1.5px solid #C4622D;border-radius:6px;color:#C4622D;font-family:'DM Sans',sans-serif;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:all 0.2s" onmouseover="this.style.background='rgba(196,98,45,0.12)'" onmouseout="this.style.background='transparent'">↻ Actualizar lista</button>
         </div>
         <div class="sb-list" id="sbList">
           <div class="empty"><div class="empty-icon">🍕</div><div class="empty-txt">Cargando...</div></div>
@@ -2190,15 +2190,46 @@ function collectFormData() {
 // ══════════════════════════════════════════════
 // GUARDAR / EDITAR
 // ══════════════════════════════════════════════
-// ── WebApp caller via window.open (bypassa CORS completamente) ──
+
+// ── Actualizar lista con stato di caricamento ──
+async function btnActualizarClick() {
+  const btn = document.getElementById('btnActualizar');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  btn.textContent = '↻ Cargando...';
+  try {
+    await reloadRecipesFromCSV();
+    showToast('Lista actualizada ✓', 'ok');
+  } catch(e) {
+    showToast('Error al actualizar', 'err');
+  } finally {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.textContent = '↻ Actualizar lista';
+  }
+}
+
+// ── WebApp caller: fetch no-cors + iframe silenzioso come fallback ──
+// Funziona su tutti i browser (Mac Safari, Mac Chrome, Windows Chrome)
+// senza richiedere popup. fetch no-cors non restituisce la risposta
+// ma scatena l'esecuzione del doGet in Apps Script.
 function callWebApp(payload) {
   return new Promise((resolve) => {
     const url = WEBAPP_URL + '?data=' + encodeURIComponent(JSON.stringify(payload));
-    const w = window.open(url, '_blank', 'width=1,height=1,left=-100,top=-100');
-    setTimeout(() => {
-      try { if(w) w.close(); } catch(_) {}
-      resolve({ ok: true });
-    }, 3000);
+    // Tentativo 1: fetch no-cors (funziona se il browser non blocca)
+    fetch(url, { method: 'GET', mode: 'no-cors', cache: 'no-store' })
+      .catch(() => {}); // ignora errori CORS — la richiesta parte comunque
+    // Tentativo 2: iframe silenzioso come backup (nessun popup, nessun blocco)
+    try {
+      const ifr = document.createElement('iframe');
+      ifr.style.cssText = 'position:fixed;width:1px;height:1px;left:-9999px;top:-9999px;opacity:0;pointer-events:none;border:none';
+      ifr.src = url;
+      document.body.appendChild(ifr);
+      setTimeout(() => { try { document.body.removeChild(ifr); } catch(_){} }, 5000);
+    } catch(_) {}
+    // Risolvi dopo 3.5s — il Apps Script ha tempo di eseguire
+    setTimeout(() => resolve({ ok: true }), 3500);
   });
 }
 
@@ -2210,6 +2241,9 @@ async function reloadRecipesFromCSV() {
     }
     const detalle = await fetchCSV(GID.DETALLE, true);
     if (detalle.length) {
+      // Reset ingredientes en TODOS los recipes antes de re-popular
+      // (evita duplicados si se llama múltiples veces)
+      RECIPES.forEach(r => { r.ingredientes = []; });
       detalle.sort((a,b)=>Number(a['Orden']||0)-Number(b['Orden']||0));
       detalle.forEach(d => {
         const rid=(d['ID_Receta']||'').trim();
@@ -2262,8 +2296,6 @@ async function saveSim() {
   try {
     const action=editId?'editar':'guardar';
     const payload=editId?{action,id:editId,data}:{action,data};
-    const url=WEBAPP_URL+'?data='+encodeURIComponent(JSON.stringify(payload));
-    try { await fetch(url,{method:'GET',mode:'no-cors'}); } catch(_){}
     const res=await callWebApp(payload);
     if(res.ok){
       showToast(`✓ Receta "${nombre}" ${editId?'actualizada':'guardada'} (${res.id||editId})`,'ok');
