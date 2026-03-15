@@ -296,14 +296,21 @@ function main(){
       id:   hdrCC.indexOf('ID_Produccion'),
       fecha:hdrCC.indexOf('Fecha'),
       rec:  hdrCC.indexOf('ID_Receta'),
+      nom:  hdrCC.indexOf('Nombre_Receta'),
+      tipo: hdrCC.indexOf('Tipo_Registro'),
       plan: hdrCC.indexOf('Q_lotes_plan'),
       real: hdrCC.indexOf('Q_lotes_real'),
-      qteo: hdrCC.indexOf('Q_salida_teorica'),
-      qreal:hdrCC.indexOf('Q_salida_real'),
+      qteo: hdrCC.indexOf('Q_salida_teorica_gr'),
+      qreal:hdrCC.indexOf('Q_salida_real_gr'),
       mgr:  hdrCC.indexOf('Merma_real_gr'),
       mpct: hdrCC.indexOf('Merma_pct'),
       clteo:hdrCC.indexOf('Costo_lote_teorico'),
-      est:  hdrCC.indexOf('Estado')
+      ctot: hdrCC.indexOf('Costo_total_teorico'),
+      rend: hdrCC.indexOf('Rendimiento'),
+      turno:hdrCC.indexOf('Turno'),
+      est:  hdrCC.indexOf('Estado'),
+      reg:  hdrCC.indexOf('Registrado_por'),
+      notas:hdrCC.indexOf('Notas')
     };
     // Fallback si columnas no encontradas
     function fi(row,i,fb){return i>=0&&row[i]!=null?row[i]:fb||'';}
@@ -311,26 +318,32 @@ function main(){
     var rowsCC=tCC.slice(1).filter(function(r){return r[0]&&r[0].trim()!='';});
     var hayDatos=rowsCC.length>0;
 
-    // Producciones de hoy
-    var hoyRows=rowsCC.filter(function(r){return isHoy(fi(r,idx.fecha));});
+    // Split por Tipo_Registro
+    var producidos  =rowsCC.filter(function(r){return String(fi(r,idx.tipo)||'').toUpperCase()==='PRODUCIDO';});
+    var planificados=rowsCC.filter(function(r){return String(fi(r,idx.tipo)||'').toUpperCase()==='PLANIFICADO';});
 
-    // Métricas del mes
+    // Producciones de hoy (cualquier tipo)
+    var hoyRows=rowsCC.filter(function(r){return isHoy(fi(r,idx.fecha));});
+    var hoyPlan=hoyRows.filter(function(r){return String(fi(r,idx.tipo)||'').toUpperCase()==='PLANIFICADO';});
+    var hoyProd=hoyRows.filter(function(r){return String(fi(r,idx.tipo)||'').toUpperCase()==='PRODUCIDO';});
+
+    // Métricas del mes — solo PRODUCIDO
     var totalLotesPlan=0,totalLotesReal=0,totalMermaGr=0,totalQteo=0,totalQreal=0,totalCostoTeo=0;
-    rowsCC.forEach(function(r){
+    producidos.forEach(function(r){
       totalLotesPlan+=toNum(fi(r,idx.plan));
       totalLotesReal+=toNum(fi(r,idx.real));
       totalMermaGr  +=toNum(fi(r,idx.mgr));
       totalQteo     +=toNum(fi(r,idx.qteo));
       totalQreal    +=toNum(fi(r,idx.qreal));
-      totalCostoTeo +=toNum(fi(r,idx.clteo));
+      totalCostoTeo +=toNum(fi(r,idx.ctot));
     });
 
     // KPI cálculos
     var mermaReal=totalQteo>0?(totalQteo-totalQreal)/totalQteo:null;
-    var cumplPlan=totalLotesPlan>0?totalLotesReal/totalLotesPlan:null;
-    // FC desvío y costo desvío → sin datos reales aún, mostrar "—"
-    var fcDesv=null;   // necesita ventas CC reales
-    var costoDesv=null;// necesita costo real registrado
+    var cumplPlan=planificados.length>0?producidos.length/planificados.length:null;
+    // FC desvío y costo desvío → sin datos reales aún
+    var fcDesv=null;
+    var costoDesv=null;
 
     // Semáforos
     var sMerma = mermaReal!==null?sem(mermaReal,mermaHi,mermaMed):'cero';
@@ -396,42 +409,69 @@ function main(){
     h+='<div class="sl"><span class="slt">Resumen de Producción · Mes en curso</span></div>';
     h+='<div class="v4">';
     h+='<div class="vc atc"><div class="vl">Lotes producidos</div>';
-    h+='<div class="vb '+(hayDatos?sCump:'')+'">'+(!hayDatos?'—':totalLotesReal)+'</div>';
-    h+='<div class="vs">Plan: '+(hayDatos?totalLotesPlan:'—')+' lotes</div></div>';
+    h+='<div class="vb '+(hayDatos?sCump:'')+'">'+(!hayDatos?'—':producidos.length)+'</div>';
+    h+='<div class="vs">Plan: '+(hayDatos?planificados.length:'—')+' planificados</div></div>';
+
     h+='<div class="vc '+(mermaReal!==null&&mermaReal>mermaMed?'ared':mermaReal!==null&&mermaReal>mermaHi?'aam':'agr')+'"><div class="vl">Merma acumulada</div>';
     h+='<div class="vb '+(hayDatos?sMerma:'')+'">'+(!hayDatos?'—':fmtP(mermaReal))+'</div>';
     h+='<div class="vs">'+(hayDatos?Math.round(totalMermaGr).toLocaleString('es-CL')+' gr totales':'Sin datos aún')+'</div></div>';
-    h+='<div class="vc atc"><div class="vl">Producción hoy</div>';
-    h+='<div class="vb">'+hoyRows.length+'</div>';
-    h+='<div class="vs">lotes registrados hoy</div></div>';
-    h+='<div class="vc atc"><div class="vl">Rendimientos cargados</div>';
-    h+='<div class="vb">'+rowsRD.length+'</div>';
-    h+='<div class="vs">factores de conversión</div></div>';
+
+    h+='<div class="vc atc"><div class="vl">Plan hoy</div>';
+    h+='<div class="vb">'+hoyPlan.length+'</div>';
+    h+='<div class="vs">'+hoyProd.length+' completados · '+(hoyPlan.length-hoyProd.length>0?hoyPlan.length-hoyProd.length+' pendientes':'todos listos')+'</div></div>';
+
+    h+='<div class="vc atc"><div class="vl">Costo total mes</div>';
+    h+='<div class="vb" style="font-size:20px">'+(!hayDatos?'—':fmt$(totalCostoTeo))+'</div>';
+    h+='<div class="vs">costo teórico acumulado</div></div>';
     h+='</div>';
 
-    // ── PRODUCCIONES DE HOY ──
-    h+='<div class="sl"><span class="slt">Producción del día · '+new Date().getDate()+'/'+(now.getMonth()+1)+'/'+now.getFullYear()+'</span></div>';
-    h+='<div class="card"><div class="sh"><div><div class="sn">Lotes producidos hoy</div><div class="ss">Desde PRODUCCION_CC — filtro fecha = hoy</div></div>';
-    h+='<div class="sb '+(hoyRows.length>0?'btc':'')+'">'+hoyRows.length+' lotes</div></div>';
+    // ── PLAN + PRODUCCIONES DE HOY ──
+    h+='<div class="sl"><span class="slt">Plan del día · '+new Date().getDate()+'/'+(now.getMonth()+1)+'/'+now.getFullYear()+'</span></div>';
+
+    // Barra plan vs completado
+    var pctHoy=hoyPlan.length>0?Math.min(100,Math.round(hoyProd.length/hoyPlan.length*100)):0;
+    var colorBarra=pctHoy===100?'var(--green)':pctHoy>50?'var(--yellow)':'var(--red)';
+
+    h+='<div class="card">';
+    if(hoyPlan.length>0){
+      h+='<div style="padding:14px 18px;border-bottom:1px solid var(--b)">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+      h+='<span style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--t3)">Cumplimiento del día</span>';
+      h+='<span style="font-family:\'DM Mono\',monospace;font-size:13px;color:'+(pctHoy===100?'var(--green)':'var(--yellow)')+'">'+hoyProd.length+' / '+hoyPlan.length+' lotes</span>';
+      h+='</div>';
+      h+='<div style="height:4px;background:var(--b2);border-radius:2px;overflow:hidden">';
+      h+='<div style="height:100%;width:'+pctHoy+'%;background:'+colorBarra+';border-radius:2px;transition:width 0.8s"></div>';
+      h+='</div></div>';
+    }
+    h+='<div class="sh"><div><div class="sn">Lotes de hoy</div><div class="ss">Planificados y producidos</div></div>';
+    h+='<div style="display:flex;gap:6px">';
+    if(hoyPlan.length>0) h+='<span class="sb btc">'+hoyPlan.length+' plan</span>';
+    h+='<span class="sb '+(hoyProd.length>0?'bverde':'')+'">'+hoyProd.length+' completos</span>';
+    h+='</div></div>';
+
     if(hoyRows.length===0){
-      h+=sinDatos('Sin producciones registradas hoy');
+      h+=sinDatos('Sin registros para hoy — ingresa los lotes planificados en PRODUCCION_CC');
     } else {
-      h+='<div class="th" style="grid-template-columns:90px 1fr 80px 80px 80px 90px 90px;"><span>ID</span><span>Receta</span><span style="text-align:right">Plan</span><span style="text-align:right">Real</span><span style="text-align:right">Merma%</span><span style="text-align:right">Costo Teo</span><span style="text-align:center">Estado</span></div>';
+      h+='<div class="th" style="grid-template-columns:90px 1fr 80px 80px 80px 80px 100px;">';
+      h+='<span>ID</span><span>Receta</span><span style="text-align:right">Plan</span><span style="text-align:right">Real</span><span style="text-align:right">Merma%</span><span style="text-align:right">Costo</span><span style="text-align:center">Estado</span></div>';
       hoyRows.forEach(function(r){
+        var tipo=String(fi(r,idx.tipo)||'').toUpperCase();
         var est=String(fi(r,idx.est)||'—').toUpperCase();
-        var cls=est==='OK'?'eok':est.includes('SIN_COSTO')||est.includes('MERMA')?'ewrn':est==='CANCELADO'?'ecan':'eerr';
-        var recId=String(fi(r,idx.rec)||'');
-        var recNom=recNombre[recId]||recId||'—';
+        var esPlan=tipo==='PLANIFICADO';
+        var cls=esPlan?'ecan':est==='OK'?'eok':est.includes('SIN_COSTO')||est.includes('MERMA')?'ewrn':est==='CANCELADO'?'ecan':'eerr';
+        var label=esPlan?'PLANIFICADO':fi(r,idx.est,'—');
+        var recNom=fi(r,idx.nom,'')||recNombre[String(fi(r,idx.rec)||'')] ||'—';
         var mp=toNum(fi(r,idx.mpct));
         var mpStr=mp>0?fmtP(mp<1?mp:mp/100):'—';
-        h+='<div class="tr" style="grid-template-columns:90px 1fr 80px 80px 80px 90px 90px;">';
+        var costoMostrar=esPlan?fmt$(fi(r,idx.clteo,0)):fmt$(fi(r,idx.ctot,0));
+        h+='<div class="tr" style="grid-template-columns:90px 1fr 80px 80px 80px 80px 100px;'+(esPlan?'opacity:0.65':'')+'">';
         h+='<span class="tsk">'+fi(r,idx.id,'—')+'</span>';
         h+='<span class="td" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+recNom+'</span>';
         h+='<span class="tn">'+fi(r,idx.plan,'—')+'</span>';
-        h+='<span class="tn">'+fi(r,idx.real,'—')+'</span>';
+        h+='<span class="tn">'+(esPlan?'—':fi(r,idx.real,'—'))+'</span>';
         h+='<span class="tn" style="color:'+(mp>6?'var(--red)':mp>3?'var(--yellow)':'var(--green)')+'">'+mpStr+'</span>';
-        h+='<span class="tn">'+fmt$(fi(r,idx.clteo,0))+'</span>';
-        h+='<span style="text-align:center"><span class="te '+cls+'">'+fi(r,idx.est,'—')+'</span></span>';
+        h+='<span class="tn">'+costoMostrar+'</span>';
+        h+='<span style="text-align:center"><span class="te '+cls+'">'+label+'</span></span>';
         h+='</div>';
       });
     }
@@ -441,21 +481,20 @@ function main(){
     h+='<div class="sl"><span class="slt">Historial · Stock crítico Bodega Central</span></div>';
     h+='<div class="s2">';
 
-    // Últimas producciones (histórico)
-    var ultCC=rowsCC.slice(-10).reverse();
-    h+='<div class="card"><div class="sh"><div><div class="sn">Últimas producciones</div><div class="ss">Historial reciente — mes en curso</div></div>';
-    h+='<div class="sb btc">'+rowsCC.length+' total</div></div>';
-    if(!hayDatos){h+=sinDatos('Sin producciones registradas');}
+    // Últimas producciones (solo PRODUCIDO, histórico)
+    var ultCC=producidos.slice(-10).reverse();
+    h+='<div class="card"><div class="sh"><div><div class="sn">Últimas producciones</div><div class="ss">Historial reciente — solo PRODUCIDO</div></div>';
+    h+='<div class="sb btc">'+producidos.length+' total</div></div>';
+    if(!hayDatos||producidos.length===0){h+=sinDatos('Sin producciones registradas');}
     else{
-      h+='<div class="th" style="grid-template-columns:70px 1fr 80px 80px 80px;"><span>Fecha</span><span>Receta</span><span style="text-align:right">Real</span><span style="text-align:right">Merma%</span><span style="text-align:center">Estado</span></div>';
+      h+='<div class="th" style="grid-template-columns:70px 1fr 70px 80px 80px;"><span>Fecha</span><span>Receta</span><span style="text-align:right">Lotes</span><span style="text-align:right">Merma%</span><span style="text-align:center">Estado</span></div>';
       ultCC.forEach(function(r){
         var est=String(fi(r,idx.est)||'—').toUpperCase();
         var cls=est==='OK'?'eok':est.includes('SIN_COSTO')||est.includes('MERMA')?'ewrn':est==='CANCELADO'?'ecan':'eerr';
-        var recId=String(fi(r,idx.rec)||'');
-        var recNom=recNombre[recId]||recId||'—';
+        var recNom=fi(r,idx.nom,'')||recNombre[String(fi(r,idx.rec)||'')] ||'—';
         var mp=toNum(fi(r,idx.mpct));
         var mpStr=mp>0?fmtP(mp<1?mp:mp/100):'—';
-        h+='<div class="tr" style="grid-template-columns:70px 1fr 80px 80px 80px;">';
+        h+='<div class="tr" style="grid-template-columns:70px 1fr 70px 80px 80px;">';
         h+='<span class="tsk">'+fmtDate(fi(r,idx.fecha))+'</span>';
         h+='<span class="td" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px">'+recNom+'</span>';
         h+='<span class="tn">'+fi(r,idx.real,'—')+'</span>';
