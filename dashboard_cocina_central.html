@@ -158,7 +158,8 @@ var CSV={
   I: BASE+'1137336805&single=true&output=csv',        // Inventario_BC
   M: BASE+'1643758434&single=true&output=csv',        // RECETAS_MASTER (para nombres)
   CC:BASE+'1354138916&single=true&output=csv',         // Produccion_CC
-  RD:BASE+'2013935344&single=true&output=csv'          // Rendimientos_CC
+  RD:BASE+'2013935344&single=true&output=csv',         // Rendimientos_CC
+  IC:BASE+'24792961&single=true&output=csv'            // Inventario_CC
 };
 
 function parseCSV(txt){
@@ -265,10 +266,11 @@ function main(){
   var rdOk=!CSV.RD.includes('GID_RENDIMIENTOS_CC');
   fetches.push(ccOk?fetchCSV(CSV.CC):Promise.resolve([['ID_Produccion','Fecha','ID_Receta','Q_lotes_plan','Q_lotes_real','Q_salida_teorica','Q_salida_real','Merma_real_gr','Merma_pct','Costo_lote_teorico','Estado']]));
   fetches.push(rdOk?fetchCSV(CSV.RD):Promise.resolve([['SKU_Insumo','Estado_entrada','Estado_salida','Factor','Fuente']]));
+  fetches.push(fetchCSV(CSV.IC));
 
   Promise.all(fetches)
   .then(function(results){
-    var tP=results[0],tI=results[1],tMast=results[2],tCC=results[3],tRD=results[4];
+    var tP=results[0],tI=results[1],tMast=results[2],tCC=results[3],tRD=results[4],tIC=results[5];
 
     // ── PARAMETROS ──
     var P={};
@@ -297,7 +299,7 @@ function main(){
       fecha:hdrCC.indexOf('Fecha'),
       rec:  hdrCC.indexOf('ID_Receta'),
       nom:  hdrCC.indexOf('Nombre_Receta'),
-      tipo: hdrCC.indexOf('Tipo de Registro'),
+      tipo: hdrCC.indexOf('Tipo_Registro'),
       plan: hdrCC.indexOf('Q_lotes_plan'),
       real: hdrCC.indexOf('Q_lotes_real'),
       qteo: hdrCC.indexOf('Q_salida_teorica_gr'),
@@ -368,6 +370,24 @@ function main(){
       return e.includes('CRITICO')||e.includes('QUIEBRE');
     });
 
+    // ── INVENTARIO_CC ──
+    var hdrIC=tIC[0]||[];
+    var iIC={
+      nom:   hdrIC.indexOf('Nombre'),
+      rec:   hdrIC.indexOf('ID_Receta'),
+      uo:    hdrIC.indexOf('UO_Stock'),
+      par:   hdrIC.indexOf('Par_Level'),
+      prod:  hdrIC.indexOf('Lotes_Producidos'),
+      ent:   hdrIC.indexOf('Lotes_Entregados'),
+      stock: hdrIC.indexOf('Stock_Actual'),
+      est:   hdrIC.indexOf('Estado'),
+      ultP:  hdrIC.indexOf('Ultima_Produccion'),
+      notas: hdrIC.indexOf('Notas')
+    };
+    var rowsIC=tIC.slice(1).filter(function(r){return r[0]&&r[0].trim()!='';});
+    var icAgotado  =rowsIC.filter(function(r){return String(r[iIC.est]||'').toUpperCase()==='AGOTADO';});
+    var icBajoMin  =rowsIC.filter(function(r){return String(r[iIC.est]||'').toUpperCase()==='BAJO_MINIMO';});
+
     // ── RENDIMIENTOS ──
     var rowsRD=tRD.slice(1).filter(function(r){return r[0]&&r[0].trim()!='';});
     var hayRD=rowsRD.length>0;
@@ -379,6 +399,8 @@ function main(){
     if(hayDatos&&mermaReal!==null&&mermaReal>mermaMed)alerts.push({n:'roja',i:'ERR',t:'Merma mensual '+fmtP(mermaReal)+' supera umbral máximo ('+fmtP(mermaMed)+')',d:'Revisar registros de producción del mes'});
     if(hayDatos&&cumplPlan!==null&&cumplPlan<cumpMed)alerts.push({n:'aamar',i:'WRN',t:'Cumplimiento del plan al '+fmtP(cumplPlan)+' — bajo objetivo ('+fmtP(cumpMed)+')',d:'Verificar causas de lotes no completados'});
     if(stockCrit.length>0)alerts.push({n:'aamar',i:'STK',t:stockCrit.length+' insumos en estado crítico / quiebre en Bodega Central',d:'Solicitar reposición antes de planificar próxima producción'});
+    if(icAgotado.length>0)alerts.push({n:'roja',i:'CC',t:icAgotado.length+' preparación'+(icAgotado.length>1?'es':'')+' AGOTADA'+(icAgotado.length>1?'S':'')+'  en Inventario CC',d:icAgotado.map(function(r){return r[iIC.nom]||'—';}).join(' · ')});
+    if(icBajoMin.length>0)alerts.push({n:'aamar',i:'CC',t:icBajoMin.length+' preparación'+(icBajoMin.length>1?'es':'')+' bajo mínimo en Inventario CC',d:icBajoMin.map(function(r){return r[iIC.nom]||'—';}).join(' · ')});
 
     // ══════ RENDER ══════
     var h='';
@@ -422,7 +444,7 @@ function main(){
 
     h+='<div class="vc atc"><div class="vl">Costo total mes</div>';
     h+='<div class="vb" style="font-size:20px">'+(!hayDatos?'—':fmt$(totalCostoTeo))+'</div>';
-    h+='<div class="vs">'+(hayDatos?totalLotesReal+' lotes reales producidos':'costo teórico acumulado')+'</div></div>';
+    h+='<div class="vs">costo teórico acumulado</div></div>';
     h+='</div>';
 
     // ── PLAN + PRODUCCIONES DE HOY ──
@@ -452,8 +474,8 @@ function main(){
     if(hoyRows.length===0){
       h+=sinDatos('Sin registros para hoy — ingresa los lotes planificados en PRODUCCION_CC');
     } else {
-      h+='<div class="th" style="grid-template-columns:90px 1fr 80px 80px 80px 80px 70px 100px;">';
-      h+='<span>ID</span><span>Receta</span><span style="text-align:right">Plan</span><span style="text-align:right">Real</span><span style="text-align:right">Merma%</span><span style="text-align:right">Costo</span><span style="text-align:center">Turno</span><span style="text-align:center">Estado</span></div>';
+      h+='<div class="th" style="grid-template-columns:90px 1fr 80px 80px 80px 80px 100px;">';
+      h+='<span>ID</span><span>Receta</span><span style="text-align:right">Plan</span><span style="text-align:right">Real</span><span style="text-align:right">Merma%</span><span style="text-align:right">Costo</span><span style="text-align:center">Estado</span></div>';
       hoyRows.forEach(function(r){
         var tipo=String(fi(r,idx.tipo)||'').toUpperCase();
         var est=String(fi(r,idx.est)||'—').toUpperCase();
@@ -464,16 +486,64 @@ function main(){
         var mp=toNum(fi(r,idx.mpct));
         var mpStr=mp>0?fmtP(mp<1?mp:mp/100):'—';
         var costoMostrar=esPlan?fmt$(fi(r,idx.clteo,0)):fmt$(fi(r,idx.ctot,0));
-        h+='<div class="tr" style="grid-template-columns:90px 1fr 80px 80px 80px 80px 70px 100px;'+(esPlan?'opacity:0.65':'')+'">';
+        h+='<div class="tr" style="grid-template-columns:90px 1fr 80px 80px 80px 80px 100px;'+(esPlan?'opacity:0.65':'')+'">';
         h+='<span class="tsk">'+fi(r,idx.id,'—')+'</span>';
         h+='<span class="td" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+recNom+'</span>';
         h+='<span class="tn">'+fi(r,idx.plan,'—')+'</span>';
         h+='<span class="tn">'+(esPlan?'—':fi(r,idx.real,'—'))+'</span>';
         h+='<span class="tn" style="color:'+(mp>6?'var(--red)':mp>3?'var(--yellow)':'var(--green)')+'">'+mpStr+'</span>';
         h+='<span class="tn">'+costoMostrar+'</span>';
-        var turno=fi(r,idx.turno,'');var turnoLabel=turno?turno.charAt(0).toUpperCase()+turno.slice(1).toLowerCase():'—';
-        h+='<span style="text-align:center;font-size:11px;color:var(--t3)">'+turnoLabel+'</span>';
         h+='<span style="text-align:center"><span class="te '+cls+'">'+label+'</span></span>';
+        h+='</div>';
+      });
+    }
+    h+='</div>';
+
+    // ── INVENTARIO CC ──
+    h+='<div class="sl"><span class="slt">Inventario Cocina Central · Stock de preparaciones</span></div>';
+    h+='<div class="card">';
+    h+='<div class="sh"><div><div class="sn">Stock de Preparaciones CC</div><div class="ss">Lotes disponibles vs Par Level · actualizado desde Inventario_CC</div></div>';
+    h+='<div style="display:flex;gap:6px">';
+    if(icAgotado.length>0) h+='<span class="sb brojo">'+icAgotado.length+' AGOTADO'+(icAgotado.length>1?'S':'')+'</span>';
+    if(icBajoMin.length>0) h+='<span class="sb bamar">'+icBajoMin.length+' BAJO MÍN</span>';
+    if(icAgotado.length===0&&icBajoMin.length===0&&rowsIC.length>0) h+='<span class="sb bverde">Todo OK</span>';
+    h+='</div></div>';
+
+    if(rowsIC.length===0){
+      h+=sinDatos('Sin preparaciones en Inventario_CC — ingresa el Par Level para cada receta PREPARACION');
+    } else {
+      h+='<div class="th" style="grid-template-columns:1fr 90px 70px 70px 70px 100px 90px;">';
+      h+='<span>Preparación</span>';
+      h+='<span style="text-align:center">Par Level</span>';
+      h+='<span style="text-align:right">Prod.</span>';
+      h+='<span style="text-align:right">Entregados</span>';
+      h+='<span style="text-align:right">Stock</span>';
+      h+='<span style="text-align:center">Estado</span>';
+      h+='<span style="text-align:right">Últ. Prod.</span>';
+      h+='</div>';
+      rowsIC.forEach(function(r){
+        var est=String(r[iIC.est]||'').toUpperCase().trim();
+        var stock=parseInt(r[iIC.stock])||0;
+        var par=parseInt(r[iIC.par])||0;
+        var prod=parseInt(r[iIC.prod])||0;
+        var ent=parseInt(r[iIC.ent])||0;
+        var cls=est==='AGOTADO'?'eerr':est==='BAJO_MINIMO'?'ewrn':'eok';
+        var pct=par>0?Math.min(100,Math.round(stock/par*100)):100;
+        var barColor=est==='AGOTADO'?'var(--red)':est==='BAJO_MINIMO'?'var(--yellow)':'var(--green)';
+        var nom=r[iIC.nom]||'—';
+        var ultP=r[iIC.ultP]||'---';
+        h+='<div class="tr" style="grid-template-columns:1fr 90px 70px 70px 70px 100px 90px;">';
+        h+='<div style="overflow:hidden">';
+        h+='<div class="td" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">'+nom+'</div>';
+        if(r[iIC.uo]){h+='<div style="font-size:10px;color:var(--t3);margin-top:1px">'+r[iIC.uo]+'</div>';}
+        h+='<div class="stock-bar"><div class="stock-fill" style="width:'+pct+'%;background:'+barColor+'"></div></div>';
+        h+='</div>';
+        h+='<span class="tn" style="color:var(--t2)">'+( par>0?par:'—')+'</span>';
+        h+='<span class="tn">'+prod+'</span>';
+        h+='<span class="tn">'+ent+'</span>';
+        h+='<span class="tn" style="color:'+barColor+';font-weight:500">'+stock+'</span>';
+        h+='<span style="text-align:center"><span class="te '+cls+'">'+est+'</span></span>';
+        h+='<span class="tn" style="font-size:11px;color:var(--t3)">'+ultP+'</span>';
         h+='</div>';
       });
     }
