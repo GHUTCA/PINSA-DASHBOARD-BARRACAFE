@@ -564,6 +564,7 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:50px;background:va
                       <option value="SIMPLE">SIMPLE (ingredientes base)</option>
                       <option value="PREPARACION">PREPARACION (CC produce)</option>
                       <option value="ENSAMBLE" selected>ENSAMBLE (en local)</option>
+                      <option value="SUBRECETA">SUBRECETA (componente de otra receta)</option>
                       <option value="OFERTA">OFERTA (composito)</option>
                     </select>
                   </div>
@@ -1047,7 +1048,7 @@ const GID = {
   BD_INSUMOS: '514178276',
 };
 // ⚠ Inserire la URL del WebApp deployato (Apps Script)
-const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzYdt568Qej08BdaTrrw2A7E6VzzWNxD5kbvgaUCK34Rxoguhy3csUWic60WDtigibOFQ/exec';
+const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbwjug6Hm6k_Fft7YC6Q6kwObmLXuSRt9z-sVnYUxwH1VIltdhjQomm5C1hLNBoBc1cC-g/exec';
 
 // ══════════════════════════════════════════════
 // INSUMOS — cargado desde BD_INSUMOS (live)
@@ -1439,7 +1440,7 @@ function setL1(f,el){
   el.classList.add('on');buildL2();renderList('');
 }
 function buildL2(){
-  const pool=filterL1==='todas'?getVisibleRecipes():filterL1==='CC'?getVisibleRecipes().filter(r=>r.tipo==='PREPARACION'):getVisibleRecipes().filter(r=>r.cat===filterL1);
+  const pool=filterL1==='todas'?getVisibleRecipes():filterL1==='CC'?getVisibleRecipes().filter(r=>r.tipo==='PREPARACION'||r.tipo==='SUBRECETA'):getVisibleRecipes().filter(r=>r.cat===filterL1);
   const familias=[...new Set(pool.map(r=>r.familia))].filter(Boolean).sort();
   const wrap=document.getElementById('familia-wrap');
   const sel=document.getElementById('familiaSelect');
@@ -1462,7 +1463,7 @@ function miniDots(n){return[1,2,3].map(i=>`<span style="display:inline-block;wid
 function renderList(q='') {
   const list=document.getElementById('sbList');
   const items=getVisibleRecipes().filter(r=>{
-    const m1=filterL1==='todas'||(filterL1==='CC'?r.tipo==='PREPARACION':r.cat===filterL1);
+    const m1=filterL1==='todas'||(filterL1==='CC'?(r.tipo==='PREPARACION'||r.tipo==='SUBRECETA'):r.cat===filterL1);
     const m2=filterL2==='todas'||r.familia===filterL2;
     const m3=filterEstado==='todas'||r.estado===filterEstado;
     const ms=!q||r.nombre.toLowerCase().includes(q.toLowerCase());
@@ -1478,7 +1479,8 @@ function renderList(q='') {
       <div class="ri-meta">
         <span class="tag">${r.familia}</span>
         ${r.tipo==='PREPARACION'?`<span class="tag" style="background:rgba(155,107,158,0.15);color:#9B6B9E;border:1px solid rgba(155,107,158,0.3)">CC</span>`:''}
-        ${r.formato&&r.tipo!=='PREPARACION'?`<span class="tag">${r.formato}</span>`:''}
+        ${r.tipo==='SUBRECETA'?`<span class="tag" style="background:rgba(74,144,210,0.15);color:#4A90D2;border:1px solid rgba(74,144,210,0.3)">SUB</span>`:''}
+        ${r.formato&&r.tipo!=='PREPARACION'&&r.tipo!=='SUBRECETA'?`<span class="tag">${r.formato}</span>`:''}
         <span class="ri-right">
           ${miniDots(r.dificultad)}
           <span class="ri-mins">${r.t_prep+(r.t_coccion||0)}′</span>
@@ -1558,6 +1560,7 @@ function renderRecipe(r) {
   const hasIng=r.ingredientes.length>0;
   const hasProc=!!(r.procedimiento&&r.procedimiento.trim());
   const isPrep=r.tipo==='PREPARACION';
+  const isSub=r.tipo==='SUBRECETA';
 
   const estadoBadgeClass=r.estado==='ACTIVA'||r.estado==='ACTIVA_SIN_DATA'?'ok':r.estado==='SIMULACION'?'sim':r.estado==='ARCHIVADA'?'arch':'pend';
 
@@ -1865,24 +1868,25 @@ function onTipoChange() {
   const tipo=document.getElementById('simTipo').value;
   const isOferta=tipo==='OFERTA';
   const isPrepCC=tipo==='PREPARACION';
+  const isSubreceta=tipo==='SUBRECETA';
   document.getElementById('sim-bloque-ingredientes').style.display=isOferta?'none':'';
   document.getElementById('sim-bloque-subrecetas').style.display=isOferta?'':'none';
   // Q lote solo per PREPARACION
   const qlWrap=document.getElementById('sim-qlote-wrap');
   if(qlWrap) qlWrap.style.display=isPrepCC?'':'none';
   // Panel comercial / solo-costo nel pannello risultato
-  // Toggle blocco OFERTA nel resultado
   const bloqOf=document.getElementById('sim-bloque-oferta');
   const bloqCom=document.getElementById('sim-bloque-comercial');
   const bloqSC=document.getElementById('sim-bloque-solo-costo');
   if(bloqOf) bloqOf.style.display=isOferta?'':'none';
-  if(bloqCom) bloqCom.style.display=(isOferta||isPrepCC)?'none':'';
-  if(bloqSC) bloqSC.style.display=isPrepCC?'':'none';
+  // SUBRECETA: solo costo, niente pannello commerciale
+  if(bloqCom) bloqCom.style.display=(isOferta||isPrepCC||isSubreceta)?'none':'';
+  if(bloqSC) bloqSC.style.display=(isPrepCC||isSubreceta)?'':'none';
   const bloqCosto=document.getElementById('sim-bloque-costo');
   if(bloqCosto) bloqCosto.style.display=isOferta?'none':'';
 
   checkTipoSeccion();
-  onCategoriaChange(); // aggiorna opzioni unidad (porcion solo per PREPARACION)
+  onCategoriaChange();
   calcSim();
 }
 
@@ -1894,7 +1898,8 @@ function checkTipoSeccion() {
   const barras=['Barra Cafe','Barra Jugos','Barra Helados','Barra Alimentos','Pasteleria'];
   const bad=(tipo==='PREPARACION'&&barras.includes(sec))
            ||(tipo==='ENSAMBLE'&&sec==='Cocina Central')
-           ||(tipo==='SIMPLE'&&sec==='Cocina Central');
+           ||(tipo==='SIMPLE'&&sec==='Cocina Central')
+           ||(tipo==='SUBRECETA'&&sec==='Cocina Central');
   warn.style.display=bad?'':'none';
 }
 
