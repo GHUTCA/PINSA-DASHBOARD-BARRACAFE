@@ -387,7 +387,7 @@ function renderDashboard(secciones){
     const bMerma=parseNum(sem['Bono Merma $']||'0');
     const bCosto=parseNum(sem['Bono Costo $']||'0');
     const ventaSem=parseNum(sem['Venta Semanal $']||'0');
-    return {ok:true,nombre:sec.nombre,diasCV,mPct,diasOK,diasCrit,cPct,cumMerma,cumCosto,bono:bMerma+bCosto,ventaSem,mhoy,dias,inv:sec.data.inventario};
+    return {ok:true,nombre:sec.nombre,diasCV,mPct,diasOK,diasCrit,cPct,cumMerma,cumCosto,bono:bMerma+bCosto,ventaSem,sem,mhoy,dias,inv:sec.data.inventario};
   });
 
   // REGOLA A: gate venta minima + entrambe devono cumplir
@@ -398,8 +398,11 @@ function renderDashboard(secciones){
   const allMerma=sd.every(s=>s.ok&&s.cumMerma);
   const allCosto=sd.every(s=>s.ok&&s.cumCosto);
 
-  // Bono basado en merma y costo — la venta es indicador separado
-  let bonoSector=0, bonoClase='rojo', bonoTexto='EN RIESGO';
+  // Bono a livello settore — due componenti indipendenti dal foglio
+  const bonoMermaSector = allMerma ? sd.reduce((sum,s)=>sum+parseNum(s.sem['Bono Merma $']||'0'),0) : 0;
+  const bonoCostoSector = allCosto ? sd.reduce((sum,s)=>sum+parseNum(s.sem['Bono Costo $']||'0'),0) : 0;
+  let bonoSector = bonoMermaSector + bonoCostoSector;
+  let bonoClase='rojo', bonoTexto='EN RIESGO';
   let msgClase='bad', msgIcon='<span class="mi-badge mi-red">!</span>', msgTitulo='Aún puedes recuperarlo.', msgCuerpo=' Revisa con tu equipo qué sección necesita atención hoy.';
 
   if(!hasDatos){
@@ -407,24 +410,27 @@ function renderDashboard(secciones){
     msgClase='warn'; msgIcon='<span class="mi-badge mi-gray">—</span>'; msgTitulo='Semana recién iniciada.';
     msgCuerpo=' Registra ventas y mermas en ambas secciones.';
   } else if(allCumplen){
-    bonoSector=CONFIG.bono_potencial;
     bonoClase='verde'; bonoTexto='¡BONO ACTIVO!';
     msgClase='ok'; msgIcon='<span class="mi-badge mi-green">★</span>'; msgTitulo='¡Excelente trabajo en equipo!';
     msgCuerpo=' Ambas secciones cumpliendo. Mantengan el estándar hasta el domingo.';
+  } else if(!allMerma && !allCosto){
+    bonoClase='rojo'; bonoTexto='EN RIESGO';
+    msgClase='bad'; msgIcon='<span class="mi-badge mi-red">!</span>';
+    msgTitulo='Merma y costo fuera de rango.';
+    msgCuerpo=' El sector necesita mejorar ambos indicadores antes del domingo.';
   } else if(!allMerma){
+    bonoClase='amarillo'; bonoTexto='BONO PARCIAL';
+    msgClase='warn'; msgIcon='<span class="mi-badge mi-yellow">!</span>';
     const f=sd.find(s=>s.ok&&!s.cumMerma);
-    bonoSector=0;
-    msgClase='warn'; msgIcon='<span class="mi-badge mi-yellow">!</span>'; bonoClase='amarillo'; bonoTexto='EN RIESGO';
     msgTitulo=`${f?.nombre||'Una sección'} tiene merma alta.`;
-    msgCuerpo=' El sector necesita bajar la merma antes del domingo.';
+    msgCuerpo=` Costo OK — $${bonoCostoSector.toLocaleString('es-CL')} activo. Bajen la merma para el bono completo.`;
   } else if(!allCosto){
+    bonoClase='amarillo'; bonoTexto='BONO PARCIAL';
+    msgClase='warn'; msgIcon='<span class="mi-badge mi-yellow">i</span>';
     const f=sd.find(s=>s.ok&&!s.cumCosto);
-    bonoSector=0;
-    msgClase='warn'; msgIcon='<span class="mi-badge mi-yellow">i</span>'; bonoClase='amarillo'; bonoTexto='EN RIESGO';
     msgTitulo=`${f?.nombre||'Una sección'} tiene costo alto.`;
-    msgCuerpo=' Revisen pedidos y porciones hoy.';
+    msgCuerpo=` Merma OK — $${bonoMermaSector.toLocaleString('es-CL')} activo. Revisen pedidos para el bono completo.`;
   }
-
   const bonoPct=Math.min(Math.round((bonoSector/CONFIG.bono_potencial)*100),100);
 
   // STOCK combinado
