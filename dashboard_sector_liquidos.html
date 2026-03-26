@@ -397,7 +397,9 @@ function renderDashboard(secciones){
   const allMerma=sd.every(s=>s.ok&&s.cumMerma);
   const allCosto=sd.every(s=>s.ok&&s.cumCosto);
 
-  let bonoSector=0, bonoClase='rojo', bonoTexto='EN RIESGO';
+  // Bono siempre visible — el operador ve siempre lo que puede ganar
+  const bonoSector=CONFIG.bono_potencial;
+  let bonoClase='rojo', bonoTexto='EN RIESGO';
   let msgClase='bad', msgIcon='<span class="mi-badge mi-red">!</span>', msgTitulo='Aún puedes recuperarlo.', msgCuerpo=' Revisa con tu equipo qué sección necesita atención hoy.';
 
   if(!hasDatos){
@@ -405,7 +407,6 @@ function renderDashboard(secciones){
     msgClase='warn'; msgIcon='<span class="mi-badge mi-gray">—</span>'; msgTitulo='Semana recién iniciada.';
     msgCuerpo=' Registra ventas y mermas en ambas secciones.';
   } else if(allCumplen){
-    bonoSector=CONFIG.bono_potencial;
     bonoClase='verde'; bonoTexto='¡BONO ACTIVO!';
     msgClase='ok'; msgIcon='<span class="mi-badge mi-green">★</span>'; msgTitulo='¡Excelente trabajo en equipo!';
     msgCuerpo=' Ambas secciones cumpliendo. Mantengan el estándar hasta el domingo.';
@@ -613,9 +614,96 @@ function renderDashboard(secciones){
       </div>${renderSI(atencion,'atencion')}`:''}
       ${totalStock===0?`<div style="text-align:center;padding:20px;color:var(--green);font-size:13px">Todo el stock en niveles normales</div>`:`<div class="stock-ver-mas">+ Ver lista completa en Inventario_Prioridad →</div>`}
     </div>
-  </div>`;
+  </div>
+
+  <!-- STORICO ULTIME 4 SETTIMANE -->
+  ${renderStorico(secciones)}
+  `;
 
   document.getElementById('main-content').innerHTML=html;
+}
+
+function fmtFecha(s){
+  if(!s) return '—';
+  const mn=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const p=s.split('-'); if(p.length<3) return s;
+  const d=parseInt(p[0]),m=parseInt(p[1])-1,y=parseInt(p[2]);
+  if(isNaN(d)||isNaN(m)||isNaN(y)) return s;
+  return d+'/'+mn[m];
+}
+
+function renderStorico(secciones){
+  const MAX=4;
+  const now=new Date(); const wkNow=getWeekCode(now);
+
+  const secsOk=secciones.filter(s=>s.ok&&s.data&&s.data.semanales);
+  if(!secsOk.length) return '';
+
+  // Prendo tutte le settimane da entrambe le sezioni
+  const allSems=secsOk[0].data.semanales
+    .filter(r=>r['Semana']&&r['Semana']!==wkNow&&parseNum(r['Totales dias con venta']||'0')>0)
+    .slice(-MAX).reverse();
+
+  if(!allSems.length) return '';
+
+  const rows=allSems.map(sem=>{
+    const wk=sem['Semana']||'';
+    const semNum=wk.split('-W')[1]||wk;
+    const fi=fmtFecha(sem['Fecha Inicio']||'');
+    const ff=fmtFecha(sem['Fecha Fin']||'');
+    const venta=parseNum(sem['Venta Semanal $']||'0');
+    const cumpVentaHist=venta>=CONFIG.venta_minima_sector;
+
+    const cols=secsOk.map(s=>{
+      const sr=s.data.semanales.find(r=>r['Semana']===wk)||{};
+      const mp=parsePct(sr['% Merma Sobre Venta']||'0');
+      const cumM=sr['Cumple Merma']==='TRUE'||sr['Cumple Merma']==='true';
+      const mDisp=(mp*100).toFixed(2)+'%';
+      const col=cumM?'var(--green)':'var(--red)';
+      const icon=cumM?'✓':'✗';
+      return `<td style="color:${col};font-size:11px;padding:6px 10px;text-align:center;">${mDisp} <span style="font-weight:500;">${icon}</span></td>`;
+    }).join('');
+
+    const bonoTotal=secsOk.reduce((sum,s)=>{
+      const sr=s.data.semanales.find(r=>r['Semana']===wk)||{};
+      return sum+parseNum(sr['Bonon Total $']||sr['Bono Total $']||'0');
+    },0);
+
+    const ventaIcon=cumpVentaHist
+      ? '<span style="color:var(--green);font-weight:500;">✓</span>'
+      : '<span style="color:var(--red);font-weight:500;">✗</span>';
+
+    return `<tr style="border-top:1px solid var(--b);">
+      <td style="font-size:11px;font-weight:500;color:var(--t2);padding:6px 10px;white-space:nowrap;">W${semNum}</td>
+      <td style="font-size:11px;color:var(--t3);padding:6px 10px;white-space:nowrap;">${fi} – ${ff}</td>
+      <td style="font-size:12px;padding:6px 10px;text-align:center;">${ventaIcon}</td>
+      ${cols}
+      <td style="font-size:12px;font-weight:500;color:${bonoTotal>0?'var(--green)':'var(--t3)'};padding:6px 10px;text-align:right;">$${bonoTotal.toLocaleString('es-CL')}</td>
+    </tr>`;
+  }).join('');
+
+  const headerCols=secsOk.map(s=>`<th style="font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--t3);padding:6px 10px;text-align:center;text-transform:uppercase;">${s.nombre.replace('Barra ','')}</th>`).join('');
+
+  return `
+  <div class="section-card" style="margin-top:12px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px 10px;">
+      <div class="section-card-title"><span class="sc-icon" style="background:rgba(127,119,221,0.15);color:#A9A4E8;">H</span> Últimas semanas — Sector ${CONFIG.sector}</div>
+    </div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="border-bottom:1px solid var(--b);">
+            <th style="font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--t3);padding:6px 10px;text-align:left;text-transform:uppercase;">Semana</th>
+            <th style="font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--t3);padding:6px 10px;text-align:left;text-transform:uppercase;">Período</th>
+            <th style="font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--t3);padding:6px 10px;text-align:center;text-transform:uppercase;">Venta</th>
+            ${headerCols}
+            <th style="font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--t3);padding:6px 10px;text-align:right;text-transform:uppercase;">Bono</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
 }
 
 initFecha();
