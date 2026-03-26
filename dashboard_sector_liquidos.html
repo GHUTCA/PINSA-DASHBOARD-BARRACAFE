@@ -199,6 +199,8 @@ const CONFIG = {
   local: "Candelaria",
   sector: "LÍQUIDOS",
   topbar_name: "Barra Café + Barra Jugos · Candelaria",
+  url_parametros: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=58421555&single=true&output=csv",
+  venta_minima_sector: 8000000,
   bono_potencial: 30000,
   umbral_merma_normal: 0.003,
   umbral_merma_critico: 0.006,
@@ -259,10 +261,51 @@ function initFecha(){
   document.getElementById('tm').textContent=`${MES[now.getMonth()]} ${yyyy}`;
 }
 
+async function loadParametros(){
+  try {
+    const rows = await fetchCSV(CONFIG.url_parametros);
+    const find = (key) => {
+      const r = rows.find(row => {
+        const firstCol = row[Object.keys(row)[0]] || '';
+        return firstCol.toString().trim() === key;
+      });
+      return r ? r[Object.keys(r)[1]] : null;
+    };
+    const pctVal = (v) => { if(!v) return null; const n=parseFloat(String(v).replace('%','').replace(',','.')); return isNaN(n)?null:n/100; };
+    const numVal = (v) => { if(v===null||v===undefined||v==='') return null; const n=parseFloat(String(v).replace(/[^0-9.\-]/g,'')); return isNaN(n)?null:n; };
+
+    const ventaLiq = numVal(find('Setup Liquidos'));
+    if(ventaLiq!==null) CONFIG.venta_minima_sector = ventaLiq;
+
+    const uNormal = pctVal(find('Umbral normal merma'));
+    if(uNormal!==null) CONFIG.umbral_merma_normal = uNormal;
+
+    const uCrit = pctVal(find('Umbral cr\u00edtico merma'));
+    if(uCrit!==null) CONFIG.umbral_merma_critico = uCrit;
+
+    const obj2 = pctVal(find('Objetivo nivel 2 merma'));
+    if(obj2!==null) CONFIG.objetivo_merma_semanal = obj2;
+
+    const costoAlto = pctVal(find('Costo M\u00e1ximo Alto (25%)'));
+    if(costoAlto!==null) CONFIG.costo_alto = costoAlto;
+
+    const costoMedio = pctVal(find('Costo M\u00e1ximo Medio (30%)'));
+    if(costoMedio!==null) CONFIG.costo_medio = costoMedio;
+
+    const bonoMermaAlto = numVal(find('Bono alto merma'));
+    const bonoCostoAlto = numVal(find('Bono Alto costo'));
+    if(bonoMermaAlto!==null && bonoCostoAlto!==null) CONFIG.bono_potencial = bonoMermaAlto + bonoCostoAlto;
+
+  } catch(e) {
+    console.warn('PARAMETROS no carg\u00f3 — usando valores de CONFIG:', e.message);
+  }
+}
+
 async function loadAllData(){
   document.getElementById('main-content').innerHTML=`<div class="loading"><div class="spinner"></div><div class="loading-txt">Cargando sector ${CONFIG.sector}...</div></div>`;
   initFecha();
   try {
+    await loadParametros();
     const results = await Promise.allSettled(
       CONFIG.secciones.map(async sec => {
         const [semanales,merma,inventario] = await Promise.all([fetchCSV(sec.url_semanales),fetchCSV(sec.url_merma),fetchCSV(sec.url_inventario)]);
@@ -331,11 +374,14 @@ function renderDashboard(secciones){
     const cumCosto=sem['Cumple Costo']==='TRUE'||sem['Cumple Costo']==='true'||(cPct>0&&cPct<=CONFIG.costo_medio);
     const bMerma=parseNum(sem['Bono Merma $']||'0');
     const bCosto=parseNum(sem['Bono Costo $']||'0');
-    return {ok:true,nombre:sec.nombre,diasCV,mPct,diasOK,diasCrit,cPct,cumMerma,cumCosto,bono:bMerma+bCosto,mhoy,dias,inv:sec.data.inventario};
+    const ventaSem=parseNum(sem['Venta Semanal $']||'0');
+    return {ok:true,nombre:sec.nombre,diasCV,mPct,diasOK,diasCrit,cPct,cumMerma,cumCosto,bono:bMerma+bCosto,ventaSem,mhoy,dias,inv:sec.data.inventario};
   });
 
-  // REGOLA A: entrambe devono cumplir
+  // REGOLA A: gate venta minima + entrambe devono cumplir
   const hasDatos=sd.some(s=>s.ok&&s.diasCV>0);
+  const ventaSector=sd.filter(s=>s.ok).reduce((sum,s)=>sum+s.ventaSem,0);
+  const cumpVenta=ventaSector>=CONFIG.venta_minima_sector;
   const allCumplen=sd.every(s=>s.ok&&s.cumMerma&&s.cumCosto);
   const allMerma=sd.every(s=>s.ok&&s.cumMerma);
   const allCosto=sd.every(s=>s.ok&&s.cumCosto);
@@ -347,6 +393,11 @@ function renderDashboard(secciones){
     bonoClase='cero'; bonoTexto='SIN DATOS';
     msgClase='warn'; msgIcon='<span class="mi-badge mi-gray">—</span>'; msgTitulo='Semana recién iniciada.';
     msgCuerpo=' Registra ventas y mermas en ambas secciones.';
+  } else if(!cumpVenta){
+    bonoClase='cero'; bonoTexto='BONO BLOQUEADO';
+    msgClase='bad'; msgIcon='<span class="mi-badge mi-red">!</span>';
+    msgTitulo='Venta del sector bajo el mínimo semanal.';
+    msgCuerpo=` Necesitan $${(CONFIG.venta_minima_sector-ventaSector).toLocaleString('es-CL')} más para activar el bono.`;
   } else if(allCumplen){
     bonoSector=CONFIG.bono_potencial;
     bonoClase='verde'; bonoTexto='¡BONO ACTIVO!';
@@ -452,6 +503,13 @@ function renderDashboard(secciones){
 
   html+=`</div>
     <div class="regla-sector">📋 Regla del sector: <strong>ambas secciones deben cumplir</strong> para activar el bono — el equipo gana o pierde junto</div>
+    <div class="regla-sector" style="border-top:none;padding-top:0;">
+      💰 Venta sector esta semana: <strong>$${ventaSector.toLocaleString('es-CL')}</strong>
+      ${cumpVenta
+        ? '<span style="color:var(--green);margin-left:8px;">✓ Mínimo alcanzado</span>'
+        : `<span style="color:var(--red);margin-left:8px;">✗ Mínimo $${CONFIG.venta_minima_sector.toLocaleString('es-CL')} — faltan $${(CONFIG.venta_minima_sector-ventaSector).toLocaleString('es-CL')}</span>`
+      }
+    </div>
     <div class="bono-msg ${msgClase}">
       <div class="bono-msg-icon">${msgIcon}</div>
       <div class="bono-msg-text"><strong>${msgTitulo}</strong>${msgCuerpo}</div>
