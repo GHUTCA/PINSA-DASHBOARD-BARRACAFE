@@ -341,22 +341,32 @@ async function load(){
       const cumC=last['Cumple Costo']==='TRUE';
       const wk=last['Semana']||'';
 
-      // MEDIA MENSILE — settimane del mese corrente nell'hist
+      // MEDIA MENSILE — solo settimane il cui lunedì cade nel mese corrente
+      function isoWkToDate(semStr){
+        // "2026-W13" → lunedì di quella settimana ISO
+        const m=semStr.match(/(\d{4})-W(\d{2})/);
+        if(!m)return null;
+        const y=+m[1],w=+m[2];
+        const jan4=new Date(y,0,4); // 4 gen è sempre nella settimana 1
+        const monday=new Date(jan4.getTime()+(w-1)*7*864e5);
+        monday.setDate(monday.getDate()-((monday.getDay()+6)%7)); // lunedì
+        return monday;
+      }
       const wkMes=hist.filter(r=>{
-        const sem=r['Semana']||'';
-        // es: "2026-W13" → estraiamo anno e settimana ISO e verifichiamo se cade nel mese corrente
-        // approssimazione pratica: usiamo le ultime 4 righe disponibili (un mese ~4 settimane)
-        return true; // usiamo tutte le righe hist filtrate a 4 per il mese
-      }).slice(-4);
-      const mMes=wkMes.length?wkMes.reduce((a,r)=>a+($p(r['% Merma Sobre Venta'])||0),0)/wkMes.length:null;
-      const fcMes=wkMes.length?(()=>{
-        const valid=wkMes.filter(r=>$n(r['Venta Semanal $'])>0);
+        const d=isoWkToDate(r['Semana']||'');
+        return d&&d.getMonth()+1===mn&&d.getFullYear()===yr;
+      });
+      // fallback: se nessuna settimana filtra (mese appena iniziato) usa ultima disponibile
+      const wkMesEff=wkMes.length?wkMes:[last].filter(Boolean);
+      const mMes=wkMesEff.length?wkMesEff.reduce((a,r)=>a+($p(r['% Merma Sobre Venta'])||0),0)/wkMesEff.length:null;
+      const fcMes=wkMesEff.length?(()=>{
+        const valid=wkMesEff.filter(r=>$n(r['Venta Semanal $'])>0);
         return valid.length?valid.reduce((a,r)=>a+($n(r['Costo Total Semanal $'])/$n(r['Venta Semanal $'])),0)/valid.length:null;
       })():null;
-      const cumMmes=wkMes.length>0&&wkMes.every(r=>r['Cumple Merma']==='TRUE');
-      const cumCmes=wkMes.length>0&&wkMes.every(r=>r['Cumple Costo']==='TRUE');
+      const cumMmes=wkMesEff.length>0&&wkMesEff.every(r=>r['Cumple Merma']==='TRUE');
+      const cumCmes=wkMesEff.length>0&&wkMesEff.every(r=>r['Cumple Costo']==='TRUE');
 
-      return{...s,ok:true,mP,fc,cumM,cumC,wk,hist,vS,cS,mMes,fcMes,cumMmes,cumCmes,nSem:wkMes.length};
+      return{...s,ok:true,mP,fc,cumM,cumC,wk,hist,vS,cS,mMes,fcMes,cumMmes,cumCmes,nSem:wkMesEff.length};
     });
 
     const sOK=secs.filter(s=>s.ok);
