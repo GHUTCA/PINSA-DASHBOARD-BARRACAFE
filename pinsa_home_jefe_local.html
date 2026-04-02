@@ -102,6 +102,21 @@
   .foot-l{font-size:10px;color:var(--t3);letter-spacing:.5px;}
   .live-f{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--green);}
   .live-f::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--green);}
+
+  /* BANNER REGISTRO */
+  .banner-registro{margin:6px 24px 0;border-radius:10px;padding:9px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;}
+  .banner-registro.ok{background:rgba(29,158,117,0.10);border:1px solid rgba(29,158,117,0.30);}
+  .banner-registro.warn{background:rgba(239,159,39,0.12);border:1px solid rgba(239,159,39,0.35);}
+  .banner-registro.alert{background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.35);}
+  .banner-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .banner-registro.ok .banner-dot{background:#5DCAA5;}
+  .banner-registro.warn .banner-dot{background:#EF9F27;}
+  .banner-registro.alert .banner-dot{background:#DC3C3C;animation:blink 1.2s ease-in-out infinite;}
+  @keyframes blink{0%,100%{opacity:1;}50%{opacity:.3;}}
+  .banner-txt{flex:1;font-size:11px;line-height:1.5;}
+  .banner-registro.ok .banner-txt{color:#5DCAA5;}
+  .banner-registro.warn .banner-txt{color:#EF9F27;}
+  .banner-registro.alert .banner-txt{color:#E05555;}
 </style>
 </head>
 <body>
@@ -130,6 +145,12 @@
   <div class="titulo">
     <h1>Mi Estación <span>· Jefe Local</span></h1>
     <p>Control operativo diario · Candelaria</p>
+  </div>
+
+  <!-- BANNER REGISTRO -->
+  <div class="banner-registro" id="bannerRegistro">
+    <div class="banner-dot"></div>
+    <div class="banner-txt" id="bannerTxt">Verificando registro diario...</div>
   </div>
 
   <div class="main-grid">
@@ -267,6 +288,65 @@ function updateClock(){
 }
 updateClock();
 setInterval(updateClock,30000);
+
+  /* BANNER REGISTRO — todas las secciones */
+  const CSVS = {
+    'Barra Cafe':      'https://docs.google.com/spreadsheets/d/e/2PACX-1vTQQP46B2-aan5TsMxqXpl_GJ3h3lNpcpd4fa-h_NGRE49pQKMBa7zkJ6sJTKOhx0lOZo1ALqJrVl8R/pub?gid=153149710&single=true&output=csv',
+    'Barra Jugos':     'https://docs.google.com/spreadsheets/d/e/2PACX-1vRgfxyaHuTXg2q9ozPN-SjmqRWKU5hk4MJ2vynH7qY2ek7mWKRxFbE3J05Wp1Wn24OlwVqkMCmP9B2v/pub?gid=153149710&single=true&output=csv',
+    'Barra Alimentos': 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQHwGrTFlMFwFsk-RlHDYbNWQPDGIvg2TofLV0vJxAru1qrZnVT8Okk9dISgB2lzLKpJW2QUx61dMyX/pub?gid=153149710&single=true&output=csv',
+    'Barra Helados':   'https://docs.google.com/spreadsheets/d/e/2PACX-1vQc0tyemN3uQzvq0jZXRP99uPaLNEtjRQs2UB1YBWdJ6ZDhVOSrjAXPt0E-yh09_5Mav9kUXTgejK_O/pub?gid=153149710&single=true&output=csv'
+  };
+
+  function esFechaHoy(fechaStr) {
+    if (!fechaStr) return false;
+    var hoy = new Date();
+    try {
+      var parsed = new Date(fechaStr);
+      return parsed.getDate() === hoy.getDate() &&
+             parsed.getMonth() === hoy.getMonth() &&
+             parsed.getFullYear() === hoy.getFullYear();
+    } catch(e) { return false; }
+  }
+
+  function checkRegistroJL() {
+    var banner = document.getElementById('bannerRegistro');
+    var txt    = document.getElementById('bannerTxt');
+    var entradas = Object.entries(CSVS);
+    var resultados = [];
+    var completati = 0;
+
+    entradas.forEach(function(entry) {
+      var nombre = entry[0], url = entry[1];
+      fetch(url).then(function(r) { return r.text(); }).then(function(csv) {
+        var ok = csv.split('\n').slice(1).some(function(row) {
+          var f = (row.split(',')[0] || '').trim().replace(/^"|"$/g,'');
+          return esFechaHoy(f);
+        });
+        resultados.push({ nombre: nombre, ok: ok });
+        completati++;
+        if (completati === entradas.length) {
+          var faltantes = resultados.filter(function(r) { return !r.ok; }).map(function(r) { return r.nombre; });
+          if (faltantes.length === 0) {
+            banner.className = 'banner-registro ok';
+            txt.innerHTML = '&#10003; &nbsp;Todas las secciones registraron hoy &mdash; bono activo';
+          } else {
+            banner.className = 'banner-registro alert';
+            txt.innerHTML = '&#9888;&#65039; &nbsp;<strong>Sin registro:</strong> ' + faltantes.join(' &middot; ') + ' &mdash; Bono en riesgo';
+          }
+        }
+      }).catch(function() {
+        completati++;
+        if (completati === entradas.length) {
+          banner.className = 'banner-registro warn';
+          txt.innerHTML = '&mdash; &nbsp;Sin conexion &mdash; no se pudo verificar registro';
+        }
+      });
+    });
+  }
+
+  checkRegistroJL();
+  setInterval(checkRegistroJL, 5 * 60 * 1000);
+
 </script>
 </body>
 </html>
