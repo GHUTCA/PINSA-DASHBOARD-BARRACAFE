@@ -107,6 +107,21 @@
   .status{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--t3);}
   .status::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--teal3);}
 
+  /* BANNER REGISTRO */
+  .banner-registro{margin:8px 24px 0;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0;transition:background .3s,border-color .3s;}
+  .banner-registro.ok{background:rgba(29,158,117,0.10);border:1px solid rgba(29,158,117,0.30);}
+  .banner-registro.warn{background:rgba(239,159,39,0.12);border:1px solid rgba(239,159,39,0.35);}
+  .banner-registro.alert{background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.35);}
+  .banner-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .banner-registro.ok .banner-dot{background:var(--teal3);}
+  .banner-registro.warn .banner-dot{background:var(--amber);}
+  .banner-registro.alert .banner-dot{background:#DC3C3C;}
+  .banner-txt{flex:1;font-size:11px;line-height:1.5;}
+  .banner-registro.ok .banner-txt{color:var(--teal3);}
+  .banner-registro.warn .banner-txt{color:var(--amber);}
+  .banner-registro.alert .banner-txt{color:#E05555;}
+  .banner-loading{color:var(--t3);font-size:11px;}
+
   /* TIMEOUT OVERLAY */
   .overlay{display:none;position:fixed;inset:0;background:rgba(10,16,11,0.96);z-index:999;flex-direction:column;align-items:center;justify-content:center;gap:20px;}
   .overlay.show{display:flex;}
@@ -131,6 +146,12 @@
   <div class="titulo">
     <h1>Mi Estación <span style="color:var(--teal3);font-weight:500;">· Sector Líquidos</span></h1>
     <p>Barra Café · Barra Jugos &nbsp;·&nbsp; Panel de turno</p>
+  </div>
+
+  <!-- BANNER REGISTRO -->
+  <div class="banner-registro" id="bannerRegistro">
+    <div class="banner-dot"></div>
+    <div class="banner-txt" id="bannerTxt"><span class="banner-loading">Verificando registro diario...</span></div>
   </div>
 
   <div class="main-grid">
@@ -211,6 +232,52 @@
 </div>
 
 <script>
+  /* ── BANNER REGISTRO DIARIO ── */
+  const CSV_CAFE  = 'https://docs.google.com/spreadsheets/d/1DO8ryspkTW1U4P2BlVL7Gd4cpQok4LEpdGkdKTMkNg8/export?format=csv&gid=153149710';
+  const CSV_JUGOS = 'https://docs.google.com/spreadsheets/d/1_rJHyCmTOBnssio415q-Av0nlCoKGkfSUpBTZBEhdWY/export?format=csv&gid=153149710';
+
+  function fechaHoy() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+
+  async function checkRegistro() {
+    const hoy = fechaHoy();
+    const banner = document.getElementById('bannerRegistro');
+    const txt    = document.getElementById('bannerTxt');
+
+    try {
+      const [rCafe, rJugos] = await Promise.all([
+        fetch(CSV_CAFE).then(r => r.text()),
+        fetch(CSV_JUGOS).then(r => r.text())
+      ]);
+
+      const tieneHoy = (csv) => csv.split('\n').slice(1).some(row => {
+        const cols = row.split(',');
+        const fecha = (cols[0] || '').trim();
+        return fecha.startsWith(hoy);
+      });
+
+      const cafeOK  = tieneHoy(rCafe);
+      const jugosOK = tieneHoy(rJugos);
+
+      if (cafeOK && jugosOK) {
+        banner.className = 'banner-registro ok';
+        txt.innerHTML = '✓ &nbsp;Registro al día — Barra Café y Barra Jugos registraron hoy';
+      } else {
+        const faltantes = [!cafeOK && 'Barra Café', !jugosOK && 'Barra Jugos'].filter(Boolean).join(' · ');
+        banner.className = 'banner-registro alert';
+        txt.innerHTML = '⚠️ &nbsp;<strong>Sin registro hoy:</strong> ' + faltantes + ' — Registra merma antes de cerrar el turno';
+      }
+    } catch(e) {
+      banner.className = 'banner-registro warn';
+      txt.innerHTML = '— &nbsp;No se pudo verificar el registro (sin conexión)';
+    }
+  }
+
+  checkRegistro();
+  setInterval(checkRegistro, 5 * 60 * 1000); // refresca cada 5 min
+
   /* ── RELOJ ── */
   function tick() {
     const n = new Date();
