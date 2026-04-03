@@ -376,8 +376,26 @@ body{background:var(--bg);color:var(--t1);font-family:'DM Sans',sans-serif;font-
       <div class="fg"><label>Cantidad</label><input type="number" id="ne-q" value="1" min="1"></div>
     </div>
     <div class="fr">
-      <div class="fg"><label>Costo Unitario $</label><input type="number" id="ne-costo" placeholder="0" min="0"></div>
-      <div class="fg"><label>Precio Venta $</label><input type="number" id="ne-pv" placeholder="0" min="0"></div>
+      <div class="fg">
+        <label>Costo Unitario $</label>
+        <input type="number" id="ne-costo" placeholder="0" min="0" oninput="calcPrecioExtra()">
+      </div>
+      <div class="fg">
+        <label>Precio Venta $
+          <span style="float:right;display:flex;gap:4px">
+            <button type="button" onclick="setPrecioExtra('costo')" style="background:#374151;border:none;color:#9CA3AF;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer" title="Al costo">$C</button>
+            <button type="button" onclick="setPrecioExtra('margen')" style="background:#1F3D2E;border:none;color:#22C55E;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer" title="Con margen de parámetros">%M</button>
+            <button type="button" onclick="setPrecioExtra('sugerido')" style="background:#451A03;border:none;color:#F59E0B;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer" title="Precio sugerido BD">$S</button>
+          </span>
+        </label>
+        <input type="number" id="ne-pv" placeholder="0" min="0" oninput="calcMargenExtra()">
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="font-size:10px;color:var(--t3)">Margen:</span>
+      <span id="ne-mg-show" style="font-family:'DM Mono',monospace;font-size:12px;color:var(--t3)">—</span>
+      <input type="number" id="ne-mg-input" placeholder="40" min="0" max="100" style="width:60px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--t1);padding:3px 6px;font-size:12px;text-align:center;outline:none" oninput="calcPVdesdeMargen()">
+      <span style="font-size:10px;color:var(--t3)">%</span>
     </div>
     <div class="fr">
       <div class="fg"><label>Proveedor</label><input type="text" id="ne-prov"></div>
@@ -680,6 +698,10 @@ async function guardarNuevoCliente(){
   const contacto=document.getElementById('nc-contacto').value.trim();
   const email=document.getElementById('nc-email').value.trim();
   if(!razon||!contacto||!email){showToast('Razón Social, Contacto y Email son obligatorios','err');return;}
+  const telCli = document.getElementById('nc-tel').value;
+  if(telCli && !validaTelCL(telCli)){showToast('Teléfono inválido — formato: +56 9 XXXX XXXX','err');document.getElementById('nc-tel').focus();return;}
+  const rutCli = document.getElementById('nc-rut').value;
+  if(rutCli && !validaRUT(rutCli)){showToast('RUT inválido — formato: 12.345.678-9','err');document.getElementById('nc-rut').focus();return;}
   try{
     const r=await fetch(GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'saveCliente',payload:{razon_social:razon,contacto,email,
@@ -703,6 +725,8 @@ async function guardarNuevoCliente(){
 async function agregarExtraLibre(){
   const desc=document.getElementById('ne-desc').value.trim();
   if(!desc){showToast('Descripción obligatoria','err');return;}
+  const telProv = document.getElementById('ne-tel-prov').value;
+  if(telProv && !validaTelCL(telProv)){showToast('Teléfono proveedor inválido — formato: +56 9 XXXX XXXX','err');document.getElementById('ne-tel-prov').focus();return;}
   const costo=parseFloat(document.getElementById('ne-costo').value)||0;
   const pv=parseFloat(document.getElementById('ne-pv').value)||0;
   const q=parseInt(document.getElementById('ne-q').value)||1;
@@ -719,9 +743,62 @@ async function agregarExtraLibre(){
         email_proveedor:document.getElementById('ne-eprov').value}})});
   }catch(e){}
   LINEAS.push({id:Date.now(),tipo:'EXTRA',id_ref:'',descripcion:desc,q,costo_u:costo,pv_u:pvFinal});
+  // Reset campi modal
+  ['ne-desc','ne-prov','ne-contacto','ne-tel-prov','ne-eprov'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('ne-q').value='1';
+  document.getElementById('ne-costo').value='';
+  document.getElementById('ne-pv').value='';
   renderResumen();recalc();cerrarModal('modal-extra');showToast('＋ '+desc,'ok');
 }
 
+
+// ── CALCOLI PREZZO EXTRA ──────────────────────────────────────
+function calcPrecioExtra() {
+  const c = parseFloat(document.getElementById('ne-costo').value)||0;
+  const pv = parseFloat(document.getElementById('ne-pv').value)||0;
+  if(c>0 && pv>0) {
+    const mg = ((pv-c)/pv*100).toFixed(1);
+    const el = document.getElementById('ne-mg-show');
+    if(el) { el.textContent = mg+'%'; el.style.color = mg>=40?'var(--green)':mg>=25?'var(--amber)':'var(--red)'; }
+    const inp = document.getElementById('ne-mg-input');
+    if(inp) inp.value = mg;
+  }
+}
+
+function calcMargenExtra() {
+  calcPrecioExtra();
+}
+
+function calcPVdesdeMargen() {
+  const c = parseFloat(document.getElementById('ne-costo').value)||0;
+  const mg = parseFloat(document.getElementById('ne-mg-input').value)||0;
+  if(c>0 && mg>0 && mg<100) {
+    const pv = Math.round(c / (1 - mg/100));
+    document.getElementById('ne-pv').value = pv;
+    const el = document.getElementById('ne-mg-show');
+    if(el) { el.textContent = mg.toFixed(1)+'%'; el.style.color = mg>=40?'var(--green)':mg>=25?'var(--amber)':'var(--red)'; }
+  }
+}
+
+function setPrecioExtra(tipo) {
+  const c = parseFloat(document.getElementById('ne-costo').value)||0;
+  if(!c) { showToast('Ingresa primero el Costo Unitario','err'); return; }
+  if(tipo==='costo') {
+    document.getElementById('ne-pv').value = c;
+    document.getElementById('ne-mg-input').value = '0';
+    document.getElementById('ne-mg-show').textContent = '0%';
+    document.getElementById('ne-mg-show').style.color = 'var(--red)';
+  } else if(tipo==='margen') {
+    const mg = parseFloat(MARGEN_ALERTA)||40;
+    const pv = Math.round(c / (1 - mg/100));
+    document.getElementById('ne-pv').value = pv;
+    document.getElementById('ne-mg-input').value = mg;
+    document.getElementById('ne-mg-show').textContent = mg+'%';
+    document.getElementById('ne-mg-show').style.color = 'var(--green)';
+  } else if(tipo==='sugerido') {
+    showToast('Sin precio sugerido en BD para este item','err');
+  }
+}
 // ── GUARDAR ────────────────────────────────────────
 async function guardarCotizacion(){
   if(!LINEAS.length){showToast('Agrega al menos un producto','err');return;}
@@ -921,6 +998,27 @@ function resetForm(){
 }
 
 // ── UTILS ──────────────────────────────────────────
+
+function validaTelCL(tel) {
+  const t = tel.replace(/[\s\-\.]/g,'');
+  // Formati validi: +569XXXXXXXX, 569XXXXXXXX, 9XXXXXXXX
+  return /^(\+?56)?9[0-9]{8}$/.test(t);
+}
+
+function validaRUT(rut) {
+  if(!rut) return true; // opzionale
+  const r = rut.replace(/[\.\ ]/g,'').toUpperCase();
+  if(!/^[0-9]+-[0-9K]$/.test(r)) return false;
+  const [num, dv] = r.split('-');
+  let sum=0, mul=2;
+  for(let i=num.length-1;i>=0;i--) {
+    sum += parseInt(num[i]) * mul;
+    mul = mul===7 ? 2 : mul+1;
+  }
+  const calc = 11 - (sum % 11);
+  const dvCalc = calc===11?'0':calc===10?'K':String(calc);
+  return dv === dvCalc;
+}
 function fmtCLP(v){return'$'+Math.round(v||0).toLocaleString('es-CL');}
 function limpiarNum(s){if(!s)return 0;return parseFloat(s.toString().replace(/[^0-9.]/g,''))||0;}
 function esc(s){return(s||'').replace(/'/g,"\'").replace(/"/g,'&quot;');}
