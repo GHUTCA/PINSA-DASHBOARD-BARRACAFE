@@ -667,37 +667,25 @@ var mrCurrentMotivo='';
 var MR_RECETAS_CACHE=null;
 var MR_INSUMOS_CACHE=null;
 var BD_INSUMOS_CSV='https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=514178276&single=true&output=csv';
-
-// Carica insumos da BD_INSUMOS per sezioni non hardcodate (alimentos, helados)
-function mrCargarInsumosDinamicos(callback){
-  var needLoad = ['alimentos','helados'];
-  if(needLoad.indexOf(SECCION)===-1){if(callback)callback();return;}
-  if(MR_INSUMOS_PER_SEC[SECCION]&&MR_INSUMOS_PER_SEC[SECCION].length>0){if(callback)callback();return;}
-  fetch(BD_INSUMOS_CSV,{cache:'no-store'})
-    .then(function(r){return r.ok?r.text():Promise.reject('HTTP '+r.status);})
-    .then(function(txt){
-      var lines=txt.trim().split('\n');
-      var lista=[];
-      // BD_INSUMOS: col A=SKU, col B=Descripcion, col C=Seccion, col D=UTM
-      // Mappa nomi sezione nel foglio
-      var secMap={alimentos:'Barra Alimentos',helados:'Barra Helados'};
-      var target=(secMap[SECCION]||'').toLowerCase();
-      for(var i=1;i<lines.length;i++){
-        var cols=lines[i].split(',');
-        var sku=(cols[0]||'').replace(/"/g,'').trim();
-        var desc=(cols[1]||'').replace(/"/g,'').trim();
-        var sec=(cols[2]||'').replace(/"/g,'').trim().toLowerCase();
-        var utm=(cols[3]||'').replace(/"/g,'').trim();
-        if(!sku||!desc)continue;
-        // Includi se sezione corrisponde O se è generico (no sezione)
-        if(sec===target||sec===''){
-          lista.push({n:desc,sku:sku,utm:utm,tipo:'insumo'});
-        }
-      }
-      MR_INSUMOS_PER_SEC[SECCION]=lista;
-      if(callback)callback();
-    })
-    .catch(function(){if(callback)callback();});
+function mrCargarInsumosDinamicos(cb){
+  var need=['alimentos','helados'];
+  if(need.indexOf(SECCION)===-1||( MR_INSUMOS_PER_SEC[SECCION]&&MR_INSUMOS_PER_SEC[SECCION].length>0)){if(cb)cb();return;}
+  fetch(BD_INSUMOS_CSV,{cache:'no-store'}).then(function(r){return r.ok?r.text():Promise.reject(r.status);}).then(function(txt){
+    var lines=txt.trim().split('\n');
+    var map={alimentos:'barra alimentos',helados:'barra helados'};
+    var target=map[SECCION]||'';
+    var lista=[];
+    for(var i=1;i<lines.length;i++){
+      var c=lines[i].split(',');
+      var sku=(c[0]||'').replace(/"/g,'').trim();
+      var desc=(c[1]||'').replace(/"/g,'').trim();
+      var sec=(c[2]||'').replace(/"/g,'').trim().toLowerCase();
+      var utm=(c[3]||'').replace(/"/g,'').trim();
+      if(sku&&desc&&sec===target)lista.push({n:desc,sku:sku,utm:utm,tipo:'insumo'});
+    }
+    MR_INSUMOS_PER_SEC[SECCION]=lista;
+    if(cb)cb();
+  }).catch(function(){if(cb)cb();});
 }
 
 function mrUpdateSessionBar(){
@@ -725,8 +713,7 @@ function mrGoStep(n,type){
     document.getElementById('mr-step2-sub').textContent=type==='insumo'?'Ingredientes y materiales':'Productos activos de la sección';
     document.getElementById('mr-search-input').value='';
     document.getElementById('mr-step2').classList.add('active');
-    // Carica insumos dinamicamente per alimentos/helados se non ancora presenti
-    mrCargarInsumosDinamicos(function(){ mrRenderList(''); });
+    mrCargarInsumosDinamicos(function(){mrRenderList('');});
   } else if(n===3){
     document.getElementById('mr-step3').classList.add('active');
   } else if(n==='ok'){
@@ -741,8 +728,6 @@ var MR_INSUMOS_PER_SEC = {
 };
 
 function mrGetInsumos(){
-  // Per cafe e jugos: lista hardcodata
-  // Per alimentos e helados: lista da MR_INSUMOS_PER_SEC (caricata da CSV)
   return MR_INSUMOS_PER_SEC[SECCION] || [];
 }
 
@@ -938,17 +923,14 @@ function showToast(msg,type){var t=document.getElementById('toast');t.textConten
   document.getElementById('h-date').textContent=formatDate();
   document.getElementById('ol-local').textContent=LOCAL;
 
-  // Filtra dropdown sección in base al sector passato dall'URL
+  // Filtra dropdown sección in base al sector dall'URL
   (function(){
     var sel=document.getElementById('sel-seccion');
-    if(!sel) return;
+    if(!sel)return;
     sel.querySelectorAll('option').forEach(function(o){
-      if(o.value && ALLOWED_SECCIONES.indexOf(o.value)===-1){
-        o.style.display='none';
-        o.disabled=true;
-      }
+      if(o.value&&ALLOWED_SECCIONES.indexOf(o.value)===-1){o.style.display='none';o.disabled=true;}
     });
-    if(ALLOWED_SECCIONES.length===1) sel.value=ALLOWED_SECCIONES[0];
+    if(ALLOWED_SECCIONES.length===1)sel.value=ALLOWED_SECCIONES[0];
   })();
 
   // Login sempre pulito — l'operatore seleziona tutto da zero
