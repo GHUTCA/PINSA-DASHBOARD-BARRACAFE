@@ -108,6 +108,16 @@
   .status{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--t3);}
   .status::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--teal3);}
 
+
+  /* ALERT BANNER */
+  .alert-bar{margin:8px 24px 0;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:10px;font-size:12px;font-weight:500;transition:all 0.3s;}
+  .alert-bar.verde{background:rgba(29,158,117,0.12);border:1px solid rgba(29,158,117,0.3);color:var(--teal3);}
+  .alert-bar.rojo{background:rgba(239,159,39,0.12);border:1px solid rgba(239,159,39,0.3);color:var(--amber);}
+  .alert-bar.cargando{background:var(--bg3);border:1px solid var(--border);color:var(--t3);}
+  .alert-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+  .alert-bar.verde .alert-dot{background:var(--teal3);}
+  .alert-bar.rojo .alert-dot{background:var(--amber);}
+  .alert-bar.cargando .alert-dot{background:var(--t3);}
   /* TIMEOUT OVERLAY */
   .overlay{display:none;position:fixed;inset:0;background:rgba(10,16,11,0.96);z-index:999;flex-direction:column;align-items:center;justify-content:center;gap:20px;}
   .overlay.show{display:flex;}
@@ -132,6 +142,11 @@
   <div class="titulo">
     <h1>Mi Estación <span style="color:var(--teal3);font-weight:500;">· Sector Líquidos</span></h1>
     <p>Barra Café · Barra Jugos &nbsp;·&nbsp; Panel de turno</p>
+  </div>
+
+  <div id="alert-merma" class="alert-bar cargando">
+    <div class="alert-dot"></div>
+    <span id="alert-merma-txt">Verificando registro de merma...</span>
   </div>
 
   <div class="main-grid">
@@ -189,6 +204,62 @@
 </div>
 
 <script>
+
+  /* ── ALERT MERMA — lee CSV BARRA_CAFE y BARRA_JUGOS ── */
+  var URL_CAFE  = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSHqqam0ulBIXIn_UNH50dEl2XX0RDAnMbI70phvGURduyKGoTpIkV8g-8k8p8pbIr42g6Nap3SE9tt/pub?gid=153149710&single=true&output=csv&t=' + Date.now();
+  var URL_JUGOS = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTZqm7Y6mBc5VLKnBLiPzK6dEjPvS5pCb3nXmvHbFoSFc_example/pub?gid=153149710&single=true&output=csv&t=' + Date.now();
+
+  function getTodayStr() {
+    var d = new Date();
+    var months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    return d.getDate() + '-' + months[d.getMonth()] + '-' + d.getFullYear();
+  }
+
+  function checkMermaCSV(url, seccion) {
+    return fetch(url, {redirect:'follow'})
+      .then(function(r){ return r.text(); })
+      .then(function(txt){
+        var today = getTodayStr().toLowerCase();
+        var lines = txt.split('\n').slice(1);
+        return lines.some(function(line){
+          return line.toLowerCase().includes(today);
+        });
+      })
+      .catch(function(){ return null; });
+  }
+
+  function checkMermaHoy() {
+    var t = Date.now();
+    var urlCafe  = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSHqqam0ulBIXIn_UNH50dEl2XX0RDAnMbI70phvGURduyKGoTpIkV8g-8k8p8pbIr42g6Nap3SE9tt/pub?gid=153149710&single=true&output=csv&t=' + t;
+    var urlJugos = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRgfxyaHuTXg2q9ozPN-SjmqRWKU5hk4MJ2vynH7qY2ek7mWKRxFbE3J05Wp1Wn24OlwVqkMCmP9B2v/pub?gid=153149710&single=true&output=csv&t=' + t;
+
+    Promise.all([
+      checkMermaCSV(urlCafe, 'Café'),
+      checkMermaCSV(urlJugos, 'Jugos')
+    ]).then(function(results){
+      var cafeOk  = results[0];
+      var jugosOk = results[1];
+      var bar = document.getElementById('alert-merma');
+      var txt = document.getElementById('alert-merma-txt');
+      if(cafeOk && jugosOk){
+        bar.className = 'alert-bar verde';
+        txt.textContent = '✓ Registro al día — Barra Café y Barra Jugos registraron hoy';
+      } else if(!cafeOk && !jugosOk){
+        bar.className = 'alert-bar rojo';
+        txt.textContent = '⚠ Sin registro hoy — Barra Café y Barra Jugos pendientes';
+      } else if(!cafeOk){
+        bar.className = 'alert-bar rojo';
+        txt.textContent = '⚠ Barra Café sin registro hoy';
+      } else {
+        bar.className = 'alert-bar rojo';
+        txt.textContent = '⚠ Barra Jugos sin registro hoy';
+      }
+    });
+  }
+
+  checkMermaHoy();
+  setInterval(checkMermaHoy, 5 * 60 * 1000); // aggiorna ogni 5 min
+
   /* ── RELOJ ── */
   function tick() {
     const n = new Date();
