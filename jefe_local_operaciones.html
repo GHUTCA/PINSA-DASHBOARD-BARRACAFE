@@ -533,46 +533,78 @@
   <div class="section-title">Ventas Diarias</div>
   <div class="section-sub">
     <span class="tag tag-orange">REGISTRO</span>
-    Ingreso por sección · cada día
+    Ventas operativas · Eventos
   </div>
 
-  <div class="card">
-    <div class="card-title">Registrar Venta</div>
-
-    <div class="row2">
-      <div class="field">
-        <label>Fecha</label>
-        <input type="date" id="venta-fecha">
-      </div>
-      <div class="field">
-        <label>Sección</label>
-        <select id="venta-seccion">
-          <option value="Barra Cafe">Barra Café</option>
-          <option value="Barra Jugos">Barra Jugos</option>
-          <option value="Barra Alimentos">Barra Alimentos</option>
-          <option value="Barra Helados">Barra Helados</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="field">
-      <label>Venta total $ (CLP)</label>
-      <input type="number" id="venta-monto" min="0" step="1" placeholder="0" oninput="formatVentaPreview()">
-      <div id="venta-preview" style="font-size:11px;color:var(--t3);margin-top:5px;font-family:var(--mono)"></div>
-    </div>
-
-    <button class="btn btn-primary" onclick="guardarVenta()">
-      Registrar Venta
+  <!-- SUB-TABS -->
+  <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px">
+    <button id="vtab-normal" onclick="switchVentaTab('normal')"
+      style="flex:1;padding:10px;background:none;border:none;border-bottom:2px solid var(--blue);color:var(--blue2);font-size:13px;font-weight:600;cursor:pointer">
+      Secciones
+    </button>
+    <button id="vtab-eventos" onclick="switchVentaTab('eventos')"
+      style="flex:1;padding:10px;background:none;border:none;border-bottom:2px solid transparent;color:var(--t3);font-size:13px;cursor:pointer">
+      Eventos <span id="vtab-eventos-badge" style="display:none;background:rgba(196,98,29,0.2);color:var(--orange2);font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;margin-left:4px">0</span>
     </button>
   </div>
 
-  <!-- Confirmación registros hoy -->
-  <div class="card">
-    <div class="card-title">Registrado hoy</div>
-    <div id="ventas-hoy-list">
-      <div class="loading-card"><div class="spinner"></div></div>
+  <!-- ── PANEL SECCIONES ── -->
+  <div id="vpanel-normal">
+    <div class="card">
+      <div class="card-title">Registrar Venta</div>
+      <div class="row2">
+        <div class="field">
+          <label>Fecha</label>
+          <input type="date" id="venta-fecha">
+        </div>
+        <div class="field">
+          <label>Sección</label>
+          <select id="venta-seccion">
+            <option value="Barra Cafe">Barra Café</option>
+            <option value="Barra Jugos">Barra Jugos</option>
+            <option value="Barra Alimentos">Barra Alimentos</option>
+            <option value="Barra Helados">Barra Helados</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Venta total $ (CLP)</label>
+        <input type="number" id="venta-monto" min="0" step="1" placeholder="0" oninput="formatVentaPreview()">
+        <div id="venta-preview" style="font-size:11px;color:var(--t3);margin-top:5px;font-family:var(--mono)"></div>
+      </div>
+      <button class="btn btn-primary" onclick="guardarVenta()">Registrar Venta</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Registrado hoy</div>
+      <div id="ventas-hoy-list">
+        <div class="loading-card"><div class="spinner"></div></div>
+      </div>
     </div>
   </div>
+
+  <!-- ── PANEL EVENTOS ── -->
+  <div id="vpanel-eventos" style="display:none">
+
+    <!-- Info banner -->
+    <div style="background:rgba(74,111,165,0.08);border:1px solid rgba(74,111,165,0.2);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--t2)">
+      Aquí aparecen los eventos <strong style="color:var(--blue2)">ADJUDICADOS</strong> pendientes de registro. Presiona "Registrar" cuando el evento haya sido servido.
+    </div>
+
+    <!-- Lista eventos pendientes -->
+    <div id="eventos-pendientes-list">
+      <div class="loading-card"><div class="spinner"></div></div>
+    </div>
+
+    <!-- Eventos ya registrados hoy -->
+    <div class="card" style="margin-top:12px">
+      <div class="card-title">Eventos registrados hoy</div>
+      <div id="eventos-registrados-list">
+        <div class="empty" style="padding:16px"><div class="empty-icon">🎉</div>Sin eventos registrados hoy</div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ══════════════════════════════════════════════════════ -->
@@ -1372,8 +1404,34 @@ function renderMovRecientes() {
 }
 
 // ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
 // MÓDULO 2 — VENTAS
 // ════════════════════════════════════════════════════════
+
+// Token CTRL_COMERCIAL para leer cotizaciones
+const CFG_COMERCIAL = {
+  TOKEN: '2PACX-1vRvt15zKAdGjMkMyDXlP6xnbqj-IJiyi4oZKxjCkc-cLWOAEhimW-McOxKXk1Iw8-ZltG9EFp-ZySuy',
+  GID_COTIZACIONES: '1695760588',
+  GID_LINEAS:       '1358739366',
+};
+
+let estadoCotizaciones = [];  // cache cotizaciones ADJUDICADA
+let lineasCotizaciones = [];  // cache lineas
+
+function switchVentaTab(tab) {
+  const isNormal = tab === 'normal';
+  document.getElementById('vpanel-normal').style.display   = isNormal ? 'block' : 'none';
+  document.getElementById('vpanel-eventos').style.display  = isNormal ? 'none'  : 'block';
+  document.getElementById('vtab-normal').style.borderBottomColor = isNormal ? 'var(--blue)'  : 'transparent';
+  document.getElementById('vtab-normal').style.color       = isNormal ? 'var(--blue2)' : 'var(--t3)';
+  document.getElementById('vtab-normal').style.fontWeight  = isNormal ? '600' : '400';
+  document.getElementById('vtab-eventos').style.borderBottomColor = isNormal ? 'transparent' : 'var(--blue)';
+  document.getElementById('vtab-eventos').style.color      = isNormal ? 'var(--t3)' : 'var(--blue2)';
+  document.getElementById('vtab-eventos').style.fontWeight = isNormal ? '400' : '600';
+  if (!isNormal) cargarEventos();
+}
+
+// ── Ventas normales ──────────────────────────────────────
 function renderVentas() {
   const hoy = today();
   const ventasHoy = STATE.ventas.filter(v => {
@@ -1388,6 +1446,7 @@ function renderVentas() {
     el.innerHTML = `<div class="empty"><div class="empty-icon">📊</div>Sin ventas registradas hoy</div>`;
     return;
   }
+  const totalHoy = ventasHoy.reduce((s,v) => s + limpiarNum(v['Venta $']), 0);
   el.innerHTML = ventasHoy.map(v => {
     const monto = limpiarNum(v['Venta $']);
     return `<div class="semaforo-row">
@@ -1397,7 +1456,11 @@ function renderVentas() {
       </div>
       <div style="font-size:14px;font-weight:600;font-family:var(--mono);color:var(--green2)">${fmtCLP(monto)}</div>
     </div>`;
-  }).join('');
+  }).join('') +
+  `<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px;display:flex;justify-content:space-between;align-items:center">
+    <span style="font-size:12px;color:var(--t3)">Total registrado hoy</span>
+    <span style="font-size:15px;font-weight:700;font-family:var(--mono);color:var(--t1)">${fmtCLP(totalHoy)}</span>
+  </div>`;
 }
 
 function formatVentaPreview() {
@@ -1414,28 +1477,181 @@ async function guardarVenta() {
   if (!fecha)               { showToast('Selecciona la fecha','error'); return; }
   if (!monto || monto <= 0) { showToast('Ingresa un monto válido','error'); return; }
 
-  const btn = document.querySelector('#mod-ventas .btn-primary');
+  const btn = document.querySelector('#vpanel-normal .btn-primary');
   btn.disabled = true;
   btn.innerHTML = '<div class="spinner"></div> Guardando...';
 
-  const res = await callGAS({
-    action:  'registrarVenta',
-    local:   CFG.local,
-    fecha:   fecha,
-    seccion: seccion,
-    venta:   monto
-  });
+  const res = await callGAS({ action:'registrarVenta', local:CFG.local, fecha, seccion, venta:monto });
 
   btn.disabled = false;
   btn.innerHTML = 'Registrar Venta';
 
-  if (res && res.ok) {
+  if (res && res.ok !== false) {
     showToast('✅ Venta registrada','success');
-    STATE.ventas.push({'Fecha': fecha,'Local': CFG.local,'Seccion': seccion,'Venta $': String(monto)});
+    STATE.ventas.push({'Fecha':fecha,'Local':CFG.local,'Seccion':seccion,'Venta $':String(monto)});
     document.getElementById('venta-monto').value = '';
     document.getElementById('venta-preview').textContent = '';
     renderVentas();
   } else {
+    showToast('Error: ' + (res?.error || 'sin respuesta'),'error');
+  }
+}
+
+// ── Eventos ──────────────────────────────────────────────
+async function cargarEventos() {
+  const el = document.getElementById('eventos-pendientes-list');
+  el.innerHTML = '<div class="loading-card"><div class="spinner"></div></div>';
+
+  try {
+    const [cots, lineas] = await Promise.all([
+      loadCSVExterno(CFG_COMERCIAL.TOKEN, CFG_COMERCIAL.GID_COTIZACIONES),
+      loadCSVExterno(CFG_COMERCIAL.TOKEN, CFG_COMERCIAL.GID_LINEAS),
+    ]);
+    estadoCotizaciones = cots;
+    lineasCotizaciones = lineas;
+    renderEventosPendientes(cots, lineas);
+    renderEventosRegistradosHoy(cots);
+    // Badge en tab
+    const pendientes = cots.filter(c => (c['Estado']||'').toUpperCase() === 'ADJUDICADA');
+    const badge = document.getElementById('vtab-eventos-badge');
+    if (pendientes.length) {
+      badge.style.display = 'inline';
+      badge.textContent   = pendientes.length;
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(e) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div>No se pudo cargar eventos</div>`;
+  }
+}
+
+async function loadCSVExterno(token, gid) {
+  const url = `https://docs.google.com/spreadsheets/d/e/${token}/pub?gid=${gid}&single=true&output=csv&t=${Date.now()}`;
+  const r = await fetch(url);
+  const txt = await r.text();
+  if (txt.includes('<!DOCTYPE')) return [];
+  return parseCSV(txt);
+}
+
+function renderEventosPendientes(cots, lineas) {
+  const el = document.getElementById('eventos-pendientes-list');
+  const pendientes = cots.filter(c => (c['Estado']||'').toUpperCase() === 'ADJUDICADA');
+
+  if (!pendientes.length) {
+    el.innerHTML = `<div class="empty" style="padding:20px"><div class="empty-icon">✅</div>No hay eventos pendientes de registro</div>`;
+    return;
+  }
+
+  el.innerHTML = pendientes.map(c => {
+    const id         = c['ID_Cot'] || '—';
+    const tipo       = c['Tipo_Evento'] || '—';
+    const fecha      = c['Fecha_Evento'] || '—';
+    const personas   = c['N_Personas'] || '—';
+    const totalPV    = limpiarNum(c['Total_PV']);
+    const ubicacion  = c['Ubicacion'] || '';
+
+    // Calcular breakdown por seccion desde lineas
+    const misLineas  = lineas.filter(l => l['ID_Cot'] === id);
+    const breakdown  = calcularBreakdown(misLineas);
+    const bHTML      = Object.entries(breakdown.secciones).map(([sec, val]) =>
+      `<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--t2)">${sec}</span>
+        <span style="color:var(--t1);font-family:var(--mono)">${fmtCLP(val)}</span>
+      </div>`
+    ).join('') +
+    (breakdown.servicios > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0">
+      <span style="color:var(--t3)">Servicios (extras)</span>
+      <span style="color:var(--t3);font-family:var(--mono)">${fmtCLP(breakdown.servicios)}</span>
+    </div>` : '');
+
+    const fechaEs = fecha ? new Date(fecha).toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+
+    return `<div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div>
+          <div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${id}</div>
+          <div style="font-size:15px;font-weight:600;color:var(--t1);margin-top:2px">${tipo} · ${personas} personas</div>
+          <div style="font-size:12px;color:var(--t3);margin-top:2px">📅 ${fechaEs} · 📍 ${ubicacion}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--t3)">Total PV</div>
+          <div style="font-size:16px;font-weight:700;font-family:var(--mono);color:var(--green2)">${fmtCLP(totalPV)}</div>
+        </div>
+      </div>
+      <div style="background:var(--bg3);border-radius:6px;padding:8px 10px;margin-bottom:12px">
+        <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Breakdown por sección</div>
+        ${bHTML}
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="registrarEvento('${id}')">
+        Registrar como Realizado
+      </button>
+    </div>`;
+  }).join('');
+}
+
+function calcularBreakdown(lineas) {
+  const secciones = {};
+  let servicios = 0;
+
+  lineas.forEach(l => {
+    const tipo = (l['Tipo']||'').toUpperCase();
+    const pv   = limpiarNum(l['PV_L']);
+    const q    = limpiarNum(l['Q']) || 1;
+    const total = pv * q;
+
+    if (tipo === 'EXTRA') {
+      servicios += total;
+    } else {
+      // Buscar seccion en BD_INSUMOS (via ID_Ref → RECETAS_MASTER)
+      // El GAS hace el mapping completo — aqui mostramos por ID_Ref o Descripcion
+      // Para el display usamos la descripcion como aproximacion
+      const desc = l['Descripcion'] || l['ID_Ref'] || 'Otros';
+      secciones[desc] = (secciones[desc] || 0) + total;
+    }
+  });
+
+  return { secciones, servicios };
+}
+
+function renderEventosRegistradosHoy(cots) {
+  const el  = document.getElementById('eventos-registrados-list');
+  const hoy = today();
+  const realizados = cots.filter(c => {
+    if ((c['Estado']||'').toUpperCase() !== 'REALIZADA') return false;
+    try { return new Date(c['Fecha_Evento']).toISOString().split('T')[0] === hoy; }
+    catch(e){ return false; }
+  });
+
+  if (!realizados.length) {
+    el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">🎉</div>Sin eventos registrados hoy</div>`;
+    return;
+  }
+  el.innerHTML = realizados.map(c =>
+    `<div class="semaforo-row">
+      <div style="flex:1">
+        <div style="font-size:13px;color:var(--t1);font-weight:500">${c['Tipo_Evento']||'—'} · ${c['N_Personas']||'?'} personas</div>
+        <div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${c['ID_Cot']}</div>
+      </div>
+      <span style="font-size:12px;font-weight:600;color:var(--green2);background:rgba(26,144,112,0.1);padding:4px 8px;border-radius:6px">REALIZADA</span>
+    </div>`
+  ).join('');
+}
+
+async function registrarEvento(idCot) {
+  const btn = document.querySelector(`button[onclick="registrarEvento('${idCot}')"]`);
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Registrando...'; }
+
+  const res = await callGAS({
+    action:  'registrarEvento',
+    local:   CFG.local,
+    idCot:   idCot,
+  });
+
+  if (res && res.ok !== false) {
+    showToast(`✅ Evento ${idCot} registrado en Ventas`,'success');
+    await cargarEventos(); // recarga
+  } else {
+    if (btn) { btn.disabled = false; btn.innerHTML = 'Registrar como Realizado'; }
     showToast('Error: ' + (res?.error || 'sin respuesta'),'error');
   }
 }
