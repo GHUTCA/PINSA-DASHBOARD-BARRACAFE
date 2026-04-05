@@ -776,28 +776,25 @@ const CFG = {
   local:     'Candelaria',
   GAS_URL:   'https://script.google.com/macros/s/AKfycbyPiDPas-b0AAOaY4U1Fmq-ix-rfrb71GlK8IJi6szPiBvbm4fRWyJHGwcKoiy7dqoV9g/exec',
 
-  // CSV de solo lectura (lectura directa, sin GAS)
-  ID_CANDELARIA: '1uY7SW7bZZ5qlIGCsGNrvBGy4pp12FlT7spYMW7muIyw',
-  ID_MAESTRO:    '1FVSx9Wgq8GgTgGe-MK_ie_lVvpldLbty0UTvyyWUaA4',
+  // Token 2PACX publicado de CONTROL_CANDELARIA_2026 ✅ verificado
+  TOKEN: '2PACX-1vQBpTFb7zww_hk_f9tstZLBbY9VP08mnPaEzQbrDFZ7faDSU9RoShxt5c5Y79NwsFgLD3nvfkUm_da-',
+  TOKEN_MAESTRO: '', // pendiente — publicar CONTROL_MAESTRO_2026
 
-  // GID de cada hoja
+  // GID de cada hoja — verificados con curl
   GID: {
-    inventario:    '585571123',   // Inventario_BLocal — usar Movimientos para derivar
-    reposicion:    '1970776921',
-    confirmacion:  '1556281472',
-    conteo:        '1634523088',
-    ventas:        '116856570',
-    analisis:      '1257035761',
-    movimientos:   '585571123',
-    bd_insumos:    '514178276',   // en MAESTRO
+    ventas:       '116856570',   // Ventas_Diarias ✅
+    reposicion:   '1970776921',  // Reposicion_Local ✅
+    confirmacion: '1556281472',  // Confirmacion_Recepcion ✅
+    conteo:       '1634523088',  // Conteo_Fisico ✅
+    movimientos:  '585571123',   // Movimientos_BLocal ✅
+    analisis:     '1257035761',  // Analisis_Consumo ✅
+    inventario:   '1145785708',  // Inventario_BLocal ✅ (era errato prima)
+    bd_insumos:   '514178276',   // BD_INSUMOS en MAESTRO — requiere TOKEN_MAESTRO
+    checklist_log:'1627612829',  // Checklist_Log ✅
   },
 
-  // Objetivo ventas semanal local (leer de PARAMETROS idealmente)
   META_VENTAS_SEM: 16000000,
-
-  // Operadores (se cargarán de PARAMETROS)
   operadores: ['Francisco','Valentina','Camila','Rodrigo','Andrea'],
-
   secciones: ['Barra Cafe','Barra Jugos','Barra Alimentos','Barra Helados'],
 };
 
@@ -825,14 +822,16 @@ const STATE = {
 // ════════════════════════════════════════════════════════
 // UTILS
 // ════════════════════════════════════════════════════════
-function csvUrl(sheetId, gid) {
-  return `https://docs.google.com/spreadsheets/d/${sheetId}/pub?gid=${gid}&single=true&output=csv&t=${Date.now()}`;
+function csvUrl(gid) {
+  return `https://docs.google.com/spreadsheets/d/e/${CFG.TOKEN}/pub?gid=${gid}&single=true&output=csv&t=${Date.now()}`;
 }
 
-async function loadCSV(sheetId, gid) {
+async function loadCSV(gid) {
   try {
-    const r = await fetch(csvUrl(sheetId, gid));
+    const r = await fetch(csvUrl(gid));
+    if (!r.ok) return [];
     const txt = await r.text();
+    if (txt.includes('<!DOCTYPE')) return [];
     return parseCSV(txt);
   } catch(e) { return []; }
 }
@@ -946,25 +945,37 @@ async function init() {
       new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
   }, 1000);
 
-  // Cargar datos en paralelo
-  const [inv, rep, conf, conteo, ventas, anal] = await Promise.all([
-    loadCSV(CFG.ID_CANDELARIA, CFG.GID.inventario),
-    loadCSV(CFG.ID_CANDELARIA, CFG.GID.reposicion),
-    loadCSV(CFG.ID_CANDELARIA, CFG.GID.confirmacion),
-    loadCSV(CFG.ID_CANDELARIA, CFG.GID.conteo),
-    loadCSV(CFG.ID_CANDELARIA, CFG.GID.ventas),
-    loadCSV(CFG.ID_CANDELARIA, CFG.GID.analisis),
+  // Cargar datos en paralelo — token publicado CONTROL_CANDELARIA_2026
+  const [ventas, rep, conf, conteo, mov, anal, bdi, inv] = await Promise.all([
+    loadCSV(CFG.GID.ventas),
+    loadCSV(CFG.GID.reposicion),
+    loadCSV(CFG.GID.confirmacion),
+    loadCSV(CFG.GID.conteo),
+    loadCSV(CFG.GID.movimientos),
+    loadCSV(CFG.GID.analisis),
+    loadCSV(CFG.GID.bd_insumos),
+    loadCSV(CFG.GID.inventario),
   ]);
 
-  STATE.inventario  = inv;
+  STATE.ventas      = ventas;
   STATE.reposicion  = rep;
   STATE.confirmacion= conf;
   STATE.conteo      = conteo;
-  STATE.ventas      = ventas;
+  STATE.inventario  = inv;
   STATE.analisis    = anal;
+  STATE.bdInsumos   = bdi;
 
-  // BD Insumos del maestro (para búsqueda en movimientos)
-  STATE.bdInsumos = await loadCSV(CFG.ID_MAESTRO, CFG.GID.bd_insumos);
+  // Info si los datos no cargan
+  const sinBD = !bdi.length;
+  if (sinBD) {
+    // BD_INSUMOS está en CONTROL_MAESTRO — necesita TOKEN_MAESTRO
+    const searchEl = document.getElementById('mov-search');
+    if (searchEl) {
+      searchEl.placeholder = 'BD Insumos no disponible — publicar CONTROL_MAESTRO';
+      searchEl.disabled = true;
+      searchEl.style.opacity = '0.5';
+    }
+  }
 
   // Conteo próximo
   calcProximoConteo();
@@ -972,7 +983,6 @@ async function init() {
   // Render módulo inicial
   initMovimientosUI();
   renderMovRecientes();
-  updateKPIVentas();
 }
 
 // ════════════════════════════════════════════════════════
