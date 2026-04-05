@@ -173,11 +173,6 @@ body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse
 .mr-hist-hora{font-size:10px;color:var(--t3);}
 .mr-hist-detail{font-size:11px;color:var(--t2);}
 .mr-empty{text-align:center;padding:30px;color:var(--t2);font-size:13px;}
-.mr-sin-merma-btn{width:100%;background:var(--bg2);border:1px solid rgba(61,170,110,0.25);border-radius:12px;padding:14px 16px;text-align:left;cursor:pointer;display:flex;align-items:center;gap:14px;transition:border-color 0.2s;}
-.mr-sin-merma-btn:hover{border-color:rgba(61,170,110,0.5);}
-.mr-sin-merma-icon{font-size:22px;color:var(--green);flex-shrink:0;width:32px;text-align:center;}
-.mr-sin-merma-title{font-size:13px;font-weight:700;color:var(--green2);margin-bottom:2px;}
-.mr-sin-merma-sub{font-size:11px;color:var(--t2);}
 </style>
 </head>
 <body>
@@ -197,10 +192,10 @@ body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse
     <div class="field-label">Sección</div>
     <select class="field-select" id="sel-seccion" onchange="onSeccionChange()">
       <option value="">— Seleccionar sección —</option>
-      <option value="cafe" class="opt-liquidos">Barra Café</option>
-      <option value="jugos" class="opt-liquidos">Barra Jugos</option>
-      <option value="alimentos" class="opt-solidos">Barra Alimentos</option>
-      <option value="helados" class="opt-solidos">Barra Helados</option>
+      <option value="cafe">Barra Café</option>
+      <option value="jugos">Barra Jugos</option>
+      <option value="alimentos">Barra Alimentos</option>
+      <option value="helados">Barra Helados</option>
     </select>
     <div class="field-label">Turno</div>
     <select class="field-select" id="sel-turno">
@@ -268,7 +263,11 @@ body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse
       <div class="progress-bar"><div class="progress-fill" id="fill-cierre" style="width:0%"></div></div>
     </div>
     <div id="checks-cierre"></div>
-
+    <div class="merma-block">
+      <div class="merma-title">📋 Confirmación de Merma</div>
+      <div class="merma-sub">¿Registraste la merma hoy? Confirma aunque sea cero.</div>
+      <div id="merma-confirm-block"></div>
+    </div>
     <div class="firma-section" id="firma-cierre"></div>
   </div>
 
@@ -294,15 +293,6 @@ body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse
         <div class="mr-type-btn-sub">Matcha Mango, Cold Brew, Berry Lift...</div>
         <div class="mr-tag">Explota ingredientes automático</div>
       </button>
-      <div id="mr-sin-merma-wrap" style="margin-top:16px;display:none;">
-        <button class="mr-sin-merma-btn" onclick="mrRegistrarSinMerma()">
-          <div class="mr-sin-merma-icon">○</div>
-          <div>
-            <div class="mr-sin-merma-title">Día sin merma</div>
-            <div class="mr-sin-merma-sub">No hubo pérdidas en este turno</div>
-          </div>
-        </button>
-      </div>
       <div style="margin-top:20px;">
         <div class="mr-step-label" style="margin-bottom:10px;">Mermas registradas hoy</div>
         <div id="mr-historial-mini"></div>
@@ -373,17 +363,11 @@ body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse
 var params=new URLSearchParams(window.location.search);
 var LOCAL=(params.get('local')||'Candelaria').trim();
 var SECCION=(params.get('seccion')||'cafe').trim().toLowerCase();
-// sector: 'liquidos' (cafe+jugos) | 'solidos' (alimentos+helados) | '' (todos)
+// sector: 'liquidos' → solo cafe+jugos | 'solidos' → solo alimentos+helados | '' → tutti
 var SECTOR=(params.get('sector')||'').trim().toLowerCase();
 var LABELS={cafe:'Barra Café',jugos:'Barra Jugos',alimentos:'Barra Alimentos',helados:'Barra Helados'};
 var SECCION_LABEL=LABELS[SECCION]||SECCION;
-
-// Mapa sector → secciones disponibles
-var SECTOR_SECCIONES={
-  liquidos:['cafe','jugos'],
-  solidos:['alimentos','helados'],
-  '':['cafe','jugos','alimentos','helados']
-};
+var SECTOR_SECCIONES={liquidos:['cafe','jugos'],solidos:['alimentos','helados'],'':['cafe','jugos','alimentos','helados']};
 var GAS_URL='https://script.google.com/macros/s/AKfycbyPiDPas-b0AAOaY4U1Fmq-ix-rfrb71GlK8IJi6szPiBvbm4fRWyJHGwcKoiy7dqoV9g/exec';
 var SESSION={};
 
@@ -480,6 +464,21 @@ function upFirma(t){
   if(pend)pend.textContent=pct===100?'🎉 ¡Todo completado!':(total-done)+' ítems pendientes ('+pct+'%)';
 }
 
+function renderMermaConfirm(){
+  var el=document.getElementById('merma-confirm-block');
+  var key='merma-'+LOCAL.toLowerCase()+'-'+SECCION+'-'+getDateKey()+'-'+(SESSION.turno||'');
+  var raw=localStorage.getItem(key);
+  if(raw){var v=JSON.parse(raw);el.innerHTML=v.tipo==='con_merma'?'<div class="merma-done">✅ Merma registrada · '+v.hora+'</div>':'<div class="merma-done-zero">⚪ Sin merma hoy · confirmado · '+v.hora+'</div>';return;}
+  el.innerHTML='<div class="merma-btns"><button class="btn-merma-si" onclick="confMerma(\'con_merma\')">✅ Sí, registré la merma</button><button class="btn-merma-no" onclick="confMerma(\'sin_merma\')">⚪ Sin merma hoy</button></div>';
+}
+
+function confMerma(tipo){
+  var hora=new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
+  localStorage.setItem('merma-'+LOCAL.toLowerCase()+'-'+SECCION+'-'+getDateKey()+'-'+SESSION.turno,JSON.stringify({tipo:tipo,hora:hora,operador:SESSION.nombre,seccion:SECCION,local:LOCAL}));
+  renderMermaConfirm();
+  showToast(tipo==='con_merma'?'✅ Merma confirmada':'⚪ Sin merma registrada','success');
+}
+
 function renderFirma(tipo){
   var el=document.getElementById('firma-'+tipo);
   var raw=localStorage.getItem('firma-'+LOCAL+'-'+SECCION+'-'+tipo+'-'+getDateKey()+'-'+(SESSION.turno||''));
@@ -536,7 +535,6 @@ function iniciarSesion(){
   SECCION_LABEL=LABELS[SECCION]||SECCION;
   SESSION={nombre:nombre,turno:turno,fecha:formatDate(),local:LOCAL,seccion:SECCION};
   localStorage.setItem('session-'+LOCAL+'-'+SECCION+'-'+getDateKey(),JSON.stringify(SESSION));
-  // Carica dati dinamici se necessario (alimentos/helados)
   initCargarDatos();
   // Aggiorna header con i valori reali
   mostrarApp();
@@ -555,6 +553,7 @@ function cerrarSesion(){
   document.getElementById('checks-cierre').innerHTML='';
   document.getElementById('firma-apertura').innerHTML='';
   document.getElementById('firma-cierre').innerHTML='';
+  document.getElementById('merma-confirm-block').innerHTML='';
   mrCurrentType=''; mrCurrentItem=null; mrCurrentMotivo='';
   mrGoStep(1,'');
   document.getElementById('overlay-login').classList.remove('hidden');
@@ -609,11 +608,7 @@ function onLocalChange(){
 }
 
 function onSeccionChange(){
-  var v=document.getElementById('sel-seccion').value;
-  if(v==='alimentos'||v==='helados'){
-    cargarInsumosDinamicos(v,null);
-    cargarProductosDinamicos(v,null);
-  }
+  // niente da aggiornare nel DOM login — la sezione si legge solo al COMENZAR
 }
 
 function mostrarApp(){
@@ -638,6 +633,7 @@ function mostrarApp(){
   document.getElementById('firma-cierre').innerHTML='';
   renderChecks('apertura');renderChecks('cierre');
   renderFirma('apertura');renderFirma('cierre');
+  renderMermaConfirm();
   // Tab automatico: AM → Apertura, PM → Cierre
   var tabTarget=SESSION.turno==='PM'?'cierre':'apertura';
   var navBtns=document.querySelectorAll('.nav-btn');
@@ -671,7 +667,6 @@ function renderHistorial(){
 // ============================================================
 var GAS_MERMA_URL='https://script.google.com/macros/s/AKfycbwLVGPmtAStBJrd2mhqWigvPEm3Y3LngnMOka1Inqn8jWNQ8d2O_KEvZA_2HizEIq63/exec';
 
-// IDs de los 4 fogli BARRA_* — usados para enviar al GAS
 var MR_IDS_CAFE={
   cafe:      '1DO8ryspkTW1U4P2BlVL7Gd4cpQok4LEpdGkdKTMkNg8',
   jugos:     '1_rJHyCmTOBnssio415q-Av0nlCoKGkfSUpBTZBEhdWY',
@@ -722,42 +717,92 @@ var MR_PRODUCTOS = [{"n": "BANANA FUEL", "sku": "REC-0071", "utm": "unidad", "se
 var MR_INSUMOS_PER_SEC = {
   cafe: [{"n": "Agua", "sku": "1228", "utm": "cc", "tipo": "insumo"}, {"n": "Agua de Coco Natural 520 ml", "sku": "1008", "utm": "CC", "tipo": "insumo"}, {"n": "BASE COLD BREW 1", "sku": "5009", "utm": "cc", "tipo": "insumo"}, {"n": "Bedida de almendras", "sku": "1033", "utm": "CC", "tipo": "insumo"}, {"n": "Cacao Valrhona", "sku": "1048", "utm": "Gr", "tipo": "insumo"}, {"n": "Cacao bruno 100% / cafe", "sku": "1046", "utm": "Gr", "tipo": "insumo"}, {"n": "Cafe blend", "sku": "1049", "utm": "Gr", "tipo": "insumo"}, {"n": "Cafe blend (molido)", "sku": "1231", "utm": "Gr", "tipo": "insumo"}, {"n": "Cafe descafeinado (pods)", "sku": "1050", "utm": "unidad", "tipo": "insumo"}, {"n": "Cafiza", "sku": "1232", "utm": "unidad", "tipo": "insumo"}, {"n": "Canela polvo", "sku": "1053", "utm": "Gr", "tipo": "insumo"}, {"n": "Colageno", "sku": "1064", "utm": "Gr", "tipo": "insumo"}, {"n": "Crema vegetal", "sku": "1069", "utm": "CC", "tipo": "insumo"}, {"n": "Fungi mix (Sobre 180 gr.)", "sku": "1083", "utm": "Gr", "tipo": "insumo"}, {"n": "Hielo Cubo", "sku": "1095", "utm": "Gr", "tipo": "insumo"}, {"n": "Hielo Frappe", "sku": "1096", "utm": "Gr", "tipo": "insumo"}, {"n": "Leche Descremada S/ Lactosa", "sku": "1106", "utm": "CC", "tipo": "insumo"}, {"n": "Leche Entera S/ Lactosa", "sku": "1108", "utm": "CC", "tipo": "insumo"}, {"n": "Leche de Avena", "sku": "1105", "utm": "CC", "tipo": "insumo"}, {"n": "Mascarpone en polvo", "sku": "1123", "utm": "Gr", "tipo": "insumo"}, {"n": "Matcha Ceremonial", "sku": "1124", "utm": "Gr", "tipo": "insumo"}, {"n": "Miel de palma 260 cc", "sku": "1127", "utm": "CC", "tipo": "insumo"}, {"n": "Stevia sachet", "sku": "1197", "utm": "unidad", "tipo": "insumo"}, {"n": "Syrup de Arandanos", "sku": "1198", "utm": "CC", "tipo": "insumo"}, {"n": "Syrup de Betarraga", "sku": "1199", "utm": "CC", "tipo": "insumo"}, {"n": "Syrup de Durazno", "sku": "1200", "utm": "CC", "tipo": "insumo"}, {"n": "Syrup de Frambuesa", "sku": "1201", "utm": "CC", "tipo": "insumo"}, {"n": "Syrup de Frutilla", "sku": "1202", "utm": "CC", "tipo": "insumo"}, {"n": "Syrup de Mango", "sku": "1203", "utm": "CC", "tipo": "insumo"}, {"n": "Syrup de Pina", "sku": "1204", "utm": "CC", "tipo": "insumo"}, {"n": "Syrup de Vainilla", "sku": "1205", "utm": "CC", "tipo": "insumo"}, {"n": "Tapa Domo 12oz", "sku": "1206", "utm": "unidad", "tipo": "insumo"}, {"n": "Tapa Domo 12oz (s/ hoyo)", "sku": "1207", "utm": "unidad", "tipo": "insumo"}, {"n": "Tapa Domo 16oz", "sku": "1208", "utm": "unidad", "tipo": "insumo"}, {"n": "Tapas cafe 12oz", "sku": "1209", "utm": "unidad", "tipo": "insumo"}, {"n": "Tapas cafe 8oz", "sku": "1210", "utm": "Un", "tipo": "insumo"}, {"n": "Taro (Polvo)", "sku": "1211", "utm": "Gr", "tipo": "insumo"}, {"n": "Vasos 12oz Transparente", "sku": "1218", "utm": "unidad", "tipo": "insumo"}, {"n": "Vasos 12oz cafe", "sku": "1217", "utm": "unidad", "tipo": "insumo"}, {"n": "Vasos 16oz Transparente", "sku": "1219", "utm": "unidad", "tipo": "insumo"}, {"n": "Vasos 8oz. Cafe", "sku": "1220", "utm": "unidad", "tipo": "insumo"}, {"n": "Vasos Espresso", "sku": "1222", "utm": "unidad", "tipo": "insumo"}, {"n": "Yogurt Natural", "sku": "1225", "utm": "Gr", "tipo": "insumo"}],
   jugos: [{"n": "Agua", "sku": "1228", "utm": "cc", "tipo": "insumo"}, {"n": "Agua con Gas", "sku": "1007", "utm": "unidad", "tipo": "insumo"}, {"n": "Agua sin Gas", "sku": "1009", "utm": "unidad", "tipo": "insumo"}, {"n": "Apio", "sku": "1020", "utm": "Gr", "tipo": "insumo"}, {"n": "Arandano", "sku": "1021", "utm": "Gr", "tipo": "insumo"}, {"n": "Betarraga", "sku": "1035", "utm": "Gr", "tipo": "insumo"}, {"n": "Camu camu", "sku": "1052", "utm": "Gr", "tipo": "insumo"}, {"n": "Coca Cola Zero Lata 350cc", "sku": "1060", "utm": "unidad", "tipo": "insumo"}, {"n": "Colageno", "sku": "1064", "utm": "Gr", "tipo": "insumo"}, {"n": "Creatina", "sku": "1068", "utm": "Gr", "tipo": "insumo"}, {"n": "Curcuma", "sku": "1072", "utm": "Gr", "tipo": "insumo"}, {"n": "Espinaca", "sku": "1076", "utm": "Gr", "tipo": "insumo"}, {"n": "Estabilizante G Xantana", "sku": "1078", "utm": "Gr", "tipo": "insumo"}, {"n": "Frutilla", "sku": "1082", "utm": "Gr", "tipo": "insumo"}, {"n": "Hielo Cubo", "sku": "1095", "utm": "Gr", "tipo": "insumo"}, {"n": "Hielo Frappe", "sku": "1096", "utm": "Gr", "tipo": "insumo"}, {"n": "Jengibre polvo", "sku": "1102", "utm": "Gr", "tipo": "insumo"}, {"n": "Limon", "sku": "1111", "utm": "Gr", "tipo": "insumo"}, {"n": "Manzana verde", "sku": "1120", "utm": "Gr", "tipo": "insumo"}, {"n": "Maqui en polvo", "sku": "1121", "utm": "Gr", "tipo": "insumo"}, {"n": "Naranja", "sku": "1130", "utm": "Gr", "tipo": "insumo"}, {"n": "Pera", "sku": "1143", "utm": "Gr", "tipo": "insumo"}, {"n": "Perejil", "sku": "1144", "utm": "Gr", "tipo": "insumo"}, {"n": "Pina", "sku": "1146", "utm": "Gr", "tipo": "insumo"}, {"n": "Platano", "sku": "1149", "utm": "Gr", "tipo": "insumo"}, {"n": "Sandia", "sku": "1228", "utm": "Gr", "tipo": "insumo"}, {"n": "Tapa Domo 12oz", "sku": "1206", "utm": "unidad", "tipo": "insumo"}, {"n": "Tapa Domo 12oz (s/ hoyo)", "sku": "1207", "utm": "unidad", "tipo": "insumo"}, {"n": "Tapa Domo 16oz", "sku": "1208", "utm": "unidad", "tipo": "insumo"}, {"n": "Tapas cafe 12oz", "sku": "1209", "utm": "unidad", "tipo": "insumo"}, {"n": "Tapas cafe 8oz", "sku": "1210", "utm": "Un", "tipo": "insumo"}, {"n": "Vasos 12oz Transparente", "sku": "1218", "utm": "unidad", "tipo": "insumo"}, {"n": "Vasos 16oz Transparente", "sku": "1219", "utm": "unidad", "tipo": "insumo"}, {"n": "Vinagre de manzana", "sku": "1223", "utm": "CC", "tipo": "insumo"}, {"n": "Zanahoria", "sku": "1226", "utm": "Gr", "tipo": "insumo"}],
-  // ── SÓLIDOS ── cargados desde BD_INSUMOS col C = "alimentos" o "helados"
-  // Fallback hardcodeado — se actualiza dinámicamente en cargarInsumosDinamicos()
-  alimentos: [
-    {"n": "Aceite de oliva EV", "sku": "1001", "utm": "CC", "tipo": "insumo"},
-    {"n": "Ajo", "sku": "1011", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Albahaca", "sku": "1013", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Cebolla", "sku": "1055", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Harina de trigo", "sku": "1090", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Huevo", "sku": "1097", "utm": "unidad", "tipo": "insumo"},
-    {"n": "Masa pinsa refrigerada", "sku": "1122", "utm": "unidad", "tipo": "insumo"},
-    {"n": "Mozarella fior di latte", "sku": "1128", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Papel horno", "sku": "1139", "utm": "unidad", "tipo": "insumo"},
-    {"n": "Pesto", "sku": "1145", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Queso parmesano", "sku": "1160", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Rúcula", "sku": "1170", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Sal", "sku": "1174", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Salsa de tomate", "sku": "1175", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Tomate cherry", "sku": "1215", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Tomate fresco", "sku": "1216", "utm": "Gr", "tipo": "insumo"}
-  ],
-  helados: [
-    {"n": "Acaí Mix", "sku": "1003", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Base helado soft", "sku": "1030", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Coco rayado", "sku": "1062", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Frutilla", "sku": "1082", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Granola", "sku": "1088", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Mango", "sku": "1118", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Miel de palma 260 cc", "sku": "1127", "utm": "CC", "tipo": "insumo"},
-    {"n": "Mix helado maracuya", "sku": "1130", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Mix helado vainilla", "sku": "1131", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Platano", "sku": "1149", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Toppings varios", "sku": "1213", "utm": "Gr", "tipo": "insumo"},
-    {"n": "Vaso helado 8oz", "sku": "1220", "utm": "unidad", "tipo": "insumo"}
-  ]
+  // Fallback sólidos — se actualiza dinámicamente vía cargarInsumosDinamicos()
+  alimentos: [{"n":"Aceite de oliva EV","sku":"1001","utm":"CC","tipo":"insumo"},{"n":"Albahaca","sku":"1013","utm":"Gr","tipo":"insumo"},{"n":"Cebolla morada","sku":"1055","utm":"Gr","tipo":"insumo"},{"n":"Huevo","sku":"1097","utm":"unidad","tipo":"insumo"},{"n":"Masa pinsa refrigerada","sku":"1122","utm":"unidad","tipo":"insumo"},{"n":"Mozzarella fior di latte","sku":"1128","utm":"Gr","tipo":"insumo"},{"n":"Papel Ceresinado Pinsa","sku":"1139","utm":"unidad","tipo":"insumo"},{"n":"Palta","sku":"1143","utm":"Gr","tipo":"insumo"},{"n":"Pollo","sku":"1160","utm":"Gr","tipo":"insumo"},{"n":"Queso Mozzarella","sku":"1161","utm":"Gr","tipo":"insumo"},{"n":"Rucula","sku":"1170","utm":"Gr","tipo":"insumo"},{"n":"Sal","sku":"1174","utm":"Gr","tipo":"insumo"},{"n":"Salmon fresco","sku":"1175","utm":"Gr","tipo":"insumo"},{"n":"Tomate cherry","sku":"1215","utm":"Gr","tipo":"insumo"},{"n":"Bandeja Craft Grande (Focacciotto)","sku":"1030","utm":"unidad","tipo":"insumo"},{"n":"Bandeja Craft Chica (Bastoncino)","sku":"1031","utm":"unidad","tipo":"insumo"}],
+  helados: [{"n":"Acaí Mix","sku":"1003","utm":"Gr","tipo":"insumo"},{"n":"Coco rayado","sku":"1062","utm":"Gr","tipo":"insumo"},{"n":"Frutilla","sku":"1082","utm":"Gr","tipo":"insumo"},{"n":"Granola Pinsa","sku":"1088","utm":"Gr","tipo":"insumo"},{"n":"Mango en trozos IQF","sku":"1118","utm":"Gr","tipo":"insumo"},{"n":"Miel de palma 260 cc","sku":"1127","utm":"CC","tipo":"insumo"},{"n":"Platano","sku":"1149","utm":"Gr","tipo":"insumo"},{"n":"Vasos 9oz (Açaí)","sku":"1220","utm":"unidad","tipo":"insumo"},{"n":"Semillas de chia","sku":"1197","utm":"Gr","tipo":"insumo"},{"n":"Arandano","sku":"1021","utm":"Gr","tipo":"insumo"},{"n":"Frambuesa IQF","sku":"1082","utm":"Gr","tipo":"insumo"}]
 };
 
+// ── URLs CSV desde CONTROL_MAESTRO — mismo token del sistema ──
+var CSV_BD_INSUMOS='https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=514178276&single=true&output=csv';
+var CSV_RECETAS_MASTER='https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=1643758434&single=true&output=csv';
+var CSV_RECETAS_DETALLE='https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=1714485150&single=true&output=csv';
+
+function _splitCsvLine(line){
+  var res=[],cur='',inQ=false;
+  for(var i=0;i<line.length;i++){
+    var c=line[i];
+    if(c==='"'){inQ=!inQ;}
+    else if(c===','&&!inQ){res.push(cur.trim().replace(/^"|"$/g,''));cur='';}
+    else{cur+=c;}
+  }
+  res.push(cur.trim().replace(/^"|"$/g,''));
+  return res;
+}
+
+function cargarInsumosDinamicos(seccion){
+  // BD_INSUMOS col C (idx 2) = seccion; col A (0) = SKU; col B (1) = Descripcion; col P (15) = UTM
+  fetch(CSV_BD_INSUMOS+'&t='+Date.now())
+    .then(function(r){return r.text();})
+    .then(function(txt){
+      var lines=txt.split('\n');
+      var lista=[];
+      lines.forEach(function(line,idx){
+        if(idx===0||!line.trim())return;
+        var c=_splitCsvLine(line);
+        var sku=(c[0]||'').trim(), desc=(c[1]||'').trim();
+        var sec=(c[2]||'').trim().toLowerCase(), utm=(c[15]||'Gr').trim();
+        if(sku&&desc&&sec===seccion) lista.push({n:desc,sku:sku,utm:utm,tipo:'insumo'});
+      });
+      if(lista.length>0) MR_INSUMOS_PER_SEC[seccion]=lista;
+    }).catch(function(){});
+}
+
+function cargarProductosDinamicos(seccion){
+  // RECETAS_MASTER (0-based): A=ID, B=Nombre, C=Tipo, D=Seccion, G=Estado, I=Unidad_salida
+  // RECETAS_DETALLE (0-based): A=ID_Receta, D=Descripcion, E=Q_Lote, F=UM
+  var maestro={};
+  fetch(CSV_RECETAS_MASTER+'&t='+Date.now())
+    .then(function(r){return r.text();})
+    .then(function(txt){
+      var lines=txt.split('\n');
+      lines.forEach(function(line,idx){
+        if(idx===0||!line.trim())return;
+        var c=_splitCsvLine(line);
+        var id=(c[0]||'').trim(), nombre=(c[1]||'').trim();
+        var tipo=(c[2]||'').trim().toUpperCase(), sec=(c[3]||'').trim().toLowerCase();
+        var estado=(c[6]||'').trim().toUpperCase(), utm=(c[8]||'unidad').trim();
+        var tiposOk=['ENSAMBLE','SIMPLE','OFERTA','PINSA','BOWL','ENSALADA'];
+        if(id&&nombre&&sec===seccion&&estado==='ACTIVO'&&tiposOk.indexOf(tipo)!==-1)
+          maestro[id]={n:nombre,sku:id,utm:utm,seccion:seccion,ing:[]};
+      });
+      return fetch(CSV_RECETAS_DETALLE+'&t='+Date.now());
+    })
+    .then(function(r){return r.text();})
+    .then(function(txt){
+      var lines=txt.split('\n');
+      lines.forEach(function(line,idx){
+        if(idx===0||!line.trim())return;
+        var c=_splitCsvLine(line);
+        var idRec=(c[0]||'').trim(), desc=(c[3]||'').trim();
+        var qty=parseFloat((c[4]||'0').replace(',','.')), um=(c[5]||'Gr').trim();
+        if(idRec&&maestro[idRec]&&desc&&!isNaN(qty)&&qty>0)
+          maestro[idRec].ing.push({d:desc,q:qty,utm:um});
+      });
+      var lista=Object.values(maestro);
+      if(lista.length>0){
+        MR_PRODUCTOS=MR_PRODUCTOS.filter(function(p){return p.seccion!==seccion;});
+        MR_PRODUCTOS=MR_PRODUCTOS.concat(lista);
+      }
+    }).catch(function(){});
+}
+
+function initCargarDatos(){
+  var sec=SECCION||'cafe';
+  if(sec==='alimentos'||sec==='helados'){
+    cargarInsumosDinamicos(sec);
+    cargarProductosDinamicos(sec);
+  }
+}
 
 function mrGetInsumos(){
   return MR_INSUMOS_PER_SEC[SECCION] || MR_INSUMOS_PER_SEC['cafe'];
@@ -772,116 +817,6 @@ function mrGetItemsForSection(type){
   var seccion=SECCION||'cafe';
   if(type==='insumo') return mrGetInsumos();
   return mrGetProductos().filter(function(p){return p.seccion===seccion;});
-}
-
-// ============================================================
-// CARGA DINÁMICA CSV — BD_INSUMOS + RECETAS_MASTER (alimentos/helados)
-// Mismo token que el resto del sistema PINSA
-// Solo se ejecuta para secciones solidos — cafe/jugos usan datos hardcodeados
-// ============================================================
-var CSV_BD_INSUMOS='https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=514178276&single=true&output=csv';
-var CSV_RECETAS_MASTER='https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=1643758434&single=true&output=csv';
-var CSV_RECETAS_DETALLE='https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=1714485150&single=true&output=csv';
-
-// splitLine: gestione CSV con virgole dentro celle quotate
-function splitLine(line){
-  var res=[],cur='',inQ=false;
-  for(var i=0;i<line.length;i++){
-    var c=line[i];
-    if(c==='"'){inQ=!inQ;}
-    else if(c===','&&!inQ){res.push(cur.trim().replace(/^"|"$/g,''));cur='';}
-    else{cur+=c;}
-  }
-  res.push(cur.trim().replace(/^"|"$/g,''));
-  return res;
-}
-
-function cargarInsumosDinamicos(seccion, cb){
-  // seccion = 'alimentos' | 'helados'
-  // col C di BD_INSUMOS = seccion; col A = SKU; col B = Descripcion; col P = UTM
-  fetch(CSV_BD_INSUMOS+'&t='+Date.now())
-    .then(function(r){return r.text();})
-    .then(function(txt){
-      var lines=txt.split('\n');
-      var lista=[];
-      lines.forEach(function(line,idx){
-        if(idx===0||!line.trim())return;
-        var cols=splitLine(line);
-        var sku=(cols[0]||'').trim();
-        var desc=(cols[1]||'').trim();
-        var sec=(cols[2]||'').trim().toLowerCase();
-        var utm=(cols[15]||'Gr').trim();
-        if(sku && desc && sec===seccion){
-          lista.push({n:desc, sku:sku, utm:utm, tipo:'insumo'});
-        }
-      });
-      if(lista.length>0){
-        MR_INSUMOS_PER_SEC[seccion]=lista;
-      }
-      if(cb)cb();
-    })
-    .catch(function(){if(cb)cb();});
-}
-
-function cargarProductosDinamicos(seccion, cb){
-  // RECETAS_MASTER (0-based CSV):
-  // A(0)=ID_Receta  B(1)=Nombre  C(2)=Tipo Receta  D(3)=Seccion
-  // G(6)=Estado     I(8)=Unidad_salida
-  var maestroData={};
-  fetch(CSV_RECETAS_MASTER+'&t='+Date.now())
-    .then(function(r){return r.text();})
-    .then(function(txt){
-      var lines=txt.split('\n');
-      lines.forEach(function(line,idx){
-        if(idx===0||!line.trim())return;
-        var cols=splitLine(line);
-        var id=(cols[0]||'').trim();
-        var nombre=(cols[1]||'').trim();
-        var tipo=(cols[2]||'').trim().toUpperCase();    // C = Tipo Receta
-        var sec=(cols[3]||'').trim().toLowerCase();     // D = Seccion
-        var estado=(cols[6]||'').trim().toUpperCase(); // G = Estado
-        var utm=(cols[8]||'unidad').trim();             // I = Unidad_salida
-        var tiposOk=['ENSAMBLE','SIMPLE','OFERTA','PINSA','BOWL','ENSALADA'];
-        if(id && nombre && sec===seccion && estado==='ACTIVO' && tiposOk.indexOf(tipo)!==-1){
-          maestroData[id]={n:nombre, sku:id, utm:utm, seccion:seccion, ing:[]};
-        }
-      });
-      return fetch(CSV_RECETAS_DETALLE+'&t='+Date.now());
-    })
-    .then(function(r){return r.text();})
-    .then(function(txt){
-      // RECETAS_DETALLE (0-based CSV):
-      // A(0)=ID_Receta  B(1)=Orden  C(2)=SKU(formula)  D(3)=Descripcion
-      // E(4)=Q_Lote  F(5)=UM
-      var lines=txt.split('\n');
-      lines.forEach(function(line,idx){
-        if(idx===0||!line.trim())return;
-        var cols=splitLine(line);
-        var idRec=(cols[0]||'').trim();
-        var desc=(cols[3]||'').trim();
-        var qty=parseFloat((cols[4]||'0').replace(',','.'));
-        var um=(cols[5]||'Gr').trim();
-        if(idRec && maestroData[idRec] && desc && !isNaN(qty) && qty>0){
-          maestroData[idRec].ing.push({d:desc, q:qty, utm:um});
-        }
-      });
-      var lista=Object.values(maestroData);
-      if(lista.length>0){
-        MR_PRODUCTOS=MR_PRODUCTOS.filter(function(p){return p.seccion!==seccion;});
-        MR_PRODUCTOS=MR_PRODUCTOS.concat(lista);
-      }
-      if(cb)cb();
-    })
-    .catch(function(){if(cb)cb();});
-}
-
-// Carga dinamica all'init se la sezione è solidos
-function initCargarDatos(){
-  var sec=SECCION||'cafe';
-  if(sec==='alimentos'||sec==='helados'){
-    cargarInsumosDinamicos(sec,null);
-    cargarProductosDinamicos(sec,null);
-  }
 }
 
 function mrRenderList(q){
@@ -1004,29 +939,12 @@ function mrEnviarGAS(rows,cb){
   });
 }
 
-function mrRegistrarSinMerma(){
-  var fecha=new Date().toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'numeric'});
-  var responsable=SESSION.nombre||'Operador';
-  var local=SESSION.local||LOCAL;
-  var seccion=SECCION_LABEL;
-  var row={fecha:fecha,local:local,seccion:seccion,descripcion:'',sku:'',cantidad:0,utm:'',motivo:'SIN_MERMA',responsable:responsable,observacion:''};
-  mrSaveLocal([row]);
-  mrEnviarGAS([row],function(ok){
-    document.getElementById('mr-sin-merma-wrap').style.display='none';
-    mrRenderHistorialMini();
-    showToast(ok?'✅ Día sin merma registrado':'✅ Guardado localmente','success');
-  });
-}
-
 function mrRenderHistorialMini(){
   var el=document.getElementById('mr-historial-mini');
   if(!el)return;
   var key=mrGetMermaKey();
   var items=[];
   try{items=JSON.parse(localStorage.getItem(key))||[];}catch(e){}
-  // Mostra/nascondi bottone sin merma
-  var sinMermaWrap=document.getElementById('mr-sin-merma-wrap');
-  if(sinMermaWrap){sinMermaWrap.style.display=items.length===0?'block':'none';}
   if(!items.length){el.innerHTML='<div class="mr-empty">Sin mermas registradas hoy en este turno</div>';return;}
   var byProd={};
   items.forEach(function(r){
@@ -1059,45 +977,25 @@ function showToast(msg,type){var t=document.getElementById('toast');t.textConten
   if(olImg) olImg.style.backgroundImage = 'url(' + LOGO_B64 + ')';
   var hImg = document.getElementById('header-logo-img');
   if(hImg) hImg.src = LOGO_B64;
-
-  // ── FILTRO DROPDOWN SECCIÓN según parámetro sector ──
-  // Home Líquidos pasa ?sector=liquidos → solo cafe/jugos
-  // Home Sólidos pasa ?sector=solidos → solo alimentos/helados
-  var selSec=document.getElementById('sel-seccion');
-  if(SECTOR && SECTOR_SECCIONES[SECTOR]){
-    var allowed=SECTOR_SECCIONES[SECTOR];
-    var opts=selSec.querySelectorAll('option[value]');
-    opts.forEach(function(opt){
-      if(opt.value && allowed.indexOf(opt.value)===-1){
-        opt.style.display='none';
-        opt.disabled=true;
-      }
-    });
-    // Se viene passato seccion=X da URL e non è permesso, reset
-    if(SECCION && allowed.indexOf(SECCION)===-1){
-      SECCION=allowed[0];
-      SECCION_LABEL=LABELS[SECCION]||SECCION;
-    }
-    // Pre-seleziona la prima opzione permessa se nessuna selezionata
-    if(!SECCION || allowed.indexOf(SECCION)===-1){
-      SECCION=allowed[0];
-      SECCION_LABEL=LABELS[SECCION]||SECCION;
-    }
-  }
-
-  // Se seccion è passata via URL, pre-seleziona nel dropdown
-  if(SECCION){
-    var optToSel=selSec.querySelector('option[value="'+SECCION+'"]');
-    if(optToSel && !optToSel.disabled) optToSel.selected=true;
-  }
-
   cargarNombres();
   document.getElementById('h-local').textContent=LOCAL;
   document.getElementById('h-seccion').textContent=SECCION_LABEL;
   document.getElementById('h-date').textContent=formatDate();
   document.getElementById('ol-local').textContent=LOCAL;
 
-  // Carica insumos/productos dinamici per sezioni solidos
+  // Filtro dropdown sección según ?sector=liquidos|solidos
+  if(SECTOR && SECTOR_SECCIONES[SECTOR]){
+    var _allowed=SECTOR_SECCIONES[SECTOR];
+    var _selSec=document.getElementById('sel-seccion');
+    _selSec.querySelectorAll('option[value]').forEach(function(opt){
+      if(opt.value && _allowed.indexOf(opt.value)===-1){opt.style.display='none';opt.disabled=true;}
+    });
+    if(!SECCION||_allowed.indexOf(SECCION)===-1){SECCION=_allowed[0];SECCION_LABEL=LABELS[SECCION]||SECCION;}
+    var _opt=_selSec.querySelector('option[value="'+SECCION+'"]');
+    if(_opt&&!_opt.disabled)_opt.selected=true;
+  }
+
+  // Carga dinámica insumos/productos para sólidos
   initCargarDatos();
 
   // Login sempre pulito — l'operatore seleziona tutto da zero
