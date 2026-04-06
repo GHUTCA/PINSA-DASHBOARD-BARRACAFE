@@ -1033,11 +1033,20 @@ async function loadCSV(gid) {
 function parseCSV(txt) {
   const lines = txt.trim().split('\n');
   if (!lines.length) return [];
-  const headers = splitCSVLine(lines[0]);
+  const rawHeaders = splitCSVLine(lines[0]);
+  // Gestisce header duplicati aggiungendo .1 .2 ecc
+  const seen = {};
+  const headers = rawHeaders.map(h => {
+    const k = h.trim();
+    if (!k) return k;
+    if (seen[k] === undefined) { seen[k] = 0; return k; }
+    seen[k]++;
+    return k + '.' + seen[k];
+  });
   return lines.slice(1).map(l => {
     const vals = splitCSVLine(l);
     const obj = {};
-    headers.forEach((h,i) => obj[h.trim()] = (vals[i]||'').trim());
+    headers.forEach((h,i) => { if (h) obj[h] = (vals[i]||'').trim(); });
     return obj;
   }).filter(r => Object.values(r).some(v => v !== ''));
 }
@@ -1918,7 +1927,7 @@ function renderSolicitudList(items, q) {
   if (solFiltroActivo === 'editados') {
     filtered = items.filter(r => {
       const sku = r['SKU']||r['SKU.1']||'';
-      const sug = parseFloat(r['Pedido en UO']||r['Pedido Sugerido en UO']||0);
+      const sug = parseFloat(r['Pedido en UO']||r['Pedido Sugerido en UO']||r['Pedido Confirmado en UO']||r['Cantidad a Pedir UTM']||0);
       return STATE.solicitudQtys[sku] !== undefined && STATE.solicitudQtys[sku] !== sug;
     });
   }
@@ -1939,9 +1948,9 @@ function renderSolicitudList(items, q) {
     const sku  = r['SKU'] || r['SKU.1'] || '—';
     const desc = r['Descripcion'] || r['Descripcion.1'] || '—';
     const est  = r['Estado'] || r['Estado.1'] || '';
-    const sug  = parseFloat(r['Pedido en UO'] || r['Pedido Sugerido en UO'] || 0);
+    const sug  = parseFloat(r['Pedido en UO'] || r['Pedido Sugerido en UO'] || r['Pedido Confirmado en UO'] || r['Cantidad a Pedir UTM'] || 0);
     const utm  = r['UTM'] || r['UTM.1'] || '';
-    const fmt  = r['Pedido Formateado'] || r['Pedido Formateado.1'] || '';
+    const fmt  = r['Pedido Formateado'] || r['Pedido Formateado.1'] || r['Pedido Formateado.2'] || '';
     const cur  = STATE.solicitudQtys[sku] !== undefined ? STATE.solicitudQtys[sku] : sug;
     const isEdited = cur !== sug;
     const isZero   = cur === 0;
@@ -2017,7 +2026,7 @@ function solActualizarResumen(reps) {
   let totalProd = 0, totalUO = 0, editados = 0, omitidos = 0;
   reps.forEach(r => {
     const sku = r['SKU']||r['SKU.1']||'';
-    const sug = parseFloat(r['Pedido en UO']||r['Pedido Sugerido en UO']||0);
+    const sug = parseFloat(r['Pedido en UO']||r['Pedido Sugerido en UO']||r['Pedido Confirmado en UO']||r['Cantidad a Pedir UTM']||0);
     const cur = STATE.solicitudQtys[sku] !== undefined ? STATE.solicitudQtys[sku] : sug;
     if (cur > 0) { totalProd++; totalUO += cur; }
     else omitidos++;
@@ -2047,7 +2056,7 @@ function solAskConfirm() {
   solGetReps().forEach(r => {
     const sku  = r['SKU']||r['SKU.1']||'';
     const desc = r['Descripcion']||r['Descripcion.1']||'';
-    const sug  = parseFloat(r['Pedido en UO']||r['Pedido Sugerido en UO']||0);
+    const sug  = parseFloat(r['Pedido en UO']||r['Pedido Sugerido en UO']||r['Pedido Confirmado en UO']||r['Cantidad a Pedir UTM']||0);
     const cur  = STATE.solicitudQtys[sku] !== undefined ? STATE.solicitudQtys[sku] : sug;
     const utm  = r['UTM']||r['UTM.1']||'';
     if (cur > 0) {
@@ -2082,7 +2091,7 @@ async function enviarSolicitud() {
     const sku  = r['SKU']||r['SKU.1']||'';
     const desc = r['Descripcion']||r['Descripcion.1']||'';
     const utm  = r['UTM']||r['UTM.1']||'';
-    const sug  = parseFloat(r['Pedido en UO']||r['Pedido Sugerido en UO']||0);
+    const sug  = parseFloat(r['Pedido en UO']||r['Pedido Sugerido en UO']||r['Pedido Confirmado en UO']||r['Cantidad a Pedir UTM']||0);
     if (!sku) return;
     const cur = STATE.solicitudQtys[sku] !== undefined ? STATE.solicitudQtys[sku] : sug;
     if (cur > 0) items.push({ sku, desc, utm, qty:cur });
