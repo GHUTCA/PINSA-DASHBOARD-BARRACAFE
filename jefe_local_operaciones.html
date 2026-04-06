@@ -666,9 +666,9 @@
 
     <!-- Eventos ya registrados hoy -->
     <div class="card" style="margin-top:12px">
-      <div class="card-title">Eventos registrados hoy</div>
+      <div class="card-title">Eventos registrados · últimos 7 días</div>
       <div id="eventos-registrados-list">
-        <div class="empty" style="padding:16px"><div class="empty-icon">🎉</div>Sin eventos registrados hoy</div>
+        <div class="empty" style="padding:16px"><div class="empty-icon">🎉</div>Sin eventos registrados en los últimos 7 días</div>
       </div>
     </div>
   </div>
@@ -1757,24 +1757,41 @@ function calcularBreakdown(lineas) {
 
 function renderEventosRegistradosHoy(cots) {
   const el  = document.getElementById('eventos-registrados-list');
-  const hoy = today();
-  // Filtra per stato REALIZADA — la data di registro è oggi (si registrano in tempo reale)
-  // Usiamo Fecha_Evento come riferimento secondario ma mostriamo tutti i REALIZADA recenti
-  const realizados = cots.filter(c => (c['Estado']||'').toUpperCase() === 'REALIZADA');
+  // Ultimi 7 giorni
+  const hace7 = new Date();
+  hace7.setDate(hace7.getDate() - 7);
+  const realizados = cots
+    .filter(c => {
+      if ((c['Estado']||'').toUpperCase() !== 'REALIZADA') return false;
+      const f = c['Fecha_Evento'];
+      if (!f) return true; // includi se senza data
+      try { return new Date(f) >= hace7; } catch(e) { return true; }
+    })
+    .sort((a, b) => {
+      try { return new Date(b['Fecha_Evento']) - new Date(a['Fecha_Evento']); }
+      catch(e) { return 0; }
+    });
 
   if (!realizados.length) {
-    el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">🎉</div>Sin eventos registrados</div>`;
+    el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">🎉</div>Sin eventos registrados en los últimos 7 días</div>`;
     return;
   }
-  el.innerHTML = realizados.map(c =>
-    `<div class="semaforo-row">
+  el.innerHTML = realizados.map(c => {
+    const fechaEs = c['Fecha_Evento']
+      ? new Date(c['Fecha_Evento']).toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'numeric'})
+      : '—';
+    const totalPV = limpiarNum(c['Total_PV']);
+    return `<div class="semaforo-row">
       <div style="flex:1">
         <div style="font-size:13px;color:var(--t1);font-weight:500">${c['Tipo_Evento']||'—'} · ${c['N_Personas']||'?'} personas</div>
-        <div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${c['ID_Cot']||'—'} · ${c['Fecha_Evento']||''}</div>
+        <div style="font-size:11px;color:var(--t3);font-family:var(--mono);margin-top:2px">${c['ID_Cot']||'—'} · ${fechaEs}</div>
       </div>
-      <span style="font-size:12px;font-weight:600;color:var(--green2);background:rgba(26,144,112,0.1);padding:4px 8px;border-radius:6px">REALIZADA</span>
-    </div>`
-  ).join('');
+      <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+        <span style="font-size:12px;font-weight:600;color:var(--green2);background:rgba(26,144,112,0.1);padding:3px 8px;border-radius:6px">REALIZADA</span>
+        ${totalPV > 0 ? `<span style="font-size:12px;font-family:var(--mono);color:var(--t2)">${fmtCLP(totalPV)}</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 async function registrarEvento(idCot) {
