@@ -591,7 +591,7 @@ header{
       <div id="vt-eventos" style="display:none">
         <div class="alerta" id="ev-alerta"></div>
         <div id="ev-lista"><div class="loading-card">Cargando eventos...</div></div>
-        <div class="sec">Eventos realizados</div>
+        <div class="sec">Eventos realizados esta semana</div>
         <div class="hoy-box" id="ev-realizados"><div class="loading-card">Cargando...</div></div>
       </div>
     </div>
@@ -1045,14 +1045,27 @@ function movSeccionChange() {
   document.getElementById('mov-resultados').style.display = 'none';
 }
 
+function normSec(s){ return (s||'').toLowerCase().replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u'); }
+
 function movBuscar(q) {
   const seccion = document.getElementById('mov-seccion').value;
   const wrap = document.getElementById('mov-resultados');
   const lista = document.getElementById('mov-lista');
   if(q.length < 2){ wrap.style.display='none'; return; }
+  if(BD_INSUMOS.length === 0){
+    lista.innerHTML='<div style="padding:10px 14px;font-size:12px;color:var(--t3)">⏳ Cargando insumos...</div>';
+    wrap.style.display='block'; return;
+  }
   const q2 = q.toLowerCase();
   let filtrados = BD_INSUMOS.filter(i => i.nombre.toLowerCase().includes(q2));
-  if(seccion) filtrados = filtrados.filter(i => !i.seccion || i.seccion.toLowerCase().includes(seccion.toLowerCase().split(' ')[1]||seccion.toLowerCase()));
+  if(seccion) {
+    const secN = normSec(seccion);
+    filtrados = filtrados.filter(i => {
+      if(!i.seccion) return true;
+      const iN = normSec(i.seccion);
+      return iN.includes(secN) || secN.includes(iN);
+    });
+  }
   if(!filtrados.length){ lista.innerHTML='<div style="padding:10px 14px;font-size:12px;color:var(--t3)">Sin resultados</div>'; wrap.style.display='block'; return; }
   lista.innerHTML = filtrados.slice(0,10).map(i =>
     `<div style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--b);font-size:12px;color:var(--t1)" onclick="movSelInsumo('${i.sku}')" onmouseover="this.style.background='rgba(255,255,255,.04)'" onmouseout="this.style.background=''">${i.nombre} <span style="color:var(--t3);font-size:10px">${i.sku} · ${i.um}</span></div>`
@@ -1373,7 +1386,13 @@ async function cargarRealizados() {
   const box = document.getElementById('ev-realizados');
   try {
     const rows = await fetchCSV(CFG.csvCan + CFG.gidVentas);
-    const realizados = rows.filter(r=>(r['Tipo']||'').toLowerCase()==='evento' && (r['Fecha']||'').substring(0,10)===HOY);
+    const d7 = new Date(); d7.setDate(d7.getDate()-7);
+    const d7str = d7.toISOString().split('T')[0];
+    const realizados = rows.filter(r=>{
+      const tipo=(r['Tipo']||'').toLowerCase();
+      const fecha=(r['Fecha']||'').substring(0,10);
+      return tipo==='evento' && fecha>=d7str && fecha<=HOY;
+    });
     if(!realizados.length){ box.innerHTML='<div class="hoy-empty">Sin eventos realizados hoy</div>'; return; }
     box.innerHTML = realizados.map(r=>`
       <div class="hoy-row">
@@ -1399,7 +1418,14 @@ function solBuscar(q) {
   const seccion = document.getElementById('sol-seccion').value.toLowerCase();
   const q2 = q.toLowerCase();
   let filtrados = BD_INSUMOS.filter(i=>i.nombre.toLowerCase().includes(q2));
-  if(seccion) filtrados=filtrados.filter(i=>!i.seccion||i.seccion.toLowerCase().includes(seccion.split(' ')[1]||seccion));
+  if(seccion) {
+    const secN = normSec(seccion);
+    filtrados=filtrados.filter(i=>{
+      if(!i.seccion) return true;
+      const iN=normSec(i.seccion);
+      return iN.includes(secN)||secN.includes(iN);
+    });
+  }
   lista.innerHTML = filtrados.slice(0,8).map(i=>
     `<div style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--b);font-size:12px;color:var(--t1)" onclick="solAgregarItem('${i.sku}')" onmouseover="this.style.background='rgba(255,255,255,.04)'" onmouseout="this.style.background=''">
       ${i.nombre} <span style="color:var(--t3);font-size:10px">${i.sku} · ${i.um}</span>
@@ -1561,8 +1587,8 @@ async function cntCargar() {
   if(!seccion){ lista.innerHTML=''; btn.style.display='none'; return; }
   lista.innerHTML='<div class="loading-card">Cargando insumos...</div>';
   btn.style.display='none';
-  const secKey = seccion.toLowerCase().replace('barra ','');
-  CONTEO_ITEMS = BD_INSUMOS.filter(i=>i.seccion.toLowerCase().includes(secKey));
+  const secKey = normSec(seccion).replace('barra ','');
+  CONTEO_ITEMS = BD_INSUMOS.filter(i=>normSec(i.seccion).includes(secKey));
   if(!CONTEO_ITEMS.length){
     lista.innerHTML='<div class="loading-card">Sin insumos para esta sección</div>'; return;
   }
@@ -1649,7 +1675,10 @@ function invRender() {
   const filtro = document.getElementById('inv-filtro').value;
   const cont   = document.getElementById('inv-content');
   let data = INV_DATA;
-  if(filtro) data = data.filter(i=>i.seccion.toLowerCase().includes(filtro.toLowerCase().split(' ')[1]||filtro.toLowerCase()));
+  if(filtro) {
+    const fN=normSec(filtro);
+    data=data.filter(i=>normSec(i.seccion).includes(fN));
+  }
   if(!data.length){ cont.innerHTML='<div class="loading-card">Sin datos</div>'; return; }
   cont.innerHTML = `
     <div class="form-card" style="padding:0;overflow:hidden">
