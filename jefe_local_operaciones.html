@@ -915,12 +915,6 @@
     <div class="loading-card"><div class="spinner"></div></div>
   </div>
 
-  <!-- Botón registrar fijo abajo -->
-  <div style="position:sticky;bottom:0;background:var(--bg);padding:12px 16px 4px;border-top:1px solid var(--border)">
-    <button class="btn btn-primary" id="btn-conteo-registrar" onclick="registrarConteo()" disabled>
-      Registrar ajustes y enviar PDF
-    </button>
-  </div>
 
 </div>
 
@@ -1074,6 +1068,7 @@ const STATE = {
   reposicion: [],
   confirmacion: [],
   conteo: [],
+  cteoPreview: {},   // sku → {rawUO, rawBO, uo} — temporaneo, non ancora committato
   ventas: [],
   analisis: [],
   bdInsumos: [],
@@ -2456,7 +2451,6 @@ function cteoFiltrar(q) {
   document.getElementById('cteo-prog-num').innerHTML = done.size + '/<span id="cteo-total-num">' + all.length + '</span>';
   const pct = all.length > 0 ? Math.round(done.size / all.length * 100) : 0;
   document.getElementById('cteo-prog-bar').style.width = pct + '%';
-  document.getElementById('btn-conteo-registrar').disabled = done.size === 0;
 
   const el = document.getElementById('cteo-list');
   if (!items.length) {
@@ -2486,14 +2480,23 @@ function cteoFiltrar(q) {
     let inputHtml = '';
     if (metodo === 'nivel') {
       const niveles = [0,25,50,75,100];
-      const curPct  = isDone ? data.rawUO : null;
-      inputHtml = `<div style="display:flex;gap:5px;margin:10px 0 8px">
-        ${niveles.map(n => `<div onclick="cteoSetNivel('${sku}',${n})"
-          style="flex:1;padding:9px 0;border:1px solid ${curPct===n?'var(--green2)':'var(--border2)'};
-          border-radius:6px;background:${curPct===n?'rgba(15,110,86,0.15)':'var(--bg3)'};
-          color:${curPct===n?'var(--green2)':'var(--t3)'};font-size:12px;font-weight:600;
-          text-align:center;cursor:pointer">${n}%</div>`).join('')}
-      </div>`;
+      // curPct: valore selezionato (da STATE o da pendingPreview)
+      const curPct = isDone ? data.rawUO : (STATE.cteoPreview[sku] !== undefined ? STATE.cteoPreview[sku].rawUO : null);
+      const previewUO = curPct !== null ? (curPct / 100) : null;
+      inputHtml = `
+        <div id="cteo-nivel-${sku}" style="display:flex;gap:5px;margin:10px 0 8px">
+          ${niveles.map(n => `<div onclick="cteoPreviewNivel('${sku}',${n})"
+            style="flex:1;padding:9px 0;border:1px solid ${curPct===n?'var(--green2)':'var(--border2)'};
+            border-radius:6px;background:${curPct===n?'rgba(15,110,86,0.15)':'var(--bg3)'};
+            color:${curPct===n?'var(--green2)':'var(--t3)'};font-size:12px;font-weight:600;
+            text-align:center;cursor:pointer">${n}%</div>`).join('')}
+        </div>
+        ${previewUO !== null ? `
+        <div id="cteo-preview-${sku}" style="background:rgba(15,110,86,0.1);border:1px solid var(--green2);border-radius:6px;
+          padding:8px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:12px;color:var(--green2)">✓ Contado</div>
+          <div style="font-size:16px;font-weight:700;color:var(--green2);font-family:var(--mono)">${previewUO.toFixed(3)} UO</div>
+        </div>` : `<div id="cteo-preview-${sku}" style="display:none"></div>`}`;
     } else if (metodo === 'peso') {
       const curGr  = isDone ? data.rawUO  : '';
       const curBO  = isDone ? (data.rawBO || '') : '';
@@ -2505,7 +2508,8 @@ function cteoFiltrar(q) {
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:${bo.activo?'10':'8'}px">
           <input type="number" id="cteo-input-${sku}" value="${curGr}" placeholder="0"
             min="0" step="1" inputmode="decimal"
-            oninput="cteoSetPeso('${sku}',this.value,document.getElementById('cteo-bo-${sku}')?.value||0)"
+            oninput="cteoPreviewPeso('${sku}',this.value,document.getElementById('cteo-bo-${sku}')?.value||0)"
+            onblur="cteoCommitPeso('${sku}')"
             style="flex:1;padding:10px;font-size:20px;font-weight:600;text-align:center;
             background:var(--bg3);border:1px solid var(--border2);border-radius:6px;
             color:var(--t1);font-family:var(--mono);outline:none">
@@ -2518,12 +2522,14 @@ function cteoFiltrar(q) {
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
           <input type="number" id="cteo-bo-${sku}" value="${curBO}" placeholder="0"
             min="0" step="1" inputmode="decimal"
-            oninput="cteoSetPeso('${sku}',document.getElementById('cteo-input-${sku}')?.value||0,this.value)"
+            oninput="cteoPreviewPeso('${sku}',document.getElementById('cteo-input-${sku}')?.value||0,this.value)"
+            onblur="cteoCommitPeso('${sku}')"
             style="flex:1;padding:10px;font-size:20px;font-weight:600;text-align:center;
             background:var(--bg3);border:1px solid rgba(212,134,10,0.3);border-radius:6px;
             color:var(--amber);font-family:var(--mono);outline:none">
           <span style="font-size:13px;color:var(--t3);min-width:24px">${utm}</span>
-        </div>` : ''}`;
+        </div>` : ''}
+        <div id="cteo-preview-${sku}" style="display:none"></div>`;
     } else {
       const bo    = cteoGetBO(sku);
       const curU  = isDone ? data.rawUO : '';
@@ -2531,7 +2537,8 @@ function cteoFiltrar(q) {
       inputHtml = `<div style="display:flex;gap:8px;align-items:center;margin:10px 0 8px">
         <input type="number" id="cteo-input-${sku}" value="${curU}" placeholder="0"
           min="0" step="1" inputmode="decimal"
-          oninput="cteoSetSellado('${sku}',this.value,document.getElementById('cteo-bo-${sku}')?.value||0)"
+          oninput="cteoPreviewSellado('${sku}',this.value,document.getElementById('cteo-bo-${sku}')?.value||0)"
+          onblur="cteoCommitSellado('${sku}')"
           style="flex:1;padding:10px;font-size:20px;font-weight:600;text-align:center;
           background:var(--bg3);border:1px solid var(--border2);border-radius:6px;
           color:var(--t1);font-family:var(--mono);outline:none">
@@ -2544,23 +2551,23 @@ function cteoFiltrar(q) {
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
           <input type="number" id="cteo-bo-${sku}" value="${curBO}" placeholder="0"
             min="0" step="1" inputmode="decimal"
-            oninput="cteoSetSellado('${sku}',document.getElementById('cteo-input-${sku}')?.value||0,this.value)"
+            oninput="cteoPreviewSellado('${sku}',document.getElementById('cteo-input-${sku}')?.value||0,this.value)"
+            onblur="cteoCommitSellado('${sku}')"
             style="flex:1;padding:10px;font-size:20px;font-weight:600;text-align:center;
             background:var(--bg3);border:1px solid rgba(212,134,10,0.3);border-radius:6px;
             color:var(--amber);font-family:var(--mono);outline:none">
           <span style="font-size:13px;color:var(--t3);min-width:50px">${bo.descBO}</span>
-        </div>` : ''}`;
-    }
+        </div>` : ''}
+      <div id="cteo-preview-${sku}" style="display:none"></div>`;
 
-    // Confirmación — lógica según estado y tab
+    // Confirmación — solo muestra valor si isDone, sin botones Confirmar
     let confirmHtml = '';
     if (isDone) {
       const uo = data.uo;
-      const esFrac = (uo > 0) && (Math.abs(uo - Math.round(uo)) > 0.01);
       const boAb = cteoGetBO(sku);
       const boAbierto = boAb.activo && data.rawBO > 0 && boAb.factorBO > 0 &&
                         (Math.abs(data.rawBO % boAb.factorBO) > 0.01);
-      const alertaHtml = (boAbierto || esFrac) ?
+      const alertaHtml = boAbierto ?
         `<div style="font-size:11px;color:var(--amber);background:rgba(212,134,10,0.1);
           border:1px solid rgba(212,134,10,0.3);border-radius:6px;padding:6px 10px;margin-bottom:8px">
           ⚠️ BO abierto — se reportará al JO</div>` : '';
@@ -2570,27 +2577,14 @@ function cteoFiltrar(q) {
           <div style="font-size:12px;color:var(--green2)">✓ Contado</div>
           <div style="font-size:16px;font-weight:700;color:var(--green2);font-family:var(--mono)">${uo.toFixed(3)} UO</div>
         </div>`;
-      if (cteoTab === 'pendientes') {
-        // isDone en Pendientes: muestra valor + alerta + botón Confirmar verde
-        confirmHtml = valorHtml + alertaHtml +
-          `<button onclick="cteoConfirmar('${sku}')"
-            style="width:100%;padding:9px;background:var(--green2);border:none;
-            border-radius:7px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;margin-top:2px">
-            ✓ Confirmar y continuar →</button>`;
-      } else {
-        // Contados: valor + Deshacer
+      if (cteoTab === 'contados') {
         confirmHtml = valorHtml + alertaHtml +
           `<button onclick="cteoDeshacer('${sku}')"
             style="width:100%;padding:7px;background:transparent;border:1px solid var(--border2);
             border-radius:7px;color:var(--t3);font-size:12px;cursor:pointer">Deshacer</button>`;
+      } else {
+        confirmHtml = valorHtml + alertaHtml;
       }
-    } else if (cteoTab === 'pendientes') {
-      // !isDone en Pendientes: input visible + botón Confirmar gris (activo siempre)
-      confirmHtml =
-        `<button onclick="cteoConfirmarDesdeInput('${sku}')"
-          style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--border2);
-          border-radius:7px;color:var(--t2);font-size:13px;font-weight:600;cursor:pointer;margin-top:4px">
-          Confirmar →</button>`;
     }
 
     const borderColor = isDone ? 'var(--green2)' : 'var(--border)';
@@ -2654,103 +2648,140 @@ function cteoMostrarResumen(total, cuadrado, inferior, superior, pctErr, boCount
   document.body.appendChild(modal);
 }
 
-function cteoConfirmar(sku) {
-  // Sposta il prodotto a tab Contados e mostra il prossimo pendiente
-  cteoSetTab('contados');
-  cteoFiltrar('');
-}
+// ── PREVIEW (oninput / click Nivel) — solo visual, NON scrive in STATE.conteoInputs ──
 
-function cteoConfirmarDesdeInput(sku) {
-  // Confirmar desde botón cuando !isDone — lee el valor actual del input
-  // Si no hay valor ingresado, registra UO=0 (conteo a cero es válido)
-  const metodo = cteoGetMetodo(STATE.conteo.find(r => String(r['SKU']||'') === sku) || {});
-  if (metodo === 'nivel') {
-    // Para nivel: si no seleccionó nada, registrar 0%
-    if (STATE.conteoInputs[sku] === undefined) {
-      cteoSetNivel(sku, 0);
-    }
-  } else if (metodo === 'peso') {
-    const valUO = document.getElementById('cteo-input-' + sku)?.value || '0';
-    const valBO = document.getElementById('cteo-bo-'    + sku)?.value || '0';
-    cteoSetPeso(sku, valUO, valBO);
-  } else {
-    const valUO = document.getElementById('cteo-input-' + sku)?.value || '0';
-    const valBO = document.getElementById('cteo-bo-'    + sku)?.value || '0';
-    cteoSetSellado(sku, valUO, valBO);
+function cteoPreviewNivel(sku, pct) {
+  // Evidenzia il bottone selezionato immediatamente
+  const wrap = document.getElementById('cteo-nivel-' + sku);
+  if (wrap) {
+    wrap.querySelectorAll('div').forEach((btn, i) => {
+      const n = [0,25,50,75,100][i];
+      btn.style.borderColor  = n === pct ? 'var(--green2)' : 'var(--border2)';
+      btn.style.background   = n === pct ? 'rgba(15,110,86,0.15)' : 'var(--bg3)';
+      btn.style.color        = n === pct ? 'var(--green2)' : 'var(--t3)';
+    });
   }
-  // Dopo aver impostato, sposta a Contados
-  cteoSetTab('contados');
-  cteoFiltrar('');
+  // Mostra preview UO sotto i bottoni
+  const uo = pct / 100;
+  const prev = document.getElementById('cteo-preview-' + sku);
+  if (prev) {
+    prev.style.display = 'flex';
+    prev.style.cssText = 'background:rgba(15,110,86,0.1);border:1px solid var(--green2);border-radius:6px;padding:8px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center';
+    prev.innerHTML = `<div style="font-size:12px;color:var(--green2)">✓ Contado</div>
+      <div style="font-size:16px;font-weight:700;color:var(--green2);font-family:var(--mono)">${uo.toFixed(3)} UO</div>`;
+  }
+  // Salva in stato temporaneo per blur
+  if (!STATE.cteoPreview) STATE.cteoPreview = {};
+  STATE.cteoPreview[sku] = { rawUO: pct, rawBO: 0, uo };
+  // Commit immediato al prossimo blur del contenitore — aggiungi listener once
+  const card = document.getElementById('cteo-card-' + sku);
+  if (card && !card._nivelBlurBound) {
+    card._nivelBlurBound = true;
+    card.setAttribute('tabindex', '-1');
+    // Usa touchstart/mousedown su altri elementi per committare
+    document.addEventListener('touchstart', function _commit(e) {
+      if (!card.contains(e.target)) {
+        cteoCommitNivel(sku);
+        document.removeEventListener('touchstart', _commit);
+        card._nivelBlurBound = false;
+      }
+    }, { passive: true });
+    document.addEventListener('mousedown', function _commitM(e) {
+      if (!card.contains(e.target)) {
+        cteoCommitNivel(sku);
+        document.removeEventListener('mousedown', _commitM);
+        card._nivelBlurBound = false;
+      }
+    });
+  }
 }
 
-function cteoSetNivel(sku, pct) {
-  STATE.conteoInputs[sku] = { rawUO: pct, rawBO: 0, uo: pct / 100 };
-  // Rimane in Pendientes — mostra la card con il valore selezionato per conferma visiva
-  cteoFiltrar(document.getElementById('conteo-search').value || '');
-}
-
-function cteoSetPeso(sku, valUO, valBO) {
-  const grUO   = parseFloat(valUO) || 0;
-  const grBO   = parseFloat(valBO) || 0;
+function cteoPreviewPeso(sku, valUO, valBO) {
+  const grUO   = parseFloat(String(valUO).replace(/,/g,'')) || 0;
+  const grBO   = parseFloat(String(valBO).replace(/,/g,'')) || 0;
   const factor = cteoGetFactor(sku);
   const bo     = cteoGetBO(sku);
-  // UO completas + fracción BO convertida a UTM
-  const totalUTM = (grUO) + (grBO);
+  const totalUTM = grUO + grBO;
   const uo = factor > 0 ? totalUTM / factor : 0;
-  if (grUO > 0 || grBO > 0) {
-    STATE.conteoInputs[sku] = { rawUO: grUO, rawBO: grBO, uo };
-  } else {
-    delete STATE.conteoInputs[sku];
-  }
-  // Detecta BO abierto: si hay grBO > 0 y no es múltiplo de factorBO
   const boAbierto = bo.activo && grBO > 0 && bo.factorBO > 0 &&
                     (Math.abs(grBO % bo.factorBO) > 0.01);
-  cteoUpdateConfirm(sku, uo, grUO > 0 || grBO > 0, boAbierto);
+  if (!STATE.cteoPreview) STATE.cteoPreview = {};
+  if (grUO > 0 || grBO > 0) STATE.cteoPreview[sku] = { rawUO: grUO, rawBO: grBO, uo };
+  else delete STATE.cteoPreview[sku];
+  _cteoShowPreview(sku, uo, grUO > 0 || grBO > 0, boAbierto);
+}
+
+function cteoPreviewSellado(sku, valUO, valBO) {
+  const uPack  = parseFloat(String(valUO).replace(/,/g,'')) || 0;
+  const uBO    = parseFloat(String(valBO).replace(/,/g,'')) || 0;
+  const bo     = cteoGetBO(sku);
+  const factor = cteoGetFactor(sku);
+  const utmTot = (uPack * factor) + (uBO * (bo.activo ? bo.factorBO : 0));
+  const uo     = factor > 0 ? utmTot / factor : uPack;
+  const boAbierto = bo.activo && uBO > 0 && bo.factorBO > 0 &&
+                    (Math.abs(uBO % bo.factorBO) > 0.01);
+  if (!STATE.cteoPreview) STATE.cteoPreview = {};
+  if (uPack > 0 || uBO > 0) STATE.cteoPreview[sku] = { rawUO: uPack, rawBO: uBO, uo };
+  else delete STATE.cteoPreview[sku];
+  _cteoShowPreview(sku, uo, uPack > 0 || uBO > 0, boAbierto);
+}
+
+function _cteoShowPreview(sku, uo, hasVal, boAbierto) {
+  const prev = document.getElementById('cteo-preview-' + sku);
+  const card = document.getElementById('cteo-card-' + sku);
+  if (!prev) return;
+  if (!hasVal) { prev.style.display = 'none'; if (card) card.style.borderColor = 'var(--border)'; return; }
+  prev.style.cssText = 'background:rgba(15,110,86,0.08);border:1px solid var(--green2);border-radius:6px;padding:8px 12px;margin-top:6px;display:flex;justify-content:space-between;align-items:center';
+  prev.innerHTML = `<div style="font-size:12px;color:var(--green2)">✓ Contado</div>
+    <div style="font-size:16px;font-weight:700;color:var(--green2);font-family:var(--mono)">${uo.toFixed(3)} UO</div>
+    ${boAbierto ? `<div style="font-size:10px;color:var(--amber);margin-left:8px">⚠️ BO</div>` : ''}`;
+  if (card) card.style.borderColor = 'rgba(15,110,86,0.4)'; // bordo verde tenue = "in corso"
+}
+
+// ── COMMIT (onblur) — scrive in STATE.conteoInputs → re-render → prodotto va in Contados ──
+
+function cteoCommitNivel(sku) {
+  if (!STATE.cteoPreview) return;
+  const p = STATE.cteoPreview[sku];
+  if (p === undefined) return;
+  STATE.conteoInputs[sku] = p;
+  delete STATE.cteoPreview[sku];
+  cteoFiltrar(document.getElementById('conteo-search')?.value || '');
+}
+
+function cteoCommitPeso(sku) {
+  if (!STATE.cteoPreview) return;
+  const p = STATE.cteoPreview[sku];
+  if (!p || p.uo === 0) return; // vuoto o zero → non committare
+  STATE.conteoInputs[sku] = p;
+  delete STATE.cteoPreview[sku];
+  cteoFiltrar(document.getElementById('conteo-search')?.value || '');
+}
+
+function cteoCommitSellado(sku) {
+  if (!STATE.cteoPreview) return;
+  const p = STATE.cteoPreview[sku];
+  if (!p || p.uo === 0) return; // vuoto → non committare
+  STATE.conteoInputs[sku] = p;
+  delete STATE.cteoPreview[sku];
+  cteoFiltrar(document.getElementById('conteo-search')?.value || '');
+}
+
+function cteoSetNivel(sku, pct) { cteoPreviewNivel(sku, pct); }
+
+function cteoSetPeso(sku, valUO, valBO) {
+  cteoPreviewPeso(sku, valUO, valBO);
+  cteoCommitPeso(sku);
 }
 
 function cteoSetSellado(sku, valUO, valBO) {
-  const uPack = parseFloat(valUO) || 0;
-  const uBO   = parseFloat(valBO) || 0;
-  const bo    = cteoGetBO(sku);
-  const factor = cteoGetFactor(sku); // UTM per UO (es. 12 per Pack 12 un.)
-
-  // UO totale = (Pack completi × factor + BO sueltos) / factor
-  const utmTot = (uPack * factor) + (uBO * (bo.activo ? bo.factorBO : 0));
-  const uo = factor > 0 ? utmTot / factor : uPack;
-
-  const boAbierto = bo.activo && uBO > 0 && bo.factorBO > 0 &&
-                    (Math.abs(uBO % bo.factorBO) > 0.01);
-
-  if (uPack > 0 || uBO > 0) {
-    STATE.conteoInputs[sku] = { rawUO: uPack, rawBO: uBO, uo };
-  } else {
-    delete STATE.conteoInputs[sku];
-  }
-  cteoUpdateConfirm(sku, uo, uPack > 0 || uBO > 0, boAbierto);
+  cteoPreviewSellado(sku, valUO, valBO);
+  cteoCommitSellado(sku);
 }
 
 function cteoUpdateConfirm(sku, uo, hasVal, boAbierto) {
-  const card = document.getElementById('cteo-card-' + sku);
-  if (!card) return;
-  card.style.borderColor = hasVal ? 'var(--green2)' : 'var(--border)';
-  let conf = card.querySelector('.cteo-confirm');
-  if (!conf) {
-    conf = document.createElement('div');
-    conf.className = 'cteo-confirm';
-    card.appendChild(conf);
-  }
-  if (!hasVal) { conf.innerHTML = ''; return; }
-  conf.innerHTML = `
-    <div style="background:rgba(15,110,86,0.1);border:1px solid var(--green2);border-radius:6px;
-      padding:8px 12px;margin-top:6px;display:flex;justify-content:space-between;align-items:center">
-      <div style="font-size:12px;color:var(--green2)">✓ Contado</div>
-      <div style="font-size:16px;font-weight:700;color:var(--green2);font-family:var(--mono)">${uo.toFixed(3)} UO</div>
-    </div>
-    ${boAbierto ? `<div style="font-size:11px;color:var(--amber);background:rgba(212,134,10,0.1);
-      border:1px solid rgba(212,134,10,0.3);border-radius:6px;padding:6px 10px;margin-top:6px">
-      ⚠️ BO fraccionado abierto — se reportará al JO</div>` : ''}`;
-  document.getElementById('btn-conteo-registrar').disabled = Object.keys(STATE.conteoInputs).length === 0;
-  cteoRenderResumen(STATE.conteo.filter(r => r['SKU'] && r['SKU'] !== ''));
+  // Mantenuta per compatibilità — la preview ora è gestita da _cteoShowPreview
+  _cteoShowPreview(sku, uo, hasVal, boAbierto);
 }
 
 function cteoDeshacer(sku) {
@@ -2783,19 +2814,12 @@ async function registrarConteo() {
 
   if (!items.length) { showToast('No hay datos de conteo','error'); return; }
 
-  const btn = document.getElementById('btn-conteo-registrar');
-  btn.disabled = true;
-  btn.innerHTML = '<div class="spinner"></div> Registrando...';
-
   const res = await callGAS({
     action:   'registrarAjustesCandelaria',
     local:    CFG.local,
     items,
     operador: STATE.operador || ''
   });
-
-  btn.disabled = false;
-  btn.innerHTML = 'Registrar ajustes y enviar PDF';
 
   if (res && res.ok) {
     // Calcola riepilogo
