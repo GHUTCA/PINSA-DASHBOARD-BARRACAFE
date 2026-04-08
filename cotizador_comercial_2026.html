@@ -451,11 +451,11 @@ body{background:var(--bg);color:var(--t1);font-family:'DM Sans',sans-serif;font-
         <div class="be-grid">
           <div class="be-kpi">
             <div class="be-kpi-val" id="be-min-val">—</div>
-            <div class="be-kpi-lbl">Personas mínimas</div>
+            <div class="be-kpi-lbl">Costo extras</div>
           </div>
           <div class="be-kpi">
             <div class="be-kpi-val" id="be-actual-val">—</div>
-            <div class="be-kpi-lbl">Personas cotizadas</div>
+            <div class="be-kpi-lbl">Margen PINSA</div>
           </div>
         </div>
         <div class="be-bar-wrap"><div class="be-bar-fill" id="be-bar" style="width:0%"></div></div>
@@ -1873,18 +1873,19 @@ async function guardarIncidencia(){
 }
 
 // ── BREAK-EVEN ────────────────────────────────────────────────
-// Fórmula: personas_min = CostoFijo_EXTRA / (PV_persona_PINSA - CostoVar_persona_PINSA)
-// CostoFijo = suma costos EXTRA
-// PV_persona_PINSA = TotalPV_PINSA / N_personas  (si N_personas > 0)
-// CostoVar_persona_PINSA = TotalCosto_PINSA / N_personas
+// Logica: il margine totale dei prodotti PINSA copre il costo degli extras?
+// MarginePINSA = TotalPV_PINSA - TotalCosto_PINSA
+// CostoExtras  = Σ(costo_u × q) degli extras
+// Copertura%   = MarginePINSA / CostoExtras × 100
 function calcBreakEven(){
-  const nPersonas = parseInt(document.getElementById('n-personas')?.value)||0;
+  const nPersonas  = parseInt(document.getElementById('n-personas')?.value)||0;
   const lineasPinsa = LINEAS.filter(l=>l.tipo==='RECETA'||l.tipo==='PINSA');
   const lineasExtra = LINEAS.filter(l=>l.tipo==='EXTRA');
 
   const pvPinsa    = lineasPinsa.reduce((s,l)=>s+(l.pv_u*l.q),0);
   const costoPinsa = lineasPinsa.reduce((s,l)=>s+(l.costo_u*l.q),0);
   const costoExtra = lineasExtra.reduce((s,l)=>s+(l.costo_u*l.q),0);
+  const margenPinsa= pvPinsa - costoPinsa; // margine netto PINSA per evento
 
   const beMin  = document.getElementById('be-min-val');
   const beAct  = document.getElementById('be-actual-val');
@@ -1894,40 +1895,62 @@ function calcBreakEven(){
 
   beAct.textContent = nPersonas > 0 ? nPersonas : '—';
 
-  if(nPersonas<=0 || pvPinsa===0){
+  // Nessun extra → no costo fisso evento
+  if(costoExtra===0){
     beMin.textContent='—'; beMin.className='be-kpi-val';
-    if(beBar) beBar.style.width='0%';
+    beAct.textContent='—'; beAct.className='be-kpi-val';
+    if(beBar){ beBar.style.width='0%'; beBar.className='be-bar-fill'; }
+    if(beHint) beHint.textContent='Sin extras — no hay costo fijo de evento';
+    return;
+  }
+
+  // No prodotti PINSA o persone
+  if(pvPinsa===0 || nPersonas<=0){
+    beMin.textContent='—'; beMin.className='be-kpi-val';
+    beAct.textContent='—'; beAct.className='be-kpi-val';
+    if(beBar){ beBar.style.width='0%'; beBar.className='be-bar-fill'; }
     if(beHint) beHint.textContent='Agrega productos y personas para ver el break-even';
     return;
   }
 
-  const pvUnit   = pvPinsa / nPersonas;
-  const costoUnit= costoPinsa / nPersonas;
-  const margenUnit= pvUnit - costoUnit;
+  // Mostra i valori in CLP
+  beMin.textContent = fmtCLP(costoExtra);
+  beAct.textContent = fmtCLP(margenPinsa);
 
-  if(margenUnit<=0 || costoExtra===0){
-    beMin.textContent='—'; beMin.className='be-kpi-val';
-    if(beHint) beHint.textContent = costoExtra===0 ? 'Sin extras — no hay costo fijo de evento' : '⚠ Margen PINSA negativo: revisa precios';
-    return;
+  // Copertura: quanto % del costo extras copre il margine PINSA?
+  const cobertura = margenPinsa / costoExtra; // 1.0 = 100% = copertura esatta
+  const pct = Math.min(cobertura * 100, 100);
+
+  const ok   = cobertura >= 1.0;
+  const warn = cobertura >= 0.75;
+
+  // Per il display "Personas mínimas" usiamo il costo extra per persona
+  // = quante persone servono affinché il margine PINSA per persona copra l'extra
+  const margenPerPersona = margenPinsa / nPersonas;
+  const personasMin = margenPerPersona > 0 ? Math.ceil(costoExtra / margenPerPersona) : null;
+
+  if(personasMin !== null && personasMin <= nPersonas * 5){
+    beMin.textContent = personasMin;
+  } else {
+    beMin.textContent = ok ? '≤'+nPersonas : '—';
   }
-
-  const personasMin = Math.ceil(costoExtra / margenUnit);
-  beMin.textContent = personasMin;
-
-  const ratio = Math.min(nPersonas / personasMin, 2); // cap a 2x
-  const pct   = Math.min(ratio * 50, 100); // 100% = 2x el mínimo
-  const ok    = nPersonas >= personasMin;
-  const warn  = nPersonas >= personasMin * 0.8;
 
   beMin.className = 'be-kpi-val ' + (ok ? 'ok' : warn ? 'warn' : 'bad');
   beAct.className = 'be-kpi-val ' + (ok ? 'ok' : warn ? 'warn' : 'bad');
+
   if(beBar){
-    beBar.style.width = pct+'%';
+    beBar.style.width = pct.toFixed(0)+'%';
     beBar.className = 'be-bar-fill ' + (ok ? '' : warn ? 'warn' : 'bad');
   }
+
   if(beHint){
-    if(ok) beHint.textContent = `✓ El evento cubre costos con ${nPersonas-personasMin} personas de margen`;
-    else   beHint.textContent = `⚠ Necesitas ${personasMin-nPersonas} personas más para cubrir extras`;
+    if(ok){
+      const superavit = fmtCLP(margenPinsa - costoExtra);
+      beHint.textContent = `✓ El margen PINSA (${fmtCLP(margenPinsa)}) cubre los extras con ${superavit} de margen`;
+    } else {
+      const falta = fmtCLP(costoExtra - margenPinsa);
+      beHint.textContent = `⚠ Faltan ${falta} de margen PINSA para cubrir el costo de extras`;
+    }
   }
 }
 
