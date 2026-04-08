@@ -416,7 +416,10 @@ body{background:var(--bg);color:var(--t1);font-family:'DM Sans',sans-serif;font-
           </div>
           <div class="fg" id="fg-monto-pagado" style="display:none">
             <label>Monto Pagado $</label>
-            <input type="text" id="monto-pagado" placeholder="$0">
+            <input type="text" id="monto-pagado" placeholder="$0"
+              oninput="this.dataset.raw=this.value.replace(/[^0-9]/g,'');this.value=this.dataset.raw?'$'+parseInt(this.dataset.raw).toLocaleString('es-CL'):''"
+              onfocus="this.value=this.dataset.raw||''"
+              onblur="if(this.dataset.raw)this.value='$'+parseInt(this.dataset.raw).toLocaleString('es-CL')">
           </div>
         </div>
         <div class="fr">
@@ -1793,6 +1796,8 @@ function mostrarSeccionPago(estado){
 }
 async function guardarPago(){
   if(!COT_ID){ showToast('Guarda la cotización primero','err'); return; }
+  const btn = document.querySelector('[onclick="guardarPago()"]');
+  if(btn){ btn.disabled=true; btn.textContent='💳 Guardando...'; btn.style.opacity='0.7'; }
   const payload={
     id_cot: COT_ID,
     estado_pago: document.getElementById('estado-pago').value,
@@ -1806,16 +1811,31 @@ async function guardarPago(){
     const r=await fetch(GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'updatePago',payload})});
     const d=await r.json();
-    if(d.ok) showToast('✓ Pago actualizado','ok');
-    else showToast('Error: '+(d.error||'?'),'err');
-  }catch(e){ showToast('Error conexión','err'); }
+    if(d.ok){
+      showToast('✓ Pago actualizado','ok');
+      if(btn){ btn.style.background='var(--green)'; btn.style.color='#fff'; btn.textContent='✓ Pago Guardado'; }
+      setTimeout(()=>{
+        if(btn){ btn.disabled=false; btn.style.background=''; btn.style.color=''; btn.style.opacity=''; btn.textContent='💳 Guardar Pago'; }
+      },2500);
+    } else {
+      showToast('Error: '+(d.error||'?'),'err');
+      if(btn){ btn.disabled=false; btn.style.opacity=''; btn.textContent='💳 Guardar Pago'; }
+    }
+  }catch(e){
+    showToast('Error conexión','err');
+    if(btn){ btn.disabled=false; btn.style.opacity=''; btn.textContent='💳 Guardar Pago'; }
+  }
 }
 function cargarDatosPago(cot){
   if(!cot) return;
   const ep=document.getElementById('estado-pago');
   if(ep){ ep.value=cot.estado_pago||'NO_PAGADO'; toggleMontoParcial(ep.value); }
   const mp=document.getElementById('monto-pagado');
-  if(mp) mp.value=cot.monto_pagado||'';
+  if(mp && cot.monto_pagado){
+    const raw = String(Math.round(cot.monto_pagado));
+    mp.dataset.raw = raw;
+    mp.value = '$'+parseInt(raw).toLocaleString('es-CL');
+  }
   const nf=document.getElementById('n-factura');
   if(nf) nf.value=cot.n_factura||'';
   const ef=document.getElementById('empresa-factura');
