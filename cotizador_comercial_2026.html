@@ -405,23 +405,50 @@ body{background:var(--bg);color:var(--t1);font-family:'DM Sans',sans-serif;font-
       <!-- SEZIONE PAGO (visibile solo da ADJUDICADA) -->
       <div id="sec-pago" style="display:none;flex-shrink:0;border-top:1px solid var(--border);margin-top:10px;padding-top:10px">
         <div class="pr-sec-t" style="margin-bottom:8px">Facturación y Pago</div>
+
+        <!-- Resumen importi -->
+        <div style="background:var(--bg4);border-radius:6px;padding:8px 12px;margin-bottom:10px;display:flex;gap:0;flex-direction:column">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">
+            <span style="font-size:11px;color:var(--t3)">Total evento</span>
+            <span id="pago-total-evento" style="font-family:'DM Mono',monospace;font-size:13px;font-weight:600;color:var(--t1)">—</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">
+            <span style="font-size:11px;color:var(--t3)">Monto pagado</span>
+            <span id="pago-recibido" style="font-family:'DM Mono',monospace;font-size:13px;font-weight:600;color:var(--green)">$0</span>
+          </div>
+          <div style="border-top:1px solid var(--border);margin:4px 0"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">
+            <span style="font-size:12px;font-weight:600;color:var(--t2)">Saldo pendiente</span>
+            <span id="pago-saldo" style="font-family:'DM Mono',monospace;font-size:14px;font-weight:700;color:var(--amber)">—</span>
+          </div>
+        </div>
+
+        <!-- Campos pago -->
         <div class="fr">
           <div class="fg">
             <label>Estado Pago</label>
-            <select id="estado-pago" onchange="toggleMontoParcial(this.value)">
+            <select id="estado-pago" onchange="toggleMontoParcial(this.value);actualizarResumenPago()">
               <option value="NO_PAGADO">No Pagado</option>
               <option value="PAGO_PARCIAL">Pago Parcial</option>
               <option value="PAGADO">Pagado</option>
             </select>
           </div>
-          <div class="fg" id="fg-monto-pagado" style="display:none">
-            <label>Monto Pagado $</label>
-            <input type="text" id="monto-pagado" placeholder="$0"
-              oninput="this.dataset.raw=this.value.replace(/[^0-9]/g,'');this.value=this.dataset.raw?'$'+parseInt(this.dataset.raw).toLocaleString('es-CL'):''"
-              onfocus="this.value=this.dataset.raw||''"
-              onblur="if(this.dataset.raw)this.value='$'+parseInt(this.dataset.raw).toLocaleString('es-CL')">
+          <div class="fg">
+            <label>Fecha Pago</label>
+            <input type="date" id="fecha-pago">
           </div>
         </div>
+
+        <div class="fr" id="fg-monto-pagado" style="display:none">
+          <div class="fg">
+            <label>Monto Pagado $</label>
+            <input type="text" id="monto-pagado" placeholder="$0"
+              oninput="this.dataset.raw=this.value.replace(/[^0-9]/g,'');this.value=this.dataset.raw?'$'+parseInt(this.dataset.raw).toLocaleString('es-CL'):'';actualizarResumenPago()"
+              onfocus="this.value=this.dataset.raw||''"
+              onblur="if(this.dataset.raw){this.value='$'+parseInt(this.dataset.raw).toLocaleString('es-CL');}actualizarResumenPago()">
+          </div>
+        </div>
+
         <div class="fr">
           <div class="fg">
             <label>Empresa Factura</label>
@@ -1784,7 +1811,41 @@ async function guardarContacto(){
 
 // ── PAGO ──────────────────────────────────────────────────────
 function toggleMontoParcial(val){
-  document.getElementById('fg-monto-pagado').style.display = val==='PAGO_PARCIAL' ? '' : 'none';
+  const fg = document.getElementById('fg-monto-pagado');
+  if(fg) fg.style.display = val==='PAGO_PARCIAL' ? '' : 'none';
+  actualizarResumenPago();
+}
+
+function actualizarResumenPago(){
+  // Calcola il total PV dell'evento (LINEAS)
+  const totalEvento = LINEAS.reduce((s,l)=>s+(l.pv_u*l.q),0);
+  const estado = document.getElementById('estado-pago')?.value||'NO_PAGADO';
+  let montoPagado = 0;
+  if(estado==='PAGADO') montoPagado = totalEvento;
+  else if(estado==='PAGO_PARCIAL'){
+    const raw = document.getElementById('monto-pagado')?.dataset?.raw||'0';
+    montoPagado = parseInt(raw)||0;
+  }
+  const saldo = totalEvento - montoPagado;
+
+  const elTotal  = document.getElementById('pago-total-evento');
+  const elPagado = document.getElementById('pago-recibido');
+  const elSaldo  = document.getElementById('pago-saldo');
+  if(!elTotal) return;
+
+  elTotal.textContent  = fmtCLP(totalEvento);
+  elPagado.textContent = fmtCLP(montoPagado);
+  elPagado.style.color = montoPagado>0 ? 'var(--green)' : 'var(--t3)';
+
+  elSaldo.textContent  = fmtCLP(saldo);
+  if(saldo<=0){
+    elSaldo.style.color = 'var(--green)';
+    elSaldo.textContent = '✓ Pagado completo';
+  } else if(estado==='NO_PAGADO'){
+    elSaldo.style.color = 'var(--t3)';
+  } else {
+    elSaldo.style.color = 'var(--amber)';
+  }
 }
 function toggleFacturaTexto(val){
   document.getElementById('fg-factura-texto').style.display = val==='OTRO' ? '' : 'none';
@@ -1802,6 +1863,7 @@ async function guardarPago(){
     id_cot: COT_ID,
     estado_pago: document.getElementById('estado-pago').value,
     monto_pagado: limpiarNum(document.getElementById('monto-pagado').value)||0,
+    fecha_pago: document.getElementById('fecha-pago')?.value||'',
     n_factura: document.getElementById('n-factura').value.trim(),
     empresa_factura: document.getElementById('empresa-factura').value,
     factura_texto: document.getElementById('factura-texto').value.trim(),
@@ -1836,6 +1898,8 @@ function cargarDatosPago(cot){
     mp.dataset.raw = raw;
     mp.value = '$'+parseInt(raw).toLocaleString('es-CL');
   }
+  const fp=document.getElementById('fecha-pago');
+  if(fp) fp.value=cot.fecha_pago||'';
   const nf=document.getElementById('n-factura');
   if(nf) nf.value=cot.n_factura||'';
   const ef=document.getElementById('empresa-factura');
@@ -1843,6 +1907,8 @@ function cargarDatosPago(cot){
   const ft=document.getElementById('factura-texto');
   if(ft) ft.value=cot.factura_texto||'';
   if(cot.id_contacto) CTT_SEL_ID=cot.id_contacto;
+  // Aggiorna resumen dopo aver caricato tutti i dati
+  setTimeout(actualizarResumenPago, 100);
 }
 
 // ── INCIDENCIAS ───────────────────────────────────────────────
