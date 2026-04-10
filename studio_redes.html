@@ -656,9 +656,19 @@ function openNewModal(){
 }
 function openEdit(id){
   const c=allCont.find(x=>x.ID===id);if(!c)return;
+  document.getElementById('modalContenido').dataset.editId=id;
   document.getElementById('mTitle').textContent='Editar: '+(c.Hook||id);
   setV('f-brand',c.Brand);setV('f-canal',c.Canal);setV('f-formato',c.Formato);
-  setV('f-pilar',c.Pilar);setV('f-hora',fmtHora(c.Hora_Publicacion));
+  setV('f-pilar',c.Pilar);const rawHora=fmtHora(c.Hora_Publicacion);
+  // Find closest option in select (handles timezone offsets like 08:59 -> 09:00)
+  const horaEl=document.getElementById('f-hora');
+  if(horaEl&&rawHora&&rawHora!=='—'){
+    let best='09:00',bestDiff=999;
+    const [rh,rm]=(rawHora.split(':').map(Number));
+    const rMin=rh*60+(rm||0);
+    [...horaEl.options].forEach(o=>{const[oh,om]=(o.value.split(':').map(Number));const diff=Math.abs(oh*60+om-rMin);if(diff<bestDiff){bestDiff=diff;best=o.value;}});
+    horaEl.value=best;
+  }
   setV('f-quien',c.Quien_Graba);setV('f-estado',c.Estado);
   document.getElementById('f-serie').value=c.Serie||'';
   document.getElementById('f-hook').value=c.Hook||'';
@@ -680,9 +690,13 @@ function closeModal(id){document.getElementById(id).classList.remove('open')}
 function setV(id,v){const el=document.getElementById(id);if(el&&v)el.value=v}
 
 async function saveContenido(){
+  const editId=document.getElementById('modalContenido').dataset.editId;
   const fr=document.getElementById('f-fecha').value;
   let ff='';if(fr){const[y,m,d]=fr.split('-');ff=`${d}/${m}/${y}`}
-  const p={action:'saveContenido',Brand:document.getElementById('f-brand').value,Canal:document.getElementById('f-canal').value,Fecha_Planificada:ff,Hora_Publicacion:document.getElementById('f-hora').value,Pilar:document.getElementById('f-pilar').value,Serie:document.getElementById('f-serie').value,Hook:document.getElementById('f-hook').value,Formato:document.getElementById('f-formato').value,Guion:document.getElementById('f-guion').value,Referencia:document.getElementById('f-ref').value,Quien_Graba:document.getElementById('f-quien').value,Estado:document.getElementById('f-estado').value,Notas:document.getElementById('f-notas').value};
+  // If editing existing content, use updateEstado action
+  const action=editId?'updateEstado':'saveContenido';
+  const p={action,Brand:document.getElementById('f-brand').value,Canal:document.getElementById('f-canal').value,Fecha_Planificada:ff,Hora_Publicacion:document.getElementById('f-hora').value,Pilar:document.getElementById('f-pilar').value,Serie:document.getElementById('f-serie').value,Hook:document.getElementById('f-hook').value,Formato:document.getElementById('f-formato').value,Guion:document.getElementById('f-guion').value,Referencia:document.getElementById('f-ref').value,Quien_Graba:document.getElementById('f-quien').value,Estado:document.getElementById('f-estado').value,Notas:document.getElementById('f-notas').value};
+  if(editId)p.ID=editId;
   if(!p.Hook.trim()){toast('El hook es obligatorio',true);return}
   try{const r=await fetch(GAS,{method:'POST',body:JSON.stringify(p)});const d=await r.json();if(d.error){toast(d.error,true);return}toast('✅ '+d.mensaje);closeModal('modalContenido');loadResumen();}catch(e){toast('Error guardando',true)}
 }
