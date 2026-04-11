@@ -126,6 +126,14 @@ body{background:var(--bg);color:var(--t1);font-family:'DM Sans',sans-serif;font-
 .btn-del{background:none;border:none;color:var(--t3);cursor:pointer;font-size:13px;text-align:center;}
 .btn-del:hover{color:var(--red);}
 .pv-min-hint{font-size:9px;color:var(--red);margin-top:2px;}
+.cot-row-wrap{border-top:1px solid #1E1E1E;}
+.cot-row-wrap:hover .cot-nota-wrap{opacity:1;}
+.cot-row-wrap .cot-row{border-top:none;}
+.cot-nota-wrap{padding:0 14px 6px 14px;opacity:0.55;transition:opacity .2s;}
+.cot-nota-wrap:focus-within{opacity:1;}
+.cot-nota-input{width:100%;background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--t2);font-size:11px;font-family:'DM Sans',sans-serif;padding:2px 4px;outline:none;font-style:italic;}
+.cot-nota-input:focus{border-bottom-color:var(--fu-soft);color:var(--t1);font-style:normal;}
+.cot-nota-input::placeholder{color:var(--t3);}
 
 /* ALERTA MARGINE */
 .mg-alert{display:none;background:var(--red-dim);border:1px solid var(--red);border-radius:7px;padding:12px 14px;margin-bottom:12px;}
@@ -976,6 +984,11 @@ function actualizarPV(id,val,inputEl){
   updateResumenTotals();recalc();calcBreakEven();
 }
 
+function actualizarNota(id,val){
+  const l=LINEAS.find(x=>x.id===id);
+  if(l) l.nota=val.trim();
+}
+
 // ── RENDER RESUMEN ─────────────────────────────────
 function renderResumen(){
   const pinsa=LINEAS.filter(l=>l.tipo==='RECETA');
@@ -1023,16 +1036,21 @@ function renderResumen(){
 function lineaHTML(l){
   const esExtra = l.tipo==='EXTRA';
   const pvMin=pvMinimo(l.costo_u);
-  // Il controllo pvMin si applica solo ai prodotti PINSA, non agli extras
   const errClass=(!esExtra && l.pv_u<pvMin)?'error':(!esExtra && l.pv_u<pvMin*1.1)?'warn':'';
-  return`<div class="cot-row">
-    <div class="cot-name" title="${l.descripcion}">${l.descripcion}</div>
-    <div><input class="cot-input" type="number" value="${l.q}" min="1" oninput="actualizarQ(${l.id},this.value,this)" style="width:100%"></div>
-    <div style="text-align:right">
-      <input class="cot-input ${errClass}" type="number" value="${Math.round(l.pv_u)}" min="0" onchange="actualizarPV(${l.id},this.value,this)" onblur="actualizarPV(${l.id},this.value,this)" style="width:100%;text-align:right">
-      ${errClass==='error'?`<div class="pv-min-hint">mín: ${fmtCLP(pvMin)}</div>`:''}</div>
-    <div class="cot-pv-total" id="pvt-${l.id}">${fmtCLP(l.q*l.pv_u)}</div>
-    <div><button class="btn-del" onclick="eliminarLinea(${l.id})">✕</button></div>
+  const notaVal = (l.nota||'').replace(/"/g,'&quot;');
+  return`<div class="cot-row-wrap">
+    <div class="cot-row">
+      <div class="cot-name" title="${l.descripcion}">${l.descripcion}</div>
+      <div><input class="cot-input" type="number" value="${l.q}" min="1" oninput="actualizarQ(${l.id},this.value,this)" style="width:100%"></div>
+      <div style="text-align:right">
+        <input class="cot-input ${errClass}" type="number" value="${Math.round(l.pv_u)}" min="0" onchange="actualizarPV(${l.id},this.value,this)" onblur="actualizarPV(${l.id},this.value,this)" style="width:100%;text-align:right">
+        ${errClass==='error'?`<div class="pv-min-hint">mín: ${fmtCLP(pvMin)}</div>`:''}</div>
+      <div class="cot-pv-total" id="pvt-${l.id}">${fmtCLP(l.q*l.pv_u)}</div>
+      <div><button class="btn-del" onclick="eliminarLinea(${l.id})">✕</button></div>
+    </div>
+    <div class="cot-nota-wrap">
+      <input class="cot-nota-input" type="text" placeholder="📝 Composición / nota para el local..." value="${notaVal}" oninput="actualizarNota(${l.id},this.value)" maxlength="200">
+    </div>
   </div>`;
 }
 
@@ -1222,7 +1240,7 @@ async function cargarCotizacion(id, readOnly){
     mostrarSeccionesAdjudicada(cot.estado||'');
 
     /* Popola linee — PRIMA di cargarDatosPago così totalEvento è corretto */
-    LINEAS=lineas.map((l,i)=>({id:Date.now()+i,tipo:l.tipo,id_ref:l.id_ref,descripcion:l.descripcion,q:l.q,costo_u:l.costo_u,pv_u:l.pv_u}));
+    LINEAS=lineas.map((l,i)=>({id:Date.now()+i,tipo:l.tipo,id_ref:l.id_ref,descripcion:l.descripcion,q:l.q,costo_u:l.costo_u,pv_u:l.pv_u,nota:l.nota||''}));
     renderResumen();recalc();
     setTimeout(calcBreakEven, 50);
 
@@ -1389,7 +1407,7 @@ async function guardarCotizacion(){
       creado_por:document.getElementById('creado-por').value||'GC',
       n_oc_cliente:document.getElementById('n-oc-cliente')?.value||'',
       id_contacto:CTT_SEL_ID||'',
-      lineas:LINEAS.map(l=>({tipo:l.tipo,id_ref:l.id_ref,descripcion:l.descripcion,q:l.q,costo_u:l.costo_u,pv_u:l.pv_u}))
+      lineas:LINEAS.map(l=>({tipo:l.tipo,id_ref:l.id_ref,descripcion:l.descripcion,q:l.q,costo_u:l.costo_u,pv_u:l.pv_u,nota:l.nota||''}))
     };
     /* Se COT_ID esiste → aggiorna, altrimenti crea nuovo */
     const action = COT_ID ? 'updateCotizacion' : 'saveCotizacion';
@@ -1599,8 +1617,8 @@ function generarPDFCliente(){
     <div class="ii"><label>N° Personas</label><p>${document.getElementById('n-personas').value||'—'}</p></div>
     <div class="ii"><label>Ubicación</label><p>${document.getElementById('ubicacion').value||'—'}</p></div>
   </div>
-  ${LINEAS.filter(l=>l.tipo==='RECETA').length?`<h3>Productos PINSA</h3><table><thead><tr><th>Producto</th><th>Cant.</th><th>Precio Unit.</th><th>Total</th></tr></thead><tbody>${LINEAS.filter(l=>l.tipo==='RECETA').map(l=>`<tr><td>${l.descripcion}</td><td>${l.q}</td><td>${fmtCLP(l.pv_u)}</td><td>${fmtCLP(l.q*l.pv_u)}</td></tr>`).join('')}</tbody></table>`:''}
-  ${LINEAS.filter(l=>l.tipo==='EXTRA').length?`<h3>Extras &amp; Servicios</h3><table><thead><tr><th>Servicio</th><th>Cant.</th><th>Precio Unit.</th><th>Total</th></tr></thead><tbody>${LINEAS.filter(l=>l.tipo==='EXTRA').map(l=>`<tr><td>${l.descripcion}</td><td>${l.q}</td><td>${fmtCLP(l.pv_u)}</td><td>${fmtCLP(l.q*l.pv_u)}</td></tr>`).join('')}</tbody></table>`:''}
+  ${LINEAS.filter(l=>l.tipo==='RECETA').length?`<h3>Productos PINSA</h3><table><thead><tr><th>Producto</th><th>Cant.</th><th>Precio Unit.</th><th>Total</th></tr></thead><tbody>${LINEAS.filter(l=>l.tipo==='RECETA').map(l=>`<tr><td>${l.descripcion}${l.nota?`<div style="font-size:10px;color:#888;font-style:italic;margin-top:2px">📝 ${l.nota}</div>`:''}</td><td>${l.q}</td><td>${fmtCLP(l.pv_u)}</td><td>${fmtCLP(l.q*l.pv_u)}</td></tr>`).join('')}</tbody></table>`:''}
+  ${LINEAS.filter(l=>l.tipo==='EXTRA').length?`<h3>Extras &amp; Servicios</h3><table><thead><tr><th>Servicio</th><th>Cant.</th><th>Precio Unit.</th><th>Total</th></tr></thead><tbody>${LINEAS.filter(l=>l.tipo==='EXTRA').map(l=>`<tr><td>${l.descripcion}${l.nota?`<div style="font-size:10px;color:#888;font-style:italic;margin-top:2px">📝 ${l.nota}</div>`:''}</td><td>${l.q}</td><td>${fmtCLP(l.pv_u)}</td><td>${fmtCLP(l.q*l.pv_u)}</td></tr>`).join('')}</tbody></table>`:''}
   <table style="margin-top:8px"><tbody>
     <tr><td colspan="3" style="text-align:right;font-size:12px;color:#666">Subtotal neto</td><td>${fmtCLP(tp)}</td></tr>
     <tr><td colspan="3" style="text-align:right;font-size:12px;color:#666">IVA (19%)</td><td>${fmtCLP(Math.round(tp*19/100))}</td></tr>
@@ -1642,7 +1660,7 @@ function generarPDFOperativo(){
     <div class="ic"><label>N° Personas</label><p style="font-size:20px">${document.getElementById('n-personas').value||'—'}</p></div>
     <div class="ic" style="grid-column:1/-1"><label>Ubicación</label><p>${document.getElementById('ubicacion').value||'—'}</p></div>
   </div>
-  ${lP.length?`<h3>🍽️ Productos a Preparar</h3><table><thead><tr><th>Producto</th><th>Cantidad</th></tr></thead><tbody>${lP.map(l=>`<tr><td><strong>${l.descripcion}</strong></td><td style="font-size:16px;font-weight:700">${l.q}</td></tr>`).join('')}</tbody></table>`:''}
+  ${lP.length?`<h3>🍽️ Productos a Preparar</h3><table><thead><tr><th>Producto</th><th>Cantidad</th></tr></thead><tbody>${lP.map(l=>`<tr><td><strong>${l.descripcion}</strong>${l.nota?`<div style="margin-top:5px;padding:4px 8px;background:#FFF9C4;border-left:3px solid #F59E0B;font-size:12px;font-weight:700;color:#92400E">📋 ${l.nota}</div>`:''}</td><td style="font-size:16px;font-weight:700">${l.q}</td></tr>`).join('')}</tbody></table>`:''}
   ${lE.length?`<h3>🔧 Servicios Externos</h3><table><thead><tr><th>Servicio</th><th>Cantidad</th></tr></thead><tbody>${lE.map(l=>`<tr><td>${l.descripcion}</td><td>${l.q}</td></tr>`).join('')}</tbody></table>`:''}
   ${document.getElementById('notas').value?`<div class="notas">⚠️ NOTAS ESPECIALES: ${document.getElementById('notas').value}</div>`:''}
   <div class="ftr">Generado ${new Date().toLocaleString('es-CL')} · Referencia: ${COT_ID}</div>
