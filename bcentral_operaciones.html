@@ -366,7 +366,7 @@
         <div class="kpi-value err" id="inv-quiebre">—</div>
       </div>
       <div class="kpi-card" style="padding:8px 10px">
-        <div class="kpi-label">Bajo mín</div>
+        <div class="kpi-label">Urgente+Pedir</div>
         <div class="kpi-value warn" id="inv-bajominimo">—</div>
       </div>
       <div class="kpi-card" style="padding:8px 10px">
@@ -374,17 +374,12 @@
         <div class="kpi-value" id="inv-valor">—</div>
       </div>
     </div>
-    <!-- Filtros -->
-    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-      <div class="search-wrap" style="flex:1;min-width:140px;margin:0">
-        <span class="search-icon">🔍</span>
-        <input type="text" id="inv-search" placeholder="Buscar producto o SKU..." oninput="filtrarInventario(this.value)" autocomplete="off">
-      </div>
-      <button id="inv-pill-q"   onclick="invSetFiltro('quiebre')"    style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--red);background:rgba(192,57,43,0.15);color:var(--red)">Quiebre (<span id="inv-n-q">—</span>)</button>
-      <button id="inv-pill-bm"  onclick="invSetFiltro('bajominimo')" style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--amber);background:rgba(212,134,10,0.12);color:var(--amber)">Atención (<span id="inv-n-bm">—</span>)</button>
-      <button id="inv-pill-ok"  onclick="invSetFiltro('ok')"         style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--t3)">OK (<span id="inv-n-ok">—</span>)</button>
-      <button id="inv-pill-all" onclick="invSetFiltro('all')"        style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--t3)">Todos</button>
+    <!-- Búsqueda + Pills dinámicos -->
+    <div class="search-wrap" style="margin-bottom:8px">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="inv-search" placeholder="Buscar producto, UPC o SKU..." oninput="filtrarInventario(this.value)" autocomplete="off">
     </div>
+    <div id="inv-pills-area" style="display:flex;flex-wrap:wrap;gap:6px"></div>
   </div>
 
   <div class="mod-scroll" id="inv-scroll">
@@ -395,8 +390,8 @@
             <th>Producto</th>
             <th>UPC / Presentación</th>
             <th style="text-align:right">Stock</th>
+            <th style="text-align:center">Cobertura</th>
             <th style="text-align:right">Mín → Máx</th>
-            <th style="text-align:right">Valor $</th>
             <th style="text-align:center">Estado</th>
           </tr>
         </thead>
@@ -661,18 +656,18 @@ const CFG = {
 const STATE = {
   tab: 'inventario',
   inventario: [],
+  movimientos: [],   // Movimientos_BC — para calcular cobertura
   solicitudes: [],
   conteo: [],
   proveedores: [],
   bdInsumos: [],
   ocLog: [],
-  conteoInputs: {},   // sku → { upc, bo }
-
-  // OC carrito
-  ocCarrito: {},      // sku → { desc, upc_desc, qty, proveedor, costo }
+  conteoInputs: {},
+  ocCarrito: {},
   ocSelectedSKU: null,
   ocSelectedData: {},
   ocTabActual: 'pedido',
+  coberturaMap: {},  // sku → { consumoDia, coberturaDias }
 };
 
 // ════════════════════════════════════════════════════════
@@ -793,53 +788,131 @@ function goTab(name) {
 // ════════════════════════════════════════════════════════
 let invFiltroActivo = 'quiebre';
 
-function invGetStatus(r) {
-  const stock = limpiarNum(r['Inventario UPC'] || r['Stock Actual UPC'] || '0');
-  const min   = limpiarNum(r['Stock Min UPC'] || r['Stock min UPC'] || '0');
+// ── Calcola coberturaMap da Movimientos_BC ──────────────
+// Usa solo "Entrega BLocal" degli ultimi N giorni
+function calcularCobertura(movRows) {
+  const DIAS = 10; // finestra storico
+  const consumoTotal = {}; // sku → UPC totali uscite
+  movRows.forEach(r => {
+    if ((r['Tipo de MOvimiento']||'').trim() !== 'Entrega BLocal') return;
+    const sku = String(r['SKU']||'').trim();
+    if (!sku) return;
+    const q = limpiarNum(r['Q UPC Entregada']||'0');
+    if (q > 0) consumoTotal[sku] = (consumoTotal[sku]||0) + q;
+  });
+  const map = {};
+  Object.entries(consumoTotal).forEach(([sku, tot]) => {
+    map[sku] = { consumoDia: tot / DIAS };
+  });
+  STATE.coberturaMap = map;
+}
+
+// ── Semaforo 5 livelli ───────────────────────────────────
+// quiebre | urgente (<3d) | pedir (3-7d) | ok (>7d) | sinRotacion
+function invGetSemaforo(sku, stock) {
   if (stock <= 0) return 'quiebre';
-  if (min > 0 && stock <= min) return 'bajominimo';
+  const c = STATE.coberturaMap[sku];
+  if (!c || c.consumoDia <= 0) return 'sinRotacion';
+  const dias = stock / c.consumoDia;
+  if (dias < 3)  return 'urgente';
+  if (dias <= 7) return 'pedir';
+  return 'ok';
+}
+
+function invGetCoberturaDias(sku, stock) {
+  if (stock <= 0) return null;
+  const c = STATE.coberturaMap[sku];
+  if (!c || c.consumoDia <= 0) return null;
+  return Math.round(stock / c.consumoDia);
+}
+
+// Mappa semaforo → config visual
+const SEM = {
+  quiebre:    { label:'QUIEBRE',    cls:'status-err',  dot:'#C0392B', order:0, pillId:'inv-pill-q'  },
+  urgente:    { label:'URGENTE',    cls:'status-err',  dot:'#E07030', order:1, pillId:'inv-pill-u'  },
+  pedir:      { label:'PEDIR',      cls:'status-warn', dot:'#D4860A', order:2, pillId:'inv-pill-p'  },
+  ok:         { label:'OK',         cls:'status-ok',   dot:'#1A9070', order:3, pillId:'inv-pill-ok' },
+  sinRotacion:{ label:'SIN MOV',    cls:'status-gray', dot:'#3A3530', order:4, pillId:'inv-pill-sr' },
+};
+
+function invGetStatus(r) {
+  // Retrocompatibilità per renderDespacho e altri che usano invGetStatus
+  const stock = limpiarNum(r['Inventario UPC']||'0');
+  const sem   = invGetSemaforo(String(r['SKU']||''), stock);
+  if (sem==='quiebre') return 'quiebre';
+  if (sem==='urgente' || sem==='pedir') return 'bajominimo';
   return 'ok';
 }
 
 function invSetFiltro(f) {
   invFiltroActivo = f;
-  const pills = { quiebre:'inv-pill-q', bajominimo:'inv-pill-bm', ok:'inv-pill-ok', all:'inv-pill-all' };
-  Object.entries(pills).forEach(([key, id]) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (key === f) {
-      if (key==='quiebre')     { el.style.background='rgba(192,57,43,0.3)'; el.style.borderColor='var(--red)'; el.style.color='var(--red)'; }
-      else if (key==='bajominimo') { el.style.background='rgba(212,134,10,0.25)'; el.style.borderColor='var(--amber)'; el.style.color='var(--amber)'; }
-      else if (key==='ok')     { el.style.background='rgba(15,110,86,0.2)'; el.style.borderColor='var(--green2)'; el.style.color='var(--green2)'; }
-      else                     { el.style.background='var(--bg3)'; el.style.borderColor='var(--border2)'; el.style.color='var(--t1)'; }
-    } else {
-      el.style.background='transparent'; el.style.borderColor='var(--border2)'; el.style.color='var(--t3)';
-    }
+  const allPills = ['inv-pill-q','inv-pill-u','inv-pill-p','inv-pill-ok','inv-pill-sr','inv-pill-hoy','inv-pill-all'];
+  allPills.forEach(id => {
+    const el = document.getElementById(id); if (!el) return;
+    el.style.fontWeight = (el.id === ('inv-pill-'+f) || id === 'inv-pill-'+f) ? '700' : '400';
+    el.style.opacity = '1';
   });
+  // Colora pill attiva
+  const active = document.getElementById('inv-pill-'+f);
+  if (active) active.style.outline = '2px solid currentColor';
   filtrarInventario(document.getElementById('inv-search').value || '');
 }
 
 function renderInventario() {
   const items = STATE.inventario.filter(r => r['SKU'] && r['SKU'] !== '');
-  const nQ  = items.filter(r => invGetStatus(r)==='quiebre').length;
-  const nBM = items.filter(r => invGetStatus(r)==='bajominimo').length;
-  const nOK = items.filter(r => invGetStatus(r)==='ok').length;
-  const val = items.reduce((a,r) => a + limpiarNum(r['Valor Inventario $']||'0'), 0);
+
+  // Conta per semaforo
+  let nQ=0, nU=0, nP=0, nOK=0, nSR=0;
+  items.forEach(r => {
+    const stock = limpiarNum(r['Inventario UPC']||'0');
+    const sem   = invGetSemaforo(String(r['SKU']||''), stock);
+    if (sem==='quiebre')     nQ++;
+    else if (sem==='urgente') nU++;
+    else if (sem==='pedir')   nP++;
+    else if (sem==='ok')      nOK++;
+    else                      nSR++;
+  });
+  const nHoy = nQ + nU + nP; // "Qué pedir hoy"
+  const val  = items.reduce((a,r) => a + limpiarNum(r['Valor Inventario $']||'0'), 0);
 
   document.getElementById('inv-total').textContent      = items.length;
   document.getElementById('inv-quiebre').textContent    = nQ;
-  document.getElementById('inv-bajominimo').textContent = nBM;
+  document.getElementById('inv-bajominimo').textContent = nU + nP;
   document.getElementById('inv-valor').textContent      = val >= 1e6 ? '$'+(val/1e6).toFixed(1)+'M' : fmtCLP(val);
-  document.getElementById('inv-n-q').textContent        = nQ;
-  document.getElementById('inv-n-bm').textContent       = nBM;
-  document.getElementById('inv-n-ok').textContent       = nOK;
 
-  // Badge tab
+  // Aggiorna pills dinamicamente
+  const pillsArea = document.getElementById('inv-pills-area');
+  if (pillsArea) {
+    pillsArea.innerHTML = `
+      <button id="inv-pill-hoy"  onclick="invSetFiltro('hoy')"
+        style="padding:5px 11px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--orange);background:rgba(196,98,29,0.2);color:var(--orange2)">
+        🔥 Pedir hoy (${nHoy})</button>
+      <button id="inv-pill-q"    onclick="invSetFiltro('quiebre')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--red);background:rgba(192,57,43,0.12);color:var(--red)">
+        Quiebre (${nQ})</button>
+      <button id="inv-pill-u"    onclick="invSetFiltro('urgente')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--orange);background:rgba(196,98,29,0.12);color:var(--orange2)">
+        Urgente &lt;3d (${nU})</button>
+      <button id="inv-pill-p"    onclick="invSetFiltro('pedir')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--amber);background:rgba(212,134,10,0.12);color:var(--amber)">
+        Pedir 3-7d (${nP})</button>
+      <button id="inv-pill-ok"   onclick="invSetFiltro('ok')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--green2);background:rgba(15,110,86,0.1);color:var(--green2)">
+        OK &gt;7d (${nOK})</button>
+      <button id="inv-pill-sr"   onclick="invSetFiltro('sinRotacion')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--t3)">
+        Sin mov (${nSR})</button>
+      <button id="inv-pill-all"  onclick="invSetFiltro('all')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--t3)">
+        Todos</button>`;
+  }
+
+  // Badge tab — mostra urgencias totales
   const bdg = document.getElementById('badge-inv');
-  if (nQ > 0) { bdg.textContent = nQ; bdg.style.display = ''; }
+  if (nQ + nU > 0) { bdg.textContent = nQ + nU; bdg.style.display = ''; }
   else bdg.style.display = 'none';
 
-  invSetFiltro('quiebre');
+  invSetFiltro('hoy');
 }
 
 // Formatea número limpio: sin decimales si es entero, máx 1 decimal si no
@@ -856,103 +929,125 @@ function filtrarInventario(q) {
     (r['Descripocion UPC']||r['Descripcion UPC']||'').toLowerCase().includes(q.toLowerCase()) ||
     String(r['SKU']||'').includes(q)
   );
-  if (invFiltroActivo !== 'all') items = items.filter(r => invGetStatus(r) === invFiltroActivo);
+
+  // Filtro per semaforo
+  const f = invFiltroActivo;
+  if (f === 'hoy') {
+    items = items.filter(r => {
+      const stock = limpiarNum(r['Inventario UPC']||'0');
+      const sem   = invGetSemaforo(String(r['SKU']||''), stock);
+      return sem==='quiebre' || sem==='urgente' || sem==='pedir';
+    });
+  } else if (f !== 'all') {
+    items = items.filter(r => {
+      const stock = limpiarNum(r['Inventario UPC']||'0');
+      return invGetSemaforo(String(r['SKU']||''), stock) === f;
+    });
+  }
+
+  // Ordina per urgenza → cobertura crescente → nome
   items.sort((a,b) => {
-    const order = {quiebre:0,bajominimo:1,ok:2};
-    const d = order[invGetStatus(a)] - order[invGetStatus(b)];
-    return d !== 0 ? d : (a['Descripcion']||'').localeCompare(b['Descripcion']||'');
+    const sA = limpiarNum(a['Inventario UPC']||'0');
+    const sB = limpiarNum(b['Inventario UPC']||'0');
+    const semA = invGetSemaforo(String(a['SKU']||''), sA);
+    const semB = invGetSemaforo(String(b['SKU']||''), sB);
+    const oA = SEM[semA]?.order ?? 9;
+    const oB = SEM[semB]?.order ?? 9;
+    if (oA !== oB) return oA - oB;
+    // Stessa urgenza → ordina per cobertura crescente
+    const dA = invGetCoberturaDias(String(a['SKU']||''), sA) ?? 9999;
+    const dB = invGetCoberturaDias(String(b['SKU']||''), sB) ?? 9999;
+    return dA - dB;
   });
 
   const tbody = document.getElementById('inv-tbody');
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="6"><div class="empty">Sin resultados</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6"><div class="empty" style="padding:24px">Sin productos en este filtro</div></td></tr>';
     return;
   }
 
-  let lastSec = null;
+  let lastSem = null;
   tbody.innerHTML = items.map(r => {
-    const sku    = r['SKU'] || '';
+    const sku     = r['SKU'] || '';
     const skuSafe = sku.replace(/'/g,"\\'");
-    const desc   = r['Descripcion'] || '—';
-    const upc    = r['Descripocion UPC'] || r['Descripcion UPC'] || r['Descripcion_UPC'] || '';
-    const stock  = limpiarNum(r['Inventario UPC'] || '0');
-    const min    = limpiarNum(r['Stock Min UPC'] || '0');
-    const max    = limpiarNum(r['Stock Max UPC'] || '0');
-    const valor  = limpiarNum(r['Valor Inventario $'] || '0');
-    const status = invGetStatus(r);
-    const inCart = STATE.ocCarrito[sku] !== undefined;
+    const desc    = r['Descripcion'] || '—';
+    const upc     = r['Descripocion UPC'] || r['Descripcion UPC'] || '';
+    const stock   = limpiarNum(r['Inventario UPC'] || '0');
+    const min     = limpiarNum(r['Stock Min UPC'] || '0');
+    const max     = limpiarNum(r['Stock Max UPC'] || '0');
+    const valor   = limpiarNum(r['Valor Inventario $'] || '0');
+    const sem     = invGetSemaforo(sku, stock);
+    const dias    = invGetCoberturaDias(sku, stock);
+    const inCart  = STATE.ocCarrito[sku] !== undefined;
 
-    // Stock color — negativo = color especial
-    let stockColor = 'var(--green2)';
-    if (stock < 0)  stockColor = 'var(--red)';
-    else if (status==='quiebre')    stockColor = 'var(--red)';
-    else if (status==='bajominimo') stockColor = 'var(--amber)';
+    // Colore stock
+    const stockColors = { quiebre:'var(--red)', urgente:'var(--orange2)', pedir:'var(--amber)', ok:'var(--green2)', sinRotacion:'var(--t3)' };
+    const stockColor  = stockColors[sem] || 'var(--t2)';
 
-    // Mín→Máx limpio
+    // Cobertura HTML
+    let cobHTML;
+    if (stock <= 0)      cobHTML = `<span style="color:var(--red);font-weight:600">—</span>`;
+    else if (dias===null) cobHTML = `<span style="color:var(--t3);font-size:10px">sin mov</span>`;
+    else {
+      const cobColor = dias < 3 ? 'var(--orange2)' : dias <= 7 ? 'var(--amber)' : 'var(--green2)';
+      cobHTML = `<span style="color:${cobColor};font-weight:700;font-family:var(--mono)">${dias}d</span>`;
+    }
+
+    // Mín→Máx
     const minMax = (min>0||max>0) ? fmtNum(min)+'→'+fmtNum(max) : '—';
 
-    // Badge estado
-    let statusBadge;
-    if (stock < 0)              statusBadge = `<span class="status status-err" style="font-size:10px">NEGATIVO</span>`;
-    else if (status==='quiebre') statusBadge = `<span class="status status-err" style="font-size:10px">CRITICO</span>`;
-    else if (status==='bajominimo') statusBadge = `<span class="status status-warn" style="font-size:10px">ATENCIÓN</span>`;
-    else                         statusBadge = `<span class="status status-ok" style="font-size:10px">OK</span>`;
-
-    // Botón OC — modal inline
-    const ocBtn = inCart
+    // Badge semaforo
+    const semCfg = SEM[sem];
+    const badge  = `<span class="status ${semCfg.cls}" style="font-size:10px">${semCfg.label}</span>`;
+    const ocBtn  = inCart
       ? `<div style="font-size:10px;color:var(--orange2);margin-top:3px;text-align:center">✓ en OC</div>`
       : `<button onclick="invMostrarModalOC('${skuSafe}')" style="display:block;width:100%;margin-top:4px;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid var(--orange);background:rgba(196,98,29,0.15);color:var(--orange2);cursor:pointer;font-weight:600">+ OC ▸</button>`;
 
-    // Modal inline OC (oculto por defecto)
-    const sug = Math.max(1, max - Math.max(0, stock));
+    // Riga separatore per sezione (solo filtro all/hoy)
+    let secRow = '';
+    if ((f==='all'||f==='hoy') && sem !== lastSem) {
+      lastSem = sem;
+      const secLabels = { quiebre:'🔴 Quiebre — sin stock', urgente:'🟠 Urgente — menos de 3 días', pedir:'🟡 Pedir — 3 a 7 días', ok:'🟢 OK — más de 7 días', sinRotacion:'⚪ Sin movimiento — revisar' };
+      const secBg     = { quiebre:'rgba(192,57,43,0.1)', urgente:'rgba(196,98,29,0.1)', pedir:'rgba(212,134,10,0.08)', ok:'rgba(15,110,86,0.06)', sinRotacion:'rgba(255,255,255,0.02)' };
+      secRow = `<tr><td colspan="6" style="padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:0.5px;background:${secBg[sem]};color:${stockColor};border-bottom:1px solid var(--border)">${secLabels[sem]||sem}</td></tr>`;
+    }
+
+    // Modal inline OC
+    const sug = max > stock ? Math.ceil(max - Math.max(0,stock)) : 1;
     const modalOC = inCart ? '' : `
       <tr id="oc-modal-${skuSafe}" style="display:none;background:rgba(196,98,29,0.06)">
         <td colspan="6" style="padding:10px 14px">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <div style="flex:1;min-width:0">
               <div style="font-size:12px;font-weight:600;color:var(--t1)">${desc}</div>
-              <div style="font-size:11px;color:var(--t3)">${upc} · Sugerido: ${fmtNum(sug)}</div>
+              <div style="font-size:11px;color:var(--t3)">${upc}${dias!==null?' · Cobertura actual: '+dias+'d':''}${sug>0?' · Sugerido: '+sug:''}</div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-              <input type="number" id="oc-qty-${skuSafe}" value="${sug > 0 ? sug : 1}" min="1" step="1"
+              <input type="number" id="oc-qty-${skuSafe}" value="${sug>0?sug:1}" min="1" step="1"
                 style="width:80px;height:38px;border-radius:6px;border:2px solid var(--orange);background:var(--bg3);color:var(--t1);font-size:16px;font-weight:700;font-family:var(--mono);text-align:center;outline:none;padding:0 4px">
               <button onclick="invConfirmarModalOC('${skuSafe}')"
-                style="padding:8px 16px;background:var(--orange);border:none;border-radius:7px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">
-                ✓ OK
-              </button>
+                style="padding:8px 16px;background:var(--orange);border:none;border-radius:7px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">✓ OK</button>
               <button onclick="invCerrarModalOC('${skuSafe}')"
-                style="padding:8px 12px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--t3);font-size:13px;cursor:pointer;font-family:var(--font)">
-                ✕
-              </button>
+                style="padding:8px 12px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--t3);font-size:13px;cursor:pointer;font-family:var(--font)">✕</button>
             </div>
           </div>
         </td>
       </tr>`;
-
-    let secRow = '';
-    if (invFiltroActivo === 'all' && status !== lastSec) {
-      lastSec = status;
-      const sl = {quiebre:'Quiebre — sin stock', bajominimo:'Bajo mínimo', ok:'OK — suficiente'};
-      const sb = {quiebre:'rgba(192,57,43,0.12)', bajominimo:'rgba(212,134,10,0.10)', ok:'rgba(15,110,86,0.08)'};
-      const sc = {quiebre:'var(--red)', bajominimo:'var(--amber)', ok:'var(--green2)'};
-      secRow = `<tr><td colspan="6" style="padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;background:${sb[status]};color:${sc[status]};border-bottom:1px solid var(--border)">${sl[status]}</td></tr>`;
-    }
 
     return secRow + `<tr>
       <td>
         <div style="font-size:13px;font-weight:500;color:var(--t1)">${desc}</div>
         <div style="font-size:10px;color:var(--t3)">SKU ${sku}</div>
       </td>
-      <td style="font-size:11px;color:var(--t3);max-width:100px">${upc || '<span style="color:var(--border2)">—</span>'}</td>
+      <td style="font-size:11px;color:var(--t3)">${upc||'<span style="color:var(--border2)">—</span>'}</td>
       <td style="text-align:right;font-size:13px;font-weight:600;color:${stockColor};font-family:var(--mono)">${fmtNum(stock)}</td>
+      <td style="text-align:center">${cobHTML}</td>
       <td style="text-align:right;font-size:11px;color:var(--t3);font-family:var(--mono);white-space:nowrap">${minMax}</td>
-      <td style="text-align:right;font-size:11px;color:var(--t2)">${valor>0?fmtCLP(valor):'<span style="color:var(--t3)">—</span>'}</td>
-      <td style="text-align:center;min-width:80px">${statusBadge}${ocBtn}</td>
+      <td style="text-align:center;min-width:80px">${badge}${ocBtn}</td>
     </tr>` + modalOC;
   }).join('');
 }
 
-// Modal inline OC
 function invMostrarModalOC(sku) {
   // Chiudi tutti gli altri modal aperti
   document.querySelectorAll('[id^="oc-modal-"]').forEach(el => {
@@ -1011,16 +1106,20 @@ async function refrescarTodo() {
   if (icon) { icon.style.display='inline-block'; icon.style.animation='spin .7s linear infinite'; }
 
   // Ricarica tutti i dati base
-  const [inv, sol, prov] = await Promise.all([
+  const [inv, sol, prov, mov] = await Promise.all([
     loadCSV(CFG.GID.inventario),
     loadCSV(CFG.GID.solicitud),
     loadCSV(CFG.GID.proveedores),
+    loadCSV(CFG.GID.movimientos),
   ]);
 
   STATE.inventario  = inv;
   STATE.solicitudes = sol;
   STATE.proveedores = prov;
+  STATE.movimientos = mov;
   provAllItems      = prov;
+
+  calcularCobertura(mov);
 
   // Badge despacho
   const nSol = sol.filter(r=>(r['Estado']||'').trim().toUpperCase()==='SOLICITADO').length;
@@ -1586,20 +1685,25 @@ async function init() {
     logoEl.style.backgroundImage = '';
   }
 
-  // Cargar en parallelo
-  const [inv, sol, prov] = await Promise.all([
+  // Cargar en parallelo — incluyendo Movimientos_BC para cobertura
+  const [inv, sol, prov, mov] = await Promise.all([
     loadCSV(CFG.GID.inventario),
     loadCSV(CFG.GID.solicitud),
     loadCSV(CFG.GID.proveedores),
+    loadCSV(CFG.GID.movimientos),
   ]);
 
   STATE.inventario  = inv;
   STATE.solicitudes = sol;
   STATE.proveedores = prov;
-  provAllItems      = prov;  // inizializza anche provAllItems per filtro
+  STATE.movimientos = mov;
+  provAllItems      = prov;
+
+  // Calcular cobertura antes de renderizar
+  calcularCobertura(mov);
 
   renderInventario();
-  renderProveedoresList(prov); // render immediato — il tab lo mostrerà già pronto
+  renderProveedoresList(prov);
 
   // Badge despacho
   const nSol = sol.filter(r=>(r['Estado']||'').trim().toUpperCase()==='SOLICITADO').length;
