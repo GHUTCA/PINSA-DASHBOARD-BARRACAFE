@@ -677,6 +677,9 @@
     <button class="nav-tab" onclick="goTab('analisis')">Análisis</button>
     <button class="nav-tab" onclick="goTab('recepcion')">Recepción BC</button>
     <button class="nav-tab" onclick="goTab('conteo')">Conteo Físico</button>
+    <button class="nav-tab" onclick="jlRefrescarTodo()" id="btn-jl-refresh" style="margin-left:auto;color:var(--t3)">
+      <span id="jl-refresh-icon">↻</span> Actualizar
+    </button>
   </div>
 </div>
 
@@ -1124,7 +1127,7 @@
         <div class="section-title" style="margin:0">Inventario BLocal</div>
         <div style="font-size:11px;color:var(--t3);margin-top:2px">
           <span class="tag tag-gray" style="font-size:9px;padding:1px 6px">CONSULTA</span>
-          Stock actual · Alertas críticas
+          Stock actual · Toca <b>+ Pedir</b> para solicitar a BC
         </div>
       </div>
     </div>
@@ -1141,9 +1144,9 @@
         <div class="kpi-sub">Stock = 0</div>
       </div>
       <div class="kpi-card" style="padding:8px 10px">
-        <div class="kpi-label">Bajo mín</div>
+        <div class="kpi-label">Urgente+Pedir</div>
         <div class="kpi-value" style="color:var(--amber)" id="inv-bajominimo">—</div>
-        <div class="kpi-sub">Stock &lt; mín</div>
+        <div class="kpi-sub">&lt;7 días</div>
       </div>
       <div class="kpi-card" style="padding:8px 10px">
         <div class="kpi-label">Valor</div>
@@ -1152,19 +1155,36 @@
       </div>
     </div>
 
-    <!-- FILTROS: search + pills -->
-    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-      <div class="search-wrap" style="flex:1;min-width:140px;margin:0">
-        <span class="search-icon">🔍</span>
-        <input type="text" id="inv-search" placeholder="Buscar producto o SKU..." oninput="filtrarInventario(this.value)" autocomplete="off">
-      </div>
-      <button id="inv-pill-q"   onclick="invSetFiltro('quiebre')"    style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--red);background:rgba(192,57,43,0.15);color:var(--red)">Quiebre (<span id="inv-n-q">—</span>)</button>
-      <button id="inv-pill-bm"  onclick="invSetFiltro('bajominimo')" style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--amber);background:rgba(212,134,10,0.12);color:var(--amber)">Bajo mín (<span id="inv-n-bm">—</span>)</button>
-      <button id="inv-pill-ok"  onclick="invSetFiltro('ok')"         style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--t3)">OK (<span id="inv-n-ok">—</span>)</button>
-      <button id="inv-pill-all" onclick="invSetFiltro('all')"        style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--t3)">Todos</button>
+    <!-- BÚSQUEDA -->
+    <div class="search-wrap" style="margin-bottom:8px">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="inv-search" placeholder="Buscar producto o SKU..." oninput="filtrarInventario(this.value)" autocomplete="off">
     </div>
+    <!-- PILLS dinámicos — se renderizan con renderInventario -->
+    <div id="inv-pills-area" style="display:flex;flex-wrap:wrap;gap:6px"></div>
   </div>
 
+  <!-- SCROLL AREA -->
+  <div id="inv-scroll">
+    <div style="border-radius:8px;overflow:hidden;border:1px solid var(--border)">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:var(--bg3)">
+            <th style="padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--t3);font-weight:500;text-align:left">Producto</th>
+            <th style="padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--t3);font-weight:500;text-align:right">Stock UTM</th>
+            <th style="padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--t3);font-weight:500;text-align:right">Stock UO</th>
+            <th style="padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--t3);font-weight:500;text-align:center">Cobertura</th>
+            <th style="padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--t3);font-weight:500;text-align:right">Valor $</th>
+            <th style="padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--t3);font-weight:500;text-align:center">Estado</th>
+          </tr>
+        </thead>
+        <tbody id="inv-tbody">
+          <tr><td colspan="6" class="empty">Cargando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
   <!-- SCROLL AREA -->
   <div id="inv-scroll">
     <div style="border-radius:8px;overflow:hidden;border:1px solid var(--border)">
@@ -3326,143 +3346,300 @@ async function registrarConteo() {
   }
 }
 
-// MÓDULO 6 — INVENTARIO
 // ════════════════════════════════════════════════════════
-let invFiltroActivo = 'quiebre';
+// MÓDULO 6 — INVENTARIO BLOCAL (v80 — semáforo 5 niveles)
+// ════════════════════════════════════════════════════════
+let invFiltroActivo = 'hoy';
+
+// Semáforo 5 niveles basado en cobertura días (usa STATE.analisis)
+function invGetDiario(sku) {
+  const analRow = STATE.analisis.find(a => String(a['SKU']||'').trim() === String(sku).trim());
+  if (!analRow) return 0;
+  const consumo30 = limpiarNum(analRow['Consumo 30 dias en UTM']||analRow['Consumo 30 dias en UO']||'0');
+  return limpiarNum(analRow['Promedio Diario']||'0') || (consumo30 > 0 ? consumo30/30 : 0);
+}
+
+function invGetSemaforo(sku, stockUTM) {
+  if (stockUTM <= 0) return 'quiebre';
+  const diario = invGetDiario(sku);
+  if (diario <= 0) return 'sinRotacion';
+  const dias = stockUTM / diario;
+  if (dias < 3)  return 'urgente';
+  if (dias <= 7) return 'pedir';
+  return 'ok';
+}
+
+function invGetCoberturaDias(sku, stockUTM) {
+  if (stockUTM <= 0) return null;
+  const diario = invGetDiario(sku);
+  if (diario <= 0) return null;
+  return Math.round(stockUTM / diario);
+}
+
+const JL_SEM = {
+  quiebre:    { label:'QUIEBRE', cls:'status-err',  order:0 },
+  urgente:    { label:'URGENTE', cls:'status-err',  order:1 },
+  pedir:      { label:'PEDIR',   cls:'status-warn', order:2 },
+  ok:         { label:'OK',      cls:'status-ok',   order:3 },
+  sinRotacion:{ label:'SIN MOV', cls:'status-gray', order:4 },
+};
 
 function invGetStatus(r) {
+  // Retrocompat para otros módulos
   const stock = limpiarNum(r['Stock Actual UTM']||r['Stock Actual UO']||'0');
-  const min   = limpiarNum(r['Stock min UTM']||r['Stock min UO']||'0');
-  if (stock <= 0) return 'quiebre';
-  if (min > 0 && stock <= min) return 'bajominimo';
+  const sem   = invGetSemaforo(String(r['SKU']||''), stock);
+  if (sem==='quiebre') return 'quiebre';
+  if (sem==='urgente'||sem==='pedir') return 'bajominimo';
   return 'ok';
 }
 
 function invSetFiltro(f) {
   invFiltroActivo = f;
-  // Aggiorna stili pills
-  const pills = { quiebre:'inv-pill-q', bajominimo:'inv-pill-bm', ok:'inv-pill-ok', all:'inv-pill-all' };
-  Object.entries(pills).forEach(([key, id]) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (key === f) {
-      if (key==='quiebre')    { el.style.background='rgba(192,57,43,0.3)'; el.style.borderColor='var(--red)'; el.style.color='var(--red)'; }
-      else if (key==='bajominimo') { el.style.background='rgba(212,134,10,0.25)'; el.style.borderColor='var(--amber)'; el.style.color='var(--amber)'; }
-      else if (key==='ok')    { el.style.background='rgba(15,110,86,0.2)'; el.style.borderColor='var(--green2)'; el.style.color='var(--green2)'; }
-      else                    { el.style.background='var(--bg3)'; el.style.borderColor='var(--border2)'; el.style.color='var(--t1)'; }
-    } else {
-      el.style.background='transparent'; el.style.borderColor='var(--border2)'; el.style.color='var(--t3)';
-    }
-  });
   filtrarInventario(document.getElementById('inv-search').value || '');
 }
 
 function renderInventario() {
   const items = STATE.inventario.filter(r => r['SKU'] && r['SKU'] !== '');
-  const nQ  = items.filter(r => invGetStatus(r)==='quiebre').length;
-  const nBM = items.filter(r => invGetStatus(r)==='bajominimo').length;
-  const nOK = items.filter(r => invGetStatus(r)==='ok').length;
-  const valorTotal = items.reduce((acc,r) => acc + limpiarNum(r['Valor Inventario $']||'0'), 0);
+  let nQ=0, nU=0, nP=0, nOK=0, nSR=0;
+  items.forEach(r => {
+    const s = limpiarNum(r['Stock Actual UTM']||r['Stock Actual UO']||'0');
+    const sem = invGetSemaforo(String(r['SKU']||''), s);
+    if (sem==='quiebre')     nQ++;
+    else if (sem==='urgente') nU++;
+    else if (sem==='pedir')   nP++;
+    else if (sem==='ok')      nOK++;
+    else                      nSR++;
+  });
+  const nHoy = nQ + nU + nP;
+  const val  = items.reduce((a,r) => a + limpiarNum(r['Valor Inventario $']||'0'), 0);
 
   document.getElementById('inv-total').textContent      = items.length;
   document.getElementById('inv-quiebre').textContent    = nQ;
-  document.getElementById('inv-bajominimo').textContent = nBM;
-  document.getElementById('inv-valor').textContent      = valorTotal >= 1e6
-    ? '$' + (valorTotal/1e6).toFixed(1) + 'M'
-    : '$' + Math.round(valorTotal).toLocaleString('es-CL');
-  const nqEl = document.getElementById('inv-n-q');   if(nqEl) nqEl.textContent = nQ;
-  const nbEl = document.getElementById('inv-n-bm');  if(nbEl) nbEl.textContent = nBM;
-  const noEl = document.getElementById('inv-n-ok');  if(noEl) noEl.textContent = nOK;
-  invSetFiltro('quiebre');
+  document.getElementById('inv-bajominimo').textContent = nU + nP;
+  document.getElementById('inv-valor').textContent      = val >= 1e6 ? '$'+(val/1e6).toFixed(1)+'M' : '$'+Math.round(val).toLocaleString('es-CL');
+
+  const pillsArea = document.getElementById('inv-pills-area');
+  if (pillsArea) {
+    pillsArea.innerHTML = `
+      <button id="inv-pill-hoy"  onclick="invSetFiltro('hoy')"
+        style="padding:5px 11px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--orange);background:rgba(196,98,29,0.2);color:var(--orange2)">
+        🔥 Pedir hoy (${nHoy})</button>
+      <button id="inv-pill-q"    onclick="invSetFiltro('quiebre')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--red);background:rgba(192,57,43,0.12);color:var(--red)">
+        Quiebre (${nQ})</button>
+      <button id="inv-pill-u"    onclick="invSetFiltro('urgente')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--orange);background:rgba(196,98,29,0.12);color:var(--orange2)">
+        Urgente &lt;3d (${nU})</button>
+      <button id="inv-pill-p"    onclick="invSetFiltro('pedir')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--amber);background:rgba(212,134,10,0.12);color:var(--amber)">
+        Pedir 3-7d (${nP})</button>
+      <button id="inv-pill-ok"   onclick="invSetFiltro('ok')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--green2);background:rgba(15,110,86,0.1);color:var(--green2)">
+        OK &gt;7d (${nOK})</button>
+      <button id="inv-pill-sr"   onclick="invSetFiltro('sinRotacion')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--t3)">
+        Sin mov (${nSR})</button>
+      <button id="inv-pill-all"  onclick="invSetFiltro('all')"
+        style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--t3)">
+        Todos</button>`;
+  }
+  invSetFiltro('hoy');
 }
 
 function filtrarInventario(q) {
   let items = STATE.inventario.filter(r => r['SKU'] && r['SKU'] !== '');
   if (q) items = items.filter(r =>
     (r['Descripcion']||'').toLowerCase().includes(q.toLowerCase()) ||
-    (r['SKU']||'').toString().includes(q)
+    String(r['SKU']||'').includes(q)
   );
-  if (invFiltroActivo !== 'all') items = items.filter(r => invGetStatus(r) === invFiltroActivo);
 
-  // Ordena: quiebre → bajominimo → ok, luego alfabético
-  const order = { quiebre:0, bajominimo:1, ok:2 };
+  const f = invFiltroActivo;
+  if (f === 'hoy') {
+    items = items.filter(r => {
+      const s = limpiarNum(r['Stock Actual UTM']||r['Stock Actual UO']||'0');
+      const sem = invGetSemaforo(String(r['SKU']||''), s);
+      return sem==='quiebre'||sem==='urgente'||sem==='pedir';
+    });
+  } else if (f !== 'all') {
+    items = items.filter(r => {
+      const s = limpiarNum(r['Stock Actual UTM']||r['Stock Actual UO']||'0');
+      return invGetSemaforo(String(r['SKU']||''), s) === f;
+    });
+  }
+
+  // Ordena por urgencia → cobertura creciente → alfabético
   items.sort((a,b) => {
-    const diff = order[invGetStatus(a)] - order[invGetStatus(b)];
-    return diff !== 0 ? diff : (a['Descripcion']||'').localeCompare(b['Descripcion']||'');
+    const sA = limpiarNum(a['Stock Actual UTM']||a['Stock Actual UO']||'0');
+    const sB = limpiarNum(b['Stock Actual UTM']||b['Stock Actual UO']||'0');
+    const semA = invGetSemaforo(String(a['SKU']||''), sA);
+    const semB = invGetSemaforo(String(b['SKU']||''), sB);
+    const oA = JL_SEM[semA]?.order ?? 9;
+    const oB = JL_SEM[semB]?.order ?? 9;
+    if (oA !== oB) return oA - oB;
+    const dA = invGetCoberturaDias(String(a['SKU']||''), sA) ?? 9999;
+    const dB = invGetCoberturaDias(String(b['SKU']||''), sB) ?? 9999;
+    return dA !== dB ? dA - dB : (a['Descripcion']||'').localeCompare(b['Descripcion']||'');
   });
 
   const tbody = document.getElementById('inv-tbody');
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin resultados</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin productos en este filtro</td></tr>';
     return;
   }
 
-  // Agrupa por sección (quiebre / bajominimo / ok) solo si filtro all
-  let lastSection = null;
-  const rows = items.map(r => {
-    const desc   = r['Descripcion'] || '—';
+  let lastSem = null;
+  const secLabels = { quiebre:'🔴 Quiebre — sin stock', urgente:'🟠 Urgente — menos de 3 días', pedir:'🟡 Pedir — 3 a 7 días', ok:'🟢 OK — más de 7 días', sinRotacion:'⚪ Sin movimiento — revisar' };
+  const secBg     = { quiebre:'rgba(192,57,43,0.1)', urgente:'rgba(196,98,29,0.1)', pedir:'rgba(212,134,10,0.08)', ok:'rgba(15,110,86,0.06)', sinRotacion:'rgba(255,255,255,0.02)' };
+  const stockColors= { quiebre:'var(--red)', urgente:'var(--orange2)', pedir:'var(--amber)', ok:'var(--green2)', sinRotacion:'var(--t3)' };
+
+  tbody.innerHTML = items.map(r => {
     const sku    = r['SKU'] || '';
+    const skuSafe= sku.replace(/'/g,"\\'");
+    const desc   = r['Descripcion'] || '—';
     const utm    = r['UTM'] || '';
     const stockUTM = limpiarNum(r['Stock Actual UTM']||'0');
     const stockUO  = limpiarNum(r['Stock Actual UO']||'0');
     const descUO   = r['Descripcion UO'] || '';
     const min    = limpiarNum(r['Stock min UTM']||r['Stock min UO']||'0');
     const valor  = limpiarNum(r['Valor Inventario $']||'0');
-    // Join con Analisis_Consumo por SKU para obtener consumo diario
-    const analRow = STATE.analisis.find(a => String(a['SKU']||'').trim() === String(sku).trim());
-    const consumo30 = analRow ? limpiarNum(analRow['Consumo 30 dias en UTM']||analRow['Consumo 30 dias en UO']||'0') : 0;
-    const diario = analRow ? limpiarNum(analRow['Promedio Diario']||'0') || (consumo30 > 0 ? consumo30/30 : 0) : limpiarNum(r['Promedio Diario']||r['Consumo Diario']||'0');
-    const status = invGetStatus(r);
+    const sem    = invGetSemaforo(sku, stockUTM);
+    const dias   = invGetCoberturaDias(sku, stockUTM);
+    const inCart = STATE.solicitudQtys[sku] > 0;
+    const analRow= STATE.analisis.find(a => String(a['SKU']||'').trim() === String(sku).trim());
+    const maxSug = analRow ? limpiarNum(analRow['Max Sugerido UTM']||'0') : 0;
+    const stockColor = stockColors[sem] || 'var(--t2)';
 
-    // Cobertura en días
-    let cobHTML = '<span style="color:var(--t3)">—</span>';
-    if (status !== 'quiebre' && diario > 0) {
-      const dias = Math.round(stockUTM / diario);
-      const col  = dias <= 3 ? 'var(--red)' : dias <= 7 ? 'var(--amber)' : 'var(--green2)';
-      cobHTML = `<span style="color:${col};font-weight:500">${dias}d</span>`;
-    } else if (status === 'quiebre') {
-      cobHTML = '<span style="color:var(--red)">— d</span>';
+    // Cobertura HTML
+    let cobHTML;
+    if (stockUTM <= 0)   cobHTML = `<span style="color:var(--red)">—</span>`;
+    else if (dias===null) cobHTML = `<span style="color:var(--t3);font-size:10px">sin mov</span>`;
+    else {
+      const c = dias<3?'var(--orange2)':dias<=7?'var(--amber)':'var(--green2)';
+      cobHTML = `<span style="color:${c};font-weight:700;font-family:var(--mono)">${dias}d</span>`;
     }
 
-    let statusBadge, stockColor;
-    const invMaxSug = analRow ? limpiarNum(analRow['Max Sugerido UTM']||'0') : 0;
-    const pedirBtn = `<button onclick="invPedir('${sku}',${invMaxSug})" style="display:block;width:100%;margin-top:4px;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid var(--orange);background:rgba(196,98,29,0.15);color:var(--orange2);cursor:pointer;font-weight:600">+ Pedir</button>`;
-    if (status === 'quiebre') {
-      statusBadge = `<span class="status status-err">QUIEBRE</span>${pedirBtn}`;
-      stockColor  = 'var(--red)';
-    } else if (status === 'bajominimo') {
-      statusBadge = `<span class="status status-warn">ATENCIÓN</span>${pedirBtn}`;
-      stockColor  = 'var(--amber)';
-    } else {
-      statusBadge = `<span class="status status-ok">OK</span>${pedirBtn}`;
-      stockColor  = 'var(--green2)';
+    const semCfg = JL_SEM[sem] || JL_SEM.ok;
+    const badge  = `<span class="status ${semCfg.cls}" style="font-size:10px">${semCfg.label}</span>`;
+
+    // Botón + Pedir → modal inline
+    const pedirBtn = inCart
+      ? `<div style="font-size:10px;color:var(--orange2);margin-top:3px;text-align:center;font-weight:600">✓ ${STATE.solicitudQtys[sku]} UO<br><span style="font-size:9px;color:var(--t3)">en pedido</span></div>`
+      : `<button onclick="invMostrarModalPedir('${skuSafe}',${maxSug})" style="display:block;width:100%;margin-top:4px;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid var(--orange);background:rgba(196,98,29,0.15);color:var(--orange2);cursor:pointer;font-weight:600">+ Pedir ▸</button>`;
+
+    const valorFmt = valor > 0 ? '$'+Math.round(valor).toLocaleString('es-CL') : '<span style="color:var(--t3)">$0</span>';
+
+    // Sección separador
+    let secRow = '';
+    if ((f==='all'||f==='hoy') && sem !== lastSem) {
+      lastSem = sem;
+      secRow = `<tr><td colspan="6" style="padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:0.5px;background:${secBg[sem]};color:${stockColor};border-bottom:1px solid var(--border)">${secLabels[sem]||sem}</td></tr>`;
     }
 
-    const valorFmt = valor > 0 ? '$' + Math.round(valor).toLocaleString('es-CL') : '<span style="color:var(--t3)">$0</span>';
+    // Modal inline Pedir
+    const sug = maxSug > stockUTM ? Math.ceil(maxSug - Math.max(0,stockUTM)) : (maxSug > 0 ? maxSug : 1);
+    const modalPedir = inCart ? '' : `
+      <tr id="pedir-modal-${skuSafe}" style="display:none;background:rgba(196,98,29,0.06)">
+        <td colspan="6" style="padding:10px 14px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12px;font-weight:600;color:var(--t1)">${desc} · ${utm}</div>
+              <div style="font-size:11px;color:var(--t3)">${dias!==null?'Cobertura: '+dias+'d · ':''}Sugerido: ${sug} UO${descUO?' ('+descUO+')':''}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              <input type="number" id="pedir-qty-${skuSafe}" value="${sug}" min="1" step="1"
+                style="width:80px;height:38px;border-radius:6px;border:2px solid var(--orange);background:var(--bg3);color:var(--t1);font-size:16px;font-weight:700;font-family:var(--mono);text-align:center;outline:none;padding:0 4px">
+              <button onclick="invConfirmarModalPedir('${skuSafe}')"
+                style="padding:8px 16px;background:var(--orange);border:none;border-radius:7px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">✓ OK</button>
+              <button onclick="invCerrarModalPedir('${skuSafe}')"
+                style="padding:8px 12px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--t3);font-size:13px;cursor:pointer;font-family:var(--font)">✕</button>
+            </div>
+          </div>
+        </td>
+      </tr>`;
 
-    let sectionRow = '';
-    if (invFiltroActivo === 'all' && status !== lastSection) {
-      lastSection = status;
-      const sLabels = { quiebre:'Quiebre — sin stock', bajominimo:'Bajo mínimo — pedir pronto', ok:'OK — stock suficiente' };
-      const sBg     = { quiebre:'rgba(192,57,43,0.12)', bajominimo:'rgba(212,134,10,0.10)', ok:'rgba(15,110,86,0.08)' };
-      const sCol    = { quiebre:'var(--red)', bajominimo:'var(--amber)', ok:'var(--green2)' };
-      sectionRow = `<tr><td colspan="6" style="padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;background:${sBg[status]};color:${sCol[status]};border-bottom:1px solid var(--border)">${sLabels[status]}</td></tr>`;
-    }
-
-    return sectionRow + `<tr style="border-bottom:1px solid var(--border)">
+    return secRow + `<tr style="border-bottom:1px solid var(--border)">
       <td style="padding:10px">
         <div style="font-size:13px;font-weight:500;color:var(--t1)">${desc}</div>
         <div style="font-size:11px;color:var(--t3)">SKU ${sku}${min > 0 ? ' · Mín: '+min.toLocaleString('es-CL')+' '+utm : ''}</div>
       </td>
       <td style="padding:10px;text-align:right;font-size:13px;font-weight:500;color:${stockColor}">${stockUTM.toLocaleString('es-CL')} <span style="font-size:11px;font-weight:400">${utm}</span></td>
-      <td style="padding:10px;text-align:right;font-size:12px;color:${stockColor}">${stockUO > 0 || status==='quiebre' ? stockUO.toFixed(1)+' <span style="font-size:10px;color:var(--t3)">'+descUO+'</span>' : '—'}</td>
-      <td style="padding:10px;text-align:right;font-size:13px">${cobHTML}</td>
+      <td style="padding:10px;text-align:right;font-size:12px;color:${stockColor}">${stockUO > 0 || stockUTM<=0 ? stockUO.toFixed(1)+' <span style="font-size:10px;color:var(--t3)">'+descUO+'</span>' : '—'}</td>
+      <td style="padding:10px;text-align:center">${cobHTML}</td>
       <td style="padding:10px;text-align:right;font-size:12px;color:var(--t2)">${valorFmt}</td>
-      <td style="padding:10px;text-align:center">${statusBadge}</td>
-    </tr>`;
-  });
+      <td style="padding:10px;text-align:center">${badge}${pedirBtn}</td>
+    </tr>` + modalPedir;
+  }).join('');
+}
 
-  tbody.innerHTML = rows.join('');
+// Modal inline Pedir → agrega al carrito solicitud BC
+function invMostrarModalPedir(sku, maxSug) {
+  document.querySelectorAll('[id^="pedir-modal-"]').forEach(el => {
+    if (el.id !== 'pedir-modal-'+sku) el.style.display = 'none';
+  });
+  const modal = document.getElementById('pedir-modal-'+sku);
+  if (!modal) return;
+  const isOpen = modal.style.display !== 'none';
+  modal.style.display = isOpen ? 'none' : 'table-row';
+  if (!isOpen) setTimeout(() => { const inp = document.getElementById('pedir-qty-'+sku); if(inp) inp.select(); }, 50);
+}
+
+function invCerrarModalPedir(sku) {
+  const m = document.getElementById('pedir-modal-'+sku);
+  if (m) m.style.display = 'none';
+}
+
+function invConfirmarModalPedir(sku) {
+  const inp = document.getElementById('pedir-qty-'+sku);
+  const qty = inp ? parseFloat(inp.value) : 0;
+  if (!qty || qty <= 0) { showToast('Ingresa una cantidad válida','error'); return; }
+  if (!STATE.solicitudQtys[sku]) STATE.solicitudQtys[sku] = 0;
+  STATE.solicitudQtys[sku] = qty;
+  invCerrarModalPedir(sku);
+  solUpdateCarritoBar();
+  showToast('✓ Agregado al pedido BC', 'success');
+  filtrarInventario(document.getElementById('inv-search').value || '');
+}
+
+// Mantener compatibilidad con invPedir legacy
+function invPedir(sku, maxSug) { invMostrarModalPedir(sku, maxSug); }
+
+// ════════════════════════════════════════════════════════
+// REFRESH GLOBAL JL
+// ════════════════════════════════════════════════════════
+async function jlRefrescarTodo() {
+  const btn  = document.getElementById('btn-jl-refresh');
+  const icon = document.getElementById('jl-refresh-icon');
+  if (btn) btn.disabled = true;
+  if (icon) icon.style.animation = 'spin .7s linear infinite';
+
+  const [inv, rep, conf, conteo, mov, anal, bdi] = await Promise.all([
+    loadCSV(CFG.GID.inventario),
+    loadCSV(CFG.GID.reposicion),
+    loadCSV(CFG.GID.confirmacion),
+    loadCSV(CFG.GID.conteo),
+    loadCSV(CFG.GID.movimientos),
+    loadCSV(CFG.GID.analisis),
+    loadCSV(CFG.GID.bd_insumos),
+  ]);
+
+  STATE.inventario   = inv;
+  STATE.reposicion   = rep;
+  STATE.confirmacion = conf;
+  STATE.conteo       = conteo;
+  STATE.analisis     = anal;
+  STATE.bdInsumos    = bdi;
+
+  const t = document.querySelector('.nav-tab.active')?.getAttribute('onclick')?.match(/'(\w+)'/)?.[1] || 'movimientos';
+  if (t==='inventario')  renderInventario();
+  if (t==='solicitud')   renderSolicitud();
+  if (t==='recepcion')   renderRecepcion();
+  if (t==='conteo')      renderConteo();
+  if (t==='analisis')    renderAnalisis();
+  if (t==='movimientos') { initMovimientosUI(); renderMovRecientes(); }
+
+  if (btn)  btn.disabled = false;
+  if (icon) icon.style.animation = '';
+  showToast('✓ Datos actualizados', 'success');
 }
 
 // ════════════════════════════════════════════════════════
