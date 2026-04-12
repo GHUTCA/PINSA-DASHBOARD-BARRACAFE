@@ -1373,40 +1373,42 @@ async function renderDespacho() {
     const safe=g.id.replace(/[^a-zA-Z0-9]/g,'-');
     const itemsHTML = g.items.map((r,i) => {
       const sku=r['SKU']||'—', desc=r['Descripcion']||'—';
-      // UTM nel Sheet ora contiene la descUO (es: "Pack 6 un") grazie al fix JL v80
-      // Fallback: se è ancora il vecchio UTM ("Gr","CC") mostra comunque
-      const utm=r['UTM']||''; // "Pack 6 un" o "Balde 4000 gr" — la presentazione fisica
+      const utm=r['UTM']||'';
       const qSol=limpiarNum(r['Q Solicitada']||'0');
       const invRow=STATE.inventario.find(x=>String(x['SKU'])===String(sku));
-      const upcBC=invRow?(invRow['Descripocion UPC']||invRow['Descripcion UPC']||''):'';
-      // UO description da Inventario_BC — sempre la presentazione fisica corretta
-      const uoBC=invRow?(invRow['UO Descripcion Principal']||invRow['Descripcion UO']||upcBC):'';
-      const stockBC=invRow?limpiarNum(invRow['Inventario UPC']||'0'):null;
-      const stockBCpos=stockBC!==null?Math.max(0,stockBC):null;
-      const sc=stockBC===null?'var(--t3)':stockBC>0?'var(--green2)':'var(--red)';
-      const sl=stockBC===null?'—':stockBC<=0?`<span style="color:var(--red);font-weight:600">0</span>`:String(stockBC).replace('.',',');
-      const maxC=stockBCpos!==null?Math.min(qSol,stockBCpos):qSol;
-      const sinStock=stockBC!==null&&stockBC<=0;
-      // Etiqueta de unidad para el campo Enviar: siempre en UO
-      const enviarLabel = uoBC || utm || '';
+      const upcBC  = invRow?(invRow['Descripocion UPC']||invRow['Descripcion UPC']||''):'';
+      const uoBC   = invRow?(invRow['UO Descripcion Principal']||invRow['Descripcion UO']||upcBC):'';
+      const factor = invRow?Math.max(1,limpiarNum(invRow['Factor_UO_UPC']||'1')):1;
+      const stockUPC = invRow?limpiarNum(invRow['Inventario UPC']||'0'):null;
+      const stockUO  = stockUPC!==null ? Math.round(stockUPC * factor) : null;
+      const stockUOpos = stockUO!==null ? Math.max(0, stockUO) : null;
+      const sinStock = stockUO!==null && stockUO<=0;
+      const sc = stockUO===null?'var(--t3)':stockUO>0?'var(--green2)':'var(--red)';
+      const maxC = stockUOpos!==null ? Math.min(qSol, stockUOpos) : qSol;
+      // Stock display: "250 Bolsa 200gr \n (= 10 Cajas)"
+      let stockHTML;
+      if (stockUO===null) {
+        stockHTML = '<span style="color:var(--t3)">—</span>';
+      } else if (stockUO<=0) {
+        stockHTML = `<span style="color:var(--red);font-weight:600">0</span><div style="font-size:9px;color:var(--t3)">${uoBC||upcBC}</div>`;
+      } else {
+        const cajasLine = (factor>1&&stockUPC!==null) ? `<div style="font-size:9px;color:var(--t3)">(= ${stockUPC} ${upcBC})</div>` : '';
+        stockHTML = `<span style="font-size:13px;font-weight:700;color:${sc};font-family:var(--mono)">${stockUO}</span><div style="font-size:9px;color:var(--t3)">${uoBC||upcBC}</div>${cajasLine}`;
+      }
       return `<div style="display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border)">
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:500;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</div>
           <div style="font-size:11px;color:var(--t3);margin-top:2px">
             SKU ${sku}
             ${utm?`<span style="background:rgba(107,142,224,0.12);color:var(--blue2);border-radius:3px;padding:1px 6px;margin-left:4px;font-weight:600">${qSol} × ${utm}</span>`:`<span style="color:var(--t3)">${qSol}</span>`}
-            ${upcBC&&upcBC!==uoBC?`<span style="color:var(--t3);margin-left:4px">· BC: ${upcBC}</span>`:''}
           </div>
         </div>
-        <div style="text-align:right;flex-shrink:0;min-width:64px">
-          <div style="font-size:13px;font-weight:600;color:${sc};font-family:var(--mono)">${sl}</div>
-          <div style="font-size:9px;color:var(--t3)">${upcBC||'en BC'}</div>
-        </div>
+        <div style="text-align:right;flex-shrink:0;min-width:80px">${stockHTML}</div>
         ${sinStock
           ? `<div style="width:72px;height:36px;border-radius:6px;border:1px solid rgba(192,57,43,0.4);background:rgba(192,57,43,0.08);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--red);font-weight:600;flex-shrink:0">SIN STOCK</div>`
           : `<div style="flex-shrink:0;text-align:center">
-              <input type="number" id="desp-inp-${safe}-${i}" value="${maxC}" min="0" max="${stockBCpos||9999}" step="1" style="width:72px;height:36px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--t1);font-size:14px;font-weight:600;font-family:var(--mono);text-align:center;outline:none;padding:0 4px">
-              ${enviarLabel?`<div style="font-size:9px;color:var(--orange2);margin-top:2px;font-weight:600">${enviarLabel}</div>`:''}
+              <input type="number" id="desp-inp-${safe}-${i}" value="${maxC}" min="0" max="${stockUOpos||9999}" step="1" style="width:72px;height:36px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--t1);font-size:14px;font-weight:600;font-family:var(--mono);text-align:center;outline:none;padding:0 4px">
+              ${uoBC?`<div style="font-size:9px;color:var(--orange2);margin-top:2px;font-weight:600">${uoBC}</div>`:''}
             </div>`
         }
       </div>`;
