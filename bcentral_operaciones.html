@@ -757,6 +757,7 @@ const CFG = {
     proveedores: '1453971067',   // Proveedores
     oc_log:      '1913197636',   // OC_Log
     bd_insumos:  '514178276',    // BD_INSUMOS (en MAESTRO)
+    bd_insumos_bc: '1315608134', // BD_INSUMOS importado en CTRL_BC_2026 ✅
     parametros:  '1396290439',   // PARAMETROS ✅
   },
 };
@@ -774,6 +775,7 @@ const STATE = {
   bdInsumos: [],
   ocLog: [],
   parametros: [],    // PARAMETROS — tipi movimiento, destinos, locales
+  bdInsumos:  [],    // BD_INSUMOS — proveedor principal/alternativo per filtro
   conteoInputs: {},
   ocCarrito: {},
   ocSelectedSKU: null,
@@ -800,12 +802,31 @@ function bcMovOnTipoChange() {
 function bcMovBuscar(q) {
   const res = document.getElementById('bcmov-results');
   if (!q || q.length < 2) { res.innerHTML = ''; return; }
-  const items = STATE.inventario.filter(r => {
+
+  const prov = document.getElementById('bcmov-proveedor').value;
+  const tipo = document.getElementById('bcmov-tipo').value;
+  const esIngresoProv = tipo === 'Ingreso Proveedor';
+
+  let items = STATE.inventario.filter(r => {
     const desc = (r['Descripcion']||'').toLowerCase();
     const sku  = String(r['SKU']||'');
-    return desc.includes(q.toLowerCase()) || sku.startsWith(q);
+    if (!desc.includes(q.toLowerCase()) && !sku.startsWith(q)) return false;
+
+    // Filtro fornitore solo per Ingreso Proveedor e se non è SUPERMERCADO
+    if (esIngresoProv && prov && prov !== 'SUPERMERCADO') {
+      // Legge Proveedor Principal e Prov Alternativo da BD_INSUMOS
+      const bdiRow = STATE.bdInsumos.find(b => String(b['SKU']||b['_col0']||'') === String(r['SKU']||''));
+      const provP  = (bdiRow?.['Proveedor Principal']||bdiRow?.['_col5']||'').trim();
+      const provA  = (bdiRow?.['Prov Alternativo']||bdiRow?.['_col6']||'').trim();
+      if (provP !== prov && provA !== prov) return false;
+    }
+    return true;
   }).slice(0, 8);
-  if (!items.length) { res.innerHTML = `<div style="font-size:12px;color:var(--t3);padding:8px 0">Sin resultados</div>`; return; }
+
+  if (!items.length) {
+    res.innerHTML = `<div style="font-size:12px;color:var(--t3);padding:8px 0">Sin resultados${esIngresoProv&&prov&&prov!=='SUPERMERCADO'?' para '+prov:''}</div>`;
+    return;
+  }
   res.innerHTML = items.map(r => {
     const desc = r['Descripcion']||'—', sku = r['SKU']||'';
     const upc  = r['Descripocion UPC']||r['Descripcion UPC']||'';
@@ -1407,7 +1428,7 @@ async function refrescarTodo() {
   if (icon) { icon.style.display='inline-block'; icon.style.animation='spin .7s linear infinite'; }
 
   // Ricarica tutti i dati base
-  const [inv, sol, prov, mov, params] = await Promise.all([
+  const [inv, sol, prov, mov, params, bdi] = await Promise.all([
     loadCSV(CFG.GID.inventario),
     loadCSV(CFG.GID.solicitud),
     loadCSV(CFG.GID.proveedores),
@@ -2051,12 +2072,13 @@ async function init() {
   }
 
   // Cargar en parallelo — incluyendo Movimientos_BC para cobertura
-  const [inv, sol, prov, mov, params] = await Promise.all([
+  const [inv, sol, prov, mov, params, bdi] = await Promise.all([
     loadCSV(CFG.GID.inventario),
     loadCSV(CFG.GID.solicitud),
     loadCSV(CFG.GID.proveedores),
     loadCSV(CFG.GID.movimientos),
     loadCSV(CFG.GID.parametros),
+    loadCSV(CFG.GID.bd_insumos_bc),
   ]);
 
   STATE.inventario  = inv;
@@ -2064,6 +2086,7 @@ async function init() {
   STATE.proveedores = prov;
   STATE.movimientos = mov;
   STATE.parametros  = params;
+  STATE.bdInsumos   = bdi;
   provAllItems      = prov;
 
   // Calcular cobertura antes de renderizar
