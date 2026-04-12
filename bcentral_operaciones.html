@@ -1373,28 +1373,31 @@ async function renderDespacho() {
     const safe=g.id.replace(/[^a-zA-Z0-9]/g,'-');
     const itemsHTML = g.items.map((r,i) => {
       const sku=r['SKU']||'—', desc=r['Descripcion']||'—';
-      const qSol=limpiarNum(r['Q Solicitada']||'0'), utm=r['UTM']||'';
+      // UTM nel Sheet ora contiene la descUO (es: "Pack 6 un") grazie al fix JL v80
+      // Fallback: se è ancora il vecchio UTM ("Gr","CC") mostra comunque
+      const utm=r['UTM']||''; // "Pack 6 un" o "Balde 4000 gr" — la presentazione fisica
+      const qSol=limpiarNum(r['Q Solicitada']||'0');
       const invRow=STATE.inventario.find(x=>String(x['SKU'])===String(sku));
+      const upcBC=invRow?(invRow['Descripocion UPC']||invRow['Descripcion UPC']||''):'';
       const stockBC=invRow?limpiarNum(invRow['Inventario UPC']||'0'):null;
-      const upcBC=invRow?(invRow['Descripocion UPC']||invRow['Descripcion UPC']||''):'' ;
-      const stockBCpos = stockBC !== null ? Math.max(0, stockBC) : null;
-      const sc=stockBC===null?'var(--t3)':stockBC>0?'var(--green2)':stockBC===0?'var(--red)':'var(--red)';
+      const stockBCpos=stockBC!==null?Math.max(0,stockBC):null;
+      const sc=stockBC===null?'var(--t3)':stockBC>0?'var(--green2)':'var(--red)';
       const sl=stockBC===null?'—':stockBC<=0?`<span style="color:var(--red);font-weight:600">0</span>`:String(stockBC).replace('.',',');
       const maxC=stockBCpos!==null?Math.min(qSol,stockBCpos):qSol;
-      const sinStock = stockBC !== null && stockBC <= 0;
-      // Indicador de unidades diferentes
-      const unidadDistinta = utm && upcBC && utm.toLowerCase() !== upcBC.toLowerCase();
+      const sinStock=stockBC!==null&&stockBC<=0;
       return `<div style="display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border)">
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:500;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</div>
-          <div style="font-size:11px;color:var(--t3);margin-top:1px">
+          <div style="font-size:11px;color:var(--t3);margin-top:2px">
             SKU ${sku}
-            <span style="margin-left:6px;background:rgba(107,142,224,0.12);color:var(--blue2);border-radius:3px;padding:1px 5px;font-weight:600">Pide: ${qSol} ${utm}</span>
-            ${upcBC?`<span style="margin-left:4px;background:rgba(196,98,29,0.1);color:var(--orange2);border-radius:3px;padding:1px 5px">BC: ${upcBC}</span>`:''}
+            ${utm?`<span style="background:rgba(107,142,224,0.12);color:var(--blue2);border-radius:3px;padding:1px 6px;margin-left:4px;font-weight:600">${qSol} × ${utm}</span>`:`<span style="color:var(--t3)">${qSol}</span>`}
+            ${upcBC&&upcBC!==utm?`<span style="color:var(--t3);margin-left:4px">· BC: ${upcBC}</span>`:''}
           </div>
-          ${unidadDistinta?`<div style="font-size:10px;color:var(--amber);margin-top:2px">⚠️ Unidades distintas — convertir antes</div>`:''}
         </div>
-        <div style="font-size:12px;color:${sc};width:60px;text-align:right;flex-shrink:0;font-family:var(--mono);font-weight:600">${sl}<div style="font-size:9px;color:var(--t3);font-weight:400;text-align:right">${upcBC||'UPC'}</div></div>
+        <div style="text-align:right;flex-shrink:0;min-width:64px">
+          <div style="font-size:13px;font-weight:600;color:${sc};font-family:var(--mono)">${sl}</div>
+          <div style="font-size:9px;color:var(--t3)">${upcBC||'en BC'}</div>
+        </div>
         ${sinStock
           ? `<div style="width:72px;height:36px;border-radius:6px;border:1px solid rgba(192,57,43,0.4);background:rgba(192,57,43,0.08);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--red);font-weight:600;flex-shrink:0">SIN STOCK</div>`
           : `<input type="number" id="desp-inp-${safe}-${i}" value="${maxC}" min="0" max="${stockBCpos||qSol}" step="0.1" style="width:72px;height:36px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--t1);font-size:14px;font-weight:600;font-family:var(--mono);text-align:center;outline:none;padding:0 4px">`
@@ -1412,9 +1415,9 @@ async function renderDespacho() {
       </div>
       <div id="det-${safe}" class="desp-item-body">
         <div style="display:flex;gap:8px;padding:6px 14px;background:var(--bg3);border-bottom:1px solid var(--border)">
-          <div style="flex:1;font-size:10px;color:var(--t3);text-transform:uppercase">Producto · Q solicitada (UO local)</div>
-          <div style="width:60px;font-size:10px;color:var(--t3);text-transform:uppercase;text-align:right">Stock BC</div>
-          <div style="width:72px;font-size:10px;color:var(--t3);text-transform:uppercase;text-align:center">Enviar (UPC BC)</div>
+          <div style="flex:1;font-size:10px;color:var(--t3);text-transform:uppercase">Producto · Q × Presentación</div>
+          <div style="min-width:64px;font-size:10px;color:var(--t3);text-transform:uppercase;text-align:right">Stock BC</div>
+          <div style="width:72px;font-size:10px;color:var(--t3);text-transform:uppercase;text-align:center">Enviar</div>
         </div>
         ${itemsHTML}
         <div style="padding:12px 14px;background:var(--bg3);border-top:1px solid var(--border)">
