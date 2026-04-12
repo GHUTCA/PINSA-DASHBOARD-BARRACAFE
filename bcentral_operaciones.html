@@ -389,7 +389,8 @@
         <thead>
           <tr>
             <th>Producto</th>
-            <th style="text-align:right">Stock UPC</th>
+            <th>UPC / Presentación</th>
+            <th style="text-align:right">Stock</th>
             <th style="text-align:right">Mín → Máx</th>
             <th style="text-align:right">Valor $</th>
             <th style="text-align:center">Estado</th>
@@ -837,10 +838,18 @@ function renderInventario() {
   invSetFiltro('quiebre');
 }
 
+// Formatea número limpio: sin decimales si es entero, máx 1 decimal si no
+function fmtNum(n) {
+  if (n === 0) return '0';
+  if (Number.isInteger(n)) return n.toLocaleString('es-CL');
+  return n.toFixed(1).replace('.', ',');
+}
+
 function filtrarInventario(q) {
   let items = STATE.inventario.filter(r => r['SKU'] && r['SKU'] !== '');
   if (q) items = items.filter(r =>
     (r['Descripcion']||'').toLowerCase().includes(q.toLowerCase()) ||
+    (r['Descripcion UPC']||'').toLowerCase().includes(q.toLowerCase()) ||
     String(r['SKU']||'').includes(q)
   );
   if (invFiltroActivo !== 'all') items = items.filter(r => invGetStatus(r) === invFiltroActivo);
@@ -852,13 +861,14 @@ function filtrarInventario(q) {
 
   const tbody = document.getElementById('inv-tbody');
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="5"><div class="empty">Sin resultados</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6"><div class="empty">Sin resultados</div></td></tr>';
     return;
   }
 
   let lastSec = null;
   tbody.innerHTML = items.map(r => {
     const sku    = r['SKU'] || '';
+    const skuSafe = sku.replace(/'/g,"\\'");
     const desc   = r['Descripcion'] || '—';
     const upc    = r['Descripcion UPC'] || '';
     const stock  = limpiarNum(r['Inventario UPC'] || '0');
@@ -868,14 +878,52 @@ function filtrarInventario(q) {
     const status = invGetStatus(r);
     const inCart = STATE.ocCarrito[sku] !== undefined;
 
-    const ocBtn = inCart
-      ? `<span style="font-size:10px;color:var(--orange2)">✓ en OC</span>`
-      : `<button onclick="invAgregarOC('${sku}')" style="display:block;width:100%;margin-top:4px;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid var(--orange);background:rgba(196,98,29,0.15);color:var(--orange2);cursor:pointer;font-weight:600">+ OC</button>`;
+    // Stock color — negativo = color especial
+    let stockColor = 'var(--green2)';
+    if (stock < 0)  stockColor = 'var(--red)';
+    else if (status==='quiebre')    stockColor = 'var(--red)';
+    else if (status==='bajominimo') stockColor = 'var(--amber)';
 
-    let badge, stockColor;
-    if (status==='quiebre')    { badge=`<span class="status status-err">CRITICO</span>${ocBtn}`; stockColor='var(--red)'; }
-    else if (status==='bajominimo') { badge=`<span class="status status-warn">ATENCIÓN</span>${ocBtn}`; stockColor='var(--amber)'; }
-    else                       { badge=`<span class="status status-ok">OK</span>${ocBtn}`; stockColor='var(--green2)'; }
+    // Mín→Máx limpio
+    const minMax = (min>0||max>0) ? fmtNum(min)+'→'+fmtNum(max) : '—';
+
+    // Badge estado
+    let statusBadge;
+    if (stock < 0)              statusBadge = `<span class="status status-err" style="font-size:10px">NEGATIVO</span>`;
+    else if (status==='quiebre') statusBadge = `<span class="status status-err" style="font-size:10px">CRITICO</span>`;
+    else if (status==='bajominimo') statusBadge = `<span class="status status-warn" style="font-size:10px">ATENCIÓN</span>`;
+    else                         statusBadge = `<span class="status status-ok" style="font-size:10px">OK</span>`;
+
+    // Botón OC — modal inline
+    const ocBtn = inCart
+      ? `<div style="font-size:10px;color:var(--orange2);margin-top:3px;text-align:center">✓ en OC</div>`
+      : `<button onclick="invMostrarModalOC('${skuSafe}')" style="display:block;width:100%;margin-top:4px;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid var(--orange);background:rgba(196,98,29,0.15);color:var(--orange2);cursor:pointer;font-weight:600">+ OC ▸</button>`;
+
+    // Modal inline OC (oculto por defecto)
+    const sug = Math.max(1, max - Math.max(0, stock));
+    const modalOC = inCart ? '' : `
+      <tr id="oc-modal-${skuSafe}" style="display:none;background:rgba(196,98,29,0.06)">
+        <td colspan="6" style="padding:10px 14px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12px;font-weight:600;color:var(--t1)">${desc}</div>
+              <div style="font-size:11px;color:var(--t3)">${upc} · Sugerido: ${fmtNum(sug)}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              <input type="number" id="oc-qty-${skuSafe}" value="${sug > 0 ? sug : 1}" min="1" step="1"
+                style="width:80px;height:38px;border-radius:6px;border:2px solid var(--orange);background:var(--bg3);color:var(--t1);font-size:16px;font-weight:700;font-family:var(--mono);text-align:center;outline:none;padding:0 4px">
+              <button onclick="invConfirmarModalOC('${skuSafe}')"
+                style="padding:8px 16px;background:var(--orange);border:none;border-radius:7px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">
+                ✓ OK
+              </button>
+              <button onclick="invCerrarModalOC('${skuSafe}')"
+                style="padding:8px 12px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--t3);font-size:13px;cursor:pointer;font-family:var(--font)">
+                ✕
+              </button>
+            </div>
+          </div>
+        </td>
+      </tr>`;
 
     let secRow = '';
     if (invFiltroActivo === 'all' && status !== lastSec) {
@@ -883,34 +931,63 @@ function filtrarInventario(q) {
       const sl = {quiebre:'Quiebre — sin stock', bajominimo:'Bajo mínimo', ok:'OK — suficiente'};
       const sb = {quiebre:'rgba(192,57,43,0.12)', bajominimo:'rgba(212,134,10,0.10)', ok:'rgba(15,110,86,0.08)'};
       const sc = {quiebre:'var(--red)', bajominimo:'var(--amber)', ok:'var(--green2)'};
-      secRow = `<tr><td colspan="5" style="padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;background:${sb[status]};color:${sc[status]};border-bottom:1px solid var(--border)">${sl[status]}</td></tr>`;
+      secRow = `<tr><td colspan="6" style="padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;background:${sb[status]};color:${sc[status]};border-bottom:1px solid var(--border)">${sl[status]}</td></tr>`;
     }
 
     return secRow + `<tr>
-      <td><div style="font-size:13px;font-weight:500;color:var(--t1)">${desc}</div><div style="font-size:10px;color:var(--t3)">SKU ${sku}${upc?' · '+upc:''}</div></td>
-      <td style="text-align:right;font-size:13px;font-weight:500;color:${stockColor};font-family:var(--mono)">${stock.toLocaleString('es-CL')}</td>
-      <td style="text-align:right;font-size:11px;color:var(--t3);font-family:var(--mono)">${(min>0||max>0)?min+'→'+max:'—'}</td>
-      <td style="text-align:right;font-size:11px;color:var(--t2)">${valor>0?fmtCLP(valor):'<span style="color:var(--t3)">$0</span>'}</td>
-      <td style="text-align:center">${badge}</td>
-    </tr>`;
+      <td>
+        <div style="font-size:13px;font-weight:500;color:var(--t1)">${desc}</div>
+        <div style="font-size:10px;color:var(--t3)">SKU ${sku}</div>
+      </td>
+      <td style="font-size:11px;color:var(--t3);max-width:100px">${upc || '<span style="color:var(--border2)">—</span>'}</td>
+      <td style="text-align:right;font-size:13px;font-weight:600;color:${stockColor};font-family:var(--mono)">${fmtNum(stock)}</td>
+      <td style="text-align:right;font-size:11px;color:var(--t3);font-family:var(--mono);white-space:nowrap">${minMax}</td>
+      <td style="text-align:right;font-size:11px;color:var(--t2)">${valor>0?fmtCLP(valor):'<span style="color:var(--t3)">—</span>'}</td>
+      <td style="text-align:center;min-width:80px">${statusBadge}${ocBtn}</td>
+    </tr>` + modalOC;
   }).join('');
 }
 
-// Agregar desde inventario al carrito OC
-function invAgregarOC(sku) {
+// Modal inline OC
+function invMostrarModalOC(sku) {
+  // Chiudi tutti gli altri modal aperti
+  document.querySelectorAll('[id^="oc-modal-"]').forEach(el => {
+    if (el.id !== 'oc-modal-' + sku) el.style.display = 'none';
+  });
+  const modal = document.getElementById('oc-modal-' + sku);
+  if (!modal) return;
+  const isOpen = modal.style.display !== 'none';
+  modal.style.display = isOpen ? 'none' : 'table-row';
+  if (!isOpen) {
+    setTimeout(() => { const inp = document.getElementById('oc-qty-' + sku); if(inp){inp.select();} }, 50);
+  }
+}
+
+function invCerrarModalOC(sku) {
+  const modal = document.getElementById('oc-modal-' + sku);
+  if (modal) modal.style.display = 'none';
+}
+
+function invConfirmarModalOC(sku) {
+  const inp = document.getElementById('oc-qty-' + sku);
+  const qty = inp ? parseFloat(inp.value) : 0;
+  if (!qty || qty <= 0) { showToast('Ingresa una cantidad válida','error'); return; }
   const r = STATE.inventario.find(x => String(x['SKU']) === String(sku));
   if (!r) return;
   const desc  = r['Descripcion'] || '—';
   const upc   = r['Descripcion UPC'] || '';
-  const max   = limpiarNum(r['Stock Max UPC'] || '0');
-  const stock = limpiarNum(r['Inventario UPC'] || '0');
-  const sug   = Math.max(0, max - stock);
   const costo = limpiarNum(r['Costo UTM'] || r['Costo UPC'] || '0');
   const prov  = r['Proveedor'] || '';
-  STATE.ocCarrito[sku] = { desc, upc_desc: upc, qty: sug > 0 ? sug : 1, proveedor: prov, costo };
+  STATE.ocCarrito[sku] = { desc, upc_desc: upc, qty, proveedor: prov, costo };
+  invCerrarModalOC(sku);
   actualizarCarritoBar();
-  showToast('➕ ' + desc + ' agregado a OC', 'success');
+  showToast('➕ ' + desc + ' → OC', 'success');
   filtrarInventario(document.getElementById('inv-search').value || '');
+}
+
+// Agregar desde inventario al carrito OC (versión directa — fallback)
+function invAgregarOC(sku) {
+  invMostrarModalOC(sku);
 }
 
 function actualizarCarritoBar() {
