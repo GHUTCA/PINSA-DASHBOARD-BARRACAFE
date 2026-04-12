@@ -1121,10 +1121,11 @@ async function refrescarTodo() {
 
   calcularCobertura(mov);
 
-  // Badge despacho
-  const nSol = sol.filter(r=>(r['Estado']||'').trim().toUpperCase()==='SOLICITADO').length;
+  // Badge despacho — conta solicitudes uniche, non righe
+  const solPend = sol.filter(r=>(r['Estado']||'').trim().toUpperCase()==='SOLICITADO');
+  const nGrupD  = [...new Set(solPend.map(r=>r['ID Solicitud']||r['_col1']||('SOL-'+r['Fecha'])))].length;
   const bdgD = document.getElementById('badge-desp');
-  if (nSol>0) { bdgD.textContent=nSol; bdgD.style.display=''; } else bdgD.style.display='none';
+  if (nGrupD>0) { bdgD.textContent=nGrupD; bdgD.style.display=''; } else bdgD.style.display='none';
 
   // Aggiorna il tab attivo
   const t = STATE.tab;
@@ -1355,7 +1356,9 @@ async function renderDespacho() {
   });
 
   const bdg = document.getElementById('badge-desp');
-  if (pend.length) { bdg.textContent=pend.length; bdg.style.display=''; } else bdg.style.display='none';
+  // Conta solicitudes uniche (gruppi per ID), non righe prodotto
+  const nGrupos = [...new Set(pend.map(r => r['ID Solicitud']||r['_col1']||('SOL-'+r['Fecha'])))].length;
+  if (nGrupos) { bdg.textContent=nGrupos; bdg.style.display=''; } else bdg.style.display='none';
 
   if (!pend.length) { el.innerHTML=`<div class="empty" style="margin-top:10px"><div class="empty-icon">✅</div>Sin solicitudes pendientes</div>`; renderDespHistorial(rows); return; }
 
@@ -1373,13 +1376,18 @@ async function renderDespacho() {
       const qSol=limpiarNum(r['Q Solicitada']||'0'), utm=r['UTM']||'';
       const invRow=STATE.inventario.find(x=>String(x['SKU'])===String(sku));
       const stockBC=invRow?limpiarNum(invRow['Inventario UPC']||'0'):null;
-      const sc=stockBC===null?'var(--t3)':stockBC>=qSol?'var(--green2)':stockBC>0?'var(--amber)':'var(--red)';
-      const sl=stockBC===null?'—':stockBC.toLocaleString('es-CL');
-      const maxC=stockBC!==null?Math.min(qSol,stockBC):qSol;
+      const stockBCpos = stockBC !== null ? Math.max(0, stockBC) : null; // mai negativo
+      const sc=stockBC===null?'var(--t3)':stockBC>0?'var(--green2)':stockBC===0?'var(--red)':'var(--red)';
+      const sl=stockBC===null?'—':stockBC<=0?`<span style="color:var(--red);font-weight:600">0</span>`:stockBC.toLocaleString('es-CL');
+      const maxC=stockBCpos!==null?Math.min(qSol,stockBCpos):qSol;
+      const sinStock = stockBC !== null && stockBC <= 0;
       return `<div style="display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border)">
         <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</div><div style="font-size:11px;color:var(--t3)">SKU ${sku} · Sol: ${qSol} ${utm}</div></div>
         <div style="font-size:11px;color:${sc};width:56px;text-align:right;flex-shrink:0">BC: ${sl}</div>
-        <input type="number" id="desp-inp-${safe}-${i}" value="${maxC}" min="0" step="1" style="width:72px;height:36px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--t1);font-size:14px;font-weight:600;font-family:var(--mono);text-align:center;outline:none;padding:0 4px">
+        ${sinStock
+          ? `<div style="width:72px;height:36px;border-radius:6px;border:1px solid rgba(192,57,43,0.4);background:rgba(192,57,43,0.08);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--red);font-weight:600;flex-shrink:0">SIN STOCK</div>`
+          : `<input type="number" id="desp-inp-${safe}-${i}" value="${maxC}" min="0" max="${stockBCpos||qSol}" step="1" style="width:72px;height:36px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--t1);font-size:14px;font-weight:600;font-family:var(--mono);text-align:center;outline:none;padding:0 4px">`
+        }
       </div>`;
     }).join('');
     return `<div class="desp-item" style="margin-top:10px">
@@ -1705,9 +1713,10 @@ async function init() {
   renderInventario();
   renderProveedoresList(prov);
 
-  // Badge despacho
-  const nSol = sol.filter(r=>(r['Estado']||'').trim().toUpperCase()==='SOLICITADO').length;
-  if (nSol>0) { const bdg=document.getElementById('badge-desp'); bdg.textContent=nSol; bdg.style.display=''; }
+  // Badge despacho — conta solicitudes uniche, non righe
+  const solPendI = sol.filter(r=>(r['Estado']||'').trim().toUpperCase()==='SOLICITADO');
+  const nGrupI   = [...new Set(solPendI.map(r=>r['ID Solicitud']||r['_col1']||('SOL-'+r['Fecha'])))].length;
+  if (nGrupI>0) { const bdg=document.getElementById('badge-desp'); bdg.textContent=nGrupI; bdg.style.display=''; }
 
   // BD_INSUMOS se carica se TOKEN_MAESTRO disponibile
   if (CFG.TOKEN_MAESTRO) {
