@@ -406,12 +406,12 @@
               </div>
               <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
                 <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;text-align:center">
-                  <div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px">Stock UO</div>
+                  <div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px">Stock UPC</div>
                   <div style="font-size:16px;font-weight:600;color:var(--t1);font-family:var(--mono)" id="bcmov-sel-stock">—</div>
                   <div style="font-size:10px;color:var(--t3)" id="bcmov-sel-uodesc">—</div>
                 </div>
                 <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;text-align:center">
-                  <div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px">Stock UPC</div>
+                  <div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px">Stock BO</div>
                   <div style="font-size:16px;font-weight:600;color:var(--t3);font-family:var(--mono)" id="bcmov-sel-stockupc">—</div>
                   <div style="font-size:10px;color:var(--t3)" id="bcmov-sel-upcdesc">—</div>
                 </div>
@@ -876,17 +876,25 @@ function bcMovBuscar(q) {
 
 function bcMovSelect(sku, desc, upcDesc, uoDesc) {
   const invRow  = STATE.inventario.find(r => String(r['SKU']||'') === String(sku));
+  const bdiRow  = STATE.bdInsumos.find(b => String(b['SKU']||'').trim() === String(sku).trim());
   const stockUPC = invRow ? limpiarNum(invRow['Inventario UPC']||'0') : 0;
   const stockUO  = invRow ? limpiarNum(invRow['Inventario UO']||'0')  : 0;
-  bcMovSel = { sku, desc, upcDesc, uoDesc, stockUO, stockUPC };
+  // BO
+  const boActivo  = (bdiRow?.['BO Activo']||'').toString().trim().toUpperCase() === 'SI';
+  const boDesc    = (bdiRow?.['Descripcion BO']||'').trim();
+  const unidXupc  = Math.max(1, limpiarNum(bdiRow?.['Unidades por UPC']||'1'));
+  const stockBO   = boActivo ? Math.round(stockUPC * unidXupc) : null;
+  bcMovSel = { sku, desc, upcDesc, uoDesc, stockUPC, stockUO, boActivo, boDesc, stockBO, unidXupc };
   document.getElementById('bcmov-sel-desc').textContent    = desc;
   document.getElementById('bcmov-sel-sku').textContent     = sku;
   document.getElementById('bcmov-sel-upc').textContent     = upcDesc;
-  document.getElementById('bcmov-sel-stock').textContent   = stockUO;
-  document.getElementById('bcmov-sel-uodesc').textContent  = uoDesc;
-  document.getElementById('bcmov-sel-stockupc').textContent= stockUPC;
-  document.getElementById('bcmov-sel-upcdesc').textContent = upcDesc;
-  document.getElementById('bcmov-uolabel').textContent     = uoDesc || upcDesc;
+  // Stock UPC sempre, Stock BO se attivo
+  document.getElementById('bcmov-sel-stock').textContent   = stockUPC;
+  document.getElementById('bcmov-sel-uodesc').textContent  = upcDesc;
+  document.getElementById('bcmov-sel-stockupc').textContent= boActivo ? stockBO : '—';
+  document.getElementById('bcmov-sel-upcdesc').textContent = boActivo ? boDesc  : '—';
+  // Label qty: BO se attivo, UPC altrimenti
+  document.getElementById('bcmov-uolabel').textContent     = boActivo ? boDesc : upcDesc;
   document.getElementById('bcmov-search').value = desc;
   document.getElementById('bcmov-results').innerHTML = '';
   document.getElementById('bcmov-selected').style.display = 'block';
@@ -909,9 +917,11 @@ function bcMovCheckAlert() {
   const tipo = document.getElementById('bcmov-tipo').value;
   const qty  = parseFloat(document.getElementById('bcmov-qty').value)||0;
   const esSalida = ['Ajuste - menos','Merma BCentral','Salida a CocCentr'].includes(tipo);
-  if (esSalida && qty > bcMovSel.stockUO) {
+  const stockDisp = bcMovSel.boActivo ? bcMovSel.stockBO : bcMovSel.stockUPC;
+  const unidLabel = bcMovSel.boActivo ? bcMovSel.boDesc : bcMovSel.upcDesc;
+  if (esSalida && qty > stockDisp) {
     alertEl.style.display = 'block';
-    alertEl.textContent = `⚠️ Cantidad (${qty}) supera el stock disponible (${bcMovSel.stockUO} ${bcMovSel.uoDesc}). Verifica físicamente.`;
+    alertEl.textContent = `⚠️ Cantidad (${qty}) supera el stock disponible (${stockDisp} ${unidLabel}). Verifica físicamente.`;
   } else {
     alertEl.style.display = 'none';
   }
@@ -1732,15 +1742,19 @@ async function renderDespacho() {
       const utm=r['UTM']||'';
       const qSol=limpiarNum(r['Q Solicitada']||'0');
       const invRow=STATE.inventario.find(x=>String(x['SKU'])===String(sku));
-      const upcBC  = invRow?(invRow['Descripocion UPC']||invRow['Descripcion UPC']||''):'';
-      const uoBC   = (invRow?(invRow['UO Descripcion Principal']||invRow['Descripcion UO']||''):'') || utm;
-      const factor = invRow?Math.max(1,limpiarNum(invRow["Factor_UO_UPC"]||"1")):1; // UNUSED
+      const bdiRow=STATE.bdInsumos.find(b=>String(b['SKU']||'').trim()===String(sku).trim());
+      const upcBC    = invRow?(invRow['Descripocion UPC']||invRow['Descripcion UPC']||''):'';
       const stockUPC = invRow?limpiarNum(invRow['Inventario UPC']||'0'):null;
-      const stockUO  = invRow?limpiarNum(invRow["Inventario UO"]||"0"):null;
-      const stockUOpos = stockUO!==null ? Math.max(0, stockUO) : null;
-      const sinStock = stockUO!==null && stockUO<=0;
-      const sc = stockUO===null?'var(--t3)':stockUO>0?'var(--green2)':'var(--red)';
-      // max bloqueado al stock disponible en UO
+      const boActivo  = (bdiRow?.['BO Activo']||'').toString().trim().toUpperCase()==='SI';
+      const boDesc    = (bdiRow?.['Descripcion BO']||'').trim();
+      const unidXupc  = Math.max(1, limpiarNum(bdiRow?.['Unidades por UPC']||'1'));
+      const stockBO   = (boActivo && stockUPC!==null) ? Math.round(stockUPC * unidXupc) : null;
+      const stockDisp = boActivo ? stockBO : stockUPC;
+      const enviarLabel = boActivo ? boDesc : (utm||upcBC);
+      const stockLabel  = boActivo ? boDesc : upcBC;
+      const stockUOpos = stockDisp!==null ? Math.max(0, stockDisp) : null;
+      const sinStock = stockDisp!==null && stockDisp<=0;
+      const sc = stockDisp===null?'var(--t3)':stockDisp>0?'var(--green2)':'var(--red)';
       const maxEnviar = stockUOpos || 0;
       const valInp = Math.min(qSol, maxEnviar);
       const pct = maxEnviar>0 ? Math.round((valInp/maxEnviar)*100) : 0;
@@ -1751,13 +1765,12 @@ async function renderDespacho() {
             <div style="font-size:13px;font-weight:500;color:var(--t1);margin-bottom:2px">${desc}</div>
             <div style="font-size:11px;color:var(--t3);margin-bottom:6px">SKU ${sku}</div>
             <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:1px">Solicita</div>
-            <div style="font-size:12px;font-weight:500;color:var(--t2)">${qSol} · ${utm||uoBC}</div>
+            <div style="font-size:12px;font-weight:500;color:var(--t2)">${qSol} · ${utm||enviarLabel}</div>
           </div>
           <div style="text-align:center">
-            <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px">UO</div>
+            <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px">${boActivo?'BO':'UPC'}</div>
             <div style="font-size:20px;font-weight:500;color:var(--red)">0</div>
-            <div style="font-size:11px;color:var(--t3)">${uoBC}</div>
-            ${factor>1&&stockUPC!==null?`<div style="margin-top:5px;padding-top:5px;border-top:1px solid var(--border)"><div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:1px">UPC</div><div style="font-size:13px;font-weight:500;color:var(--t3)">0</div><div style="font-size:11px;color:var(--t3)">${upcBC}</div></div>`:''}
+            <div style="font-size:11px;color:var(--t3)">${stockLabel}</div>
           </div>
           <div style="text-align:center">
             <div style="border:1px solid rgba(192,57,43,0.35);background:rgba(192,57,43,0.07);border-radius:6px;padding:10px 8px;font-size:11px;font-weight:600;color:var(--red)">SIN STOCK</div>
@@ -1770,19 +1783,19 @@ async function renderDespacho() {
           <div style="font-size:13px;font-weight:500;color:var(--t1);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</div>
           <div style="font-size:11px;color:var(--t3);margin-bottom:6px">SKU ${sku}</div>
           <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:1px">Solicita</div>
-          <div style="font-size:12px;font-weight:500;color:var(--orange2)">${qSol} · ${utm||uoBC}</div>
+          <div style="font-size:12px;font-weight:500;color:var(--orange2)">${qSol} · ${utm||enviarLabel}</div>
         </div>
         <div style="text-align:center">
-          <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px">UO</div>
-          <div style="font-size:20px;font-weight:500;color:${sc}">${stockUO}</div>
-          <div style="font-size:11px;color:var(--t3)">${uoBC}</div>
-          ${factor>1&&stockUPC!==null?`<div style="margin-top:5px;padding-top:5px;border-top:1px solid var(--border)"><div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:1px">UPC</div><div style="font-size:13px;font-weight:500;color:var(--t3)">${stockUPC}</div><div style="font-size:11px;color:var(--t3)">${upcBC}</div></div>`:''}
+          <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px">${boActivo?'BO':'UPC'}</div>
+          <div style="font-size:20px;font-weight:500;color:${sc}">${stockDisp}</div>
+          <div style="font-size:11px;color:var(--t3)">${stockLabel}</div>
+          ${!boActivo&&stockUPC!==null?`<div style="margin-top:5px;padding-top:5px;border-top:1px solid var(--border)"><div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:1px">Stock</div><div style="font-size:13px;font-weight:500;color:var(--t3)">${stockUPC}</div><div style="font-size:11px;color:var(--t3)">${upcBC}</div></div>`:''}
         </div>
         <div style="text-align:center">
           <input type="number" id="desp-inp-${safe}-${i}" value="${valInp}" min="0" max="${maxEnviar}" step="1"
             oninput="despUpdateBar(this,${maxEnviar},'bar-${safe}-${i}','lbl-${safe}-${i}')"
             style="width:72px;height:38px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--t1);font-size:16px;font-weight:600;font-family:var(--mono);text-align:center;outline:none;padding:0 4px">
-          <div style="font-size:11px;color:var(--t3);margin-top:3px;margin-bottom:5px">${uoBC}</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:3px;margin-bottom:5px">${enviarLabel}</div>
           <div style="height:4px;background:var(--bg3);border-radius:2px;overflow:hidden;width:72px;margin:0 auto">
             <div id="bar-${safe}-${i}" style="height:4px;background:var(--green2);border-radius:2px;width:${pct}%;transition:width 0.15s"></div>
           </div>
