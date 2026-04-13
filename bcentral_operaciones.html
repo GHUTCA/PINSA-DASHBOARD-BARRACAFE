@@ -421,11 +421,19 @@
           </div>
         </div>
 
-        <!-- CANTIDAD en UO -->
+        <!-- CANTIDAD UPC — siempre visible -->
         <div class="field">
-          <label>Cantidad en UO — <span id="bcmov-uolabel" style="color:var(--orange2);font-weight:600">—</span></label>
-          <input type="number" id="bcmov-qty" placeholder="0" min="0" step="1" inputmode="numeric"
+          <label>Cantidad en UPC — <span id="bcmov-upc-label" style="color:var(--orange2);font-weight:600">—</span></label>
+          <input type="number" id="bcmov-qty-upc" placeholder="0" min="0" step="1" inputmode="numeric"
             style="font-family:var(--mono);font-size:22px;font-weight:700;text-align:center"
+            oninput="bcMovCheckAlert()">
+        </div>
+
+        <!-- CANTIDAD UO — visible solo si UPC ≠ UO -->
+        <div class="field" id="bcmov-uo-field" style="display:none">
+          <label>Cantidad en UO — <span id="bcmov-uo-label" style="color:var(--blue2);font-weight:600">—</span></label>
+          <input type="number" id="bcmov-qty-uo" placeholder="0" min="0" step="1" inputmode="numeric"
+            style="font-family:var(--mono);font-size:22px;font-weight:700;text-align:center;border-color:var(--blue)"
             oninput="bcMovCheckAlert()">
         </div>
 
@@ -875,34 +883,46 @@ function bcMovBuscar(q) {
 }
 
 function bcMovSelect(sku, desc, upcDesc, uoDesc) {
-  const invRow  = STATE.inventario.find(r => String(r['SKU']||'') === String(sku));
-  const bdiRow  = STATE.bdInsumos.find(b => String(b['SKU']||'').trim() === String(sku).trim());
+  const invRow   = STATE.inventario.find(r => String(r['SKU']||'') === String(sku));
+  const bdiRow   = STATE.bdInsumos.find(b => String(b['SKU']||'').trim() === String(sku).trim());
   const stockUPC = invRow ? limpiarNum(invRow['Inventario UPC']||'0') : 0;
   const stockUO  = invRow ? limpiarNum(invRow['Inventario UO']||'0')  : 0;
-  // BO
-  const boActivo  = (bdiRow?.['BO Activo']||'').toString().trim().toUpperCase() === 'SI';
-  const boDesc    = (bdiRow?.['Descripcion BO']||'').trim();
-  const _factorZ = limpiarNum(bdiRow?.['Factor BO - UTM']||'1');
-  const _factorJ = limpiarNum(bdiRow?.['Q UPC']||'1');  // UTM por UPC (col J BD_INSUMOS)
-  // stockBO = stockUPC × (factorJ / factorZ) = cuántos BO caben en el stock UPC
-  const unidXupc = _factorJ > 0 && _factorZ > 0 ? Math.round(_factorJ / _factorZ) : 1;
-  const stockBO  = boActivo ? Math.round(stockUPC * unidXupc) : null;
-  bcMovSel = { sku, desc, upcDesc, uoDesc, stockUPC, stockUO, boActivo, boDesc, stockBO, unidXupc, factorZ: _factorZ, factorJ: _factorJ };
-  document.getElementById('bcmov-sel-desc').textContent    = desc;
-  document.getElementById('bcmov-sel-sku').textContent     = sku;
-  document.getElementById('bcmov-sel-upc').textContent     = upcDesc;
-  // Stock UPC sempre, Stock BO se attivo
-  document.getElementById('bcmov-sel-stock').textContent   = stockUPC;
-  document.getElementById('bcmov-sel-uodesc').textContent  = upcDesc;
-  document.getElementById('bcmov-sel-stockupc').textContent= boActivo ? stockBO : '—';
-  document.getElementById('bcmov-sel-upcdesc').textContent = boActivo ? boDesc  : '—';
-  // Label qty: BO se attivo, UPC altrimenti
-  document.getElementById('bcmov-uolabel').textContent     = boActivo ? boDesc : upcDesc;
+
+  // UPC = UO cuando col J = col T × col I
+  // Si son distintos → mostrar campo UO separado
+  const _factorJ = limpiarNum(bdiRow?.['Q UPC']||'0');        // UTM por UPC (col J)
+  const _factorT = limpiarNum(bdiRow?.['Facor UO UTM']||bdiRow?.['Factor UO UTM']||'0'); // UTM por UO (col T)
+  const _unidI   = limpiarNum(bdiRow?.['Unidades por UPC']||'1'); // UO dentro de 1 UPC (col I)
+  const upcEqualUO = (_factorJ > 0 && _factorT > 0)
+    ? Math.abs(_factorJ - (_factorT * _unidI)) < 0.01
+    : true; // si no hay datos → asumir UPC=UO
+
+  bcMovSel = { sku, desc, upcDesc, uoDesc, stockUPC, stockUO, upcEqualUO };
+
+  // Info insumo
+  document.getElementById('bcmov-sel-desc').textContent = desc;
+  document.getElementById('bcmov-sel-sku').textContent  = sku;
+  document.getElementById('bcmov-sel-upc').textContent  = upcDesc;
+
+  // Stock — siempre UPC + UO si distinto
+  document.getElementById('bcmov-sel-stock').textContent    = stockUPC;
+  document.getElementById('bcmov-sel-uodesc').textContent   = upcDesc;
+  document.getElementById('bcmov-sel-stockupc').textContent = upcEqualUO ? '—' : stockUO;
+  document.getElementById('bcmov-sel-upcdesc').textContent  = upcEqualUO ? '—' : uoDesc;
+
+  // Labels campos cantidad
+  document.getElementById('bcmov-upc-label').textContent = upcDesc;
+  document.getElementById('bcmov-uo-label').textContent  = uoDesc;
+
+  // Mostrar campo UO solo si UPC ≠ UO
+  document.getElementById('bcmov-uo-field').style.display = upcEqualUO ? 'none' : 'block';
+
   document.getElementById('bcmov-search').value = desc;
   document.getElementById('bcmov-results').innerHTML = '';
   document.getElementById('bcmov-selected').style.display = 'block';
-  document.getElementById('bcmov-qty').value = '';
-  document.getElementById('bcmov-qty').focus();
+  document.getElementById('bcmov-qty-upc').value = '';
+  document.getElementById('bcmov-qty-uo').value  = '';
+  document.getElementById('bcmov-qty-upc').focus();
   bcMovCheckAlert();
 }
 
@@ -912,19 +932,22 @@ function bcMovClear() {
   document.getElementById('bcmov-search').value = '';
   document.getElementById('bcmov-results').innerHTML = '';
   document.getElementById('bcmov-alert').style.display = 'none';
+  document.getElementById('bcmov-qty-upc').value = '';
+  document.getElementById('bcmov-qty-uo').value  = '';
+  document.getElementById('bcmov-uo-field').style.display = 'none';
 }
 
 function bcMovCheckAlert() {
   const alertEl = document.getElementById('bcmov-alert');
   if (!bcMovSel) { alertEl.style.display='none'; return; }
-  const tipo = document.getElementById('bcmov-tipo').value;
-  const qty  = parseFloat(document.getElementById('bcmov-qty').value)||0;
+  const tipo    = document.getElementById('bcmov-tipo').value;
+  const qtyUPC  = parseFloat(document.getElementById('bcmov-qty-upc').value)||0;
+  const qtyUO   = parseFloat(document.getElementById('bcmov-qty-uo').value)||0;
   const esSalida = ['Ajuste - menos','Merma BCentral','Salida a CocCentr'].includes(tipo);
-  const stockDisp = bcMovSel.boActivo ? bcMovSel.stockBO : bcMovSel.stockUPC;
-  const unidLabel = bcMovSel.boActivo ? bcMovSel.boDesc : bcMovSel.upcDesc;
-  if (esSalida && qty > stockDisp) {
+  // Alerta solo si supera stock UPC (campo principal)
+  if (esSalida && qtyUPC > 0 && qtyUPC > bcMovSel.stockUPC) {
     alertEl.style.display = 'block';
-    alertEl.textContent = `⚠️ Cantidad (${qty}) supera el stock disponible (${stockDisp} ${unidLabel}). Verifica físicamente.`;
+    alertEl.textContent = `⚠️ Cantidad UPC (${qtyUPC}) supera el stock disponible (${bcMovSel.stockUPC} ${bcMovSel.upcDesc}). Verifica físicamente.`;
   } else {
     alertEl.style.display = 'none';
   }
@@ -932,13 +955,16 @@ function bcMovCheckAlert() {
 
 async function bcMovGuardar() {
   const tipo  = document.getElementById('bcmov-tipo').value;
-  const qty   = parseFloat(document.getElementById('bcmov-qty').value)||0;
   const notas = document.getElementById('bcmov-notas').value.trim();
   const prov  = document.getElementById('bcmov-proveedor').value;
   const costo = parseFloat(document.getElementById('bcmov-costo').value)||0;
+  const qtyUPC = parseFloat(document.getElementById('bcmov-qty-upc').value)||0;
+  const qtyUO  = parseFloat(document.getElementById('bcmov-qty-uo').value)||0;
+
   if (!tipo)     { showToast('Selecciona tipo de movimiento','error'); return; }
   if (!bcMovSel) { showToast('Selecciona un insumo','error'); return; }
-  if (!qty || qty <= 0) { showToast('Ingresa una cantidad válida','error'); return; }
+  if (qtyUPC <= 0 && qtyUO <= 0) { showToast('Ingresa al menos una cantidad','error'); return; }
+
   const EMERGENCIA = ['SUPERMERCADO','Mercado Libre','Europa Secreta'];
   if (tipo === 'Ingreso Proveedor') {
     if (!prov) { showToast('Selecciona un proveedor','error'); return; }
@@ -946,23 +972,18 @@ async function bcMovGuardar() {
     if (!costo || costo <= 0) { showToast('Ingresa el costo según boleta','error'); return; }
   }
 
-  // Si BO activo → el operador insertó en BO → convertir a UPC antes de enviar al GAS
-  // Fórmula: qtyUPC = (qty × factorZ) / factorJ
-  // Atun:          (1 × 200)  / 5000  = 0.04 UPC → col I = 0.04 × 5000 = 200gr  ✅
-  // Leche de Avena:(1 × 1000) / 12000 = 0.0833 UPC → col I = 0.0833 × 12000 = 1000cc ✅
-  const qtyUPC = bcMovSel.boActivo
-    ? parseFloat(((qty * bcMovSel.factorZ) / bcMovSel.factorJ).toFixed(4))
-    : qty;
+  // Zero conversiones — GAS recibe exactamente lo que el operador insertó
+  // GAS escribe qtyUPC en col H, qtyUO en col J
+  // Las fórmulas del foglio convierten en UTM: col I = H × col J / col K = J × col T
 
   const btn = document.getElementById('bcmov-btn');
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
 
   const res = await callGAS({
     action: 'registrarMovimientoBC',
-    tipo, qty: qtyUPC,
+    tipo, qtyUPC, qtyUO,
     sku: bcMovSel.sku, desc: bcMovSel.desc,
     uoDesc: bcMovSel.uoDesc, upcDesc: bcMovSel.upcDesc,
-    factor: bcMovSel.factor,
     proveedor: prov, costoUTM: costo,
     notas, operador: STATE.operador || '',
     fecha: today()
@@ -973,9 +994,11 @@ async function bcMovGuardar() {
   if (res && res.ok) {
     showToast('✅ Movimiento registrado', 'success');
     bcMovClear();
-    document.getElementById('bcmov-tipo').value = '';
+    document.getElementById('bcmov-tipo').value  = '';
     document.getElementById('bcmov-notas').value = '';
     document.getElementById('bcmov-costo').value = '';
+    document.getElementById('bcmov-qty-upc').value = '';
+    document.getElementById('bcmov-qty-uo').value  = '';
     bcMovOnTipoChange();
     bcMovRenderRecientes();
     // Refrescar inventario en background
