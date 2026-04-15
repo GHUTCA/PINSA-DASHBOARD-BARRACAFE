@@ -747,6 +747,26 @@ input[type="date"]::-webkit-datetime-edit-text{color:var(--t3);}
   </div>
 </div>
 
+<!-- MODAL APROBACIÓN MARGEN BAJO -->
+<div class="modal-ov" id="modal-margen-bajo">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-t" style="color:var(--red)">🚫 Margen insuficiente — Requiere aprobación</div>
+    <div style="background:var(--red-dim);border:1px solid var(--red);border-radius:7px;padding:10px 14px;margin-bottom:14px;">
+      <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:4px">Margen actual: <span id="modal-mg-valor" style="font-family:'DM Mono',monospace">—</span></div>
+      <div style="font-size:11px;color:var(--t2)">El mínimo aceptable es <strong style="color:var(--t1)"><span id="modal-mg-minimo">25</span>%</strong>. Al guardar se enviará una notificación al validador para aprobación.</div>
+    </div>
+    <div class="fg">
+      <label>Motivo de la excepción <span style="color:var(--red)">*</span></label>
+      <textarea id="modal-motivo-bloqueo" rows="3" placeholder="Ej: cliente estratégico, evento de captación, primera vez, precio acordado con gerencia..."></textarea>
+    </div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:14px">📧 Se notificará al validador. La cotización quedará guardada en estado CREADA a la espera de revisión.</div>
+    <div class="modal-act">
+      <button class="btn btn-secondary" onclick="cerrarModal('modal-margen-bajo')">Cancelar</button>
+      <button class="btn" style="background:#450A0A;color:#FCA5A5;border:1px solid var(--red)" onclick="confirmarGuardadoConExcepcion()">Guardar con excepción →</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -758,7 +778,7 @@ const CSV_URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnf
 
 let RECETAS=[],EXTRAS_BD=[],CLIENTES_BD=[],LINEAS=[];
 let CLI_SEL=null,COT_ID=null,COT_ESTADO=null,PAGO_ANTERIOR=0;
-let MARGEN_MIN_ABS=20, MARGEN_BLOQUEO=25, MARGEN_ALERTA=35, MARGEN_SUGERIDO_EXTRA=30;
+let MARGEN_MIN_ABS=40, MARGEN_BLOQUEO=30, MARGEN_ALERTA=35, MARGEN_SUGERIDO_EXTRA=50;
 let recFiltradas=[];
 
 document.addEventListener('DOMContentLoaded',async()=>{
@@ -797,10 +817,10 @@ async function cargarGAS(){
       CLIENTES_BD=d.clientes||[];
       EXTRAS_BD=(d.extras||[]).filter(e=>e.activo!=='NO');
       if(d.params){
-        MARGEN_MIN_ABS=parseFloat(d.params.margen_alerta_pct_linea||d.params.margen_alerta_pct||20);
-        MARGEN_BLOQUEO=parseFloat(d.params.margen_minimo_absoluto_pct||25);
+        MARGEN_MIN_ABS=parseFloat(d.params.margen_minimo_pct||d.params.margen_alerta_pct_linea||40);
+        MARGEN_BLOQUEO=parseFloat(d.params.margen_minimo_absoluto_pct||30);
         MARGEN_ALERTA=parseFloat(d.params.margen_alerta_absoluto_pct||35);
-        MARGEN_SUGERIDO_EXTRA=parseFloat(d.params['margen sugerido extras']||d.params.margen_sugerido_extras||30);
+        MARGEN_SUGERIDO_EXTRA=parseFloat(d.params['margen sugerido extras']||d.params.margen_sugerido_extras||50);
       }
       renderExtList();
       // Popola dropdown Creado por da params
@@ -832,10 +852,19 @@ async function cargarGcNombresCSV(){
     const txt = await r.text();
     const rows = txt.trim().split('\n').slice(1);
     let gcNames = '';
+    const params = {};
     rows.forEach(l=>{
       const cols = splitLineSimple(l);
-      if((cols[0]||'').trim().toLowerCase()==='gc_nombres') gcNames=(cols[1]||'').replace(/"/g,'').trim();
+      const key = (cols[0]||'').trim().toLowerCase().replace(/\s+/g,'_');
+      const val = (cols[1]||'').replace(/"/g,'').trim();
+      if(key) params[key] = val;
+      if(key==='gc_nombres') gcNames = val;
     });
+    // Carica margini dal CSV fallback
+    if(params.margen_minimo_pct)        MARGEN_MIN_ABS       = parseFloat(params.margen_minimo_pct)||40;
+    if(params.margen_minimo_absoluto_pct) MARGEN_BLOQUEO     = parseFloat(params.margen_minimo_absoluto_pct)||30;
+    if(params.margen_alerta_absoluto_pct) MARGEN_ALERTA      = parseFloat(params.margen_alerta_absoluto_pct)||35;
+    if(params.margen_sugerido_extras)   MARGEN_SUGERIDO_EXTRA = parseFloat(params.margen_sugerido_extras)||50;
     const gcSel = document.getElementById('creado-por');
     if(gcNames){
       gcSel.innerHTML = '<option value="">Seleccionar...</option>';
@@ -1342,7 +1371,7 @@ function onCostoExtraInput(el){
   el.value = raw ? '$'+parseInt(raw).toLocaleString('es-CL') : '';
   const c = limpiarNum(el.value);
   if(c > 0){
-    const mg = MARGEN_SUGERIDO_EXTRA || 30;
+    const mg = MARGEN_SUGERIDO_EXTRA || 50;
     const pv = Math.round(c / (1 - mg/100));
     document.getElementById('ne-pv').value = '$'+pv.toLocaleString('es-CL');
     showMgExtra(mg);
@@ -1380,7 +1409,7 @@ function setPrecioExtra(tipo) {
     document.getElementById('ne-mg-show').textContent = '0%';
     document.getElementById('ne-mg-show').style.color = 'var(--red)';
   } else if(tipo==='margen') {
-    const mg = parseFloat(MARGEN_SUGERIDO_EXTRA)||30;
+    const mg = parseFloat(MARGEN_SUGERIDO_EXTRA)||50;
     const pv = Math.round(c / (1 - mg/100));
     document.getElementById('ne-pv').value = pv;
     document.getElementById('ne-mg-input').value = mg;
@@ -1400,17 +1429,44 @@ async function guardarCotizacion(){
   LINEAS.forEach(l=>{tc+=l.q*l.costo_u;tp+=l.q*l.pv_u;});
   const mgP=tp>0?((tp-tc)/tp*100):0;
 
+  // Margine SOTTO il minimo → modal dedicato (non toast nascosto)
   if(mgP<MARGEN_BLOQUEO){
-    const motivo=document.getElementById('motivo-bloqueo').value.trim();
-    if(!motivo){showToast('Indica el motivo de la excepción para continuar','err');document.getElementById('motivo-bloqueo').focus();return;}
-  } else if(mgP<MARGEN_ALERTA){
-    const motivo=document.getElementById('motivo-alerta').value.trim();
-    if(!motivo){showToast('Indica el motivo del margen bajo para continuar','err');document.getElementById('motivo-alerta').focus();return;}
+    document.getElementById('modal-mg-valor').textContent=mgP.toFixed(1)+'%';
+    document.getElementById('modal-mg-minimo').textContent=MARGEN_BLOQUEO;
+    document.getElementById('modal-motivo-bloqueo').value='';
+    abrirModal('modal-margen-bajo');
+    return;
   }
 
+  // Margine in zona alerta → richiede motivo nel panel (già visibile)
+  if(mgP<MARGEN_ALERTA){
+    const motivo=document.getElementById('motivo-alerta').value.trim();
+    if(!motivo){
+      showToast('Indica el motivo del margen bajo para continuar','err');
+      document.getElementById('alert-alerta').classList.add('open');
+      document.getElementById('motivo-alerta').focus();
+      return;
+    }
+  }
+
+  await _ejecutarGuardado(mgP);
+}
+
+async function confirmarGuardadoConExcepcion(){
+  const motivo=document.getElementById('modal-motivo-bloqueo').value.trim();
+  if(!motivo){showToast('El motivo es obligatorio','err');document.getElementById('modal-motivo-bloqueo').focus();return;}
+  // Copia il motivo nel campo interno (usato da _ejecutarGuardado)
+  document.getElementById('motivo-bloqueo').value=motivo;
+  cerrarModal('modal-margen-bajo');
+  let tc=0,tp=0;
+  LINEAS.forEach(l=>{tc+=l.q*l.costo_u;tp+=l.q*l.pv_u;});
+  const mgP=tp>0?((tp-tc)/tp*100):0;
+  await _ejecutarGuardado(mgP);
+}
+
+async function _ejecutarGuardado(mgP){
   const btn=document.getElementById('btn-guardar');
   btn.disabled=true;btn.textContent='⏳ Guardando...';
-
   try{
     const motivo=mgP<MARGEN_BLOQUEO?document.getElementById('motivo-bloqueo').value:
                  mgP<MARGEN_ALERTA?document.getElementById('motivo-alerta').value:'';
@@ -1680,7 +1736,7 @@ function generarPDFOperativo(){
     <div class="ic" style="grid-column:1/-1"><label>Ubicación</label><p>${document.getElementById('ubicacion').value||'—'}</p></div>
   </div>
   ${lP.length?`<h3>🍽️ Productos a Preparar</h3><table><thead><tr><th>Producto</th><th>Cantidad</th></tr></thead><tbody>${lP.map(l=>`<tr><td><strong>${l.descripcion}</strong>${l.nota?`<div style="margin-top:5px;padding:4px 8px;background:#FFF9C4;border-left:3px solid #F59E0B;font-size:12px;font-weight:700;color:#92400E">📋 ${l.nota}</div>`:''}</td><td style="font-size:16px;font-weight:700">${l.q}</td></tr>`).join('')}</tbody></table>`:''}
-  ${lE.length?`<h3>🔧 Servicios Externos</h3><table><thead><tr><th>Servicio</th><th>Cantidad</th></tr></thead><tbody>${lE.map(l=>`<tr><td>${l.descripcion}</td><td>${l.q}</td></tr>`).join('')}</tbody></table>`:''}
+  ${lE.length?`<h3>🔧 Servicios Externos</h3><table><thead><tr><th>Servicio</th><th>Cantidad</th></tr></thead><tbody>${lE.map(l=>`<tr><td>${l.descripcion}${l.nota?`<div style="margin-top:5px;padding:4px 8px;background:#FFF9C4;border-left:3px solid #F59E0B;font-size:12px;font-weight:700;color:#92400E">📋 ${l.nota}</div>`:''}</td><td>${l.q}</td></tr>`).join('')}</tbody></table>`:''}
   ${document.getElementById('notas').value?`<div class="notas">⚠️ NOTAS ESPECIALES: ${document.getElementById('notas').value}</div>`:''}
   <div class="ftr">Generado ${new Date().toLocaleString('es-CL')} · Referencia: ${COT_ID}</div>
   </body></html>`;
