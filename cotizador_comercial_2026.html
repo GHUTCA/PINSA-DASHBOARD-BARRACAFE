@@ -170,7 +170,7 @@ body{background:var(--bg);color:var(--t1);font-family:'DM Sans',sans-serif;font-
 .badge-new{background:#1E293B;color:#64748B;} .badge-ok{background:var(--green-dim);color:var(--green);}
 
 /* TOAST */
-.toast{position:fixed;bottom:20px;right:20px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:10px 16px;font-size:12px;z-index:300;display:none;}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:10px 16px;font-size:12px;z-index:300;display:none;max-width:280px;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.4);}
 
 /* ── CONTACTOS ─────────────────────────────────────────────── */
 .ctt-list{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
@@ -747,6 +747,30 @@ input[type="date"]::-webkit-datetime-edit-text{color:var(--t3);}
   </div>
 </div>
 
+<!-- MODAL PV BAJO MÍNIMO -->
+<div class="modal-ov" id="modal-pv-bajo">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-t" style="color:var(--red)">🚫 Precio bajo mínimo — Requiere aprobación</div>
+    <div style="background:var(--red-dim);border:1px solid var(--red);border-radius:7px;padding:10px 14px;margin-bottom:14px;">
+      <div style="font-size:12px;color:var(--t2);margin-bottom:6px;">Producto: <strong style="color:var(--t1)" id="modal-pv-producto">—</strong></div>
+      <div style="display:flex;gap:16px;font-family:'DM Mono',monospace;font-size:13px;">
+        <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;margin-bottom:2px">PV ingresado</div><span style="color:var(--red);font-weight:600" id="modal-pv-ingresado">—</span></div>
+        <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;margin-bottom:2px">PV mínimo</div><span style="color:var(--t1)" id="modal-pv-minimo">—</span></div>
+        <div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;margin-bottom:2px">Diferencia</div><span style="color:var(--amber)" id="modal-pv-diff">—</span></div>
+      </div>
+    </div>
+    <div class="fg">
+      <label>Motivo de la excepción <span style="color:var(--red)">*</span></label>
+      <textarea id="modal-pv-motivo" rows="3" placeholder="Ej: precio acordado con cliente, evento especial, autorizado por gerencia..."></textarea>
+    </div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:14px">📧 Se notificará al validador. El precio quedará registrado pendiente de aprobación.</div>
+    <div class="modal-act">
+      <button class="btn btn-secondary" onclick="cancelarPVBajo()">Cancelar — usar mínimo</button>
+      <button class="btn" style="background:#450A0A;color:#FCA5A5;border:1px solid var(--red)" onclick="confirmarPVBajo()">Aceptar con excepción →</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL APROBACIÓN MARGEN BAJO -->
 <div class="modal-ov" id="modal-margen-bajo">
   <div class="modal" style="max-width:420px">
@@ -989,16 +1013,23 @@ function updateResumenTotals(){
   if(elTotIva) elTotIva.textContent = fmtCLP(totPV + ivaAmt);
 }
 
+let _pvBajoCtx = null; // contesto temporaneo per modal PV bajo
+
 function actualizarPV(id,val,inputEl){
   const l=LINEAS.find(x=>x.id===id);
   if(!l)return;
   const pvMin=pvMinimo(l.costo_u);
   const pvNew=parseFloat(val)||0;
-  if(pvNew<pvMin){
-    inputEl.classList.add('error');
-    inputEl.value=Math.round(pvMin);
-    l.pv_u=pvMin;
-    showToast('PV mínimo: '+fmtCLP(pvMin),'err');
+  if(pvNew>0 && pvNew<pvMin && l.tipo==='RECETA'){
+    // Salva contesto e apre modal — non blocca
+    _pvBajoCtx={id, pvNew, pvMin, inputEl, prevPV: l.pv_u};
+    document.getElementById('modal-pv-producto').textContent=l.descripcion;
+    document.getElementById('modal-pv-ingresado').textContent=fmtCLP(pvNew);
+    document.getElementById('modal-pv-minimo').textContent=fmtCLP(pvMin);
+    document.getElementById('modal-pv-diff').textContent='-'+fmtCLP(pvMin-pvNew);
+    document.getElementById('modal-pv-motivo').value='';
+    abrirModal('modal-pv-bajo');
+    return;
   }else if(pvNew<pvMin*1.1){
     inputEl.classList.remove('error');
     inputEl.classList.add('warn');
@@ -1007,10 +1038,57 @@ function actualizarPV(id,val,inputEl){
     inputEl.classList.remove('error','warn');
     l.pv_u=pvNew;
   }
-  // Aggiorna totale riga in-place senza re-render (preserva focus)
   const pvTot=document.getElementById('pvt-'+id);
   if(pvTot) pvTot.textContent=fmtCLP(l.q*l.pv_u);
   updateResumenTotals();recalc();calcBreakEven();
+}
+
+function cancelarPVBajo(){
+  // Ripristina il PV minimo e chiude
+  if(_pvBajoCtx){
+    const {id, pvMin, inputEl} = _pvBajoCtx;
+    const l=LINEAS.find(x=>x.id===id);
+    if(l){ l.pv_u=pvMin; inputEl.value=Math.round(pvMin); inputEl.classList.remove('error','warn'); }
+    const pvTot=document.getElementById('pvt-'+id);
+    if(pvTot) pvTot.textContent=fmtCLP(l.q*pvMin);
+    updateResumenTotals();recalc();calcBreakEven();
+    _pvBajoCtx=null;
+  }
+  cerrarModal('modal-pv-bajo');
+}
+
+async function confirmarPVBajo(){
+  const motivo=document.getElementById('modal-pv-motivo').value.trim();
+  if(!motivo){showToast('El motivo es obligatorio','err');document.getElementById('modal-pv-motivo').focus();return;}
+  if(!_pvBajoCtx)return;
+  const {id, pvNew, pvMin, inputEl} = _pvBajoCtx;
+  const l=LINEAS.find(x=>x.id===id);
+  if(l){
+    l.pv_u=pvNew;
+    inputEl.classList.remove('error');
+    inputEl.classList.add('warn');
+    inputEl.value=Math.round(pvNew);
+    const pvTot=document.getElementById('pvt-'+id);
+    if(pvTot) pvTot.textContent=fmtCLP(l.q*pvNew);
+    updateResumenTotals();recalc();calcBreakEven();
+    // Notifica validatore
+    try{
+      const empresa=document.getElementById('empresa-grupo').value.toLowerCase();
+      await fetch(GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({action:'enviarEmailValidador',payload:{
+          id_cot: COT_ID||'(sin guardar)',
+          empresa_grupo: document.getElementById('empresa-grupo').value,
+          cliente: CLI_SEL?.razon_social||'—',
+          tipo_evento: document.getElementById('tipo-evento').value,
+          creado_por: document.getElementById('creado-por').value||'GC',
+          total_costo:0, total_pv:0, margen_pct:'—',
+          motivo: `[PV BAJO MÍNIMO] ${l.descripcion} — PV: ${fmtCLP(pvNew)} / Mín: ${fmtCLP(pvMin)} — Motivo: ${motivo}`
+        }})});
+    }catch(e){console.warn('Email PV bajo fallida',e);}
+    showToast('⚠ PV bajo mínimo aceptado — validador notificado','err');
+  }
+  _pvBajoCtx=null;
+  cerrarModal('modal-pv-bajo');
 }
 
 function actualizarNota(id,val){
@@ -1259,10 +1337,43 @@ async function cargarCotizacion(id, readOnly){
     };
     const ec = estadoColores[cot.estado] || {bg:'var(--bg4)',color:'var(--t2)'};
     const badge = document.getElementById('cot-badge');
-    badge.textContent = COT_ID + ' · ' + (cot.estado||'?');
-    badge.style.background = ec.bg;
-    badge.style.color = ec.color;
-    badge.style.fontWeight = '600';
+
+    // Si hay validacion pendiente → muestra badge BLOQUEADA
+    const validacion = cot.validacion || '';
+    if(validacion === 'PENDIENTE'){
+      badge.textContent = COT_ID + ' · 🔒 BLOQUEADA — pendiente validación';
+      badge.style.background = 'rgba(239,68,68,0.15)';
+      badge.style.color = 'var(--red)';
+      badge.style.fontWeight = '700';
+      // Banner fijo informativo
+      const bann = document.createElement('div');
+      bann.id = 'banner-bloqueada';
+      bann.style.cssText = 'position:fixed;top:56px;left:0;right:0;background:#450A0A;border-bottom:2px solid var(--red);color:#FCA5A5;font-size:12px;font-weight:600;text-align:center;padding:8px;z-index:99;';
+      bann.innerHTML = '🔒 Cotización BLOQUEADA — excepción de precio pendiente de aprobación por el validador. No se puede adjudicar hasta recibir aprobación.';
+      document.body.appendChild(bann);
+      // Bloquea botón adjudicar
+      setTimeout(()=>{
+        const btnAdj = document.getElementById('btn-adjudicar');
+        if(btnAdj){btnAdj.disabled=true;btnAdj.style.opacity='0.3';btnAdj.style.pointerEvents='none';}
+        const btnAdjBar = document.querySelector('.btn-adjudicar-bar');
+        if(btnAdjBar){btnAdjBar.disabled=true;btnAdjBar.style.opacity='0.3';btnAdjBar.style.pointerEvents='none';}
+      },200);
+    } else if(validacion === 'APROBADA'){
+      badge.textContent = COT_ID + ' · ' + (cot.estado||'?') + ' ✅ aprobada';
+      badge.style.background = ec.bg;
+      badge.style.color = 'var(--green)';
+      badge.style.fontWeight = '600';
+    } else if(validacion === 'RECHAZADA'){
+      badge.textContent = COT_ID + ' · ❌ RECHAZADA — revisar precios';
+      badge.style.background = 'var(--red-dim)';
+      badge.style.color = 'var(--red)';
+      badge.style.fontWeight = '700';
+    } else {
+      badge.textContent = COT_ID + ' · ' + (cot.estado||'?');
+      badge.style.background = ec.bg;
+      badge.style.color = ec.color;
+      badge.style.fontWeight = '600';
+    }
 
     /* Popola form evento */
     document.getElementById('tipo-evento').value=cot.tipo_evento||'';
@@ -1422,7 +1533,14 @@ function setPrecioExtra(tipo) {
 // ── GUARDAR ────────────────────────────────────────
 async function guardarCotizacion(){
   if(!LINEAS.length){showToast('Agrega al menos un producto','err');return;}
-  if(!CLI_SEL){showToast('Selecciona o crea un cliente','err');return;}
+  if(!CLI_SEL){
+    showToast('Selecciona o crea un cliente','err');
+    const inp=document.getElementById('cli-input');
+    inp.style.borderColor='var(--red)';
+    inp.focus();
+    setTimeout(()=>inp.style.borderColor='',2500);
+    return;
+  }
   if(!document.getElementById('tipo-evento').value){showToast('Selecciona tipo de evento','err');return;}
 
   let tc=0,tp=0;
