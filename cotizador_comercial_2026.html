@@ -1,10 +1,10 @@
-document.addEventListener<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cotizador Comercial · PINSA</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23A855B5'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-weight='bold' font-size='18' fill='white'>P</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23A855B5'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-weight='bold' font-size='18' fill='white'>P</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -762,11 +762,12 @@ let MARGEN_MIN_ABS=20, MARGEN_BLOQUEO=25, MARGEN_ALERTA=35, MARGEN_SUGERIDO_EXTR
 let recFiltradas=[];
 
 document.addEventListener('DOMContentLoaded',async()=>{
+  /* Assicura che i bottoni azione siano nascosti all'avvio */
   document.getElementById('btn-adjudicar').style.display='none';
   document.getElementById('btn-perder').style.display='none';
   await Promise.all([cargarRecetas(),cargarGAS()]);
-  // cargarClientesCSV solo se GAS non ha restituito clienti
-  if(!CLIENTES_BD.length) await cargarClientesCSV();
+  await cargarClientesCSV();
+  /* Se ?id=COT-xxx carica la cotización existente */
   const urlId = new URLSearchParams(window.location.search).get('id');
   const urlMode = new URLSearchParams(window.location.search).get('mode');
   if(urlId) await cargarCotizacion(urlId, urlMode==='view');
@@ -1096,25 +1097,29 @@ function recalc(){
 }
 
 // ── CLIENTE ────────────────────────────────────────
+/* norm(): normalizza chiavi indipendentemente dalla fonte (GAS minuscolo vs CSV PascalCase) */
+function normCli(c){
+  return {
+    id_cliente: c.id_cliente || c.ID_Cliente || '',
+    razon_social: c.razon_social || c.RazonSocial || '',
+    contacto: c.contacto || c.Contacto || '',
+    email: c.email || c.Email || '',
+    telefono: c.telefono || c.Telefono || '',
+    ciudad: c.ciudad || c.Ciudad || ''
+  };
+}
 function buscarCliente(q){
   const dd=document.getElementById('cli-dd');
-  // Normalizza chiavi — supporta sia struttura GAS {id_cliente,razon_social} che CSV {ID_Cliente,RazonSocial}
-  const norm=c=>({
-    id:    c.id_cliente||c.ID_Cliente||'',
-    razon: c.razon_social||c.RazonSocial||'',
-    cont:  c.contacto||c.Contacto||'',
-    email: c.email||c.Email||'',
-    tel:   c.telefono||c.Telefono||'',
-    ciudad:c.ciudad||c.Ciudad||''
-  });
-  const todos = CLIENTES_BD.map(norm).filter(c=>c.id)
-    .sort((a,b)=>a.razon.localeCompare(b.razon,'es'));
-  // Senza testo → mostra tutti in ordine alfabetico
-  const m = (!q||q.length<1)
-    ? todos
-    : todos.filter(c=>c.razon.toLowerCase().includes(q.toLowerCase())||c.cont.toLowerCase().includes(q.toLowerCase()));
+  const todos = CLIENTES_BD.map(normCli);
+  if(!q||q.length<1){ // mostra tutti se campo vuoto o 1 char
+    dd.innerHTML=todos.sort((a,b)=>a.razon_social.localeCompare(b.razon_social))
+      .map(c=>`<div class="cli-opt" onclick="selCli('${esc(c.id_cliente)}','${esc(c.razon_social)}','${esc(c.contacto)}','${esc(c.email)}','${esc(c.telefono)}','${esc(c.ciudad)}')">${c.razon_social} <span style="color:var(--t3);font-size:10px">· ${c.contacto}</span></div>`).join('');
+    dd.style.display='block';return;
+  }
+  const f=q.toLowerCase();
+  const m=todos.filter(c=>c.razon_social.toLowerCase().includes(f)||c.contacto.toLowerCase().includes(f));
   if(!m.length){dd.style.display='none';return;}
-  dd.innerHTML=m.map(c=>`<div class="cli-opt" onclick="selCli('${esc(c.id)}','${esc(c.razon)}','${esc(c.cont)}','${esc(c.email)}','${esc(c.tel)}','${esc(c.ciudad)}')">${c.razon} <span style="color:var(--t3);font-size:10px">· ${c.cont}</span></div>`).join('');
+  dd.innerHTML=m.map(c=>`<div class="cli-opt" onclick="selCli('${esc(c.id_cliente)}','${esc(c.razon_social)}','${esc(c.contacto)}','${esc(c.email)}','${esc(c.telefono)}','${esc(c.ciudad)}')">${c.razon_social} <span style="color:var(--t3);font-size:10px">· ${c.contacto}</span></div>`).join('');
   dd.style.display='block';
 }
 
@@ -1162,8 +1167,10 @@ async function guardarNuevoCliente(){
         notas:document.getElementById('nc-notas').value}})});
     const d=await r.json();
     if(d.ok){
-      CLIENTES_BD.push({ID_Cliente:d.id,RazonSocial:razon,Contacto:contacto,Email:email});
-      selCli(d.id,razon,contacto,email,'','');
+      const tel=document.getElementById('nc-tel').value;
+      const ciudad=document.getElementById('nc-ciudad').value;
+      CLIENTES_BD.push({id_cliente:d.id,razon_social:razon,contacto,email,telefono:tel,ciudad});
+      selCli(d.id,razon,contacto,email,tel,ciudad);
       cerrarModal('modal-cliente');
       showToast('Cliente guardado: '+razon,'ok');
     }
@@ -1988,11 +1995,6 @@ function mostrarSeccionPago(estado){
   const visible = ['ADJUDICADA','REALIZADA'].includes(estado);
   const sec = document.getElementById('sec-pago');
   if(sec) sec.style.display = visible ? '' : 'none';
-  // Default fecha_pago = oggi se il campo è vuoto
-  if(visible){
-    const fp = document.getElementById('fecha-pago');
-    if(fp && !fp.value) fp.value = new Date().toISOString().slice(0,10);
-  }
 }
 async function guardarPago(){
   if(!COT_ID){ showToast('Guarda la cotización primero','err'); return; }
