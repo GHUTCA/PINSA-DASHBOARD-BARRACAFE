@@ -590,13 +590,16 @@
         </div>
         <div id="oc-carrito-list"></div>
 
-        <div class="field" style="margin-top:14px">
-          <label>Proveedor global (si no especificaste por producto)</label>
-          <select id="oc-prov-global"><option value="">— Seleccionar —</option></select>
-        </div>
-        <div class="field">
-          <label>Notas para el proveedor</label>
-          <input type="text" id="oc-notas" placeholder="Urgencia, fecha entrega...">
+        <div id="oc-monto-alert" style="display:none;padding:9px 12px;border-radius:8px;font-size:12px;margin-top:10px"></div>
+        <div class="row2" style="margin-top:10px">
+          <div class="field">
+            <label>Fecha entrega solicitada</label>
+            <input type="date" id="oc-fecha-entrega">
+          </div>
+          <div class="field">
+            <label>Notas para el proveedor</label>
+            <input type="text" id="oc-notas" placeholder="Urgencia, instrucciones...">
+          </div>
         </div>
         <button class="btn btn-primary" id="btn-emitir-oc" onclick="emitirOC()">📧 Emitir OC</button>
       </div>
@@ -1627,18 +1630,84 @@ function renderOCCarrito() {
   const card  = document.getElementById('oc-carrito-card');
   const list  = document.getElementById('oc-carrito-list');
   const nEl   = document.getElementById('oc-n-items');
-  if (!items.length) { card.style.display = 'none'; return; }
+  const alrt  = document.getElementById('oc-monto-alert');
+  if (!items.length) { card.style.display = 'none'; if(alrt) alrt.style.display='none'; return; }
   card.style.display = 'block';
-  nEl.textContent = items.length + ' producto' + (items.length>1?'s':'');
-  list.innerHTML = items.map(([sku,d]) => `
-    <div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:500;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.desc}</div>
-        <div style="font-size:11px;color:var(--t3)">SKU ${sku}${d.proveedor?' · '+d.proveedor:''}</div>
+
+  // Raggruppare per fornitore
+  const porProv = {};
+  let totalGeneral = 0;
+  items.forEach(([sku,d]) => {
+    const prov = d.proveedor || 'Sin proveedor';
+    if (!porProv[prov]) porProv[prov] = [];
+    porProv[prov].push([sku,d]);
+    totalGeneral += (d.costo||0) * d.qty;
+  });
+  const nProveedores = Object.keys(porProv).length;
+  nEl.textContent = items.length + ' producto' + (items.length>1?'s':'') + ' · ' + nProveedores + ' OC';
+
+  list.innerHTML = Object.entries(porProv).map(([prov, provItems]) => {
+    const totalProv = provItems.reduce((s,[,d]) => s+(d.costo||0)*d.qty, 0);
+    const rows = provItems.map(([sku,d]) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:500;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.desc}</div>
+          <div style="font-size:11px;color:var(--t3)">SKU ${sku}${d.upc_desc?' · '+d.upc_desc:''}</div>
+        </div>
+        <input type="number" value="${d.qty}" min="1" step="1" style="width:70px;height:36px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--t1);font-size:14px;font-weight:600;font-family:var(--mono);text-align:center;outline:none;padding:0 4px" oninput="ocUpdateQty('${sku}',this.value)">
+        <button onclick="ocEliminar('${sku}')" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer;padding:0 4px">✕</button>
+      </div>`).join('');
+    return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
+      <div style="background:var(--bg3);padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--t1)">${prov}</div>
+          <div style="font-size:10px;color:var(--t3)">${provItems.length} producto${provItems.length>1?'s':''} · OC independiente</div>
+        </div>
+        <div style="font-size:13px;font-weight:600;color:var(--orange2)">${fmtCLP(totalProv)}</div>
       </div>
-      <input type="number" value="${d.qty}" min="1" step="1" style="width:70px;height:36px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--t1);font-size:14px;font-weight:600;font-family:var(--mono);text-align:center;outline:none;padding:0 4px" oninput="ocUpdateQty('${sku}',this.value)">
-      <button onclick="ocEliminar('${sku}')" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer;padding:0 4px">✕</button>
-    </div>`).join('');
+      <div style="padding:0 12px">${rows}</div>
+    </div>`;
+  }).join('');
+
+  // Semaforo monto — legge da PARAMETROS
+  if (alrt) {
+    const montoMax = ocGetMontoMax();
+    if (totalGeneral > montoMax) {
+      alrt.style.display = 'block';
+      alrt.style.background = 'rgba(184,84,80,0.10)';
+      alrt.style.border = '1px solid var(--red)';
+      alrt.style.color = 'var(--red)';
+      alrt.innerHTML = '⚠ Total ' + fmtCLP(totalGeneral) + ' supera límite ' + fmtCLP(montoMax) + ' — requiere aprobación JO';
+    } else {
+      alrt.style.display = 'block';
+      alrt.style.background = 'rgba(90,158,122,0.10)';
+      alrt.style.border = '1px solid var(--green2)';
+      alrt.style.color = 'var(--green2)';
+      alrt.innerHTML = '✓ Total ' + fmtCLP(totalGeneral) + ' dentro del límite (' + fmtCLP(montoMax) + ')';
+    }
+  }
+
+  // Fecha entrega default: hoy + 7 días
+  const fechaEl = document.getElementById('oc-fecha-entrega');
+  if (fechaEl && !fechaEl.value) {
+    const d7 = new Date(); d7.setDate(d7.getDate()+7);
+    fechaEl.value = d7.toISOString().split('T')[0];
+  }
+}
+
+function ocGetMontoMax() {
+  // Legge monto max da PARAMETROS (CTRL_BC_2026) — riga "Monto max OC sin autorizacion"
+  if (STATE.parametros && STATE.parametros.length) {
+    const row = STATE.parametros.find(r => {
+      const tipo = (r['Tipo']||r['E']||'').toString().toLowerCase();
+      return tipo.includes('monto') && tipo.includes('autorizacion');
+    });
+    if (row) {
+      const val = limpiarNum(row['Dias']||row['Hora']||row['$']||row['D']||'0');
+      if (val > 0) return val;
+    }
+  }
+  return 500000; // fallback solo se PARAMETROS non caricato
 }
 
 function ocUpdateQty(sku,val) { const q=parseFloat(val); if(q>0&&STATE.ocCarrito[sku]) STATE.ocCarrito[sku].qty=q; }
@@ -1661,26 +1730,57 @@ function ocLimpiarCarrito() {
 async function emitirOC() {
   const items = Object.entries(STATE.ocCarrito).map(([sku,d]) => ({
     sku, desc:d.desc, upc_desc:d.upc_desc,
-    qty:d.qty, proveedor:d.proveedor || document.getElementById('oc-prov-global').value,
+    qty:d.qty, proveedor:d.proveedor,
     costo:d.costo
   }));
   if (!items.length) { showToast('Agrega productos al pedido','error'); return; }
+  const fechaEntrega = document.getElementById('oc-fecha-entrega')?.value || '';
+  const notas = document.getElementById('oc-notas')?.value || '';
+  const montoTotal = items.reduce((s,i)=>s+(i.costo||0)*i.qty,0);
+  const montoMax = ocGetMontoMax();
+  const esInfra = montoTotal > montoMax;
+
+  // Raggruppare per fornitore — una OC per fornitore
+  const porProv = {};
+  items.forEach(i => {
+    const p = i.proveedor || 'Sin proveedor';
+    if (!porProv[p]) porProv[p] = [];
+    porProv[p].push(i);
+  });
+
   const btn = document.getElementById('btn-emitir-oc');
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Emitiendo...';
-  const res = await callGAS({ action:'emitirOC', local:CFG.local, items, notas:document.getElementById('oc-notas').value, operador:SESSION?SESSION.nombre:'', fecha:today() });
+
+  const ocIds = [];
+  let allOk = true;
+  for (const [prov, provItems] of Object.entries(porProv)) {
+    const res = await callGAS({
+      action:'emitirOC', local:CFG.local,
+      items:provItems, proveedor:prov,
+      notas, fechaEntrega, esInfra,
+      montoTotal: provItems.reduce((s,i)=>s+(i.costo||0)*i.qty,0),
+      operador:SESSION?SESSION.nombre:'', fecha:today()
+    });
+    if (res && res.ok!==false) {
+      ocIds.push(res.ocId || ('OC-BC-'+today().replace(/-/g,'')+'-'+prov.toUpperCase().replace(/\s/g,'')));
+    } else {
+      allOk = false;
+      showToast('Error OC '+prov+': '+(res?.error||'sin respuesta'),'error');
+    }
+  }
+
   btn.disabled=false; btn.innerHTML='📧 Emitir OC';
-  if (res && res.ok!==false) {
-    const ocId = res.ocId || ('OC-BC-'+today().replace(/-/g,'')+'-'+String(Date.now()).slice(-3));
-    showToast('✅ OC emitida · '+ocId,'success');
+  if (allOk && ocIds.length) {
+    showToast('✅ ' + ocIds.length + ' OC emitida' + (ocIds.length>1?'s':'') + (esInfra?' · ⚠ Requiere aprobación JO':'· Pendiente aprobación JO'), 'success');
     const recEl = document.getElementById('oc-recientes-list');
     if (recEl.querySelector('.empty')) recEl.innerHTML='';
-    const div=document.createElement('div');
-    div.style.cssText='background:rgba(15,110,86,0.1);border:1px solid var(--green2);border-radius:8px;padding:12px;margin-bottom:8px';
-    div.innerHTML=`<div style="font-size:12px;font-family:var(--mono);color:var(--green2)">${ocId}</div><div style="font-size:13px;font-weight:500;color:var(--t1)">${items.length} productos · ${SESSION?SESSION.nombre:''}</div>`;
-    recEl.prepend(div);
+    ocIds.forEach(ocId => {
+      const div=document.createElement('div');
+      div.style.cssText='background:rgba(15,110,86,0.1);border:1px solid var(--green2);border-radius:8px;padding:12px;margin-bottom:8px';
+      div.innerHTML=`<div style="font-size:12px;font-family:var(--mono);color:var(--green2)">${ocId}</div><div style="font-size:13px;font-weight:500;color:var(--t1)">${SESSION?SESSION.nombre:''}</div>`;
+      recEl.prepend(div);
+    });
     ocLimpiarCarrito();
-  } else {
-    showToast('Error: '+(res?.error||'sin respuesta'),'error');
   }
 }
 
@@ -1691,47 +1791,134 @@ async function renderOCRecepcion() {
   STATE.ocLog = rows;
   const pend = rows.filter(r => {
     const est=(r['Estado']||r['OC Emitida']||'').toString().trim().toUpperCase();
-    return est==='EMITIDA'||est==='SI'||est==='PENDIENTE';
+    return est==='ENVIADA'||est==='EMITIDA'||est==='SI'||est==='PENDIENTE'||est==='APROBADA';
   });
   if (!pend.length) { el.innerHTML=`<div class="empty"><div class="empty-icon">✅</div>Sin OC pendientes de recepción</div>`; return; }
   el.innerHTML = pend.map(oc => {
-    const ocId=oc['N° OC']||oc['ID OC']||oc['OC']||'—';
-    const prov=oc['Proveedor']||'—';
-    const fecha=oc['Fecha']||'—';
-    const safe=ocId.replace(/[^a-zA-Z0-9]/g,'-');
+    const ocId  = oc['N° OC']||oc['ID OC']||oc['OC']||'—';
+    const prov  = oc['Proveedor']||'—';
+    const fecha = oc['Fecha']||'—';
+    const total = limpiarNum(oc['Total $']||oc['Total']||'0');
+    const safe  = ocId.replace(/[^a-zA-Z0-9]/g,'-');
+    // Verificar si proveedor tiene precios negociados (campo en BD_INSUMOS / Proveedores)
+    const provRow = STATE.proveedores.find(p => (p['Nickname']||p['Proveedor']||'').toLowerCase() === prov.toLowerCase());
+    const tieneNegociado = provRow ? (provRow['Precios Negociados']||'').toString().toUpperCase()==='SI' : false;
+    const precioNegLabel = tieneNegociado
+      ? '<span style="font-size:10px;background:rgba(90,158,122,0.15);color:var(--green2);border:1px solid var(--green2);border-radius:10px;padding:1px 6px;margin-left:6px">Precios negociados</span>'
+      : '<span style="font-size:10px;background:rgba(74,144,217,0.12);color:var(--blue);border:1px solid var(--blue);border-radius:10px;padding:1px 6px;margin-left:6px">Sin precio negociado</span>';
     return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
       <div onclick="ocRecepToggle('recep-${safe}')" style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
         <div>
           <div style="font-size:11px;font-family:var(--mono);color:var(--t3)">${ocId}</div>
-          <div style="font-size:13px;font-weight:500;color:var(--t1)">${prov}</div>
-          <div style="font-size:11px;color:var(--t3)">${fmtDate(fecha)}</div>
+          <div style="font-size:13px;font-weight:500;color:var(--t1)">${prov}${precioNegLabel}</div>
+          <div style="font-size:11px;color:var(--t3)">${fmtDate(fecha)} · OC: ${fmtCLP(total)}</div>
         </div>
         <span class="status status-warn">PENDIENTE</span>
       </div>
       <div id="recep-${safe}" style="display:none;border-top:1px solid var(--border);padding:12px 14px">
-        <div class="row2" style="margin-bottom:12px">
-          <div class="field"><label>Q Recibida (UPC)</label><input type="number" id="qrecib-${safe}" min="0" step="0.01" placeholder="0" style="font-family:var(--mono)"></div>
-          <div class="field"><label>Precio factura</label><input type="number" id="precio-${safe}" min="0" step="1" placeholder="0" style="font-family:var(--mono)"></div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:10px">
+          Ingresa Q recibida y precio neto por UPC según factura. El sistema detecta diferencias automáticamente.
         </div>
-        <div class="field"><label>Notas / diferencias</label><input type="text" id="nota-recep-${safe}" placeholder="Faltantes, precios..."></div>
-        <button class="btn btn-green" onclick="confirmarRecepcionOC('${ocId}','${safe}','${prov}')">✓ Confirmar Recepción</button>
+        <div class="row2" style="margin-bottom:8px">
+          <div class="field">
+            <label>Q recibida (UPC)</label>
+            <input type="number" id="qrecib-${safe}" min="0" step="1" placeholder="0" style="font-family:var(--mono)" oninput="ocRecepActualizar('${safe}',${tieneNegociado},${total})">
+          </div>
+          <div class="field">
+            <label>Q ordenada (OC)</label>
+            <input type="number" id="qord-${safe}" value="${limpiarNum(oc['N° Items']||'0')}" readonly style="font-family:var(--mono);opacity:0.5">
+          </div>
+        </div>
+        <div class="row2" style="margin-bottom:8px">
+          <div class="field">
+            <label>Precio neto factura (por UPC)</label>
+            <input type="number" id="precio-${safe}" min="0" step="1" placeholder="0" style="font-family:var(--mono)" oninput="ocRecepActualizar('${safe}',${tieneNegociado},${total})">
+          </div>
+          <div class="field">
+            <label>Precio OC (por UPC)</label>
+            <input type="number" id="preciooc-${safe}" value="${total}" readonly style="font-family:var(--mono);opacity:0.5">
+          </div>
+        </div>
+        <div id="recep-alert-${safe}" style="display:none;padding:9px 12px;border-radius:8px;font-size:12px;margin-bottom:8px"></div>
+        <div id="recep-total-${safe}" style="display:none;background:var(--bg3);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--t2)"></div>
+        <div class="field"><label>Notas / diferencias</label><input type="text" id="nota-recep-${safe}" placeholder="Faltantes, precios, motivo diferencia..."></div>
+        <button class="btn btn-green" onclick="confirmarRecepcionOC('${ocId}','${safe}','${prov}',${tieneNegociado})">✓ Confirmar Recepción</button>
       </div>
     </div>`;
   }).join('');
 }
 
+function ocRecepActualizar(safe, tieneNegociado, totalOC) {
+  const qRecib  = parseFloat(document.getElementById('qrecib-'+safe)?.value||'0')||0;
+  const precio  = parseFloat(document.getElementById('precio-'+safe)?.value||'0')||0;
+  const precioOC= parseFloat(document.getElementById('preciooc-'+safe)?.value||'0')||0;
+  const alertEl = document.getElementById('recep-alert-'+safe);
+  const totEl   = document.getElementById('recep-total-'+safe);
+  if (!alertEl) return;
+
+  const msgs = [];
+  // Confronto prezzo
+  if (precio > 0 && precioOC > 0) {
+    const diff = Math.abs(precio - precioOC);
+    const pct  = precioOC > 0 ? diff/precioOC : 0;
+    if (pct > 0.001) {
+      if (tieneNegociado) {
+        msgs.push({t:'error', m:'Precio factura ' + fmtCLP(precio) + ' ≠ precio negociado ' + fmtCLP(precioOC) + ' → se generará Nota de Crédito'});
+      } else {
+        msgs.push({t:'warn', m:'Precio factura ' + fmtCLP(precio) + ' distinto al último precio. Se actualizará BD_INSUMOS.'});
+      }
+    } else {
+      msgs.push({t:'ok', m:'Precio OK · coincide con OC'});
+    }
+  }
+
+  // Confronto totali
+  if (precio > 0 && qRecib > 0) {
+    const totFact = precio * qRecib;
+    const delta = totFact - totalOC;
+    if (totEl) {
+      totEl.style.display = 'block';
+      totEl.innerHTML = 'Total OC: <strong>' + fmtCLP(totalOC) + '</strong> &nbsp;·&nbsp; Total factura: <strong>' + fmtCLP(totFact) + '</strong> &nbsp;·&nbsp; Diferencia: <strong style="color:' + (delta < 0 ? 'var(--green2)' : delta > 0 ? 'var(--red)' : 'var(--t1)') + '">' + (delta >= 0 ? '+' : '') + fmtCLP(delta) + '</strong>';
+    }
+  }
+
+  if (!msgs.length) { alertEl.style.display='none'; return; }
+  alertEl.style.display = 'block';
+  const last = msgs[msgs.length-1];
+  if (last.t==='error') { alertEl.style.background='rgba(184,84,80,0.1)'; alertEl.style.border='1px solid var(--red)'; alertEl.style.color='var(--red)'; }
+  else if (last.t==='warn') { alertEl.style.background='rgba(200,137,58,0.1)'; alertEl.style.border='1px solid var(--yellow)'; alertEl.style.color='var(--yellow)'; }
+  else { alertEl.style.background='rgba(90,158,122,0.1)'; alertEl.style.border='1px solid var(--green2)'; alertEl.style.color='var(--green2)'; }
+  alertEl.innerHTML = msgs.map(m=>m.m).join('<br>');
+}
+
 function ocRecepToggle(id) { const el=document.getElementById(id); if(el) el.style.display=el.style.display==='none'?'block':'none'; }
 
-async function confirmarRecepcionOC(ocId, safe, prov) {
-  const qRecib = parseFloat(document.getElementById('qrecib-'+safe)?.value||'0');
-  const precio = parseFloat(document.getElementById('precio-'+safe)?.value||'0');
-  const nota   = document.getElementById('nota-recep-'+safe)?.value||'';
-  const btn    = document.querySelector(`#recep-${safe} .btn-green`);
+async function confirmarRecepcionOC(ocId, safe, prov, tieneNegociado) {
+  const qRecib  = parseFloat(document.getElementById('qrecib-'+safe)?.value||'0');
+  const precio  = parseFloat(document.getElementById('precio-'+safe)?.value||'0');
+  const precioOC= parseFloat(document.getElementById('preciooc-'+safe)?.value||'0');
+  const nota    = document.getElementById('nota-recep-'+safe)?.value||'';
+  if (!qRecib || qRecib <= 0) { showToast('Ingresa la Q recibida','error'); return; }
+  const btn = document.querySelector(`#recep-${safe} .btn-green`);
   if (btn) { btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Registrando...'; }
-  const res = await callGAS({ action:'recibirOC', local:CFG.local, ocId, proveedor:prov, qRecibida:qRecib, precio, notas:nota, operador:SESSION?SESSION.nombre:'', fecha:today(), hasDiff:nota.length>0 });
+  // Determinar accion de precio
+  let precioAccion = 'sin_cambio';
+  if (precio > 0 && precioOC > 0 && Math.abs(precio-precioOC)/precioOC > 0.001) {
+    precioAccion = tieneNegociado ? 'nc' : 'actualizar_bd';
+  }
+  const res = await callGAS({
+    action:'recibirOC', local:CFG.local, ocId, proveedor:prov,
+    qRecibida:qRecib, precioFactura:precio, precioOC,
+    precioAccion, tieneNegociado,
+    notas:nota, operador:SESSION?SESSION.nombre:'', fecha:today(),
+    hasDiff: nota.length>0 || qRecib !== parseFloat(document.getElementById('qord-'+safe)?.value||'0')
+  });
   if (btn) { btn.disabled=false; btn.innerHTML='✓ Confirmar Recepción'; }
   if (res && res.ok!==false) {
-    showToast(nota?'✅ Recibido · ⚠️ Diferencia registrada':'✅ Recepción confirmada','success');
+    let msg = '✅ Recepción confirmada';
+    if (precioAccion==='nc') msg += ' · NC generada';
+    if (precioAccion==='actualizar_bd') msg += ' · Precio BD actualizado';
+    showToast(msg, 'success');
     renderOCRecepcion();
   } else {
     showToast('Error: '+(res?.error||'sin respuesta'),'error');
