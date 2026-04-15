@@ -126,6 +126,9 @@ header{position:sticky;top:0;z-index:100;background:rgba(15,15,15,0.97);backdrop
 .tag.ADJUDICADA{color:var(--e-adjudicada);background:var(--e-adjudicada-bg);border:1px solid rgba(90,158,122,.2)}
 .tag.REALIZADA{color:#6BAEE0;background:rgba(74,111,165,0.12);border:1px solid rgba(74,111,165,0.25)}
 .tag.PERDIDA{color:var(--e-perdida);background:var(--e-perdida-bg);border:1px solid rgba(184,84,80,.2)}
+.tag.BLOQUEADA{color:#FCA5A5;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);font-weight:700}
+.tag.APROBADA{color:#86EFAC;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.3)}
+.tag.RECHAZADA{color:#FCA5A5;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3)}
 
 /* Semáforo margine inline */
 .margen-pill{display:inline-flex;align-items:center;gap:4px;font-family:'DM Mono',monospace;font-size:11px;padding:2px 8px;border-radius:4px;font-weight:500}
@@ -420,16 +423,7 @@ async function loadData(){
     const cliMap = buildClienteMap(txtCli);
 
     /* Construir cotizaciones */
-    const rows = [];
-let cur='',inQ=false;
-for(let i=0;i<txtCot.length;i++){
-  const c=txtCot[i];
-  if(c==='"'){if(inQ&&txtCot[i+1]==='"'){cur+='"';i++;}else inQ=!inQ;cur+=c;}
-  else if((c==='\n'||c==='\r')&&!inQ){if(cur.trim())rows.push(splitLine(cur));cur='';}
-  else cur+=c;
-}
-if(cur.trim())rows.push(splitLine(cur));
-rows.shift();
+    const rows = txtCot.trim().split('\n').slice(1).map(l=>splitLine(l));
     rawData = buildFromCSV(rows, cliMap);
 
     renderAll();
@@ -499,6 +493,7 @@ function buildFromCSV(rows, cliMap){
     estado_pago:    (r[23]||'').toUpperCase().trim()||'NO_PAGADO',
     monto_pagado:   parseNum(r[24]),
     fecha_pago:     r[25]||'',
+    validacion:     (r[26]||'').toUpperCase().trim(),
     /* enriquece nombre cliente desde mapa CLIENTES */
     cliente_nombre: cliMap[r[2]||''] || r[2] || '—'
   })).filter(c=>c.id);
@@ -699,7 +694,7 @@ function renderActivas(cots){
           <div class="cliente-name">${esc(c.cliente_nombre||c.id_cliente)}</div>
           <div class="evento-tipo">${esc(c.tipo_evento)}${c.ubicacion?' · '+esc(c.ubicacion):''}</div>
         </td>
-        <td><span class="tag ${c.estado}">${c.estado}</span></td>
+        <td><span class="tag ${c.estado}">${c.estado}</span>${c.validacion==="PENDIENTE"?`<span class="tag BLOQUEADA" style="margin-left:4px;display:block;margin-top:3px">🔒 BLOQUEADA</span>`:c.validacion==="APROBADA"?`<span class="tag APROBADA" style="margin-left:4px;display:block;margin-top:3px">✅ aprobada</span>`:c.validacion==="RECHAZADA"?`<span class="tag RECHAZADA" style="margin-left:4px;display:block;margin-top:3px">❌ rechazada</span>`:""}</td>
         <td class="mono">${fe}</td>
         <td class="mono" style="color:var(--t1)">${fmtCLP(c.total_pv)}</td>
         <td><span class="margen-pill ${mgClass}">${mg.toFixed(1)}%</span></td>
@@ -903,7 +898,7 @@ function renderPagosPendientes(cots){
           <div class="cliente-name">${esc(c.cliente_nombre||c.id_cliente)}</div>
           <div class="evento-tipo">${esc(c.tipo_evento)}${c.ubicacion?' · '+esc(c.ubicacion):''}</div>
         </td>
-        <td><span class="tag ${c.estado}">${c.estado}</span></td>
+        <td><span class="tag ${c.estado}">${c.estado}</span>${c.validacion==="PENDIENTE"?`<span class="tag BLOQUEADA" style="display:block;margin-top:3px">🔒 BLOQUEADA</span>`:c.validacion==="APROBADA"?`<span class="tag APROBADA" style="display:block;margin-top:3px">✅ aprobada</span>`:c.validacion==="RECHAZADA"?`<span class="tag RECHAZADA" style="display:block;margin-top:3px">❌ rechazada</span>`:""}</td>
         <td class="mono">${formatFecha(c.fecha_evento)}</td>
         <td class="mono" style="color:var(--t1)">${fmtCLP(c.total_pv)}</td>
         <td class="mono" style="color:var(--green)">${esParc?fmtCLP(c.monto_pagado||0):'$0'}</td>
@@ -941,11 +936,7 @@ function renderPagosPendientes(cots){
 function renderHistorial(cots){
   const hist = cots
     .filter(c=>['ADJUDICADA','REALIZADA','PERDIDA'].includes(c.estado))
-    .sort((a,b)=>{
-  const da = parseDate(b.fecha_pago)||parseDate(b.fecha_cre)||0;
-  const db = parseDate(a.fecha_pago)||parseDate(a.fecha_cre)||0;
-  return da-db;
-})
+    .sort((a,b)=>(parseDate(b.fecha_cre)||0)-(parseDate(a.fecha_cre)||0));
 
   if(!hist.length){
     document.getElementById('historial-wrap').innerHTML =
@@ -977,7 +968,7 @@ function renderHistorial(cots){
           <div class="cliente-name">${esc(c.cliente_nombre||c.id_cliente)}</div>
           <div class="evento-tipo">${esc(c.tipo_evento)}${c.ubicacion?' · '+esc(c.ubicacion):''}</div>
         </td>
-        <td><span class="tag ${c.estado}">${c.estado}</span></td>
+        <td><span class="tag ${c.estado}">${c.estado}</span>${c.validacion==="PENDIENTE"?`<span class="tag BLOQUEADA" style="display:block;margin-top:3px">🔒 BLOQUEADA</span>`:c.validacion==="APROBADA"?`<span class="tag APROBADA" style="display:block;margin-top:3px">✅ aprobada</span>`:c.validacion==="RECHAZADA"?`<span class="tag RECHAZADA" style="display:block;margin-top:3px">❌ rechazada</span>`:""}</td>
         <td class="mono">${fe}</td>
         <td class="mono" style="color:var(--t1)">${fmtCLP(c.total_pv)}</td>
         <td>${esAdj?`<span class="margen-pill ${mgClass}">${mg.toFixed(1)}%</span>`:`<span style="font-size:11px;color:var(--t3)">${esc(c.motivo_perd||'—')}</span>`}</td>
