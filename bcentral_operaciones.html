@@ -1840,8 +1840,11 @@ async function renderOCRecepcion() {
   el.innerHTML='<div class="loading-card"><div class="spinner"></div></div>';
   const rows = await loadCSV(CFG.GID.oc_log);
   STATE.ocLog = rows;
+  const confirmed = STATE.ocConfirmadas || new Set();
   const pend = rows.filter(r => {
     const est=(r['Estado']||r['OC Emitida']||'').toString().trim().toUpperCase();
+    const ocId = (r['N° OC']||r['ID OC']||r['OC']||'').toString().trim();
+    if (confirmed.has(ocId)) return false;
     return est==='ENVIADA'||est==='EMITIDA'||est==='SI'||est==='PENDIENTE'||est==='APROBADA'||est==='APROBADO';
   });
   if (!pend.length) { el.innerHTML=`<div class="empty"><div class="empty-icon">✅</div>Sin OC pendientes de recepción</div>`; return; }
@@ -1958,16 +1961,17 @@ async function confirmarRecepcionOC(ocId, safe, prov, tieneNegociado) {
     if (precioAccion==='nc') msg+=' · NC generada';
     if (precioAccion==='actualizar_bd') msg+=' · Precio BD actualizado';
     showToast(msg,'success');
-    // Eliminar la card localmente de inmediato — evita que reaparezca por caché CSV
+    // Marcar OC como confirmada en STATE para filtrarla en reloads
+    STATE.ocConfirmadas = STATE.ocConfirmadas || new Set();
+    STATE.ocConfirmadas.add(ocId);
+    // Eliminar card localmente
     const card = document.getElementById('oc-card-'+safe);
     if (card) card.remove();
-    // Verificar si quedan OCs pendientes
+    // Si no quedan cards mostrar empty state
     const lista = document.getElementById('oc-recep-list');
     if (lista && !lista.querySelector('[id^="oc-card-"]')) {
       lista.innerHTML=`<div class="empty"><div class="empty-icon">✅</div>Sin OC pendientes de recepción</div>`;
     }
-    // Reload en background para sincronizar
-    setTimeout(()=>{ STATE.ocLog=[]; renderOCRecepcion(); }, 2000);
   } else {
     showToast('Error: '+(res?.error||'sin respuesta'),'error');
   }
