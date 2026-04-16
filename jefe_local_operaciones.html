@@ -2777,40 +2777,42 @@ async function confirmarEntrega(idEntrega, idSafe, qEsperadas) {
   const nota      = document.getElementById('nota-' + idSafe)?.value || '';
   const operador  = (typeof SESSION !== 'undefined' && SESSION) ? SESSION.nombre : '';
 
-  // Deshabilita botón
   const btn = document.querySelector(`[onclick*="confirmarEntrega('${idEntrega}'"]`);
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Confirmando...'; }
 
-  // Llama GAS para cada producto
-  let errores = 0;
-  for (const it of items) {
-    const res = await callGAS({
-      action:    'confirmarRecepcion',
-      local:     CFG.local,
-      idEntrega: it.idEntrega,
-      sku:       it.sku,
-      desc:      it.desc,
-      qEsperada: it.qEsperada,
-      qRecibida: it.qRecibida,
-      notas:     nota,
-      operador:  operador
+  const res = await callGAS({
+    action:    'confirmarRecepcion',
+    local:     CFG.local,
+    idEntrega: idEntrega,
+    items:     items,
+    notas:     nota,
+    operador:  operador
+  });
+
+  if (btn) { btn.disabled = false; btn.innerHTML = 'Confirmar recepción'; }
+
+  if (res && res.ok) {
+    const conDif = res.diferencias > 0;
+    showToast(
+      conDif
+        ? '⚠️ ' + res.diferencias + ' diferencia(s) — BC notificado'
+        : '✅ Recepción confirmada · ' + res.itemsOk + ' productos OK',
+      conDif ? '' : 'success'
+    );
+    // Actualiza STATE local para que UI refleje confirmación
+    STATE.confirmacion = STATE.confirmacion.map(r => {
+      if (r['ID Entrega'] !== idEntrega) return r;
+      const match = items.find(it => String(it.sku) === String(r['SKU']||''));
+      if (!match) return r;
+      const delta = (parseFloat(match.qEsperada)||0) - (parseFloat(match.qRecibida)||0);
+      return Object.assign({}, r, {
+        'Q Recibida UPC': String(match.qRecibida),
+        'Estado': Math.abs(delta) < 0.01 ? 'RECIBIDO' : 'DIFERENCIA'
+      });
     });
-    if (!res || !res.ok) errores++;
-    else {
-      // Actualiza STATE local
-      STATE.confirmacion = STATE.confirmacion.map(r =>
-        (r['ID Entrega'] === it.idEntrega && String(r['SKU']) === String(it.sku))
-          ? {...r, 'Q Recibida UPC': String(it.qRecibida)}
-          : r
-      );
-    }
-  }
-
-  if (errores === 0) {
-    const conDif = items.some(it => Math.abs(it.qRecibida - it.qEsperada) > 0.01);
-    showToast(conDif ? '⚠️ Diferencias registradas — BC será notificado' : '✅ Recepción confirmada', conDif ? '' : 'success');
+    renderRecepcion();
   } else {
-    showToast('Error en ' + errores + ' productos — reintenta', 'error');
+    showToast('Error: ' + (res?.error || 'sin respuesta'), 'error');
   }
 
   renderRecepcion();
