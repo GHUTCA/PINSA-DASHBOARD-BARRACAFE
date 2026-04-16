@@ -1859,7 +1859,7 @@ async function renderOCRecepcion() {
     const negLabel = tieneNegociado
       ? `<span style="font-size:10px;background:rgba(90,158,122,0.15);color:var(--green2);border:1px solid var(--green2);border-radius:10px;padding:1px 6px;margin-left:6px">Precios negociados</span>`
       : `<span style="font-size:10px;background:rgba(74,144,217,0.12);color:var(--blue);border:1px solid var(--blue);border-radius:10px;padding:1px 6px;margin-left:6px">Sin precio negociado</span>`;
-    return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
+    return `<div id="oc-card-${safe}" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
       <div onclick="ocRecepToggle('recep-${safe}')" style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
         <div>
           <div style="font-size:11px;font-family:var(--mono);color:var(--t3)">${ocId}</div>
@@ -1879,10 +1879,10 @@ async function renderOCRecepcion() {
         </div>
         <div class="row2" style="margin-bottom:8px">
           <div class="field"><label>Precio neto factura (por UPC)</label>
-            <input type="number" id="precio-${safe}" min="0" step="1" placeholder="0" style="font-family:var(--mono)" oninput="ocRecepActualizar('${safe}',${tieneNegociado},${total})">
+            <input type="text" inputmode="numeric" id="precio-${safe}" placeholder="$0" style="font-family:var(--mono)" oninput="ocRecepFmtPrecio(this);ocRecepActualizar('${safe}',${tieneNegociado},${total})">
           </div>
           <div class="field"><label>Precio OC (por UPC)</label>
-            <input type="number" id="preciooc-${safe}" value="${total}" readonly style="font-family:var(--mono);opacity:0.5">
+            <input type="text" inputmode="numeric" id="preciooc-${safe}" value="${fmtCLP(total)}" readonly style="font-family:var(--mono);opacity:0.5">
           </div>
         </div>
         <div id="recep-alert-${safe}" style="display:none;padding:9px 12px;border-radius:8px;font-size:12px;margin-bottom:8px"></div>
@@ -1896,10 +1896,15 @@ async function renderOCRecepcion() {
   }).join('');
 }
 
+function ocRecepFmtPrecio(el) {
+  const raw = limpiarNum(el.value);
+  if (raw > 0) el.value = fmtCLP(raw);
+}
+
 function ocRecepActualizar(safe, tieneNegociado, totalOC) {
   const qRecib   = parseFloat(document.getElementById('qrecib-'+safe)?.value||'0')||0;
-  const precio   = parseFloat(document.getElementById('precio-'+safe)?.value||'0')||0;
-  const precioOC = parseFloat(document.getElementById('preciooc-'+safe)?.value||'0')||0;
+  const precio   = limpiarNum(document.getElementById('precio-'+safe)?.value||'0');
+  const precioOC = limpiarNum(document.getElementById('preciooc-'+safe)?.value||'0');
   const alertEl  = document.getElementById('recep-alert-'+safe);
   const totEl    = document.getElementById('recep-total-'+safe);
   if (!alertEl) return;
@@ -1930,8 +1935,8 @@ function ocRecepActualizar(safe, tieneNegociado, totalOC) {
 
 async function confirmarRecepcionOC(ocId, safe, prov, tieneNegociado) {
   const qRecib   = parseFloat(document.getElementById('qrecib-'+safe)?.value||'0');
-  const precio   = parseFloat(document.getElementById('precio-'+safe)?.value||'0');
-  const precioOC = parseFloat(document.getElementById('preciooc-'+safe)?.value||'0');
+  const precio   = limpiarNum(document.getElementById('precio-'+safe)?.value||'0');
+  const precioOC = limpiarNum(document.getElementById('preciooc-'+safe)?.value||'0');
   const nota     = document.getElementById('nota-recep-'+safe)?.value||'';
   if (!qRecib || qRecib <= 0) { showToast('Ingresa la Q recibida','error'); return; }
   let precioAccion = 'sin_cambio';
@@ -1953,7 +1958,16 @@ async function confirmarRecepcionOC(ocId, safe, prov, tieneNegociado) {
     if (precioAccion==='nc') msg+=' · NC generada';
     if (precioAccion==='actualizar_bd') msg+=' · Precio BD actualizado';
     showToast(msg,'success');
-    renderOCRecepcion();
+    // Eliminar la card localmente de inmediato — evita que reaparezca por caché CSV
+    const card = document.getElementById('oc-card-'+safe);
+    if (card) card.remove();
+    // Verificar si quedan OCs pendientes
+    const lista = document.getElementById('oc-recep-list');
+    if (lista && !lista.querySelector('[id^="oc-card-"]')) {
+      lista.innerHTML=`<div class="empty"><div class="empty-icon">✅</div>Sin OC pendientes de recepción</div>`;
+    }
+    // Reload en background para sincronizar
+    setTimeout(()=>{ STATE.ocLog=[]; renderOCRecepcion(); }, 2000);
   } else {
     showToast('Error: '+(res?.error||'sin respuesta'),'error');
   }
