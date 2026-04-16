@@ -641,6 +641,13 @@
       <div class="loading-card" style="margin-top:10px"><div class="spinner"></div></div>
     </div>
 
+    <div style="margin-top:16px" id="desp-dif-section" style="display:none">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;color:var(--red);margin-bottom:8px">
+        ⚠️ Diferencias pendientes <span id="desp-dif-badge" style="background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;margin-left:4px"></span>
+      </div>
+      <div id="desp-dif-list"></div>
+    </div>
+
     <div style="margin-top:16px">
       <div style="font-size:11px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;color:var(--t3);margin-bottom:8px">Enviados recientes</div>
       <div id="desp-hist-list"></div>
@@ -2138,14 +2145,112 @@ function despToggle(id) {
 function renderDespHistorial(rows) {
   const env = rows.filter(r=>(r['Estado']||'').trim().toUpperCase()==='ENVIADO').slice(-10).reverse();
   const histEl = document.getElementById('desp-hist-list');
-  if (!env.length) { histEl.innerHTML=`<div class="empty" style="padding:16px"><div class="empty-icon">📦</div>Sin envíos recientes</div>`; return; }
-  const g2={};
-  env.forEach(r=>{const id=r['ID Solicitud']||r['Fecha']; if(!g2[id]) g2[id]={id,local:r['Local']||'',fecha:r['Fecha']||'',n:0}; g2[id].n++;});
-  histEl.innerHTML=Object.values(g2).map(g=>`
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-      <div><div style="font-size:13px;font-weight:500;color:var(--t1)">${g.local} · ${g.n} productos</div><div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${g.id} · ${fmtDate(g.fecha)}</div></div>
-      <span class="status status-ok">ENVIADO</span>
-    </div>`).join('');
+  if (!env.length) { histEl.innerHTML=`<div class="empty" style="padding:16px"><div class="empty-icon">📦</div>Sin envíos recientes</div>`; }
+  else {
+    const g2={};
+    env.forEach(r=>{const id=r['ID Solicitud']||r['Fecha']; if(!g2[id]) g2[id]={id,local:r['Local']||'',fecha:r['Fecha']||'',n:0}; g2[id].n++;});
+    histEl.innerHTML=Object.values(g2).map(g=>`
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+        <div><div style="font-size:13px;font-weight:500;color:var(--t1)">${g.local} · ${g.n} productos</div><div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${g.id} · ${fmtDate(g.fecha)}</div></div>
+        <span class="status status-ok">ENVIADO</span>
+      </div>`).join('');
+  }
+  // Cargar diferencias pendientes
+  renderDespDiferencias();
+}
+
+async function renderDespDiferencias() {
+  const secEl  = document.getElementById('desp-dif-section');
+  const listEl = document.getElementById('desp-dif-list');
+  const badge  = document.getElementById('desp-dif-badge');
+  if (!secEl || !listEl) return;
+
+  // Cargar Confirmacion_Diferencias desde CTRL_BC_2026
+  // Usa GID de CFG si existe, sino carga via GAS
+  let difs = [];
+  try {
+    const res = await callGAS({ action:'leerDiferenciasPendientes', local:CFG.local });
+    if (res && res.ok) difs = res.diferencias || [];
+  } catch(e) { return; }
+
+  if (!difs.length) { secEl.style.display='none'; return; }
+
+  secEl.style.display='block';
+  badge.textContent = difs.length;
+
+  listEl.innerHTML = difs.map(d => {
+    const safe = (d.idEntrega||'').replace(/[^a-zA-Z0-9]/g,'-') + '-' + (d.sku||'');
+    const pct  = d.qEsp > 0 ? Math.round(Math.abs(d.delta)/d.qEsp*100) : 0;
+    const colorPct = pct > 10 ? 'var(--red)' : 'var(--amber)';
+    return `<div id="dif-card-${safe}" style="background:var(--bg2);border:1px solid var(--red);border-radius:10px;padding:14px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--t1)">${d.desc}</div>
+          <div style="font-size:11px;color:var(--t3);font-family:var(--mono);margin-top:2px">${d.idEntrega} · SKU ${d.sku}</div>
+        </div>
+        <span style="font-size:11px;font-weight:700;color:${colorPct};background:rgba(200,50,50,0.1);border:1px solid ${colorPct};border-radius:6px;padding:3px 8px">${pct}%</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;background:var(--bg3);border-radius:8px;padding:10px">
+        <div style="text-align:center">
+          <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">Enviado BC</div>
+          <div style="font-size:18px;font-weight:700;color:var(--t1);font-family:var(--mono)">${d.qEsp}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">Recibido JL</div>
+          <div style="font-size:18px;font-weight:700;color:var(--amber);font-family:var(--mono)">${d.qRec}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">Diferencia</div>
+          <div style="font-size:18px;font-weight:700;color:var(--red);font-family:var(--mono)">-${Math.abs(d.delta)}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:10px">¿Qué pasó con las <strong style="color:var(--t2)">${Math.abs(d.delta)} UO</strong> que no llegaron?</div>
+      <div style="display:flex;gap:8px">
+        <button onclick="resolverDif('${d.idEntrega}','${d.sku}','${safe}','ajuste')"
+          style="flex:1;padding:10px;background:rgba(192,57,43,0.15);border:1px solid var(--red);border-radius:8px;color:var(--red);font-size:12px;font-weight:600;cursor:pointer">
+          📦 Se perdió en ruta<br><span style="font-size:10px;font-weight:400">Registrar Ajuste − en BC</span>
+        </button>
+        <button onclick="resolverDif('${d.idEntrega}','${d.sku}','${safe}','sin_ajuste')"
+          style="flex:1;padding:10px;background:rgba(15,110,86,0.1);border:1px solid var(--green2);border-radius:8px;color:var(--green2);font-size:12px;font-weight:600;cursor:pointer">
+          ✅ Error de conteo JL<br><span style="font-size:10px;font-weight:400">Sin ajuste en BC</span>
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function resolverDif(idEntrega, sku, safe, accion) {
+  const btn1 = document.querySelector(`#dif-card-${safe} button:first-child`);
+  const btn2 = document.querySelector(`#dif-card-${safe} button:last-child`);
+  if (btn1) btn1.disabled=true;
+  if (btn2) btn2.disabled=true;
+
+  const res = await callGAS({
+    action:    'resolverDiferenciaBC',
+    local:     CFG.local,
+    idEntrega: idEntrega,
+    sku:       sku,
+    accion:    accion,
+    operador:  SESSION ? SESSION.nombre : ''
+  });
+
+  if (res && res.ok) {
+    showToast(accion==='ajuste' ? '✅ Ajuste registrado en BC' : '✅ Marcado sin ajuste', 'success');
+    const card = document.getElementById('dif-card-'+safe);
+    if (card) card.remove();
+    const listEl = document.getElementById('desp-dif-list');
+    const secEl  = document.getElementById('desp-dif-section');
+    if (listEl && !listEl.querySelector('[id^="dif-card-"]')) {
+      secEl.style.display='none';
+    }
+    // Actualizar badge tab
+    const badge = document.getElementById('desp-dif-badge');
+    if (badge) badge.textContent = Math.max(0, parseInt(badge.textContent||'0') - 1) || '';
+  } else {
+    if (btn1) btn1.disabled=false;
+    if (btn2) btn2.disabled=false;
+    showToast('Error: '+(res?.error||'sin respuesta'), 'error');
+  }
 }
 
 async function confirmarDespacho(solId, safe, nItems, local) {
