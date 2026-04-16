@@ -3155,13 +3155,9 @@ function cteoMostrarResumen(total, cuadrado, inferior, superior, pctErr, boCount
         <span style="color:var(--t3)">% error: <strong style="color:${pctColor}">${pctErr}%</strong></span>
         ${boCount > 0 ? `<span style="color:var(--amber)">⚠️ ${boCount} BO abierto${boCount>1?'s':''} reportado${boCount>1?'s':''}</span>` : '<span style="color:var(--green2)">✓ Sin BO abiertos</span>'}
       </div>
-      <button onclick="abrirPDFConteoCandelaria()"
-        style="width:100%;padding:12px;background:#7C3F8E;border:none;border-radius:8px;
-        color:#fff;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px">
-        📄 Descargar / Imprimir PDF</button>
       <button onclick="document.getElementById('cteo-modal-resumen').remove(); cteoSetTab('pendientes');"
-        style="width:100%;padding:12px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
-        color:var(--t2);font-size:14px;font-weight:600;cursor:pointer">Cerrar</button>
+        style="width:100%;padding:12px;background:var(--accent);border:none;border-radius:8px;
+        color:#fff;font-size:14px;font-weight:600;cursor:pointer">Cerrar</button>
     </div>`;
   document.body.appendChild(modal);
 }
@@ -3328,25 +3324,6 @@ async function registrarConteo() {
   if (btn) { btn.disabled = false; btn.innerHTML = 'Registrar Ajuste Inventario'; }
 
   if (res && res.ok) {
-    // Snapshot per PDF — PRIMA di resettare
-    _lastConteoCanPDF = {
-      items: items.map(item => ({
-        sku:       item.sku,
-        desc:      item.desc || item.sku,
-        qty:       item.qty,
-        teorico:   item.teorico,
-        delta:     item.delta,
-        tipo:      item.delta > 0.001  ? 'Ajuste + mas'
-                 : item.delta < -0.001 ? 'Ajuste - menos'
-                 : 'Sin diferencia',
-        boAbierto: !!item.boAbierto
-      })),
-      operador:  (typeof SESSION !== 'undefined' && SESSION ? SESSION.nombre : '') || movOperador || '—',
-      local:     'Candelaria',
-      fechaHora: new Date().toLocaleString('es-CL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}),
-      idConteo:  'AJ-CAN-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + String(Math.floor(Math.random()*900)+100)
-    };
-
     // Calcola riepilogo
     let cuadrado=0, inferior=0, superior=0, boCount=0;
     const all = STATE.conteo.filter(r => r['SKU'] && r['SKU'] !== '');
@@ -3818,139 +3795,6 @@ function filtrarAnalisis() {
 // ════════════════════════════════════════════════════════
 // ARRANQUE
 // ════════════════════════════════════════════════════════
-
-
-// ════════════════════════════════════════════════════════
-// PDF CONTEO FÍSICO CANDELARIA
-// ════════════════════════════════════════════════════════
-let _lastConteoCanPDF = null;
-
-function abrirPDFConteoCandelaria() {
-  const data = _lastConteoCanPDF;
-  if (!data) { showToast('Sin datos para el PDF','error'); return; }
-
-  const menos   = data.items.filter(i => i.tipo === 'Ajuste - menos');
-  const mas     = data.items.filter(i => i.tipo === 'Ajuste + mas');
-  const sinDif  = data.items.filter(i => i.tipo === 'Sin diferencia');
-  const boAbs   = data.items.filter(i => i.boAbierto);
-  const ordenado = [...menos, ...mas, ...sinDif];
-
-  const filas = ordenado.map((item, idx) => {
-    const bg     = idx % 2 === 0 ? '#F7F4F9' : '#FFFFFF';
-    const tipoCl = item.tipo === 'Ajuste - menos' ? '#C0392B'
-                 : item.tipo === 'Ajuste + mas'   ? '#0F6E56' : '#888888';
-    const sign   = item.tipo === 'Ajuste - menos' ? '−'
-                 : item.tipo === 'Ajuste + mas'   ? '+' : '—';
-    const boTag  = item.boAbierto
-      ? ' <span style="background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 5px;font-size:9px;font-weight:700">BO</span>' : '';
-    return `<tr style="background:${bg}">
-      <td style="padding:7px 10px;font-size:11px;color:#555;font-family:monospace">${item.sku}</td>
-      <td style="padding:7px 10px;font-size:12px;color:#1A1A1A;font-weight:500">${item.desc}${boTag}</td>
-      <td style="padding:7px 10px;font-size:11px;color:#555;text-align:center">${item.qty != null ? parseFloat(item.qty).toFixed(2) : '—'}</td>
-      <td style="padding:7px 10px;font-size:11px;color:#555;text-align:center">${item.teorico != null ? parseFloat(item.teorico).toFixed(2) : '—'}</td>
-      <td style="padding:7px 10px;font-size:12px;font-weight:700;color:${tipoCl};text-align:center;font-family:monospace">${sign}${Math.abs(item.delta).toFixed(2)}</td>
-      <td style="padding:7px 10px;font-size:10px;color:${tipoCl};font-weight:600">${item.tipo}</td>
-    </tr>`;
-  }).join('');
-
-  const seccionBO = boAbs.length > 0 ? `
-    <div style="margin:0 20px 16px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:12px 16px;">
-      <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#92400E;margin-bottom:6px">⚠️ BULTOS ABIERTOS — requieren seguimiento</div>
-      ${boAbs.map(i => `<div style="font-size:11px;color:#92400E;padding:2px 0">${i.desc} · SKU ${i.sku}</div>`).join('')}
-    </div>` : '';
-
-  const html = `<!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8">
-<title>Conteo Físico BLocal Candelaria · ${data.fechaHora}</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&family=DM+Mono:wght@400;500&display=swap');
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:'DM Sans',Arial,sans-serif;background:#fff;color:#1A1A1A;}
-@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}.no-print{display:none!important;}@page{margin:15mm 12mm;size:A4 portrait;}}
-.btn-print{position:fixed;bottom:24px;right:24px;background:#7C3F8E;color:#fff;border:none;padding:12px 24px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 20px rgba(124,63,142,0.4);}
-.page{max-width:740px;margin:0 auto;}
-.ph{background:#0E0D0C;padding:22px 28px;display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #7C3F8E;}
-.ph-logo{font-size:26px;font-weight:900;color:#C4621D;letter-spacing:-1px;line-height:1;}
-.ph-sub{font-size:10px;color:#8A8580;letter-spacing:1.5px;text-transform:uppercase;margin-top:4px;}
-.ph-tipo{background:#7C3F8E;color:#fff;padding:4px 14px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;}
-.ph-interno{background:rgba(124,63,142,0.15);border:1px solid rgba(124,63,142,0.45);color:#B07FD8;padding:3px 12px;border-radius:20px;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-top:5px;display:inline-block;}
-.title-block{background:#F7F4F9;border-bottom:1px solid #E8DFF0;padding:18px 28px;}
-.title-main{font-size:20px;font-weight:800;color:#1A0D2E;}
-.title-sub{font-size:11px;color:#7C3F8E;font-weight:600;margin-top:2px;}
-.info-grid{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #E8DFF0;}
-.info-cell{padding:12px 16px;border-right:1px solid #E8DFF0;}
-.info-cell:last-child{border-right:none;}
-.info-label{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#999;margin-bottom:3px;}
-.info-value{font-size:12px;font-weight:600;color:#1A1A1A;}
-.chips{display:flex;gap:8px;flex-wrap:wrap;padding:12px 20px;background:#FAFAFA;border-bottom:1px solid #E8DFF0;}
-.chip{padding:4px 12px;border-radius:20px;font-size:10px;font-weight:700;}
-.chip-red{background:rgba(192,57,43,0.08);border:1px solid rgba(192,57,43,0.3);color:#C0392B;}
-.chip-green{background:rgba(15,110,86,0.08);border:1px solid rgba(15,110,86,0.3);color:#0F6E56;}
-.chip-amber{background:rgba(212,134,10,0.08);border:1px solid rgba(212,134,10,0.3);color:#92400E;}
-.chip-purple{background:rgba(124,63,142,0.08);border:1px solid rgba(124,63,142,0.3);color:#7C3F8E;}
-.table-wrap{padding:0 20px 16px;}
-.table-label{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#888;padding:14px 8px 8px;}
-table{border-collapse:collapse;width:100%;}
-thead tr{background:#1A0D2E;}
-th{padding:9px 10px;text-align:left;font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#C0A0D8;white-space:nowrap;}
-td{padding:7px 10px;border-bottom:1px solid #EEE;font-size:11px;}
-.total-row td{background:#F0EBF5;font-weight:700;border-top:2px solid #D5C0E0;}
-.doc-footer{background:#0E0D0C;padding:12px 28px;display:flex;justify-content:space-between;align-items:center;border-top:2px solid #7C3F8E;}
-.footer-id{font-family:monospace;font-size:10px;color:#7C3F8E;}
-.footer-text{font-size:9px;color:#555;letter-spacing:1px;text-transform:uppercase;}
-</style></head><body>
-<div class="page">
-  <div class="ph">
-    <div><div class="ph-logo">PINSA.</div><div class="ph-sub">Superfoods &amp; Wellness &middot; Sistema Operativo</div></div>
-    <div style="text-align:right"><div class="ph-tipo">CONTEO F&Iacute;SICO</div><div class="ph-interno">INTERNO &middot; USO OPERATIVO</div></div>
-  </div>
-  <div class="title-block">
-    <div class="title-main">Bodega Local &mdash; Ajuste de Inventario</div>
-    <div class="title-sub">Candelaria &middot; Conteo f&iacute;sico registrado &middot; ${data.fechaHora}</div>
-  </div>
-  <div class="info-grid">
-    <div class="info-cell"><div class="info-label">Secci&oacute;n</div><div class="info-value">Bodega Local</div></div>
-    <div class="info-cell"><div class="info-label">Local</div><div class="info-value">Candelaria</div></div>
-    <div class="info-cell"><div class="info-label">Operador</div><div class="info-value">${data.operador}</div></div>
-    <div class="info-cell"><div class="info-label">ID Conteo</div><div class="info-value" style="font-family:monospace;font-size:10px;color:#7C3F8E">${data.idConteo}</div></div>
-  </div>
-  <div class="chips">
-    ${menos.length  > 0 ? `<div class="chip chip-red">&#128308; ${menos.length} p&eacute;rdida${menos.length!==1?'s':''}</div>` : ''}
-    ${mas.length    > 0 ? `<div class="chip chip-green">&#128994; ${mas.length} excedente${mas.length!==1?'s':''}</div>` : ''}
-    ${boAbs.length  > 0 ? `<div class="chip chip-amber">&#9888;&#65039; ${boAbs.length} BO abierto${boAbs.length!==1?'s':''}</div>` : ''}
-    <div class="chip chip-purple">&#128230; ${data.items.length} SKU contados</div>
-  </div>
-  <div class="table-wrap">
-    <div class="table-label">Detalle por SKU</div>
-    <table>
-      <thead><tr>
-        <th>SKU</th><th>Descripci&oacute;n</th>
-        <th style="text-align:center">Conteo</th>
-        <th style="text-align:center">Te&oacute;rico</th>
-        <th style="text-align:center">Delta</th>
-        <th>Tipo Ajuste</th>
-      </tr></thead>
-      <tbody>${filas}</tbody>
-      <tr class="total-row">
-        <td colspan="4" style="text-align:right">TOTAL SKU CON DIFERENCIA:</td>
-        <td style="text-align:center">${menos.length + mas.length}</td>
-        <td></td>
-      </tr>
-    </table>
-  </div>
-  ${seccionBO}
-  <div class="doc-footer">
-    <div class="footer-id">${data.idConteo} &middot; ${data.fechaHora}</div>
-    <div class="footer-text">Documento generado autom&aacute;ticamente &mdash; PINSA Sistema Operativo</div>
-  </div>
-</div>
-<button class="btn-print no-print" onclick="window.print()">&#128247; Imprimir / Guardar PDF</button>
-</body></html>`;
-
-  const win = window.open('', '_blank', 'width=800,height=900');
-  if (win) { win.document.write(html); win.document.close(); }
-  else showToast('Activa ventanas emergentes para el PDF', 'error');
-}
 
 init().catch(console.error);
 
