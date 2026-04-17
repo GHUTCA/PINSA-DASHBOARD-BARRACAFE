@@ -2017,12 +2017,33 @@ async function renderDespacho() {
   const grupos = {};
   pend.forEach(r => {
     const id=r['ID Solicitud']||r['_col1']||('SOL-'+r['Fecha']);
-    if (!grupos[id]) grupos[id]={id,local:r['Local']||'',fecha:r['Fecha']||'',items:[]};
+    if (!grupos[id]) grupos[id]={id,local:r['Local']||'',fecha:r['Fecha']||'',hora:r['Hora']||'',items:[]};
     grupos[id].items.push(r);
   });
 
-  el.innerHTML = Object.values(grupos).map(g => {
+  // Sort DESC por fecha+hora: nuevas arriba
+  const gruposArr = Object.values(grupos);
+  gruposArr.sort((a, b) => {
+    const ka = (a.fecha || '') + ' ' + (a.hora || '');
+    const kb = (b.fecha || '') + ' ' + (b.hora || '');
+    return kb.localeCompare(ka);
+  });
+
+  // Calcola quale è "reciente" (< 1h) — glow amber
+  const now = new Date();
+  const esReciente = (g) => {
+    if (!g.fecha || !g.hora) return false;
+    try {
+      // fecha format yyyy-MM-dd, hora HH:mm
+      const dt = new Date(g.fecha + 'T' + g.hora + ':00');
+      if (isNaN(dt.getTime())) return false;
+      return (now - dt) < 3600000; // 1h en ms
+    } catch(e) { return false; }
+  };
+
+  el.innerHTML = gruposArr.map(g => {
     const safe=g.id.replace(/[^a-zA-Z0-9]/g,'-');
+    const reciente = esReciente(g);
     const itemsHTML = g.items.map((r,i) => {
       const sku=r['SKU']||'—', desc=r['Descripcion']||'—';
       const utm=r['UTM']||'';
@@ -2075,7 +2096,7 @@ async function renderDespacho() {
         </div>
         <div style="text-align:center">
           <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px">UO</div>
-          <div style="font-size:20px;font-weight:500;color:${sc}">${stockDisp}</div>
+          <div style="font-size:20px;font-weight:500;color:${sc}">${stockDisp===null?'—':stockDisp}</div>
           <div style="font-size:11px;color:var(--t3)">${stockLabel}</div>
 
         </div>
@@ -2087,16 +2108,16 @@ async function renderDespacho() {
           <div style="height:4px;background:var(--bg3);border-radius:2px;overflow:hidden;width:72px;margin:0 auto">
             <div id="bar-${safe}-${i}" style="height:4px;background:var(--green2);border-radius:2px;width:${pct}%;transition:width 0.15s"></div>
           </div>
-          <div id="lbl-${safe}-${i}" style="font-size:9px;color:var(--t3);margin-top:2px">${valInp} de ${maxEnviar}</div>
+          <div id="lbl-${safe}-${i}" style="font-size:9px;color:var(--t3);margin-top:2px">${stockDisp===null?'no monitoreado':valInp+' de '+maxEnviar}</div>
         </div>
       </div>`;
     }).join('');
-    return `<div class="desp-item" style="margin-top:10px">
+    return `<div class="desp-item" style="margin-top:10px${reciente ? ';border:2px solid var(--amber);box-shadow:0 0 14px rgba(245,166,35,0.35)' : ''}">
       <div class="desp-item-header" onclick="despToggle('det-${safe}')">
         <div>
-          <div style="font-size:11px;font-family:var(--mono);color:var(--t3)">${g.id}</div>
+          <div style="font-size:11px;font-family:var(--mono);color:var(--t3)">${g.id}${reciente ? ' <span style="background:var(--amber);color:#fff;padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;margin-left:6px;letter-spacing:0.5px">NUEVA</span>' : ''}</div>
           <div style="font-size:13px;font-weight:600;color:var(--t1)">${g.local} · ${g.items.length} productos</div>
-          <div style="font-size:11px;color:var(--t3)">${fmtDate(g.fecha)}</div>
+          <div style="font-size:11px;color:var(--t3)">${fmtDate(g.fecha)}${g.hora?' · '+g.hora:''}</div>
         </div>
         <span class="status status-warn">SOLICITADO</span>
       </div>
