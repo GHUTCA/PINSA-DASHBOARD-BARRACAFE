@@ -951,10 +951,18 @@
       </button>
     </div>
 
-    <!-- Barra búsqueda catálogo completo -->
-    <div class="search-wrap" style="margin-bottom:6px">
-      <span class="search-icon">🔍</span>
-      <input type="text" id="sol-search" placeholder="Buscar producto para agregar al pedido..." oninput="solBuscar(this.value)" autocomplete="off">
+    <!-- Barra búsqueda catálogo completo + pill Últimos 7d -->
+    <div style="display:flex;gap:8px;margin-bottom:6px;align-items:stretch">
+      <div class="search-wrap" style="flex:1;margin:0">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="sol-search" placeholder="Buscar producto para agregar al pedido..." oninput="solBuscar(this.value)" autocomplete="off">
+      </div>
+      <button onclick="solAbrirUltimos()" id="btn-ultimos-pedidos"
+        style="flex-shrink:0;padding:0 12px;border-radius:20px;background:rgba(74,111,165,0.10);
+        border:1px solid rgba(74,111,165,0.35);color:var(--blue2);font-size:11px;font-weight:600;
+        cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:4px;letter-spacing:0.3px">
+        📜 Últimos 7d
+      </button>
     </div>
 
     <!-- Resultados búsqueda (dropdown) -->
@@ -1005,6 +1013,24 @@
     <div class="sol-confirm-btns">
       <button class="btn btn-ghost" onclick="solCancelConfirm()">Cancelar</button>
       <button class="btn btn-primary" onclick="enviarSolicitud()">Enviar ahora</button>
+    </div>
+  </div>
+
+  <!-- Overlay Últimos 7 días -->
+  <div id="ultimos-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:500;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto">
+    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;width:100%;max-width:500px;max-height:calc(100vh - 40px);display:flex;flex-direction:column;overflow:hidden">
+      <!-- Header -->
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:var(--bg2)">
+        <div>
+          <div style="font-size:15px;font-weight:600;color:var(--t1)">📜 Mis últimos pedidos</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:1px">Últimos 7 días</div>
+        </div>
+        <button onclick="solCerrarUltimos()"
+          style="background:transparent;border:1px solid var(--border2);color:var(--t2);font-size:12px;
+          padding:5px 12px;border-radius:16px;cursor:pointer">Cerrar</button>
+      </div>
+      <!-- Lista -->
+      <div id="ultimos-list" style="flex:1;overflow-y:auto;padding:12px"></div>
     </div>
   </div>
 
@@ -2575,6 +2601,116 @@ async function enviarSolicitud() {
   } else {
     showToast('Error: ' + (res?.error || 'sin respuesta'), 'error');
   }
+}
+
+// ════════════════════════════════════════════════════════
+// MIS ÚLTIMOS PEDIDOS — overlay consultivo
+// Datos reales: GAS endpoint getUltimosPedidos(local, dias)
+// Mientras no esté listo el GAS, se usa fallback con datos vacíos
+// ════════════════════════════════════════════════════════
+let STATE_ultimos = { loading: false, pedidos: [], abiertos: {} };
+
+async function solAbrirUltimos() {
+  const overlay = document.getElementById('ultimos-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  // Inicia carga
+  STATE_ultimos.loading = true;
+  renderUltimos();
+
+  try {
+    const res = await callGAS({
+      action: 'getUltimosPedidos',
+      local:  CFG.local || CFG.LOCAL || 'Candelaria',
+      dias:   7
+    });
+    if (res && res.ok && Array.isArray(res.pedidos)) {
+      STATE_ultimos.pedidos = res.pedidos;
+    } else {
+      STATE_ultimos.pedidos = [];
+    }
+  } catch (e) {
+    STATE_ultimos.pedidos = [];
+  }
+  STATE_ultimos.loading = false;
+  renderUltimos();
+}
+
+function solCerrarUltimos() {
+  const overlay = document.getElementById('ultimos-overlay');
+  if (overlay) overlay.style.display = 'none';
+  STATE_ultimos.abiertos = {};
+}
+
+function solTogglePedido(idSol) {
+  // Un pedido abierto a la vez
+  const isOpen = !!STATE_ultimos.abiertos[idSol];
+  STATE_ultimos.abiertos = {};
+  if (!isOpen) STATE_ultimos.abiertos[idSol] = true;
+  renderUltimos();
+}
+
+function renderUltimos() {
+  const cont = document.getElementById('ultimos-list');
+  if (!cont) return;
+
+  if (STATE_ultimos.loading) {
+    cont.innerHTML = `<div style="padding:40px 20px;text-align:center;color:var(--t3)">
+      <div class="spinner" style="margin:0 auto 12px"></div>
+      Cargando últimos pedidos...
+    </div>`;
+    return;
+  }
+
+  if (!STATE_ultimos.pedidos.length) {
+    cont.innerHTML = `<div style="padding:40px 20px;text-align:center;color:var(--t3);font-size:13px">
+      <div style="font-size:32px;margin-bottom:10px">📭</div>
+      No hay pedidos en los últimos 7 días
+    </div>`;
+    return;
+  }
+
+  // Colores por estado
+  const estadoColor = (e) => {
+    const x = String(e || '').toUpperCase();
+    if (x === 'RECIBIDO')    return { bg: 'rgba(15,110,86,0.15)',  bd: 'rgba(15,110,86,0.35)',  fg: 'var(--green2)',   label: 'RECIBIDO' };
+    if (x === 'DIFERENCIA')  return { bg: 'rgba(192,57,43,0.15)',  bd: 'rgba(192,57,43,0.35)',  fg: '#E07070',          label: 'DIFERENCIA' };
+    if (x === 'ENVIADO')     return { bg: 'rgba(74,111,165,0.15)', bd: 'rgba(74,111,165,0.35)', fg: 'var(--blue2)',     label: 'ENVIADO' };
+    if (x === 'SOLICITADO')  return { bg: 'rgba(196,98,29,0.12)',  bd: 'rgba(196,98,29,0.35)',  fg: 'var(--orange2)',   label: 'SOLICITADO' };
+    return { bg: 'var(--bg3)', bd: 'var(--border2)', fg: 'var(--t3)', label: x || '—' };
+  };
+
+  cont.innerHTML = STATE_ultimos.pedidos.map(p => {
+    const c = estadoColor(p.estado);
+    const open = !!STATE_ultimos.abiertos[p.idSol];
+    const fechaCorta = (p.fecha || '').toString().slice(5); // MM-DD
+    const prods = Array.isArray(p.productos) ? p.productos : [];
+
+    const detalle = open ? `
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        ${prods.length ? prods.map(it => {
+          const cEst = estadoColor(it.estado || p.estado);
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04)">
+            <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t1)">${it.descripcion || it.sku || '—'}</div>
+            <div style="font-family:var(--mono);color:var(--t2);font-size:11px;min-width:60px;text-align:right">${(it.qty ?? it.qConfirmada ?? '—')} UO</div>
+            <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:${cEst.fg};min-width:72px;text-align:right">${cEst.label}</div>
+          </div>`;
+        }).join('') : `<div style="padding:10px;text-align:center;color:var(--t3);font-size:11px">Sin detalle disponible</div>`}
+      </div>` : '';
+
+    return `<div onclick="solTogglePedido('${p.idSol}')"
+      style="background:var(--bg2);border:1px solid ${c.bd};border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-family:var(--mono);font-size:10px;color:var(--t3);letter-spacing:0.5px">${p.idSol || '—'}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--t1);margin-top:1px">${fechaCorta} · ${p.nProductos || prods.length} productos · ${p.totalUO ?? '—'} UO</div>
+        </div>
+        <div style="background:${c.bg};border:1px solid ${c.bd};color:${c.fg};font-size:9px;font-weight:700;letter-spacing:1.2px;padding:3px 8px;border-radius:12px">${c.label}</div>
+        <div style="color:var(--t3);font-size:14px">${open ? '▾' : '▸'}</div>
+      </div>
+      ${detalle}
+    </div>`;
+  }).join('');
 }
 
 
