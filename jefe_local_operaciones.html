@@ -1437,7 +1437,13 @@ function fmtDate(d) {
 }
 
 function today() {
-  return new Date().toISOString().split('T')[0];
+  // Formato YYYY-MM-DD nella timezone locale (Santiago)
+  // Fix bug: toISOString() usa UTC, provocando date sbagliate per eventi serali
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 function getMondayOfWeek(date) {
@@ -2566,10 +2572,11 @@ async function enviarSolicitud() {
 
   const res = await callGAS({
     action: 'inviarSolicitud',
-    local:  CFG.LOCAL,
+    local:  CFG.local,
     items,
     operador: STATE.operador || '',
-    fecha: today()
+    fecha: today(),
+    hora: new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false })
   });
 
   if (btn) { btn.disabled = false; btn.innerHTML = 'Enviar ahora'; }
@@ -2628,8 +2635,21 @@ function solTogglePedido(idSol) {
   // Un pedido abierto a la vez
   const isOpen = !!STATE_ultimos.abiertos[idSol];
   STATE_ultimos.abiertos = {};
-  if (!isOpen) STATE_ultimos.abiertos[idSol] = true;
+  if (!isOpen) {
+    STATE_ultimos.abiertos[idSol] = true;
+    // Marca come letto
+    try {
+      const leidos = new Set(JSON.parse(localStorage.getItem('ultimos_leidos') || '[]'));
+      leidos.add(idSol);
+      localStorage.setItem('ultimos_leidos', JSON.stringify([...leidos]));
+    } catch (e) {}
+  }
   renderUltimos();
+}
+
+function _ultimosLeidos() {
+  try { return new Set(JSON.parse(localStorage.getItem('ultimos_leidos') || '[]')); }
+  catch { return new Set(); }
 }
 
 function renderUltimos() {
@@ -2662,10 +2682,29 @@ function renderUltimos() {
     return { bg: 'var(--bg3)', bd: 'var(--border2)', fg: 'var(--t3)', label: x || '—' };
   };
 
-  cont.innerHTML = STATE_ultimos.pedidos.map(p => {
+  const leidos = _ultimosLeidos();
+
+  // Sort: data desc, poi ora desc
+  const sorted = [...STATE_ultimos.pedidos].sort((a, b) => {
+    const da = (a.fecha || '') + ' ' + (a.hora || '00:00');
+    const db = (b.fecha || '') + ' ' + (b.hora || '00:00');
+    return db.localeCompare(da);
+  });
+
+  cont.innerHTML = sorted.map(p => {
     const c = estadoColor(p.estado);
     const open = !!STATE_ultimos.abiertos[p.idSol];
-    const fechaCorta = (p.fecha || '').toString().slice(5); // MM-DD
+    const noLeido = !leidos.has(p.idSol);
+
+    // Parse fecha YYYY-MM-DD → "DD-abr"
+    const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    let fechaFmt = p.fecha || '—';
+    if (p.fecha && /^\d{4}-\d{2}-\d{2}$/.test(p.fecha)) {
+      const [yy, mm, dd] = p.fecha.split('-');
+      fechaFmt = `${dd}-${meses[parseInt(mm) - 1] || mm}`;
+    }
+    const horaStr = p.hora || '';
+
     const prods = Array.isArray(p.productos) ? p.productos : [];
 
     const detalle = open ? `
@@ -2680,12 +2719,22 @@ function renderUltimos() {
         }).join('') : `<div style="padding:10px;text-align:center;color:var(--t3);font-size:11px">Sin detalle disponible</div>`}
       </div>` : '';
 
+    // Bordo: più marcato se non letto
+    const borderStyle = noLeido
+      ? `2px solid ${c.bd.replace('0.35', '0.7')}`
+      : `1px solid ${c.bd}`;
+    const bgStyle = noLeido ? 'var(--bg3)' : 'var(--bg2)';
+
     return `<div onclick="solTogglePedido('${p.idSol}')"
-      style="background:var(--bg2);border:1px solid ${c.bd};border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer">
+      style="background:${bgStyle};border:${borderStyle};border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;position:relative">
+      ${noLeido ? `<div style="position:absolute;top:8px;left:-3px;width:6px;height:6px;border-radius:50%;background:${c.fg};box-shadow:0 0 6px ${c.fg}"></div>` : ''}
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
         <div style="flex:1;min-width:0">
           <div style="font-family:var(--mono);font-size:10px;color:var(--t3);letter-spacing:0.5px">${p.idSol || '—'}</div>
-          <div style="font-size:13px;font-weight:600;color:var(--t1);margin-top:1px">${fechaCorta} · ${p.nProductos || prods.length} productos · ${p.totalUO ?? '—'} UO</div>
+          <div style="font-size:13px;font-weight:${noLeido ? '700' : '600'};color:var(--t1);margin-top:1px">
+            ${fechaFmt}${horaStr ? ` <span style="color:var(--t3);font-weight:400">${horaStr}</span>` : ''}
+            · ${p.nProductos || prods.length} productos · ${p.totalUO ?? '—'} UO
+          </div>
         </div>
         <div style="background:${c.bg};border:1px solid ${c.bd};color:${c.fg};font-size:9px;font-weight:700;letter-spacing:1.2px;padding:3px 8px;border-radius:12px">${c.label}</div>
         <div style="color:var(--t3);font-size:14px">${open ? '▾' : '▸'}</div>
