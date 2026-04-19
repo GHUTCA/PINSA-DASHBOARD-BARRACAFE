@@ -951,18 +951,33 @@
       </button>
     </div>
 
-    <!-- Barra búsqueda catálogo completo + pill Últimos 7d -->
-    <div style="display:flex;gap:8px;margin-bottom:6px;align-items:stretch">
+    <!-- Sub-tabs Nuevo Pedido / Mis Pedidos -->
+    <div id="sol-subtabs" style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:10px">
+      <button id="sol-subtab-nuevo" onclick="solSwitchSubtab('nuevo')"
+        style="flex:1;background:none;border:none;padding:8px 12px;cursor:pointer;
+        font-size:13px;font-weight:600;color:var(--orange);border-bottom:2px solid var(--orange);
+        letter-spacing:0.3px;position:relative">
+        Nuevo Pedido
+      </button>
+      <button id="sol-subtab-mis" onclick="solSwitchSubtab('mis')"
+        style="flex:1;background:none;border:none;padding:8px 12px;cursor:pointer;
+        font-size:13px;font-weight:600;color:var(--t3);border-bottom:2px solid transparent;
+        letter-spacing:0.3px;position:relative;display:flex;align-items:center;justify-content:center;gap:6px">
+        <span>Mis Pedidos</span>
+        <span id="sol-subtab-mis-badge" style="display:none;background:rgba(74,111,165,0.15);
+          color:var(--blue2);border:1px solid rgba(74,111,165,0.35);font-size:10px;font-weight:700;
+          padding:1px 7px;border-radius:10px;font-family:var(--mono);min-width:20px;text-align:center">0</span>
+        <span id="sol-subtab-mis-dot" style="display:none;width:7px;height:7px;border-radius:50%;
+          background:var(--orange2);box-shadow:0 0 6px var(--orange2);position:absolute;top:8px;right:10px"></span>
+      </button>
+    </div>
+
+    <!-- Barra búsqueda catálogo completo (solo visible en sub-tab Nuevo) -->
+    <div id="sol-search-bar" style="display:flex;gap:8px;margin-bottom:6px;align-items:stretch">
       <div class="search-wrap" style="flex:1;margin:0">
         <span class="search-icon">🔍</span>
         <input type="text" id="sol-search" placeholder="Buscar producto para agregar al pedido..." oninput="solBuscar(this.value)" autocomplete="off">
       </div>
-      <button onclick="solAbrirUltimos()" id="btn-ultimos-pedidos"
-        style="flex-shrink:0;padding:0 12px;border-radius:20px;background:rgba(74,111,165,0.10);
-        border:1px solid rgba(74,111,165,0.35);color:var(--blue2);font-size:11px;font-weight:600;
-        cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:4px;letter-spacing:0.3px">
-        📜 Últimos 7d
-      </button>
     </div>
 
     <!-- Resultados búsqueda (dropdown) -->
@@ -981,6 +996,9 @@
 
   <!-- Scroll area -->
   <div class="sol-scroll">
+
+    <!-- ═══ SUB-PANE: NUEVO PEDIDO (default) ═══ -->
+    <div id="sol-sub-nuevo">
 
     <!-- CARRITO — productos agregados -->
     <div id="sol-carrito-section" style="display:none">
@@ -1001,6 +1019,16 @@
       <div id="sol-alertas-list">
         <div class="loading-card"><div class="spinner"></div></div>
       </div>
+    </div>
+
+    </div><!-- /sol-sub-nuevo -->
+
+    <!-- ═══ SUB-PANE: MIS PEDIDOS ═══ -->
+    <div id="sol-sub-mis" style="display:none">
+      <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--t3);margin-bottom:8px">
+        Últimos 7 días <span style="font-weight:400;text-transform:none;letter-spacing:0"> · toca una tarjeta para ver detalle</span>
+      </div>
+      <div id="ultimos-list"></div>
     </div>
 
   </div>
@@ -1506,7 +1534,7 @@ function goTab(tab) {
   // FAB conteo — mostra solo nel tab conteo se ci sono prodotti contati
   const fab = document.getElementById('cteo-fab');
   if (fab) fab.style.display = (tab === 'conteo' && Object.keys(STATE.conteoInputs||{}).length > 0) ? 'block' : 'none';
-  if (tab === 'solicitud')   renderSolicitud();
+  if (tab === 'solicitud')   { renderSolicitud(); solSwitchSubtab('nuevo'); solCargarUltimos(); }
   if (tab === 'recepcion')   { recargarYRenderRecepcion(); }
   if (tab === 'conteo')      renderConteo();
   if (tab === 'inventario')  renderInventario();
@@ -2593,18 +2621,18 @@ async function enviarSolicitud() {
 }
 
 // ════════════════════════════════════════════════════════
-// MIS ÚLTIMOS PEDIDOS — overlay consultivo
-// Datos reales: GAS endpoint getUltimosPedidos(local, dias)
-// Mientras no esté listo el GAS, se usa fallback con datos vacíos
+// MIS ÚLTIMOS PEDIDOS — sub-tab dentro Pedido BC (v102)
+// Datos reales: GAS endpoint getUltimosPedidos(local, dias=7)
 // ════════════════════════════════════════════════════════
-let STATE_ultimos = { loading: false, pedidos: [], abiertos: {} };
+let STATE_ultimos = { loading: false, pedidos: [], abiertos: {}, subtab: 'nuevo', loaded: false };
 
-async function solAbrirUltimos() {
-  const overlay = document.getElementById('ultimos-overlay');
-  if (!overlay) return;
-  overlay.style.display = 'flex';
-  // Inicia carga
+// Chiamata quando si entra su tab "Pedido BC" o quando si preme "Mis Pedidos"
+async function solCargarUltimos(forzar = false) {
+  if (STATE_ultimos.loading) return;
+  if (STATE_ultimos.loaded && !forzar) return;
+
   STATE_ultimos.loading = true;
+  solRenderSubtabBadge();
   renderUltimos();
 
   try {
@@ -2613,31 +2641,78 @@ async function solAbrirUltimos() {
       local:  CFG.local || CFG.LOCAL || 'Candelaria',
       dias:   7
     });
-    if (res && res.ok && Array.isArray(res.pedidos)) {
-      STATE_ultimos.pedidos = res.pedidos;
-    } else {
-      STATE_ultimos.pedidos = [];
-    }
+    STATE_ultimos.pedidos = (res && res.ok && Array.isArray(res.pedidos)) ? res.pedidos : [];
   } catch (e) {
     STATE_ultimos.pedidos = [];
   }
   STATE_ultimos.loading = false;
+  STATE_ultimos.loaded  = true;
+  solRenderSubtabBadge();
   renderUltimos();
 }
 
-function solCerrarUltimos() {
-  const overlay = document.getElementById('ultimos-overlay');
-  if (overlay) overlay.style.display = 'none';
-  STATE_ultimos.abiertos = {};
+function solSwitchSubtab(which) {
+  STATE_ultimos.subtab = which;
+
+  const paneNuevo = document.getElementById('sol-sub-nuevo');
+  const paneMis   = document.getElementById('sol-sub-mis');
+  const tabNuevo  = document.getElementById('sol-subtab-nuevo');
+  const tabMis    = document.getElementById('sol-subtab-mis');
+  const searchBar = document.getElementById('sol-search-bar');
+
+  if (which === 'nuevo') {
+    if (paneNuevo) paneNuevo.style.display = '';
+    if (paneMis)   paneMis.style.display   = 'none';
+    if (searchBar) searchBar.style.display = '';
+    if (tabNuevo) { tabNuevo.style.color = 'var(--orange)'; tabNuevo.style.borderBottomColor = 'var(--orange)'; }
+    if (tabMis)   { tabMis.style.color   = 'var(--t3)';     tabMis.style.borderBottomColor   = 'transparent'; }
+  } else {
+    if (paneNuevo) paneNuevo.style.display = 'none';
+    if (paneMis)   paneMis.style.display   = '';
+    if (searchBar) searchBar.style.display = 'none';
+    if (tabNuevo) { tabNuevo.style.color = 'var(--t3)';     tabNuevo.style.borderBottomColor = 'transparent'; }
+    if (tabMis)   { tabMis.style.color   = 'var(--orange)'; tabMis.style.borderBottomColor   = 'var(--orange)'; }
+
+    // Carica se non ancora caricato
+    solCargarUltimos();
+
+    // Marca tutti come letti dopo 400ms (soft read)
+    setTimeout(() => {
+      try {
+        const leidos = new Set(JSON.parse(localStorage.getItem('ultimos_leidos') || '[]'));
+        STATE_ultimos.pedidos.forEach(p => leidos.add(p.idSol));
+        localStorage.setItem('ultimos_leidos', JSON.stringify([...leidos]));
+        solRenderSubtabBadge();
+        renderUltimos();
+      } catch (e) {}
+    }, 400);
+  }
+}
+
+function solRenderSubtabBadge() {
+  const badge = document.getElementById('sol-subtab-mis-badge');
+  const dot   = document.getElementById('sol-subtab-mis-dot');
+  if (!badge || !dot) return;
+
+  const n = STATE_ultimos.pedidos.length;
+  if (n > 0) {
+    badge.textContent = n;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+
+  // Dot unread
+  const leidos = _ultimosLeidos();
+  const unread = STATE_ultimos.pedidos.filter(p => !leidos.has(p.idSol)).length;
+  dot.style.display = (unread > 0 && STATE_ultimos.subtab !== 'mis') ? 'block' : 'none';
 }
 
 function solTogglePedido(idSol) {
-  // Un pedido abierto a la vez
   const isOpen = !!STATE_ultimos.abiertos[idSol];
   STATE_ultimos.abiertos = {};
   if (!isOpen) {
     STATE_ultimos.abiertos[idSol] = true;
-    // Marca come letto
     try {
       const leidos = new Set(JSON.parse(localStorage.getItem('ultimos_leidos') || '[]'));
       leidos.add(idSol);
@@ -2645,6 +2720,7 @@ function solTogglePedido(idSol) {
     } catch (e) {}
   }
   renderUltimos();
+  solRenderSubtabBadge();
 }
 
 function _ultimosLeidos() {
@@ -2719,7 +2795,6 @@ function renderUltimos() {
         }).join('') : `<div style="padding:10px;text-align:center;color:var(--t3);font-size:11px">Sin detalle disponible</div>`}
       </div>` : '';
 
-    // Bordo: più marcato se non letto
     const borderStyle = noLeido
       ? `2px solid ${c.bd.replace('0.35', '0.7')}`
       : `1px solid ${c.bd}`;
@@ -4454,23 +4529,8 @@ function confirmLogout() {
 }
 </script>
 
-<!-- Overlay Últimos 7 días — top-level per position:fixed -->
-<div id="ultimos-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto" onclick="if(event.target===this) solCerrarUltimos()">
-  <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;width:100%;max-width:560px;max-height:calc(100vh - 80px);display:flex;flex-direction:column;overflow:hidden">
-    <!-- Header -->
-    <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:var(--bg2);flex-shrink:0">
-      <div>
-        <div style="font-size:15px;font-weight:600;color:var(--t1)">📜 Mis últimos pedidos</div>
-        <div style="font-size:11px;color:var(--t3);margin-top:1px">Últimos 7 días · toca afuera o Cerrar para salir</div>
-      </div>
-      <button onclick="solCerrarUltimos()"
-        style="background:rgba(192,57,43,0.15);border:1px solid rgba(192,57,43,0.4);color:#E07070;font-size:12px;font-weight:600;
-        padding:6px 14px;border-radius:16px;cursor:pointer">✕ Cerrar</button>
-    </div>
-    <!-- Lista -->
-    <div id="ultimos-list" style="flex:1;overflow-y:auto;padding:12px"></div>
-  </div>
-</div>
+<!-- Overlay Últimos 7d — RIMOSSO in v102: ora sub-tab "Mis Pedidos" -->
+
 
 <!-- ──────────────────────────────────────────────────────────── -->
 <!-- HELP SYSTEM — ¿Qué hago ahora? — MVP Blocco 1 Pedido BC -->
@@ -4520,7 +4580,7 @@ const HELP_CONTENT = {
           'Revisas los productos y oprimes "Enviar ahora"',
           'BC recibe la solicitud y la prepara. Al despachar, verás la entrega en el tab Recepción BC'
         ],
-        cuidado: 'No envíes el mismo pedido dos veces si crees que no llegó — usa el botón "📜 Últimos 7d" para revisar. Doble pedido = doble despacho.'
+        cuidado: 'No envíes el mismo pedido dos veces si crees que no llegó — revisa la pestaña "Mis Pedidos" en la parte superior. Doble pedido = doble despacho.'
       }
     ]
   },
