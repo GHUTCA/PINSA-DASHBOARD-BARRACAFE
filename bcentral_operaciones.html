@@ -1179,7 +1179,19 @@ function limpiarNum(v) {
 
 function fmtCLP(n) { return '$' + Math.round(n).toLocaleString('es-CL'); }
 function today()   { return new Date().toISOString().split('T')[0]; }
-function fmtDate(d) { if (!d) return '—'; const dt = new Date(d); if (isNaN(dt)) return d; return dt.toLocaleDateString('es-CL',{day:'2-digit',month:'short'}); }
+function fmtDate(d) {
+  if (!d) return '—';
+  // Fix timezone: "YYYY-MM-DD" va parsato come locale, non come UTC
+  // new Date("2026-04-19") interpreta UTC midnight -> Chile -1 giorno
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) {
+    const [yy, mm, dd] = d.substring(0, 10).split('-');
+    const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    return dd + '-' + (meses[parseInt(mm) - 1] || mm);
+  }
+  const dt = new Date(d);
+  if (isNaN(dt)) return d;
+  return dt.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
+}
 
 function showToast(msg, type='') {
   const t = document.getElementById('toast');
@@ -1989,6 +2001,40 @@ async function confirmarRecepcionOC(ocId, safe, prov, tieneNegociado) {
 // ════════════════════════════════════════════════════════
 let despLocalFiltro = 'all';
 
+// ════════════════════════════════════════════════════════════
+// DESPACHO — Unread tracking (localStorage)
+// Pattern: SOL-xxx leídas se guardan en despacho_leidos
+// Al expandir card → marca como leída (sale dot azul + bordo)
+// ════════════════════════════════════════════════════════════
+let despLeidos = _despCargarLeidos();
+
+function _despCargarLeidos() {
+  try { return new Set(JSON.parse(localStorage.getItem('despacho_leidos') || '[]')); }
+  catch { return new Set(); }
+}
+
+function _despGuardarLeidos() {
+  try { localStorage.setItem('despacho_leidos', JSON.stringify([...despLeidos])); }
+  catch (e) {}
+}
+
+function despToggleYMarcar(detId, solId) {
+  despToggle(detId);
+  if (solId && !despLeidos.has(solId)) {
+    despLeidos.add(solId);
+    _despGuardarLeidos();
+    // Rerender per rimuovere bordo/dot senza collassare card
+    const el = document.getElementById(detId);
+    const wasOpen = el && el.classList.contains('open');
+    renderDespacho();
+    // Restaura apertura dopo re-render
+    setTimeout(() => {
+      const el2 = document.getElementById(detId);
+      if (el2 && wasOpen) el2.classList.add('open');
+    }, 50);
+  }
+}
+
 async function renderDespacho() {
   const el = document.getElementById('desp-sol-list');
   el.innerHTML='<div class="loading-card"><div class="spinner"></div></div>';
@@ -2112,11 +2158,16 @@ async function renderDespacho() {
         </div>
       </div>`;
     }).join('');
-    return `<div class="desp-item" style="margin-top:10px${reciente ? ';border:2px solid var(--amber);box-shadow:0 0 14px rgba(245,166,35,0.35)' : ''}">
-      <div class="desp-item-header" onclick="despToggle('det-${safe}')">
-        <div>
-          <div style="font-size:11px;font-family:var(--mono);color:var(--t3)">${g.id}${reciente ? ' <span style="background:var(--amber);color:#fff;padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;margin-left:6px;letter-spacing:0.5px">NUEVA</span>' : ''}</div>
-          <div style="font-size:13px;font-weight:600;color:var(--t1)">${g.local} · ${g.items.length} productos</div>
+    const noLeido = !despLeidos.has(g.id);
+    const borderStyleCard = reciente
+      ? ';border:2px solid var(--amber);box-shadow:0 0 14px rgba(245,166,35,0.35)'
+      : (noLeido ? ';border:2px solid var(--blue2);box-shadow:0 0 10px rgba(74,111,165,0.35)' : '');
+    return `<div class="desp-item" style="margin-top:10px${borderStyleCard}">
+      <div class="desp-item-header" onclick="despToggleYMarcar('det-${safe}','${g.id}')">
+        <div style="position:relative">
+          ${noLeido && !reciente ? `<div style="position:absolute;left:-14px;top:4px;width:8px;height:8px;border-radius:50%;background:var(--blue2);box-shadow:0 0 6px var(--blue2)"></div>` : ''}
+          <div style="font-size:11px;font-family:var(--mono);color:var(--t3)">${g.id}${reciente ? ' <span style="background:var(--amber);color:#fff;padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;margin-left:6px;letter-spacing:0.5px">NUEVA</span>' : (noLeido ? ' <span style="background:var(--blue2);color:#fff;padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;margin-left:6px;letter-spacing:0.5px">NO LEÍDA</span>' : '')}</div>
+          <div style="font-size:13px;font-weight:${noLeido ? '700' : '600'};color:var(--t1)">${g.local} · ${g.items.length} productos</div>
           <div style="font-size:11px;color:var(--t3)">${fmtDate(g.fecha)}${g.hora?' · '+g.hora:''}</div>
         </div>
         <span class="status status-warn">SOLICITADO</span>
