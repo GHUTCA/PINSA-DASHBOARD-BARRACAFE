@@ -2018,20 +2018,40 @@ function _despGuardarLeidos() {
   catch (e) {}
 }
 
-function despToggleYMarcar(detId, solId) {
+function despToggleYMarcar(detId, solId, cardId) {
+  // 1. Espande/collapse sempre
   despToggle(detId);
+
+  // 2. Se non letta, marca e spegne evidenziazione (senza re-render)
   if (solId && !despLeidos.has(solId)) {
     despLeidos.add(solId);
     _despGuardarLeidos();
-    // Rerender per rimuovere bordo/dot senza collassare card
-    const el = document.getElementById(detId);
-    const wasOpen = el && el.classList.contains('open');
-    renderDespacho();
-    // Restaura apertura dopo re-render
-    setTimeout(() => {
-      const el2 = document.getElementById(detId);
-      if (el2 && wasOpen) el2.classList.add('open');
-    }, 50);
+
+    // Rimuove bordo + shadow della card
+    const card = document.getElementById(cardId);
+    if (card) {
+      // Non togliere il bordo ambra "reciente" se c'è
+      const st = card.getAttribute('style') || '';
+      if (st.indexOf('var(--amber)') === -1) {
+        card.style.border = '';
+        card.style.boxShadow = '';
+      }
+    }
+
+    // Rimuove dot arancio
+    const safe = cardId.replace('card-', '');
+    const dot = document.getElementById('dot-' + safe);
+    if (dot) dot.style.display = 'none';
+
+    // Rimuove badge "NO LEÍDA" (mantieni "NUEVA" se c'è)
+    const badge = document.getElementById('badge-' + safe);
+    if (badge && badge.innerHTML.indexOf('NO LEÍDA') !== -1) {
+      badge.innerHTML = '';
+    }
+
+    // Riduce peso titolo
+    const title = document.getElementById('title-' + safe);
+    if (title) title.style.fontWeight = '600';
   }
 }
 
@@ -2161,13 +2181,13 @@ async function renderDespacho() {
     const noLeido = !despLeidos.has(g.id);
     const borderStyleCard = reciente
       ? ';border:2px solid var(--amber);box-shadow:0 0 14px rgba(245,166,35,0.35)'
-      : (noLeido ? ';border:2px solid var(--blue2);box-shadow:0 0 10px rgba(74,111,165,0.35)' : '');
-    return `<div class="desp-item" style="margin-top:10px${borderStyleCard}">
-      <div class="desp-item-header" onclick="despToggleYMarcar('det-${safe}','${g.id}')">
+      : (noLeido ? ';border:2px solid var(--orange2);box-shadow:0 0 10px rgba(196,98,29,0.4)' : '');
+    return `<div class="desp-item" id="card-${safe}" style="margin-top:10px${borderStyleCard}">
+      <div class="desp-item-header" onclick="despToggleYMarcar('det-${safe}','${g.id}','card-${safe}')">
         <div style="position:relative">
-          ${noLeido && !reciente ? `<div style="position:absolute;left:-14px;top:4px;width:8px;height:8px;border-radius:50%;background:var(--blue2);box-shadow:0 0 6px var(--blue2)"></div>` : ''}
-          <div style="font-size:11px;font-family:var(--mono);color:var(--t3)">${g.id}${reciente ? ' <span style="background:var(--amber);color:#fff;padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;margin-left:6px;letter-spacing:0.5px">NUEVA</span>' : (noLeido ? ' <span style="background:var(--blue2);color:#fff;padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;margin-left:6px;letter-spacing:0.5px">NO LEÍDA</span>' : '')}</div>
-          <div style="font-size:13px;font-weight:${noLeido ? '700' : '600'};color:var(--t1)">${g.local} · ${g.items.length} productos</div>
+          <div id="dot-${safe}" style="${noLeido && !reciente ? '' : 'display:none;'}position:absolute;left:-14px;top:4px;width:8px;height:8px;border-radius:50%;background:var(--orange2);box-shadow:0 0 6px var(--orange2)"></div>
+          <div style="font-size:11px;font-family:var(--mono);color:var(--t3)">${g.id}<span id="badge-${safe}">${reciente ? ' <span style="background:var(--amber);color:#fff;padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;margin-left:6px;letter-spacing:0.5px">NUEVA</span>' : (noLeido ? ' <span style="background:var(--orange2);color:#fff;padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;margin-left:6px;letter-spacing:0.5px">NO LEÍDA</span>' : '')}</span></div>
+          <div id="title-${safe}" style="font-size:13px;font-weight:${noLeido ? '700' : '600'};color:var(--t1)">${g.local} · ${g.items.length} productos</div>
           <div style="font-size:11px;color:var(--t3)">${fmtDate(g.fecha)}${g.hora?' · '+g.hora:''}</div>
         </div>
         <span class="status status-warn">SOLICITADO</span>
@@ -3073,5 +3093,350 @@ function confirmLogout() {
 
 init().catch(console.error);
 </script>
+
+<!-- ──────────────────────────────────────────────────────────── -->
+<!-- HELP SYSTEM — ¿Qué hago ahora? — BC -->
+<!-- ──────────────────────────────────────────────────────────── -->
+
+<!-- FAB "?" bottom-right -->
+<button id="help-fab" onclick="helpAbrir()" title="¿Qué hago ahora?"
+  style="position:fixed;bottom:20px;right:20px;width:48px;height:48px;border-radius:50%;
+  background:var(--orange2);color:#fff;border:none;font-size:22px;font-weight:700;
+  cursor:pointer;box-shadow:0 4px 14px rgba(196,98,29,0.4);z-index:9997;
+  display:flex;align-items:center;justify-content:center">?</button>
+
+<!-- Overlay HELP -->
+<div id="help-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.78);
+  z-index:9998;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto"
+  onclick="if(event.target===this) helpCerrar()">
+  <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;
+    width:100%;max-width:620px;max-height:calc(100vh - 80px);display:flex;flex-direction:column;overflow:hidden">
+    <!-- Header -->
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;
+      justify-content:space-between;align-items:center;background:var(--bg2);flex-shrink:0">
+      <div>
+        <div id="help-titulo" style="font-size:15px;font-weight:600;color:var(--t1)">¿Qué hago ahora?</div>
+        <div id="help-contexto" style="font-size:11px;color:var(--t3);margin-top:2px">Guía del operador</div>
+      </div>
+      <button onclick="helpCerrar()"
+        style="background:rgba(192,57,43,0.15);border:1px solid rgba(192,57,43,0.4);color:#E07070;
+        font-size:12px;font-weight:600;padding:6px 14px;border-radius:16px;cursor:pointer">✕ Cerrar</button>
+    </div>
+    <!-- Content -->
+    <div id="help-content" style="flex:1;overflow-y:auto;padding:16px 20px"></div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// HELP CONTENT — Bodega Central (Mauro · Gerente Operaciones / JB)
+// ════════════════════════════════════════════════════════════════
+const HELP_CONTENT = {
+  movimientos: {
+    titulo: 'Movimientos — Historial y registros BC',
+    preguntas: [
+      {
+        q: '¿Cómo registro un ingreso de proveedor sin OC?',
+        rapido: 'Usa "Registrar movimiento" arriba: tipo Ingreso Proveedor, producto, cantidad. Queda trazado con tu nombre.',
+        pasos: [
+          'Oprimes el botón "+ Registrar movimiento" arriba',
+          'Eliges tipo (Ingreso Proveedor, Ajuste +, Ajuste -, etc.), producto y cantidad',
+          'Agregas proveedor y notas si corresponde — confirmas y queda en el historial'
+        ],
+        cuidado: 'Si el ingreso vino con OC, recíbelo desde OC Proveedor — no a mano aquí. Duplicaría el registro y el stock quedaría mal.'
+      },
+      {
+        q: '¿Cuándo hago un Ajuste manual en lugar de Conteo?',
+        rapido: 'Solo para correcciones puntuales trazadas (ej: producto roto visto en el momento). Para diferencias de stock usa Conteo Físico.',
+        pasos: [
+          'Si ves una merma puntual (producto caído, envase roto), usas Ajuste - menos con nota clara',
+          'Si sospechas diferencia general de stock, haces Conteo Físico — es más riguroso',
+          'Cada ajuste debe tener nota explicando la razón para auditoría'
+        ],
+        cuidado: 'Ajustes sin nota son invisibles para auditoría. Si alguien pregunta en 3 meses por qué faltan 5 unidades, la nota te salva.'
+      },
+      {
+        q: 'Busco un movimiento antiguo y no lo encuentro',
+        rapido: 'El panel muestra los más recientes. Para histórico completo abres el foglio Movimientos_BC directamente.',
+        pasos: [
+          'Revisas la lista — muestra los últimos movimientos en orden cronológico',
+          'Si es de hace semanas, abres el foglio CTRL_BC_2026 → hoja Movimientos_BC',
+          'Filtras por fecha o ID en el foglio para encontrarlo'
+        ],
+        cuidado: 'No edites directamente el foglio para "corregir" algo. Los movimientos pasados son la memoria del sistema — corrige con un Ajuste nuevo.'
+      }
+    ]
+  },
+  despacho: {
+    titulo: 'Despacho a Locales — Preparar entregas',
+    preguntas: [
+      {
+        q: '¿Cómo preparo una entrega cuando llega una solicitud?',
+        rapido: 'Abres la tarjeta, verificas físicamente el stock y escribes cuánto envías. Oprimes "Confirmar Envío".',
+        pasos: [
+          'La tarjeta nueva aparece con borde naranjo (NO LEÍDA) — la tocas para abrirla',
+          'Para cada producto revisas stock BC, verificas físicamente y escribes la cantidad a enviar',
+          'Agregas nota si hay backlog o faltantes. Oprimes "Confirmar Envío → [Local]"'
+        ],
+        cuidado: 'Verifica físicamente antes de confirmar. El sistema escribe solo al oprimir — pero una vez oprimido, el local verá la entrega y el inventario baja.'
+      },
+      {
+        q: 'No tengo suficiente stock de un producto ¿qué hago?',
+        rapido: 'Escribes lo que realmente puedes enviar (aunque sea menos). Agregas nota explicando. El local sabrá que viene parcial.',
+        pasos: [
+          'En el input escribes la cantidad real disponible (el máximo se bloquea automático)',
+          'En la nota escribes "backlog: faltan X UO" o similar',
+          'Confirmas — el local recibe el envío parcial y el backlog queda visible'
+        ],
+        cuidado: 'No envíes 0 silenciosamente sin nota. El local asume que no hay stock y no reclama, pero después falta en la barra.'
+      },
+      {
+        q: 'El local reportó una diferencia en lo recibido ¿qué pasa?',
+        rapido: 'Te llega en el tab Diferencias. Decides si es pérdida en ruta (ajuste) o error de conteo del local.',
+        pasos: [
+          'Revisas la diferencia reportada: SKU, cantidad esperada vs recibida',
+          'Si crees que se perdió en ruta, oprimes "Aceptar pérdida" — se crea Ajuste - menos en BC',
+          'Si crees que el local contó mal, oprimes "Error de conteo" — no toca el inventario BC'
+        ],
+        cuidado: 'Decidir "error de conteo" sin verificar desinforma al local. Si hay dudas, llama al JL antes de cerrar la diferencia.'
+      },
+      {
+        q: 'Tarjeta con borde naranjo y chip "NO LEÍDA" ¿qué significa?',
+        rapido: 'Es una solicitud que nunca abriste. Al abrirla se marca como leída automáticamente.',
+        pasos: [
+          'Borde naranjo + chip "NO LEÍDA" = solicitud nueva para ti',
+          'Al tocar la tarjeta se expande y el indicador se apaga',
+          'Así sabes rápido qué es nuevo sin revisar toda la lista'
+        ],
+        cuidado: 'El indicador se guarda por dispositivo. Si abres desde otra PC la verás como nueva otra vez — normal, no es error.'
+      }
+    ]
+  },
+  inventario: {
+    titulo: 'Inventario BC — Stock central',
+    preguntas: [
+      {
+        q: '¿Qué significa ATENCIÓN y QUIEBRE en BC?',
+        rapido: 'ATENCIÓN = stock bajo umbral mínimo. QUIEBRE = stock insuficiente para cubrir despachos pendientes.',
+        pasos: [
+          'Revisas la lista — tag naranjo = ATENCIÓN, tag rojo = QUIEBRE',
+          'Para ATENCIÓN: planeas compra al proveedor en OC',
+          'Para QUIEBRE: es urgente — emites OC ya o avisas a locales que habrá backlog'
+        ],
+        cuidado: 'Un QUIEBRE en BC cascadea a todos los locales. Mientras más días esperes más difícil recuperar el ritmo.'
+      },
+      {
+        q: 'El stock muestra número negativo ¿es posible?',
+        rapido: 'Sí cuando hay desorden: despachos registrados sin ingreso previo, o conteos no hechos a tiempo.',
+        pasos: [
+          'Revisas los últimos movimientos de ese SKU en Movimientos',
+          'Probablemente hay un Despacho registrado sin un Ingreso Proveedor correspondiente',
+          'Para corregir: registras el Ingreso que faltó (con OC o manual) — el stock vuelve positivo'
+        ],
+        cuidado: 'No pongas Ajuste + mas "por las dudas" para tapar el negativo. Encuentra la causa — probablemente es un movimiento que nunca se registró.'
+      },
+      {
+        q: '¿Cómo agrego un producto nuevo al catálogo?',
+        rapido: 'Desde el foglio CONTROL_MAESTRO → BD_INSUMOS. Lo activas poniendo "Si" en la columna de activo.',
+        pasos: [
+          'Abres CONTROL_MAESTRO → hoja BD_INSUMOS',
+          'Agregas fila nueva: SKU, Descripción, UTM, UO, Factor, etc.',
+          'Pones "Si" en columna Activo — el producto aparece disponible en todos los panels'
+        ],
+        cuidado: 'El SKU debe ser único y numérico. Antes de agregar revisa que no exista ya con otro nombre — evita catálogo duplicado.'
+      }
+    ]
+  },
+  oc: {
+    titulo: 'OC Proveedor — Emitir y recibir',
+    preguntas: [
+      {
+        q: '¿Cómo emito una Orden de Compra?',
+        rapido: 'En "Armar Pedido" buscas productos, agregas cantidades, eliges proveedor y confirmas. Se genera PDF y email.',
+        pasos: [
+          'Tab OC Proveedor → Armar Pedido — buscas productos y los agregas con cantidad y costo',
+          'Eliges proveedor (o creas uno nuevo desde Proveedores)',
+          'Oprimes Emitir — el sistema genera PDF, OC_Log y borrador de email al proveedor'
+        ],
+        cuidado: 'Revisa costos antes de emitir. Los números que pones aquí alimentan el valor de compra del inventario — si están mal, el margen quedará mal.'
+      },
+      {
+        q: '¿Cómo recibo una OC cuando llega la mercadería?',
+        rapido: 'Tab Recepción dentro de OC Proveedor. Buscas la OC pendiente, verificas físicamente y oprimes recibir.',
+        pasos: [
+          'OC Proveedor → Recepción — lista todas las OC en estado EMITIDA',
+          'Seleccionas la OC, verificas cantidades físicas contra lo ordenado',
+          'Si todo cuadra oprimes Recibir. Si hay diferencia marcas DIFERENCIA y agregas nota'
+        ],
+        cuidado: 'Reconoce diferencias en el momento, no días después. Una vez integrado el ingreso en stock, reclamos con proveedor se complican.'
+      },
+      {
+        q: 'El precio en factura es distinto al de la OC ¿qué hago?',
+        rapido: 'El sistema te pregunta: Nota de Crédito (reclamar al proveedor), actualizar precio (nuevo estándar) o sin cambio.',
+        pasos: [
+          'Al recibir, si detectas diferencia de precio, eliges la acción correcta',
+          'NC: precio quedó mal, se pide Nota de Crédito al proveedor',
+          'Actualizar: el precio nuevo es el correcto de ahora en adelante — se refleja en próximas OC'
+        ],
+        cuidado: 'Si siempre eliges "sin cambio" por comodidad, el costo real se desalinea del registrado. Decide cada vez según el caso.'
+      }
+    ]
+  },
+  proveedores: {
+    titulo: 'Proveedores — Gestión',
+    preguntas: [
+      {
+        q: '¿Cómo agrego un proveedor nuevo?',
+        rapido: 'Oprimes "+ Nuevo" arriba, llenas datos mínimos (nombre + email) y guardas.',
+        pasos: [
+          'Tab Proveedores → oprimes "+ Nuevo Proveedor"',
+          'Llenas: nombre, nickname corto, email, contacto, RUT, condición de pago',
+          'Guardas — queda disponible para elegir al emitir OC'
+        ],
+        cuidado: 'El nickname es lo que aparece en el selector de OC — hazlo corto y reconocible. "JRA" mejor que "Juan Ramírez Asociados Ltda".'
+      },
+      {
+        q: '¿Puedo editar un proveedor existente?',
+        rapido: 'Sí. Tocas la tarjeta del proveedor, editas los datos y guardas.',
+        pasos: [
+          'En la lista tocas la tarjeta del proveedor que quieres editar',
+          'Se abre el formulario con los datos actuales',
+          'Cambias lo necesario y guardas — se actualiza en todas las OC futuras'
+        ],
+        cuidado: 'No cambies el nombre principal si ya tiene OC históricas — los PDFs viejos ya tienen el nombre antiguo. Mejor crear uno nuevo y desactivar el antiguo.'
+      },
+      {
+        q: 'Un proveedor ya no trabaja con nosotros ¿cómo lo saco?',
+        rapido: 'Por ahora no se borran desde el panel. Solo se marca inactivo manualmente en el foglio.',
+        pasos: [
+          'Abres el foglio CTRL_BC_2026 → hoja Proveedores',
+          'Marcas el proveedor como inactivo (ej: agregar "INACTIVO" en nombre)',
+          'Así no aparece más en el selector de OC pero su histórico queda intacto'
+        ],
+        cuidado: 'No borres filas del foglio de Proveedores. Las OC antiguas referencian por nombre — si lo borras, PDFs viejos pierden info.'
+      }
+    ]
+  },
+  conteo: {
+    titulo: 'Conteo Físico BC — Auditoría de stock',
+    preguntas: [
+      {
+        q: '¿Cuándo hago el conteo físico de BC?',
+        rapido: 'Mensual como mínimo. Semanal para productos críticos o alto valor.',
+        pasos: [
+          'Define calendario de conteo (ej: primer lunes del mes)',
+          'Haces conteo físico completo o por categorías (rotativo)',
+          'Registras números reales — el sistema genera ajustes automáticos contra stock teórico'
+        ],
+        cuidado: 'Conteos postergados acumulan diferencias imposibles de rastrear. Mejor parciales frecuentes que completos raros.'
+      },
+      {
+        q: '¿Qué es la diferencia entre UPC y UO en BC?',
+        rapido: 'UPC = unidad de compra al proveedor (ej: caja de 12). UO = unidad operativa (ej: unidad individual). BC usa ambas.',
+        pasos: [
+          'UPC: cómo compras al proveedor. Ej: 1 caja = 12 unidades',
+          'UO: cómo despachas a locales. Ej: 1 unidad individual',
+          'En Conteo Físico BC cuentas en UPC (la caja cerrada). El sistema convierte a UO automáticamente'
+        ],
+        cuidado: 'Si un producto tiene caja abierta, cuéntala aparte como BO (si aplica) o por UO sueltas. No sumes media caja como "1 UPC".'
+      },
+      {
+        q: 'La pérdida total del conteo es muy alta ¿qué hago?',
+        rapido: 'El PDF se genera igual. Revisa las últimas semanas en Movimientos para entender dónde se perdió — no es normal.',
+        pasos: [
+          'Registra el conteo igual — protege la verdad física del stock',
+          'Revisa Movimientos de las últimas 4 semanas buscando anomalías',
+          'Si encuentras causa (recepción mal registrada, despacho duplicado), documenta; si no hay causa clara, es merma para investigar'
+        ],
+        cuidado: 'Pérdidas > 2% del valor mensual son señal de problema estructural: proveedor que entrega menos, merma física no controlada, o robo. No ignores el patrón.'
+      }
+    ]
+  }
+};
+
+// Mappa STATE.tab → chiave HELP_CONTENT
+const HELP_TAB_MAP = {
+  'movimientos':  'movimientos',
+  'despacho':     'despacho',
+  'inventario':   'inventario',
+  'oc':           'oc',
+  'proveedores':  'proveedores',
+  'conteo':       'conteo'
+};
+
+let STATE_help = { expanded: {} };
+
+function helpAbrir() {
+  const overlay = document.getElementById('help-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  STATE_help.expanded = {};
+  helpRender();
+}
+
+function helpCerrar() {
+  const overlay = document.getElementById('help-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function helpToggleQ(i) {
+  const isOpen = !!STATE_help.expanded[i];
+  STATE_help.expanded = {};
+  if (!isOpen) STATE_help.expanded[i] = true;
+  helpRender();
+}
+
+function helpRender() {
+  const tabKey = HELP_TAB_MAP[typeof STATE !== 'undefined' && STATE.tab ? STATE.tab : ''] || 'movimientos';
+  const data = HELP_CONTENT[tabKey] || HELP_CONTENT.movimientos;
+
+  document.getElementById('help-titulo').textContent = '¿Qué hago ahora?';
+  document.getElementById('help-contexto').textContent = data.titulo || 'Guía del operador';
+
+  const cont = document.getElementById('help-content');
+  if (!cont) return;
+
+  if (!data.preguntas || !data.preguntas.length) {
+    cont.innerHTML = `<div style="padding:40px 20px;text-align:center;color:var(--t3);font-size:13px">
+      <div style="font-size:32px;margin-bottom:10px">📖</div>
+      Guía de este tab en construcción
+    </div>`;
+    return;
+  }
+
+  cont.innerHTML = data.preguntas.map((p, i) => {
+    const open = !!STATE_help.expanded[i];
+    const body = open ? `
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <div style="margin-bottom:12px">
+          <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--orange2);margin-bottom:4px">⚡ LO RÁPIDO</div>
+          <div style="font-size:13px;color:var(--t1);line-height:1.45">${p.rapido || ''}</div>
+        </div>
+        <div style="margin-bottom:12px">
+          <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--blue2);margin-bottom:4px">📋 LOS 3 PASOS</div>
+          <ol style="margin:0;padding-left:18px;font-size:12px;color:var(--t2);line-height:1.55">
+            ${(p.pasos || []).map(s => `<li style="margin-bottom:3px">${s}</li>`).join('')}
+          </ol>
+        </div>
+        <div style="background:rgba(245,166,35,0.08);border-left:3px solid var(--amber);border-radius:4px;padding:8px 10px">
+          <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--amber);margin-bottom:3px">⚠️ CUIDADO</div>
+          <div style="font-size:12px;color:var(--t2);line-height:1.45">${p.cuidado || ''}</div>
+        </div>
+      </div>` : '';
+
+    return `<div onclick="helpToggleQ(${i})"
+      style="background:${open ? 'var(--bg3)' : 'var(--bg2)'};border:1px solid var(--border2);
+      border-radius:8px;padding:12px 14px;margin-bottom:8px;cursor:pointer;
+      opacity:${open ? '1' : '0.92'}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div style="font-size:13px;font-weight:${open ? '700' : '600'};color:var(--t1);flex:1">${p.q}</div>
+        <div style="color:var(--t3);font-size:14px">${open ? '▾' : '▸'}</div>
+      </div>
+      ${body}
+    </div>`;
+  }).join('');
+}
+</script>
+
 </body>
 </html>
