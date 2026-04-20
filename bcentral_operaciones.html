@@ -1854,6 +1854,10 @@ async function emitirOC() {
 
 function ocRecepToggle(id) { const el=document.getElementById(id); if(el) el.style.display=el.style.display==='none'?'block':'none'; }
 
+// ══════════════════════════════════════════════════════════════
+// renderOCRecepcion v2 · FIX BUG #29 — UI per-SKU
+// Para cada OC pendiente, muestra cada SKU con sus propios inputs
+// ══════════════════════════════════════════════════════════════
 async function renderOCRecepcion() {
   const el = document.getElementById('oc-recep-list');
   el.innerHTML='<div class="loading-card"><div class="spinner"></div></div>';
@@ -1867,11 +1871,13 @@ async function renderOCRecepcion() {
     return est==='ENVIADA'||est==='EMITIDA'||est==='SI'||est==='PENDIENTE'||est==='APROBADA'||est==='APROBADO';
   });
   if (!pend.length) { el.innerHTML=`<div class="empty"><div class="empty-icon">✅</div>Sin OC pendientes de recepción</div>`; return; }
+  // Render card collassate (senza dettaglio SKU ancora) — dettaglio caricato on-demand al toggle
   el.innerHTML = pend.map(oc => {
     const ocId  = oc['N° OC']||oc['ID OC']||oc['OC']||'—';
     const prov  = oc['Proveedor']||'—';
     const fecha = oc['Fecha']||'—';
     const total = limpiarNum(oc['Total $']||oc['Total']||'0');
+    const nItems = limpiarNum(oc['N° Items']||'0');
     const safe  = ocId.replace(/[^a-zA-Z0-9]/g,'-');
     const provRow = STATE.proveedores.find(p => {
       const n=(p['Nickname']||p['Nombre Proveedor']||'').trim().toLowerCase();
@@ -1881,41 +1887,130 @@ async function renderOCRecepcion() {
     const negLabel = tieneNegociado
       ? `<span style="font-size:10px;background:rgba(90,158,122,0.15);color:var(--green2);border:1px solid var(--green2);border-radius:10px;padding:1px 6px;margin-left:6px">Precios negociados</span>`
       : `<span style="font-size:10px;background:rgba(74,144,217,0.12);color:var(--blue);border:1px solid var(--blue);border-radius:10px;padding:1px 6px;margin-left:6px">Sin precio negociado</span>`;
-    return `<div id="oc-card-${safe}" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
-      <div onclick="ocRecepToggle('recep-${safe}')" style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+    const provSafe = prov.replace(/'/g,"\\'").replace(/"/g,'\\"');
+    return `<div id="oc-card-${safe}" data-ocid="${ocId}" data-prov="${provSafe}" data-negociado="${tieneNegociado}" data-totaloc="${total}" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
+      <div onclick="ocRecepTogglePorSKU('${safe}')" style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
         <div>
           <div style="font-size:11px;font-family:var(--mono);color:var(--t3)">${ocId}</div>
           <div style="font-size:13px;font-weight:500;color:var(--t1)">${prov}${negLabel}</div>
-          <div style="font-size:11px;color:var(--t3)">${fmtDate(fecha)} · OC: ${fmtCLP(total)}</div>
+          <div style="font-size:11px;color:var(--t3)">${fmtDate(fecha)} · ${nItems} SKU · OC: ${fmtCLP(total)}</div>
         </div>
         <span class="status status-warn">PENDIENTE</span>
       </div>
       <div id="recep-${safe}" style="display:none;border-top:1px solid var(--border);padding:12px 14px">
-        <div class="row2" style="margin-bottom:8px">
-          <div class="field"><label>Q recibida (UPC)</label>
-            <input type="number" id="qrecib-${safe}" min="0" step="1" placeholder="0" style="font-family:var(--mono)" oninput="ocRecepActualizar('${safe}',${tieneNegociado},${total})">
-          </div>
-          <div class="field"><label>Q ordenada (OC)</label>
-            <input type="number" id="qord-${safe}" value="${limpiarNum(oc['N° Items']||'0')}" readonly style="font-family:var(--mono);opacity:0.5">
-          </div>
-        </div>
-        <div class="row2" style="margin-bottom:8px">
-          <div class="field"><label>Precio neto factura (por UPC)</label>
-            <input type="text" inputmode="numeric" id="precio-${safe}" placeholder="$0" style="font-family:var(--mono)" oninput="ocRecepActualizar('${safe}',${tieneNegociado},${total})" onblur="ocRecepFmtPrecio(this);ocRecepActualizar('${safe}',${tieneNegociado},${total})">
-          </div>
-          <div class="field"><label>Precio OC (por UPC)</label>
-            <input type="text" inputmode="numeric" id="preciooc-${safe}" value="${fmtCLP(total)}" readonly style="font-family:var(--mono);opacity:0.5">
-          </div>
-        </div>
-        <div id="recep-alert-${safe}" style="display:none;padding:9px 12px;border-radius:8px;font-size:12px;margin-bottom:8px"></div>
-        <div id="recep-total-${safe}" style="display:none;background:var(--bg3);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--t2)"></div>
-        <div class="field"><label>Notas / diferencias</label>
-          <input type="text" id="nota-recep-${safe}" placeholder="Faltantes, precios, motivo diferencia...">
-        </div>
-        <button class="btn btn-green" onclick="confirmarRecepcionOC('${ocId}','${safe}','${prov}',${tieneNegociado})">✓ Confirmar Recepción</button>
+        <div id="recep-body-${safe}"><div class="loading-card"><div class="spinner"></div></div></div>
       </div>
     </div>`;
   }).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
+// ocRecepTogglePorSKU — expand/collapse card + lazy-load dettaglio SKU
+// ══════════════════════════════════════════════════════════════
+async function ocRecepTogglePorSKU(safe) {
+  const body  = document.getElementById('recep-'+safe);
+  const inner = document.getElementById('recep-body-'+safe);
+  const card  = document.getElementById('oc-card-'+safe);
+  if (!body || !inner || !card) return;
+  const open = body.style.display === 'block';
+  if (open) { body.style.display = 'none'; return; }
+  body.style.display = 'block';
+  // Lazy-load una sola volta
+  if (inner.dataset.loaded === '1') return;
+  const ocId           = card.dataset.ocid;
+  const prov           = card.dataset.prov;
+  const tieneNegociado = card.dataset.negociado === 'true';
+  const totalOC        = parseFloat(card.dataset.totaloc) || 0;
+  const res = await callGAS({ action:'getOCDetalle', local:CFG.local, ocId });
+  if (!res || !res.ok || !res.items || !res.items.length) {
+    inner.innerHTML = `<div style="padding:10px;color:var(--red);font-size:12px">❌ ${res && res.error ? res.error : 'No se pudieron cargar los SKU de esta OC'}</div>`;
+    return;
+  }
+  inner.dataset.loaded = '1';
+  const items = res.items;
+  // Render 1 bloque por SKU
+  const skusHtml = items.map((it, idx) => {
+    const skuSafe = String(it.sku||'').replace(/[^a-zA-Z0-9]/g,'-') + '-' + idx;
+    const descEsc = (it.desc||'').replace(/"/g,'&quot;');
+    return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px" data-skurow="${safe}-${skuSafe}">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--t1)">${it.desc||'—'}</div>
+          <div style="font-size:11px;color:var(--t3)">SKU ${it.sku} · ${it.upcDesc||''}</div>
+        </div>
+      </div>
+      <div class="row2" style="margin-bottom:6px">
+        <div class="field"><label>Q recibida (UPC)</label>
+          <input type="number" id="qrec-${safe}-${skuSafe}" min="0" step="1" placeholder="0" style="font-family:var(--mono)" oninput="ocRecepRecalcSKU('${safe}','${skuSafe}',${tieneNegociado})">
+        </div>
+        <div class="field"><label>Q ordenada (OC)</label>
+          <input type="number" id="qord-${safe}-${skuSafe}" value="${it.qOrdenada}" readonly style="font-family:var(--mono);opacity:0.55">
+        </div>
+      </div>
+      <div class="row2" style="margin-bottom:6px">
+        <div class="field"><label>Precio neto factura (por UPC)</label>
+          <input type="text" inputmode="numeric" id="pfac-${safe}-${skuSafe}" placeholder="$0" style="font-family:var(--mono)" oninput="ocRecepRecalcSKU('${safe}','${skuSafe}',${tieneNegociado})" onblur="ocRecepFmtPrecio(this);ocRecepRecalcSKU('${safe}','${skuSafe}',${tieneNegociado})">
+        </div>
+        <div class="field"><label>Precio OC (por UPC)</label>
+          <input type="text" inputmode="numeric" id="poc-${safe}-${skuSafe}" value="${fmtCLP(it.precioOC)}" readonly style="font-family:var(--mono);opacity:0.55">
+        </div>
+      </div>
+      <div id="alert-${safe}-${skuSafe}" style="display:none;padding:7px 10px;border-radius:6px;font-size:11px;margin-top:4px"></div>
+      <input type="hidden" id="sku-${safe}-${skuSafe}" value="${it.sku}">
+      <input type="hidden" id="desc-${safe}-${skuSafe}" value="${descEsc}">
+      <input type="hidden" id="pocnum-${safe}-${skuSafe}" value="${it.precioOC}">
+    </div>`;
+  }).join('');
+  const skuSafes = items.map((it, idx) => String(it.sku||'').replace(/[^a-zA-Z0-9]/g,'-') + '-' + idx).join(',');
+  inner.innerHTML = skusHtml + `
+    <div id="recep-total-${safe}" style="background:var(--bg3);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:12px;color:var(--t2)">Total OC: <strong>${fmtCLP(totalOC)}</strong> · Total factura: <strong>—</strong></div>
+    <div class="field" style="margin-bottom:10px"><label>Notas / diferencias globales</label>
+      <input type="text" id="nota-recep-${safe}" placeholder="Faltantes, precios, motivo diferencia...">
+    </div>
+    <button class="btn btn-green" onclick="confirmarRecepcionOCPorSKU('${safe}','${skuSafes}',${tieneNegociado},${totalOC})">✓ Confirmar Recepción</button>`;
+}
+
+// ══════════════════════════════════════════════════════════════
+// ocRecepRecalcSKU — recalcola alert e totali per un SKU
+// ══════════════════════════════════════════════════════════════
+function ocRecepRecalcSKU(safe, skuSafe, tieneNegociado) {
+  const pFac = limpiarNum(document.getElementById('pfac-'+safe+'-'+skuSafe)?.value||'0');
+  const pOC  = parseFloat(document.getElementById('pocnum-'+safe+'-'+skuSafe)?.value||'0') || 0;
+  const alertEl = document.getElementById('alert-'+safe+'-'+skuSafe);
+  if (alertEl) {
+    if (pFac > 0 && pOC > 0) {
+      const pct = Math.abs(pFac-pOC)/pOC;
+      if (pct > 0.001) {
+        if (tieneNegociado) {
+          alertEl.style.cssText='display:block;padding:7px 10px;border-radius:6px;font-size:11px;margin-top:4px;background:rgba(184,84,80,0.1);border:1px solid var(--red);color:var(--red)';
+          alertEl.innerHTML='Precio factura ≠ precio negociado → NC';
+        } else {
+          alertEl.style.cssText='display:block;padding:7px 10px;border-radius:6px;font-size:11px;margin-top:4px;background:rgba(200,137,58,0.1);border:1px solid var(--yellow);color:var(--yellow)';
+          alertEl.innerHTML='Actualizará BD_INSUMOS';
+        }
+      } else {
+        alertEl.style.cssText='display:block;padding:7px 10px;border-radius:6px;font-size:11px;margin-top:4px;background:rgba(90,158,122,0.1);border:1px solid var(--green2);color:var(--green2)';
+        alertEl.innerHTML='✓ Precio OK';
+      }
+    } else { alertEl.style.display='none'; }
+  }
+  // Aggiorna totale factura della OC
+  const totalEl = document.getElementById('recep-total-'+safe);
+  if (totalEl) {
+    const totalOC = parseFloat(document.getElementById('oc-card-'+safe)?.dataset.totaloc||'0') || 0;
+    let totFact = 0;
+    document.querySelectorAll('[id^="qrec-'+safe+'-"]').forEach(inp => {
+      const base = inp.id.replace('qrec-','');
+      const parts = base.split('-');
+      const sSafe = parts.slice(1).join('-');
+      const q = parseFloat(inp.value||'0') || 0;
+      const p = limpiarNum(document.getElementById('pfac-'+safe+'-'+sSafe)?.value||'0');
+      totFact += q * p;
+    });
+    const delta = totFact - totalOC;
+    const color = delta < 0 ? 'var(--green2)' : (delta > 0 ? 'var(--red)' : 'var(--t1)');
+    totalEl.innerHTML = `Total OC: <strong>${fmtCLP(totalOC)}</strong> · Total factura: <strong>${fmtCLP(totFact)}</strong> · Diferencia: <strong style="color:${color}">${delta>=0?'+':''}${fmtCLP(delta)}</strong>`;
+  }
 }
 
 function ocRecepFmtPrecio(el) {
@@ -1955,45 +2050,69 @@ function ocRecepActualizar(safe, tieneNegociado, totalOC) {
   alertEl.innerHTML=msgs.map(m=>m.m).join('<br>');
 }
 
-async function confirmarRecepcionOC(ocId, safe, prov, tieneNegociado) {
-  const qRecib   = parseFloat(document.getElementById('qrecib-'+safe)?.value||'0');
-  const precio   = limpiarNum(document.getElementById('precio-'+safe)?.value||'0');
-  const precioOC = limpiarNum(document.getElementById('preciooc-'+safe)?.value||'0');
-  const nota     = document.getElementById('nota-recep-'+safe)?.value||'';
-  if (!qRecib || qRecib <= 0) { showToast('Ingresa la Q recibida','error'); return; }
-  let precioAccion = 'sin_cambio';
-  if (precio > 0 && precioOC > 0 && Math.abs(precio-precioOC)/Math.max(precioOC,1) > 0.001) {
-    precioAccion = tieneNegociado ? 'nc' : 'actualizar_bd';
+// ══════════════════════════════════════════════════════════════
+// confirmarRecepcionOCPorSKU v2 · FIX BUG #29
+// Construye payload items[] con Q y precio REALES por SKU
+// ══════════════════════════════════════════════════════════════
+async function confirmarRecepcionOCPorSKU(safe, skuSafesCsv, tieneNegociado, totalOC) {
+  const card = document.getElementById('oc-card-'+safe);
+  if (!card) { showToast('Error UI: card no encontrada','error'); return; }
+  const ocId = card.dataset.ocid;
+  const prov = card.dataset.prov;
+  const skuSafes = (skuSafesCsv||'').split(',').filter(x=>x);
+  if (!skuSafes.length) { showToast('Sin SKU para confirmar','error'); return; }
+  // Construir items
+  const items = [];
+  let totalItemsConQ = 0;
+  for (const sSafe of skuSafes) {
+    const sku       = document.getElementById('sku-'+safe+'-'+sSafe)?.value || '';
+    const desc      = document.getElementById('desc-'+safe+'-'+sSafe)?.value || '';
+    const qOrd      = parseFloat(document.getElementById('qord-'+safe+'-'+sSafe)?.value || '0') || 0;
+    const qRecib    = parseFloat(document.getElementById('qrec-'+safe+'-'+sSafe)?.value || '0') || 0;
+    const pOC       = parseFloat(document.getElementById('pocnum-'+safe+'-'+sSafe)?.value || '0') || 0;
+    const pFac      = limpiarNum(document.getElementById('pfac-'+safe+'-'+sSafe)?.value || '0');
+    if (!sku) continue;
+    if (qRecib > 0) totalItemsConQ++;
+    items.push({
+      sku: sku, desc: desc,
+      qOrdenada: qOrd, qRecibida: qRecib,
+      precioOC: pOC, precioFactura: pFac
+    });
   }
+  if (!totalItemsConQ) { showToast('Ingresa Q recibida en al menos un SKU','error'); return; }
+  const nota = document.getElementById('nota-recep-'+safe)?.value || '';
   const btn = document.querySelector(`#recep-${safe} .btn-green`);
-  if (btn) { btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Registrando...'; }
+  if (btn) { btn.disabled = true; btn.innerHTML='<span class="spinner"></span> Registrando...'; }
   const res = await callGAS({
-    action:'recibirOC', local:CFG.local, ocId, proveedor:prov,
-    qRecibida:qRecib, precioFactura:precio, precioOC,
-    precioAccion, tieneNegociado,
-    notas:nota, operador:SESSION?SESSION.nombre:'', fecha:today(),
-    hasDiff: nota.length>0 || (qRecib !== parseFloat(document.getElementById('qord-'+safe)?.value||'0'))
+    action: 'recibirOC',
+    local: CFG.local,
+    ocId: ocId,
+    proveedor: prov,
+    items: items,
+    notas: nota,
+    operador: SESSION ? SESSION.nombre : '',
+    fecha: today()
   });
-  if (btn) { btn.disabled=false; btn.innerHTML='✓ Confirmar Recepción'; }
-  if (res && res.ok!==false) {
-    let msg='✅ Recepción confirmada';
-    if (precioAccion==='nc') msg+=' · NC generada';
-    if (precioAccion==='actualizar_bd') msg+=' · Precio BD actualizado';
-    showToast(msg,'success');
-    // Marcar OC como confirmada en STATE para filtrarla en reloads
+  if (btn) { btn.disabled = false; btn.innerHTML='✓ Confirmar Recepción'; }
+  if (res && res.ok !== false) {
+    let msg = '✅ Recepción confirmada · ' + (res.escritos||0) + ' SKU registrados';
+    if (res.hasDiff) msg += ' · con diferencias';
+    showToast(msg, 'success');
     STATE.ocConfirmadas = STATE.ocConfirmadas || new Set();
     STATE.ocConfirmadas.add(ocId);
-    // Eliminar card localmente
-    const card = document.getElementById('oc-card-'+safe);
     if (card) card.remove();
-    // Si no quedan cards mostrar empty state
     const lista = document.getElementById('oc-recep-list');
     if (lista && !lista.querySelector('[id^="oc-card-"]')) {
-      lista.innerHTML=`<div class="empty"><div class="empty-icon">✅</div>Sin OC pendientes de recepción</div>`;
+      lista.innerHTML = `<div class="empty"><div class="empty-icon">✅</div>Sin OC pendientes de recepción</div>`;
     }
   } else {
-    showToast('Error: '+(res?.error||'sin respuesta'),'error');
+    showToast('Error: ' + (res?.error || 'sin respuesta'), 'error');
   }
+}
+
+// Legacy stub — mantiene compatibilidad si alguna parte del código aún la llama
+async function confirmarRecepcionOC(ocId, safe, prov, tieneNegociado) {
+  showToast('UI actualizada — recarga el panel (F5)', 'warn');
 }
 
 // ════════════════════════════════════════════════════════
