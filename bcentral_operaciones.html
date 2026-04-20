@@ -1974,7 +1974,16 @@ async function ocRecepTogglePorSKU(safe) {
 // ocRecepRecalcSKU — recalcola alert e totali per un SKU
 // ══════════════════════════════════════════════════════════════
 function ocRecepRecalcSKU(safe, skuSafe, tieneNegociado) {
-  const pFac = limpiarNum(document.getElementById('pfac-'+safe+'-'+skuSafe)?.value||'0');
+  // Helper parseCLP inline (fix BUG #30: '$1.772' → 1772 no 1.772)
+  const parseCLP = (raw) => {
+    if (raw === null || raw === undefined) return 0;
+    const s = String(raw).trim().replace(/[$\s]/g,'');
+    if (!s) return 0;
+    const hasComma = s.indexOf(',') !== -1;
+    if (hasComma) return parseFloat(s.replace(/\./g,'').replace(',','.')) || 0;
+    return parseFloat(s.replace(/\./g,'')) || 0;
+  };
+  const pFac = parseCLP(document.getElementById('pfac-'+safe+'-'+skuSafe)?.value||'0');
   const pOC  = parseFloat(document.getElementById('pocnum-'+safe+'-'+skuSafe)?.value||'0') || 0;
   const alertEl = document.getElementById('alert-'+safe+'-'+skuSafe);
   if (alertEl) {
@@ -2004,7 +2013,7 @@ function ocRecepRecalcSKU(safe, skuSafe, tieneNegociado) {
       const parts = base.split('-');
       const sSafe = parts.slice(1).join('-');
       const q = parseFloat(inp.value||'0') || 0;
-      const p = limpiarNum(document.getElementById('pfac-'+safe+'-'+sSafe)?.value||'0');
+      const p = parseCLP(document.getElementById('pfac-'+safe+'-'+sSafe)?.value||'0');
       totFact += q * p;
     });
     const delta = totFact - totalOC;
@@ -2061,6 +2070,22 @@ async function confirmarRecepcionOCPorSKU(safe, skuSafesCsv, tieneNegociado, tot
   const prov = card.dataset.prov;
   const skuSafes = (skuSafesCsv||'').split(',').filter(x=>x);
   if (!skuSafes.length) { showToast('Sin SKU para confirmar','error'); return; }
+  // Helper: parse precio CLP (entero chileno, punto = separador de miles)
+  // Fix BUG #30: '$1.772' debe ser 1772, no 1.772
+  const parseCLP = (raw) => {
+    if (raw === null || raw === undefined) return 0;
+    const s = String(raw).trim().replace(/[$\s]/g,'');
+    if (!s) return 0;
+    // CLP no tiene decimales: punto siempre es separador de miles
+    // Solo si hay COMA el número es decimal (ej: "1772,50")
+    const hasComma = s.indexOf(',') !== -1;
+    if (hasComma) {
+      // Formato europeo con decimal: "1.772,50" → 1772.50
+      return parseFloat(s.replace(/\./g,'').replace(',','.')) || 0;
+    }
+    // Solo puntos o nada: quítalos todos, es entero
+    return parseFloat(s.replace(/\./g,'')) || 0;
+  };
   // Construir items
   const items = [];
   let totalItemsConQ = 0;
@@ -2070,7 +2095,7 @@ async function confirmarRecepcionOCPorSKU(safe, skuSafesCsv, tieneNegociado, tot
     const qOrd      = parseFloat(document.getElementById('qord-'+safe+'-'+sSafe)?.value || '0') || 0;
     const qRecib    = parseFloat(document.getElementById('qrec-'+safe+'-'+sSafe)?.value || '0') || 0;
     const pOC       = parseFloat(document.getElementById('pocnum-'+safe+'-'+sSafe)?.value || '0') || 0;
-    const pFac      = limpiarNum(document.getElementById('pfac-'+safe+'-'+sSafe)?.value || '0');
+    const pFac      = parseCLP(document.getElementById('pfac-'+safe+'-'+sSafe)?.value || '0');
     if (!sku) continue;
     if (qRecib > 0) totalItemsConQ++;
     items.push({
