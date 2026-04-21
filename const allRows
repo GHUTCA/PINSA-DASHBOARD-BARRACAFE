@@ -2874,7 +2874,10 @@ async function recargarYRenderRecepcion() {
 }
 
 function renderRecepcion() {
-  const allRows  = STATE.confirmacion.filter(r => r['ID Entrega'] && r['ID Entrega'] !== '');
+  const allRows  = STATE.confirmacion.filter(r =>
+    r['ID Entrega'] && r['ID Entrega'] !== '' &&
+    !(STATE.recentlyConfirmed && STATE.recentlyConfirmed.has(r['ID Entrega']))
+  );
   const grupos   = recepAgrupar(allRows);
   const todayStr = today();
 
@@ -3019,7 +3022,6 @@ async function confirmarEntrega(idEntrega, idSafe) {
   const prods = STATE.confirmacion.filter(r => r['ID Entrega'] === idEntrega);
   if (!prods.length) return;
 
-  // Raccoglie Q Recibida per ogni prodotto
   const items = prods.map((p, i) => {
     const inputEl = document.getElementById('ri-' + idSafe + '-' + i);
     const qRec = inputEl ? parseFloat(inputEl.value) : null;
@@ -3032,7 +3034,6 @@ async function confirmarEntrega(idEntrega, idSafe) {
     };
   });
 
-  // Verifica che tutti abbiano un valore
   const sinValor = items.filter(it => it.qRecibida === null || isNaN(it.qRecibida));
   if (sinValor.length) {
     showToast('Ingresa la cantidad recibida para todos los productos', 'error');
@@ -3064,7 +3065,14 @@ async function confirmarEntrega(idEntrega, idSafe) {
         : '✅ Recepción confirmada · ' + res.itemsOk + ' productos OK',
       conDif ? '' : 'success'
     );
-    // Ricarica da CSV — più robusto del map locale che dipende dai nomi colonna esatti
+
+    // ── META-BUG #1 tampone — Set anti-riapparizione ──────────────
+    if (!STATE.recentlyConfirmed) STATE.recentlyConfirmed = new Set();
+    STATE.recentlyConfirmed.add(idEntrega);
+    setTimeout(() => {
+      if (STATE.recentlyConfirmed) STATE.recentlyConfirmed.delete(idEntrega);
+    }, 10 * 60 * 1000);
+
     await recargarYRenderRecepcion();
   } else {
     showToast('Error: ' + (res?.error || 'sin respuesta'), 'error');
