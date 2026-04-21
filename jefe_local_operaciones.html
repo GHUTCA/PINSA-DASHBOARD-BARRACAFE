@@ -717,12 +717,20 @@
       </select>
     </div>
 
-    <!-- ORIGEN — solo visible si Proveedor -->
+    <!-- ORIGEN — solo visible si Proveedor · V114 hardcoded SUPERMERCADO/MERCADO LIBRE -->
     <div class="field" id="mov-origen-field" style="display:none">
-      <label>Proveedor / Origen</label>
+      <label>Proveedor (solo emergencias)</label>
       <select id="mov-origen-text">
         <option value="">Selecciona proveedor...</option>
+        <option value="SUPERMERCADO">SUPERMERCADO</option>
+        <option value="MERCADO LIBRE">MERCADO LIBRE</option>
       </select>
+    </div>
+ 
+    <!-- COSTO REAL — solo visible si Proveedor · V114 nuovo campo -->
+    <div class="field" id="mov-costo-field" style="display:none">
+      <label>Costo real pagado ($ por unidad, según boleta/ticket)</label>
+      <input type="number" id="mov-costo-real" min="0" step="1" placeholder="0" style="width:100%">
     </div>
 
     <!-- DESTINO — oculto para ajustes e ingresos -->
@@ -1616,29 +1624,12 @@ async function init() {
 // ════════════════════════════════════════════════════════
 // ── Carga proveedores desde CTRL_BC_2026 ─────────────────
 async function cargarProveedores() {
-  const TOKEN_BC = '2PACX-1vSHqqam0ulBIXIn_UNH50dEl2XX0RDAnMbI70phvGURduyKGoTpIkV8g-8k8p8pbIr42g6Nap3SE9tt';
-  const GID_PROV = '1453971067';
-  try {
-    const url = `https://docs.google.com/spreadsheets/d/e/${TOKEN_BC}/pub?gid=${GID_PROV}&single=true&output=csv&t=${Date.now()}`;
-    const r   = await fetch(url);
-    const txt = await r.text();
-    if (txt.includes('<!DOCTYPE')) return;
-    const rows = parseCSV(txt);
-    const sel  = document.getElementById('mov-origen-text');
-    if (!sel) return;
-    rows.forEach(row => {
-      const nombre = (row['Nombre Proveedor'] || '').trim();
-      const nick   = (row['Nickname'] || '').trim();
-      if (!nombre || nombre.startsWith('⚠️')) return;
-      const label  = nick && nick !== nombre ? `${nick}  (${nombre})` : nombre;
-      const opt    = document.createElement('option');
-      opt.value    = nick || nombre;
-      opt.textContent = label;
-      sel.appendChild(opt);
-    });
-  } catch(e) { console.log('Proveedores no cargados:', e); }
+  // V114 — JL solo puede registrar emergencias SUPERMERCADO/MERCADO LIBRE.
+  // Las opciones están hardcodeadas en el HTML (ver id="mov-origen-text").
+  // Ya no se cargan los proveedores formales de BC.
+  return;
 }
-
+  
 // MÓDULO 1 — MOVIMIENTOS
 // ════════════════════════════════════════════════════════
 let movSelectedSKU  = null;
@@ -1664,15 +1655,23 @@ function onMovTipoChange() {
   const tipo = document.getElementById('mov-tipo').value;
   const destinoF = document.getElementById('mov-destino-field');
   const origenF  = document.getElementById('mov-origen-field');
-
+  const costoF   = document.getElementById('mov-costo-field'); // V114 nuovo
+ 
   // Destino visible solo para entregas y devoluciones
   destinoF.style.display = (tipo === 'Entrega Secc' || tipo === 'Devolucion Secc') ? 'block' : 'none';
-  // Origen visible solo para Proveedor
-  origenF.style.display  = (tipo === 'Ingreso Proveedor') ? 'block' : 'none';
-
-  // Reset destino a — Seleccionar —
+  // Origen + costo visibles solo para Proveedor
+  const esProveedor = (tipo === 'Ingreso Proveedor');
+  origenF.style.display = esProveedor ? 'block' : 'none';
+  if (costoF) costoF.style.display = esProveedor ? 'block' : 'none';
+ 
+  // Reset destino / costo cuando cambia tipo
   if (tipo === 'Entrega Secc' || tipo === 'Devolucion Secc') {
     document.getElementById('mov-destino').value = '';
+  }
+  if (!esProveedor) {
+    const costoInp = document.getElementById('mov-costo-real');
+    if (costoInp) costoInp.value = '';
+    document.getElementById('mov-origen-text').value = '';
   }
   checkMovAlert();
 }
@@ -1861,6 +1860,17 @@ async function guardarMovimiento() {
   const destinoFinal = (tipo === 'Ajuste + mas' || tipo === 'Ajuste - menos' || tipo === 'Ingreso BLoc' || tipo === 'Ingreso Proveedor')
     ? 'Bodega Local' : destino;
 
+  // V114 — Se es Ingreso Proveedor, concatena costo real pagado a obs
+  let obsFinal = obs;
+  if (tipo === 'Ingreso Proveedor') {
+    const costoInp = document.getElementById('mov-costo-real');
+    const costoVal = costoInp ? parseFloat(costoInp.value) || 0 : 0;
+    if (costoVal > 0) {
+      const costoTag = '[Costo real: $' + costoVal.toLocaleString('es-CL') + ']';
+      obsFinal = obs ? (costoTag + ' ' + obs) : costoTag;
+    }
+  }
+ 
   const payload = {
     action:      'registrarMovimiento',
     local:       CFG.local,
@@ -1874,7 +1884,7 @@ async function guardarMovimiento() {
     uoDesc:      movSelectedData.unidad === 'BO' ? movSelectedData.boDesc : movSelectedData.uoDesc,
     cantidad:    cant,
     responsable: movOperador,
-    obs:         obs
+    obs:         obsFinal
   };
 
   const res = await callGAS(payload);
@@ -1902,6 +1912,15 @@ async function guardarMovimiento() {
     document.getElementById('mov-destino').value = '';
     document.getElementById('mov-cantidad').value = '';
     document.getElementById('mov-obs').value = '';
+    // V114 — reset campi proveedor se erano mostrati
+    const ofield = document.getElementById('mov-origen-field');
+    const cfield = document.getElementById('mov-costo-field');
+    if (ofield) ofield.style.display = 'none';
+    if (cfield) cfield.style.display = 'none';
+    const oinp = document.getElementById('mov-origen-text');
+    const cinp = document.getElementById('mov-costo-real');
+    if (oinp) oinp.value = '';
+    if (cinp) cinp.value = '';
     renderMovRecientes();
   } else {
     showToast('Error: ' + (res?.error || 'sin respuesta'),'error');
