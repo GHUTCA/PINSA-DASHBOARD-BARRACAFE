@@ -1129,9 +1129,15 @@ function csvUrl(gid, token) {
   return `https://docs.google.com/spreadsheets/d/e/${token||CFG.TOKEN}/pub?gid=${gid}&single=true&output=csv&t=${Date.now()}`;
 }
 
-async function loadCSV(gid, token) {
+async function loadCSV(gid) {
   try {
-    const r = await fetch(csvUrl(gid, token));
+    const r = await fetch(csvUrl(gid), {
+      cache: 'no-store',
+      headers: {
+        'Pragma': 'no-cache',
+        'Cache-Control': 'no-cache'
+      }
+    });
     if (!r.ok) return [];
     const txt = await r.text();
     if (txt.includes('<!DOCTYPE')) return [];
@@ -2379,20 +2385,64 @@ function despToggle(id) {
 }
 
 function renderDespHistorial(rows) {
-  const env = rows.filter(r=>(r['Estado']||'').trim().toUpperCase()==='ENVIADO').slice(-10).reverse();
+  const env = rows.filter(r=>(r['Estado']||'').trim().toUpperCase()==='ENVIADO').slice(-20).reverse();
   const histEl = document.getElementById('desp-hist-list');
-  if (!env.length) { histEl.innerHTML=`<div class="empty" style="padding:16px"><div class="empty-icon">📦</div>Sin envíos recientes</div>`; }
-  else {
+  if (!env.length) {
+    histEl.innerHTML=`<div class="empty" style="padding:16px"><div class="empty-icon">📦</div>Sin envíos recientes</div>`;
+  } else {
     const g2={};
-    env.forEach(r=>{const id=r['ID Solicitud']||r['Fecha']; if(!g2[id]) g2[id]={id,local:r['Local']||'',fecha:r['Fecha']||'',n:0}; g2[id].n++;});
-    histEl.innerHTML=Object.values(g2).map(g=>`
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-        <div><div style="font-size:13px;font-weight:500;color:var(--t1)">${g.local} · ${g.n} productos</div><div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${g.id} · ${fmtDate(g.fecha)}</div></div>
-        <span class="status status-ok">ENVIADO</span>
-      </div>`).join('');
+    env.forEach(r=>{
+      const id=r['ID Solicitud']||r['Fecha'];
+      if(!g2[id]) g2[id]={id,local:r['Local']||'',fecha:r['Fecha']||'',hora:r['Hora']||'',items:[]};
+      g2[id].items.push(r);
+    });
+
+    histEl.innerHTML=Object.values(g2).map(g=>{
+      const safe=g.id.replace(/[^a-zA-Z0-9]/g,'-');
+      const totalUO = g.items.reduce((s,it)=>s+limpiarNum(it['Q Confirmada BC']||it['Q Solicitada']||'0'),0);
+      const itemsHTML = g.items.map(it=>{
+        const sku = it['SKU']||'—';
+        const desc = it['Descripcion']||'—';
+        const utm = it['UTM']||'';
+        const qC  = limpiarNum(it['Q Confirmada BC']||'0');
+        const qS  = limpiarNum(it['Q Solicitada']||'0');
+        const qShow = qC>0 ? qC : qS;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</div>
+            <div style="font-size:10px;color:var(--t3);font-family:var(--mono)">SKU ${sku}</div>
+          </div>
+          <div style="font-size:12px;font-weight:600;color:var(--t2);font-family:var(--mono);min-width:60px;text-align:right">${qShow} ${utm}</div>
+        </div>`;
+      }).join('');
+
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div onclick="despHistToggle('${safe}')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none">
+          <div>
+            <div style="font-size:13px;font-weight:500;color:var(--t1)">${g.local} · ${g.items.length} productos · ${totalUO} UO</div>
+            <div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${g.id} · ${fmtDate(g.fecha)}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="status status-ok">ENVIADO</span>
+            <span id="despHistArrow-${safe}" style="font-size:14px;color:var(--t3);transition:transform 0.2s">▸</span>
+          </div>
+        </div>
+        <div id="despHistBody-${safe}" style="display:none;margin-top:10px;padding:8px 10px;background:var(--bg3);border-radius:6px">
+          ${itemsHTML}
+        </div>
+      </div>`;
+    }).join('');
   }
-  // Cargar diferencias pendientes
   renderDespDiferencias();
+}
+
+function despHistToggle(safe) {
+  const body  = document.getElementById('despHistBody-'+safe);
+  const arrow = document.getElementById('despHistArrow-'+safe);
+  if (!body) return;
+  const isOpen = body.style.display === 'block';
+  body.style.display = isOpen ? 'none' : 'block';
+  if (arrow) arrow.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(90deg)';
 }
 
 async function renderDespDiferencias() {
