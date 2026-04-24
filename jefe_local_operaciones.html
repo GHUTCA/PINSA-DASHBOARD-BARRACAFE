@@ -736,7 +736,7 @@
    <!-- DESTINO — oculto para ajustes e ingresos · v118 whitelist Parametros -->
 <div class="field" id="mov-destino-field" style="display:none">
   <label>Sección destino</label>
-  <select id="mov-destino">
+  <select id="mov-destino" onchange="onMovDestinoChange()">
     <option value="">— Seleccionar —</option>
     <option value="Barra Cafe">Barra Café</option>
     <option value="Barra Alimentos">Barra Alimentos</option>
@@ -798,10 +798,42 @@
       </div>
     </div>
 
-    <button class="btn btn-primary" id="btn-mov-guardar" onclick="guardarMovimiento()" disabled>
+    <button class="btn btn-primary" id="btn-mov-guardar" onclick="onBotonMovClick()" disabled>
       Registrar Movimiento
     </button>
   </div>
+
+  <!-- V117 — Carrito Entrega a Sección -->
+  <div class="card" id="mov-carrito-card" style="display:none;border-color:rgba(74,111,165,0.4)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:var(--blue2)">En tu entrega</div>
+        <div style="font-size:11px;color:var(--t3);margin-top:2px">Sección: <span id="mov-carrito-destino" style="color:var(--t1);font-weight:600">—</span></div>
+      </div>
+      <div style="text-align:right">
+        <div id="mov-carrito-count" style="font-size:18px;font-weight:700;color:var(--t1);font-family:var(--mono)">0</div>
+        <div style="font-size:10px;color:var(--t3)">items</div>
+      </div>
+    </div>
+    <div id="mov-carrito-list"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+      <button class="btn btn-ghost" onclick="vaciarCarritoEntrega()">Vaciar</button>
+      <button class="btn btn-primary" id="btn-confirmar-entrega" onclick="confirmarEntregaBatch()">Confirmar Entrega</button>
+    </div>
+  </div>
+
+  <!-- V117 — Cuadro confirmación inline -->
+  <div class="card" id="mov-confirm-card" style="display:none;border-color:var(--green2)">
+    <div style="font-size:14px;font-weight:600;color:var(--t1);margin-bottom:4px">Confirmar entrega</div>
+    <div style="font-size:12px;color:var(--t3);margin-bottom:10px">Revisa el resumen antes de registrar. Esta acción no se puede deshacer.</div>
+    <div id="mov-confirm-detail" style="background:var(--bg3);border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--t2);line-height:1.7"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <button class="btn btn-ghost" onclick="cancelarConfirmEntrega()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-enviar-entrega-batch" onclick="enviarEntregaBatch()">Enviar ahora</button>
+    </div>
+  </div>
+
+  <!-- Resumen movimientos hoy -->
 
   <!-- Resumen movimientos hoy -->
   <div class="card">
@@ -1392,6 +1424,9 @@ const STATE = {
 
   // solicitud en curso
   solicitudQtys: {},      // sku → cantidad confirmada
+
+  // V117 — carrito entrega a sección
+  carritoEntrega: [],     // [{sku, desc, unidad, uoDesc, cantidad, obs, destino}]
 };
 
 // ════════════════════════════════════════════════════════
@@ -1651,19 +1686,29 @@ function confirmarOperador() {}
 function cambiarOperador() {}
 
 function onMovTipoChange() {
-  const tipo = document.getElementById('mov-tipo').value;
+  const tipoSelect = document.getElementById('mov-tipo');
+  const tipo = tipoSelect.value;
+
+  // V117 — Guard: se il carrello è pieno e si cambia tipo, chiedi conferma
+  if (STATE.carritoEntrega && STATE.carritoEntrega.length > 0 && tipo !== 'Entrega Secc') {
+    const ok = confirm('Tienes ' + STATE.carritoEntrega.length + ' item(s) en el carrito de entrega. ¿Vaciar el carrito y cambiar tipo?');
+    if (!ok) {
+      tipoSelect.value = 'Entrega Secc';
+      return;
+    }
+    STATE.carritoEntrega = [];
+    renderCarritoEntrega();
+  }
+
   const destinoF = document.getElementById('mov-destino-field');
   const origenF  = document.getElementById('mov-origen-field');
-  const costoF   = document.getElementById('mov-costo-field'); // V114 nuovo
- 
-  // Destino visible solo para entregas y devoluciones
+  const costoF   = document.getElementById('mov-costo-field');
+
   destinoF.style.display = (tipo === 'Entrega Secc' || tipo === 'Devolucion Secc') ? 'block' : 'none';
-  // Origen + costo visibles solo para Proveedor
   const esProveedor = (tipo === 'Ingreso Proveedor');
   origenF.style.display = esProveedor ? 'block' : 'none';
   if (costoF) costoF.style.display = esProveedor ? 'block' : 'none';
- 
-  // Reset destino / costo cuando cambia tipo
+
   if (tipo === 'Entrega Secc' || tipo === 'Devolucion Secc') {
     document.getElementById('mov-destino').value = '';
   }
@@ -1672,6 +1717,11 @@ function onMovTipoChange() {
     if (costoInp) costoInp.value = '';
     document.getElementById('mov-origen-text').value = '';
   }
+
+  // V117 — aggiorna bottone e carrello
+  actualizarBotonMov();
+  renderCarritoEntrega();
+
   checkMovAlert();
 }
 
@@ -1977,6 +2027,264 @@ function renderMovRecientes() {
     : '');
 }
 
+// ════════════════════════════════════════════════════════
+// V117 — CARRITO ENTREGA A SECCIÓN
+// ════════════════════════════════════════════════════════
+
+// Router del botón principal — single vs batch
+function onBotonMovClick() {
+  const tipo = document.getElementById('mov-tipo').value;
+  if (tipo === 'Entrega Secc') {
+    agregarAlCarritoEntrega();
+  } else {
+    guardarMovimiento();
+  }
+}
+
+// Cambia texto del botón según el tipo
+function actualizarBotonMov() {
+  const tipo = document.getElementById('mov-tipo').value;
+  const btn  = document.getElementById('btn-mov-guardar');
+  if (!btn) return;
+  if (tipo === 'Entrega Secc') {
+    btn.textContent = '+ Agregar al carrito';
+  } else {
+    btn.textContent = 'Registrar Movimiento';
+  }
+}
+
+// Guard cambio destino con carrito lleno
+function onMovDestinoChange() {
+  const nuevoDest = document.getElementById('mov-destino').value;
+  const carrito = STATE.carritoEntrega || [];
+  if (carrito.length > 0) {
+    const destActual = carrito[0].destino;
+    if (nuevoDest && nuevoDest !== destActual) {
+      const ok = confirm('Cambiar la sección destino vaciará el carrito (' + carrito.length + ' item/s). ¿Continuar?');
+      if (!ok) {
+        document.getElementById('mov-destino').value = destActual;
+        return;
+      }
+      STATE.carritoEntrega = [];
+      renderCarritoEntrega();
+    }
+  }
+  checkMovAlert();
+}
+
+// Agrega item al carrito con dedup por sku+unidad
+function agregarAlCarritoEntrega() {
+  if (!movOperador) { showToast('Confirma tu nombre primero','error'); return; }
+
+  const destino = document.getElementById('mov-destino').value;
+  const cant    = parseFloat(document.getElementById('mov-cantidad').value);
+  const obs     = document.getElementById('mov-obs').value.trim();
+
+  if (!destino)        { showToast('Selecciona la sección destino','error'); return; }
+  if (!movSelectedSKU) { showToast('Busca y selecciona un producto','error'); return; }
+  if (!cant || cant <= 0) { showToast('Ingresa una cantidad válida','error'); return; }
+
+  if (!STATE.carritoEntrega) STATE.carritoEntrega = [];
+  const carrito = STATE.carritoEntrega;
+
+  if (carrito.length > 0 && carrito[0].destino !== destino) {
+    showToast('La sección destino no coincide con el carrito','error');
+    return;
+  }
+
+  const unidad = movSelectedData.unidad || 'UO';
+  const uoDesc = unidad === 'BO' ? (movSelectedData.boDesc || '') : (movSelectedData.uoDesc || '');
+
+  // Dedup: busca item con mismo sku + misma unidad
+  const idx = carrito.findIndex(it => it.sku === movSelectedSKU && it.unidad === unidad);
+  if (idx >= 0) {
+    carrito[idx].cantidad = (parseFloat(carrito[idx].cantidad) || 0) + cant;
+    if (obs) {
+      carrito[idx].obs = carrito[idx].obs ? (carrito[idx].obs + ' · ' + obs) : obs;
+    }
+    showToast('✓ Sumado: ahora ' + carrito[idx].cantidad + ' ' + unidad, 'success');
+  } else {
+    carrito.push({
+      sku:      movSelectedSKU,
+      desc:     movSelectedData.desc || '',
+      unidad:   unidad,
+      uoDesc:   uoDesc,
+      cantidad: cant,
+      obs:      obs,
+      destino:  destino
+    });
+    showToast('✓ Agregado al carrito', 'success');
+  }
+
+  // Reset campos insumo pero MANTIENE tipo y destino
+  clearMovSelected();
+  document.getElementById('mov-cantidad').value = '';
+  document.getElementById('mov-obs').value = '';
+
+  renderCarritoEntrega();
+  setTimeout(() => { const s = document.getElementById('mov-search'); if (s) s.focus(); }, 50);
+}
+
+// Elimina item del carrito
+function eliminarItemCarrito(idx) {
+  if (!STATE.carritoEntrega) return;
+  STATE.carritoEntrega.splice(idx, 1);
+  renderCarritoEntrega();
+}
+
+// Vacía carrito con confirm
+function vaciarCarritoEntrega() {
+  if (!STATE.carritoEntrega || !STATE.carritoEntrega.length) return;
+  const ok = confirm('¿Vaciar el carrito? Perderás ' + STATE.carritoEntrega.length + ' item(s).');
+  if (!ok) return;
+  STATE.carritoEntrega = [];
+  renderCarritoEntrega();
+}
+
+// Render UI del carrito
+function renderCarritoEntrega() {
+  const tipo = document.getElementById('mov-tipo').value;
+  const card = document.getElementById('mov-carrito-card');
+  if (!card) return;
+
+  const carrito = STATE.carritoEntrega || [];
+  const visible = (tipo === 'Entrega Secc' && carrito.length > 0);
+  card.style.display = visible ? 'block' : 'none';
+
+  if (!visible) {
+    const confirmCard = document.getElementById('mov-confirm-card');
+    if (confirmCard) confirmCard.style.display = 'none';
+    return;
+  }
+
+  document.getElementById('mov-carrito-count').textContent = carrito.length;
+  document.getElementById('mov-carrito-destino').textContent = carrito[0].destino || '—';
+
+  const list = document.getElementById('mov-carrito-list');
+  list.innerHTML = carrito.map((it, idx) => {
+    const uoLabel = it.uoDesc ? (' ' + it.uoDesc) : '';
+    const obsLine = it.obs ? `<div style="font-size:10px;color:var(--t3);margin-top:2px;font-style:italic">${it.obs}</div>` : '';
+    const unidadColor = it.unidad === 'BO' ? '#6BAEE0' : 'var(--blue2)';
+    return `<div class="sol-item modified" style="margin-bottom:6px">
+      <div class="sol-info">
+        <div class="sol-name">${it.desc}</div>
+        <div class="sol-meta">
+          <span style="font-family:var(--mono);color:var(--blue2);font-size:10px">${it.sku}</span>
+          · <span style="color:${unidadColor};font-weight:600">${it.unidad}</span>${uoLabel}
+        </div>
+        ${obsLine}
+      </div>
+      <div style="flex-shrink:0;text-align:right">
+        <div style="font-size:15px;font-weight:700;color:var(--t1);font-family:var(--mono)">${it.cantidad}</div>
+        <button onclick="eliminarItemCarrito(${idx})"
+          style="font-size:10px;color:var(--red);background:none;border:none;cursor:pointer;padding:2px 0;margin-top:2px">× Quitar</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Muestra cuadro de confirmación inline
+function confirmarEntregaBatch() {
+  const carrito = STATE.carritoEntrega || [];
+  if (!carrito.length) return;
+
+  const destino = carrito[0].destino;
+  const totalUO = carrito.filter(it => it.unidad === 'UO').reduce((a, it) => a + (parseFloat(it.cantidad) || 0), 0);
+  const totalBO = carrito.filter(it => it.unidad === 'BO').reduce((a, it) => a + (parseFloat(it.cantidad) || 0), 0);
+
+  const lineas = carrito.map(it => {
+    const u = it.uoDesc ? (' ' + it.uoDesc) : '';
+    return `<div style="display:flex;justify-content:space-between;gap:10px">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.desc}${u}</span>
+      <span style="font-family:var(--mono);color:var(--t1);font-weight:600;flex-shrink:0">${it.cantidad} ${it.unidad}</span>
+    </div>`;
+  }).join('');
+
+  const totals = [];
+  if (totalUO > 0) totals.push(totalUO + ' UO');
+  if (totalBO > 0) totals.push(totalBO + ' BO');
+
+  const detail = `
+    <div style="font-weight:600;color:var(--t1);margin-bottom:6px">${destino} · ${carrito.length} productos</div>
+    ${lineas}
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border2);display:flex;justify-content:space-between;font-weight:700;color:var(--t1)">
+      <span>Total</span><span>${totals.join(' · ')}</span>
+    </div>`;
+
+  document.getElementById('mov-confirm-detail').innerHTML = detail;
+  document.getElementById('mov-confirm-card').style.display = 'block';
+  document.getElementById('mov-confirm-card').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelarConfirmEntrega() {
+  document.getElementById('mov-confirm-card').style.display = 'none';
+}
+
+// Envía batch al GAS
+async function enviarEntregaBatch() {
+  const carrito = STATE.carritoEntrega || [];
+  if (!carrito.length) return;
+
+  const btn = document.getElementById('btn-enviar-entrega-batch');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Enviando...'; }
+
+  const payload = {
+    action:      'registrarEntregaBatch',
+    local:       CFG.local,
+    destino:     carrito[0].destino,
+    responsable: movOperador,
+    items:       carrito.map(it => ({
+      sku:      it.sku,
+      desc:     it.desc,
+      unidad:   it.unidad,
+      uoDesc:   it.uoDesc,
+      cantidad: it.cantidad,
+      obs:      it.obs || ''
+    }))
+  };
+
+  const res = await callGAS(payload);
+
+  if (btn) { btn.disabled = false; btn.innerHTML = 'Enviar ahora'; }
+
+  if (res && res.ok) {
+    const n = res.scritti || carrito.length;
+    showToast('✅ ' + n + ' movimiento' + (n === 1 ? '' : 's') + ' registrado' + (n === 1 ? '' : 's'), 'success');
+
+    // Guarda en sesión local para render Hoy inmediato
+    const nowHora = new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
+    carrito.forEach(it => {
+      movHoySession.push({
+        hora:    nowHora,
+        tipo:    'Entrega Secc',
+        destino: it.destino,
+        desc:    it.desc,
+        sku:     it.sku,
+        cant:    it.cantidad,
+        resp:    movOperador
+      });
+    });
+    localStorage.setItem('mov_hoy_' + today(), JSON.stringify(movHoySession));
+
+    // Reset total: carrito + form + tipo + destino
+    STATE.carritoEntrega = [];
+    clearMovSelected();
+    document.getElementById('mov-tipo').value = '';
+    document.getElementById('mov-destino-field').style.display = 'none';
+    document.getElementById('mov-destino').value = '';
+    document.getElementById('mov-cantidad').value = '';
+    document.getElementById('mov-obs').value = '';
+    document.getElementById('mov-confirm-card').style.display = 'none';
+
+    actualizarBotonMov();
+    renderCarritoEntrega();
+    renderMovRecientes();
+  } else {
+    showToast('Error: ' + (res?.error || 'sin respuesta'), 'error');
+  }
+}
+
+  
 // ════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════
 // MÓDULO 2 — VENTAS
