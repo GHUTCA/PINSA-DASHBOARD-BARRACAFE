@@ -196,6 +196,12 @@ header{position:sticky;top:0;z-index:100;background:rgba(15,15,15,0.97);backdrop
 .aicon-badge{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:6px;flex-shrink:0;font-family:'DM Mono',monospace;font-size:9px;font-weight:500;letter-spacing:.5px}
 .ab-roja{background:var(--rbg);color:var(--red);border:1px solid rgba(184,84,80,.3)}
 .ab-amar{background:var(--ybg);color:var(--yellow);border:1px solid rgba(200,137,58,.3)}
+/* ===== TOGGLE MES (Mes actual / anterior) ===== */
+.mes-toggle{display:flex;gap:6px;margin-left:14px;align-items:center}
+.mt-btn{background:transparent;color:var(--muted);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:6px 12px;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.5px;text-transform:uppercase;cursor:pointer;transition:all .15s ease}
+.mt-btn:hover{color:var(--t1);border-color:rgba(255,255,255,.2)}
+.mt-active{background:var(--accent-bg);color:var(--accent);border-color:var(--accent)}
+.mes-banner{background:rgba(74,144,217,.08);border:1px solid rgba(74,144,217,.3);border-radius:8px;padding:10px 16px;margin-bottom:16px;font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);letter-spacing:.5px;text-transform:uppercase}
 
 </style>
 </head>
@@ -206,6 +212,10 @@ header{position:sticky;top:0;z-index:100;background:rgba(15,15,15,0.97);backdrop
   <div class="hd"></div>
   <div class="sp"><div class="spd"></div><div class="spn">Jefe de Local</div></div>
   <div class="ht"><div class="htm">Candelaria</div><div class="hts">Vista de Gestión · Control Mensual</div></div>
+  <div class="mes-toggle">
+    <button class="mt-btn mt-active" data-mes="actual" onclick="changeMes('actual')">Mes actual</button>
+    <button class="mt-btn" data-mes="anterior" onclick="changeMes('anterior')">Mes anterior</button>
+  </div>
   <div class="hm">
     <div class="li"><div class="lid"></div>Live</div>
     <div class="hc"><div class="hcm" id="tf">—</div><div class="hcs" id="tm">—</div></div>
@@ -292,6 +302,20 @@ function histAll(rows){
   return rows.filter(r=>$n(r[k]||r[k+' ']||0)>0);
 }
 
+// MES_OFFSET — 0 = mes en curso, -1 = mes anterior
+window.MES_OFFSET = 0;
+window.changeMes = function(target){
+  const newOffset = target === 'anterior' ? -1 : 0;
+  if(newOffset === window.MES_OFFSET) return;
+  window.MES_OFFSET = newOffset;
+  // Update UI buttons
+  document.querySelectorAll('.mt-btn').forEach(b=>{
+    b.classList.toggle('mt-active', b.dataset.mes === target);
+  });
+  // Re-render
+  load();
+};
+
 async function load(){
   const now=new Date();
   const wd=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][now.getDay()];
@@ -304,8 +328,14 @@ async function load(){
   document.getElementById('tm').textContent=getMes(now);
   document.getElementById('root').innerHTML='<div class="loading"><div class="spinner"></div><div class="loading-txt">Cargando datos del local...</div></div>';
 
-  const mn=now.getMonth()+1,yr=now.getFullYear();
-  const dM=new Date(yr,mn,0).getDate(),dA=now.getDate(),dR=dM-dA;
+  // MES_OFFSET: 0 = mes en curso, -1 = mes anterior
+  const offsetD = new Date(now.getFullYear(), now.getMonth() + window.MES_OFFSET, 1);
+  const mn = offsetD.getMonth() + 1;
+  const yr = offsetD.getFullYear();
+  const dM = new Date(yr, mn, 0).getDate();
+  // si estamos viendo el mes anterior, dA = días totales del mes (mes ya cerrado)
+  const dA = window.MES_OFFSET === 0 ? now.getDate() : dM;
+  const dR = dM - dA;
 
   try{
     const [vR,bR,bodR,repR,...sRaw]=await Promise.all([
@@ -316,10 +346,21 @@ async function load(){
       ...CFG.secs.map(s=>fetch1(s.u).then(rows=>({...s,ok:true,rows})).catch(()=>({...s,ok:false,rows:[]})))
     ]);
 
-    // VENTAS MES
+    // VENTAS MES — separato Local vs Eventos
+    // Una venta es "Evento" si la columna E (Tipo) === 'Evento', sino es Local.
     const vMes=vR.filter(r=>{const d=parseD(r['Fecha']);return d&&d.getMonth()+1===mn&&d.getFullYear()===yr;});
-    const vSec={};vMes.forEach(r=>{const s=r['Seccion']||'';vSec[s]=(vSec[s]||0)+$n(r['Venta $']);});
+    const isEvento = (r) => (r['Tipo']||'').trim().toLowerCase() === 'evento';
+    const vSec={}, vSecLocal={}, vSecEventos={};
+    vMes.forEach(r=>{
+      const s=r['Seccion']||'';
+      const v=$n(r['Venta $']);
+      vSec[s]=(vSec[s]||0)+v;
+      if(isEvento(r)) vSecEventos[s]=(vSecEventos[s]||0)+v;
+      else            vSecLocal[s]=(vSecLocal[s]||0)+v;
+    });
     const totV=Object.values(vSec).reduce((a,b)=>a+b,0);
+    const totVLocal=Object.values(vSecLocal).reduce((a,b)=>a+b,0);
+    const totVEventos=Object.values(vSecEventos).reduce((a,b)=>a+b,0);
 
     // BUDGET
     const bSec={};
@@ -452,10 +493,11 @@ function render(d){
   const fcStr=fcLoc!==null?pf(fcLoc):'—';
   const fcCol=cColor(fcLoc);
 
-  // VENTAS SEZIONE — con budget e faltan por sección
+  // VENTAS SEZIONE — con budget e faltan por sección + split Local/Eventos
   const pctOggi = dM > 0 ? dA / dM : 1;
   const sv=CFG.secs.map(s=>{
     const v=vSec[s.n]||0,b=bSec[s.n]||0;
+    const vL=vSecLocal[s.n]||0, vE=vSecEventos[s.n]||0;
     const p=b>0?Math.round(v/b*100):null;
     const w=b>0?Math.min(v/b*100,100):0;
     const col=p===null?'var(--muted2)':p>=pctOggi*100*0.9?'var(--green)':p>=pctOggi*100*0.6?'var(--yellow)':'var(--red)';
@@ -464,6 +506,9 @@ function render(d){
     const faltanCol=faltan===0?'var(--green)':'var(--yellow)';
     const budgetTxt=b>0?`Budget: ${clp(b)}`:'Sin budget';
     const faltanTxt=faltan!==null?(faltan===0?'✓ Alcanzado':`Faltan: ${clp(faltan)}`):null;
+    const splitTxt = vE > 0
+      ? `<span style="color:var(--muted2);font-size:10px">Local ${clp(vL)} · <span style="color:var(--accent)">Eventos ${clp(vE)}</span></span>`
+      : '';
     return`<div style="margin-bottom:10px">
       <div class="sv-row">
         <div class="sv-nom">${lbl}</div>
@@ -478,6 +523,7 @@ function render(d){
       <div class="sv-meta" style="padding-left:80px">
         <span class="sv-budget">${budgetTxt}</span>
         ${faltanTxt?`<span style="color:${faltanCol}">${faltanTxt}</span>`:''}
+        ${splitTxt}
       </div>
     </div>`;
   }).join('');
@@ -559,11 +605,17 @@ function render(d){
     <div class="r-row"><span class="r-label">Días restantes</span><span class="r-val" style="color:${dR===0?'var(--muted)':'var(--text)'}">${dR===0?'Último día':dR}</span></div>`
     :'<div style="font-size:12px;color:var(--muted)">Budget no disponible</div>';
 
+  const mesViewLabel = MES[offsetD.getMonth()] + ' ' + offsetD.getFullYear();
+  const mesBanner = window.MES_OFFSET === -1
+    ? `<div class="mes-banner">📅 Estás viendo el mes anterior · ${mesViewLabel} · cerrado</div>`
+    : '';
+
   document.getElementById('root').innerHTML=`
-    <div class="sec-label">Bono Mensual · ${getMes(now)}</div>
+    ${mesBanner}
+    <div class="sec-label">Bono Mensual · ${mesViewLabel}</div>
     <div class="bono-card">
       <div class="bono-top">
-        <div class="bono-left"><div class="bono-titulo">Bono Mensual · Jefe Local</div><div class="bono-sub">${getMes(now)} · ${kpiSubtxt}</div></div>
+        <div class="bono-left"><div class="bono-titulo">Bono Mensual · Jefe Local</div><div class="bono-sub">${mesViewLabel} · ${kpiSubtxt}</div></div>
         <div><div class="bono-amount ${bCol}">${clp(bono)}</div><div class="bono-amount-label">de ${clp(CFG.bono_pot)} posibles</div></div>
       </div>
       <div class="bono-prog">
@@ -581,7 +633,7 @@ function render(d){
       </div>
     </div>
 
-    <div class="sec-label">Ventas · ${getMes(now)}</div>
+    <div class="sec-label">Ventas · ${mesViewLabel}</div>
     <div class="v3">
       <div class="v-card v-accent-blue">
         <div class="v-label">Total vendido este mes</div>
@@ -590,6 +642,18 @@ function render(d){
         <div style="margin-top:10px;display:flex;align-items:baseline;gap:8px">
           <div class="v-pct" style="color:${pVCol}">${pVStr}</div>
           <div style="font-size:11px;color:var(--muted)">del presupuesto · día ${dA}/${dM}</div>
+        </div>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);display:flex;gap:18px">
+          <div style="flex:1">
+            <div style="font-size:9px;color:var(--muted2);letter-spacing:.6px;text-transform:uppercase">Local</div>
+            <div style="font-family:'DM Mono',monospace;font-size:14px;color:var(--t1);margin-top:2px">${clp(totVLocal)}</div>
+            <div style="font-size:10px;color:var(--muted2);margin-top:1px">${totV>0?Math.round(totVLocal/totV*100):0}% del total</div>
+          </div>
+          <div style="flex:1">
+            <div style="font-size:9px;color:var(--muted2);letter-spacing:.6px;text-transform:uppercase">Eventos</div>
+            <div style="font-family:'DM Mono',monospace;font-size:14px;color:var(--accent);margin-top:2px">${clp(totVEventos)}</div>
+            <div style="font-size:10px;color:var(--muted2);margin-top:1px">${totV>0?Math.round(totVEventos/totV*100):0}% del total</div>
+          </div>
         </div>
       </div>
       <div class="v-card v-accent-orange">
