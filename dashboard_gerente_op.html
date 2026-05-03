@@ -262,6 +262,8 @@ body.view-local {
 .kpi-metric.warn .kpi-metric-status { color: var(--amber2); }
 .kpi-metric.bad  .kpi-metric-num { color: var(--red); }
 .kpi-metric.bad  .kpi-metric-status { color: var(--red); }
+.kpi-metric.unav .kpi-metric-num { color: var(--t3); }
+.kpi-metric.unav .kpi-metric-status { color: var(--t3); }
 .kpi-metric-target { font-size: 10px; color: var(--t3); margin-top: 1px; }
 
 /* Tabella locales drill-down */
@@ -1089,8 +1091,12 @@ body.view-local .obs-submit { background: var(--amber); }
 // ============ CONFIG ============
 const CONFIG = {
   CTRL_OBJETIVOS_ID: '1x8OWq2bubT9jU1IbyiEqTeX96J-NJn2w9NrAhU2_JCM',
-  // CTRL_JO_ID: backend sheet — pending rename to CTRL_GO (task NAMING-005)
-  CTRL_JO_ID: '__TODO_ALBERTO_FORNISCE__',
+  CTRL_GO_ID: '1UEX-WORc3jKJF2QNvQIhbeq6zktrFXj7E3dZTaZvWMc',
+  // ── API ENDPOINT (DASH-GO-WIRING-FASCIA1 v1) ──
+  // Generado por dashboard_go_api.gs deployment.
+  // Si vuoto o mock_only: usa LOCALES mock hardcoded como fallback.
+  API_URL:    'https://script.google.com/macros/s/AKfycbx3LDa92dBW_g9q0xHhDlk_Q0_CLqTCnJejUYT71-_0HU-__oi36cHEMWRyhw9gn5HA/exec',
+  API_TIMEOUT_MS: 8000,
   PANELS: {
     bcentral:  'https://sistema.pinsita.cl/bcentral_operaciones',
     jl_cdl:    'https://sistema.pinsita.cl/dashboard_jefe_local',
@@ -1107,8 +1113,74 @@ const CONFIG = {
 const STATE = {
   view: 'go',          // 'go' (consolidado) | 'cdl' | 'rsc'
   forcedMomentIdx: null,
-  simulatedMinutes: null  // null = real time
+  simulatedMinutes: null,  // null = real time
+  apiData: null,       // payload from dashboard_go_api.gs
+  apiStatus: 'idle',   // 'idle' | 'loading' | 'live' | 'mock' | 'error'
+  apiError: null,
+  fcDetailOpen: false  // food cost expandable detail
 };
+
+// ============ FETCH API ============
+async function fetchDashboardData() {
+  STATE.apiStatus = 'loading';
+  renderDataTag();
+
+  if (!CONFIG.API_URL || CONFIG.API_URL.indexOf('__TODO') === 0) {
+    console.warn('[PINSA] API_URL no configurada → modo mock');
+    STATE.apiStatus = 'mock';
+    STATE.apiError  = 'API_URL no deployada';
+    renderDataTag();
+    return null;
+  }
+
+  try {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), CONFIG.API_TIMEOUT_MS);
+    const res = await fetch(CONFIG.API_URL, { signal: ctrl.signal, redirect: 'follow' });
+    clearTimeout(tid);
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+    if (!data || data.ok === false) throw new Error(data && data.error ? data.error : 'invalid payload');
+
+    STATE.apiData = data;
+    STATE.apiStatus = 'live';
+    STATE.apiError = null;
+    renderDataTag();
+    console.log('[PINSA] API live · '+data._meta.duration_ms+'ms', data);
+    return data;
+  } catch (err) {
+    console.error('[PINSA] fetch error:', err);
+    STATE.apiStatus = 'error';
+    STATE.apiError  = err.message || String(err);
+    renderDataTag();
+    return null;
+  }
+}
+
+function renderDataTag() {
+  const ctx = document.getElementById('kpi-context');
+  if (!ctx) return;
+  const tag = ctx.querySelector('.api-status-tag');
+  if (tag) tag.remove();
+
+  const newTag = document.createElement('span');
+  newTag.className = 'api-status-tag';
+  if (STATE.apiStatus === 'live') {
+    newTag.style.cssText = 'background:rgba(15,110,86,0.18);border:1px solid rgba(15,110,86,0.5);color:#5BB89F;font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 7px;border-radius:3px;text-transform:uppercase;';
+    newTag.textContent = 'datos live';
+  } else if (STATE.apiStatus === 'loading') {
+    newTag.style.cssText = 'background:rgba(45,155,142,0.15);border:1px solid rgba(45,155,142,0.4);color:var(--teal2);font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 7px;border-radius:3px;text-transform:uppercase;';
+    newTag.textContent = 'cargando…';
+  } else if (STATE.apiStatus === 'error') {
+    newTag.style.cssText = 'background:rgba(192,57,43,0.15);border:1px solid rgba(192,57,43,0.5);color:var(--red);font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 7px;border-radius:3px;text-transform:uppercase;';
+    newTag.textContent = 'API offline · mock';
+    newTag.title = STATE.apiError || '';
+  } else {
+    newTag.style.cssText = 'background:rgba(196,98,45,0.15);border:1px solid rgba(196,98,45,0.4);color:var(--orange2);font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 7px;border-radius:3px;text-transform:uppercase;';
+    newTag.textContent = 'mock';
+  }
+  ctx.appendChild(newTag);
+}
 
 // ============ DATA (mock until DASH-GO-WIRING) ============
 const LOCALES = [
@@ -1549,28 +1621,78 @@ function renderFascia1() {
   const f1Sub   = document.getElementById('f1-sub');
   const ctx = document.getElementById('kpi-context');
 
+  // ── Source: API si live, else mock ──
+  const api = (STATE.apiStatus === 'live' && STATE.apiData) ? STATE.apiData : null;
+
   if (STATE.view === 'go') {
     // Vista consolidato GO
     f1Title.textContent = 'Como vas para tu bono';
-    f1Sub.textContent   = 'Mayo 2026';
+    f1Sub.textContent   = api ? api.month.label : 'Mayo 2026';
     headTitle.textContent = 'Detalle por local · click para drill-down';
-    ctx.innerHTML = 'Bono mensual GO · consolidado todos los locales <span class="mock-tag">mock</span>';
-    document.getElementById('kpi-percent').textContent = '68%';
-    document.getElementById('kpi-target-amount').textContent = 'CLP 200.000';
-    document.getElementById('kpi-day-info').textContent = 'día 5 de 31 · esperado 16%';
-    document.getElementById('kpi-prog-fill').style.width = '68%';
 
-    renderKpiMetrics([
-      { label:'Ventas',    value:'CLP 8.4M', status:'68%',       class:'ok' },
-      { label:'Food cost', value:'33%',      status:'cumple',    class:'ok' },
-      { label:'RRHH cost', value:'23.5%',    status:'en riesgo', class:'warn', sub:'pendiente turnos' },
-      { label:'Merma',     value:'4.6%',     status:'en riesgo', class:'warn' }
-    ]);
+    // Context line (la api-status-tag se añade en renderDataTag)
+    ctx.innerHTML = api
+      ? 'Bono mensual GO · consolidado todos los locales'
+      : 'Bono mensual GO · consolidado todos los locales';
+    renderDataTag();
+
+    // KPI bono header
+    const bonoPct = api ? api.go_consolidado.bono.percent : 68;
+    const bonoTarget = api ? _fmtClp(api.go_consolidado.bono.target_clp) : 'CLP 200.000';
+    const dayInfo = api
+      ? `día ${api.month.day} de ${api.month.days_in_month} · esperado ${api.go_consolidado.bono.expected_pct_today}%`
+      : 'día 5 de 31 · esperado 16%';
+    document.getElementById('kpi-percent').textContent = bonoPct + '%';
+    document.getElementById('kpi-target-amount').textContent = bonoTarget;
+    document.getElementById('kpi-day-info').textContent = dayInfo;
+    document.getElementById('kpi-prog-fill').style.width = bonoPct + '%';
+
+    // KPI metrics 4-up
+    if (api) {
+      renderKpiMetrics(api.go_consolidado.kpi_metrics.map(k => ({
+        label:  k.label,
+        value:  k.value_label,
+        status: k.status_label,
+        class:  k.status,
+        sub:    k.sub || (k.is_composite ? 'click para detalle' : null)
+      })));
+    } else {
+      renderKpiMetrics([
+        { label:'Ventas',    value:'CLP 8.4M', status:'68%',       class:'ok' },
+        { label:'Food cost', value:'33%',      status:'cumple',    class:'ok' },
+        { label:'RRHH cost', value:'23.5%',    status:'en riesgo', class:'warn', sub:'pendiente turnos' },
+        { label:'Merma',     value:'4.6%',     status:'en riesgo', class:'warn' }
+      ]);
+    }
+
+    // Click en kpi-foodcost abre detalle 3 niveles
+    const fcMetric = document.querySelectorAll('#kpi-metrics .kpi-metric')[1];
+    if (fcMetric && api && api.food_cost_3_niveles) {
+      fcMetric.style.cursor = 'pointer';
+      fcMetric.onclick = toggleFoodCostDetail;
+    }
 
     body.innerHTML = '';
-    LOCALES.forEach(l => body.appendChild(renderLocalRow(l)));
-    PLACEHOLDERS.forEach(l => body.appendChild(renderPlaceholderRow(l)));
+    if (api && api.food_cost_3_niveles) {
+      // Render desde API: locales_activos + futuros desde l2_locales.by_local
+      const byLocal = api.food_cost_3_niveles.l2_locales.by_local;
+      Object.keys(byLocal).forEach(id => {
+        const l = byLocal[id];
+        if (l.status === 'pending_onboarding') {
+          body.appendChild(renderPlaceholderRow({ id, name: id.toUpperCase(), estado: 'PRONTO', jl: 'onboarding pendiente' }));
+        } else {
+          // Construyo objeto compatible con renderLocalRow desde API
+          body.appendChild(renderLocalRow(_apiLocalToRow(id, l, api)));
+        }
+      });
+    } else {
+      LOCALES.forEach(l => body.appendChild(renderLocalRow(l)));
+      PLACEHOLDERS.forEach(l => body.appendChild(renderPlaceholderRow(l)));
+    }
     body.appendChild(renderConsolidatedRow());
+
+    // Render Food Cost detail (si abierto)
+    renderFoodCostDetail();
   } else {
     // Vista local drill-down
     const local = LOCALES.find(x => x.id === STATE.view);
@@ -1578,7 +1700,8 @@ function renderFascia1() {
     f1Title.textContent = `Como va ${local.sigla}`;
     f1Sub.textContent   = `Local ${local.sigla} · semana 19`;
     headTitle.textContent = 'Detalle por sección · merma';
-    ctx.innerHTML = `${drill.headline} <span class="mock-tag">mock</span>`;
+    ctx.innerHTML = `${drill.headline}`;
+    renderDataTag();
     document.getElementById('kpi-percent').textContent = local.avance + '%';
     document.getElementById('kpi-target-amount').textContent = local.bono.v === '0' ? 'sin bono' : 'CLP ' + local.bono.v;
     document.getElementById('kpi-day-info').textContent = drill.bono_status;
@@ -1594,6 +1717,171 @@ function renderFascia1() {
     body.innerHTML = '';
     drill.secciones.forEach(s => body.appendChild(renderSeccionRow(s)));
   }
+}
+
+// ── helpers para render con API ──
+function _fmtClp(n) {
+  if (!n) return 'CLP 0';
+  const abs = Math.abs(n);
+  if (abs >= 1000000) {
+    const m = n / 1000000;
+    return 'CLP ' + (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + 'M';
+  }
+  if (abs >= 1000) return 'CLP ' + Math.round(n/1000) + 'K';
+  return 'CLP ' + Math.round(n);
+}
+
+function _apiLocalToRow(id, l, api) {
+  // Convierto datos API a formato renderLocalRow esperado
+  const sigla = id === 'cdl' ? 'Candelaria' : (id === 'rsc' ? 'Riesco' : id);
+  const fcStatus = l.status_label || 'cumple';
+  const fcClass  = l.status || 'ok';
+  return {
+    id: id,
+    sigla: sigla,
+    estado: 'ACTIVO',
+    jl: 'JL activo',
+    avance: 0,  // por ahora, calcular cuando tengamos datos semanales
+    metas: '— calculando',
+    ventas:   { v: '—', target: '', status: '', class: 'unav' },
+    foodcost: { v: l.value_label || '—', target: l.target_label || '', status: fcStatus, class: fcClass },
+    rrhh:     { v: '—', target: '≤22%', status: 'pendiente turnos', class: 'unav', mock: true },
+    merma:    { v: '—', target: '', status: '', class: 'unav' },
+    bono:     { v: '0', label: '— calculando', class: 'unav' }
+  };
+}
+
+// ============ FOOD COST DETAIL · 3 NIVELES ============
+function toggleFoodCostDetail() {
+  STATE.fcDetailOpen = !STATE.fcDetailOpen;
+  renderFoodCostDetail();
+}
+
+function renderFoodCostDetail() {
+  let host = document.getElementById('fc-detail-host');
+  if (!host) {
+    // Inserisco host subito sotto kpi-metrics
+    const wrap = document.getElementById('kpi-metrics');
+    if (!wrap) return;
+    host = document.createElement('div');
+    host.id = 'fc-detail-host';
+    host.style.cssText = 'margin-top:14px;';
+    wrap.parentElement.insertBefore(host, wrap.nextSibling);
+  }
+
+  if (!STATE.fcDetailOpen || !STATE.apiData || !STATE.apiData.food_cost_3_niveles) {
+    host.innerHTML = '';
+    return;
+  }
+
+  const fc = STATE.apiData.food_cost_3_niveles;
+  const l1 = fc.l1_bc;
+  const l2 = fc.l2_locales;
+
+  // L1 — Bodega Central
+  let l1Cats = '';
+  if (l1.desglose_compras && l1.desglose_compras.categorias) {
+    l1Cats = l1.desglose_compras.categorias.map(c => `
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:4px 0;font-size:11px;">
+        <span style="color:var(--t2);">── ${c.name}</span>
+        <span class="mono" style="color:var(--t1);text-align:right;min-width:80px;">${c.label}</span>
+        <span class="mono" style="color:var(--t3);min-width:36px;text-align:right;">${c.pct}%</span>
+      </div>`).join('');
+  }
+
+  // L2 — selected local (default cdl)
+  const selectedLocal = STATE.fcSelectedLocal || 'cdl';
+  const localData = l2.by_local[selectedLocal];
+  let l2Block = '';
+  if (localData && localData.status !== 'pending_onboarding') {
+    let secciones = '';
+    if (localData.secciones) {
+      secciones = localData.secciones.map(s => `
+        <div style="font-family:var(--mono);font-size:11px;">
+          · ${s.name} <span style="color:${s.status==='ok'?'var(--green2)':s.status==='warn'?'var(--amber2)':'var(--red)'};">${s.value_pct}%</span> ≤${s.target_pct}%
+        </div>`).join('');
+    }
+    let integridad = '';
+    if (localData.integridad) {
+      const i = localData.integridad;
+      integridad = `
+        <div style="margin-top:10px;padding:10px 12px;background:var(--bg3);border-radius:6px;border:1px solid var(--border);font-family:var(--mono);font-size:11px;">
+          <div style="display:grid;grid-template-columns:1fr auto;gap:4px 14px;">
+            <span style="color:var(--t2);">Recepción de BC</span><span style="color:var(--t1);text-align:right;">${_fmtClp(i.recep_bc_clp)}</span>
+            <span style="color:var(--t2);">+ Compras directas</span><span style="color:var(--t1);text-align:right;">${_fmtClp(i.compras_dir_clp)}</span>
+            <span style="grid-column:1/-1;height:1px;background:var(--border);margin:4px 0;"></span>
+            <span style="color:var(--t2);">= Total entrada</span><span style="color:var(--t1);text-align:right;">${_fmtClp(i.total_in_clp)}</span>
+            <span style="color:var(--t2);">Entregas a secciones</span><span style="color:var(--t1);text-align:right;">${_fmtClp(i.entregas_clp)}</span>
+            <span style="color:var(--t2);">+ Stock actual (${i.ultimo_conteo_label})</span><span style="color:var(--t1);text-align:right;">${_fmtClp(i.stock_clp)}</span>
+            <span style="color:var(--t2);">+ Mermas</span><span style="color:var(--t1);text-align:right;">${_fmtClp(i.mermas_clp)}</span>
+            <span style="grid-column:1/-1;height:1px;background:var(--border);margin:4px 0;"></span>
+            <span style="color:var(--t2);font-weight:600;">Diferencia</span><span style="color:${i.trust_class==='high'?'var(--green2)':i.trust_class==='partial'?'var(--amber2)':'var(--red)'};text-align:right;font-weight:600;">${i.diferencia_clp >= 0 ? '+ ' : '- '}${_fmtClp(Math.abs(i.diferencia_clp))} (${i.diferencia_pct}%)</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:10px;padding:8px 12px;background:var(--bg2);border-radius:6px;border:1px solid var(--border);flex-wrap:wrap;">
+            <span style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--t3);text-transform:uppercase;">Trust score</span>
+            <div style="flex:1;min-width:80px;height:6px;background:var(--bg4);border-radius:3px;overflow:hidden;">
+              <div style="width:${i.trust_score}%;height:100%;background:${i.trust_class==='high'?'linear-gradient(90deg,var(--green),var(--green2))':i.trust_class==='partial'?'linear-gradient(90deg,var(--amber),var(--amber2))':'linear-gradient(90deg,var(--red),#E85A4B)'};transition:width 0.4s;"></div>
+            </div>
+            <span class="mono" style="color:${i.trust_class==='high'?'#5BB89F':i.trust_class==='partial'?'var(--amber2)':'var(--red)'};font-weight:600;font-size:13px;">${i.trust_score} / 100</span>
+          </div>
+          ${i.warning ? `<div style="font-size:11px;color:${i.warning.type==='bad'?'var(--red)':'var(--amber2)'};margin-top:8px;padding:8px 10px;background:${i.warning.type==='bad'?'rgba(192,57,43,0.12)':'rgba(212,134,10,0.12)'};border-left:2px solid ${i.warning.type==='bad'?'var(--red)':'var(--amber)'};border-radius:4px;">${i.warning.text}</div>` : ''}
+        </div>`;
+    }
+    l2Block = `
+      <div style="padding:14px 16px;border-top:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+          <span style="font-family:var(--mono);font-size:9px;color:var(--t3);border:1px solid var(--border2);padding:1px 5px;border-radius:3px;">L2</span>
+          <span style="font-family:var(--font-title);font-size:13px;font-weight:600;color:var(--t1);">Locales</span>
+          ${Object.keys(l2.by_local).map(id => {
+            const sig = id==='cdl'?'Candelaria':id==='rsc'?'Riesco':id;
+            const isSel = id === selectedLocal;
+            const isPending = l2.by_local[id].status === 'pending_onboarding';
+            return `<button onclick="STATE.fcSelectedLocal='${id}';renderFoodCostDetail();" style="background:${isSel?'var(--teal-bg)':'var(--bg3)'};border:1px solid ${isSel?'var(--teal)':'var(--border)'};color:${isSel?'var(--teal2)':isPending?'var(--t3)':'var(--t2)'};padding:4px 10px;border-radius:4px;font-size:11px;font-weight:500;cursor:pointer;">${sig}${isPending?' ◌':''}</button>`;
+          }).join('')}
+          <span style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-left:auto;">owner · ${l2.owner}</span>
+        </div>
+        ${localData.status === 'pending_onboarding' ? `
+          <div style="padding:20px;text-align:center;color:var(--t3);font-size:13px;">${localData.label}</div>
+        ` : `
+          <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+            <span style="font-family:var(--font-title);font-weight:700;font-size:22px;color:${localData.status==='ok'?'var(--t1)':localData.status==='warn'?'var(--amber2)':'var(--red)'};">${localData.value_label}</span>
+            <span style="font-size:11px;color:var(--t3);font-family:var(--mono);">target ${localData.target_label}</span>
+            <span style="font-size:11px;color:${localData.status==='ok'?'var(--green2)':localData.status==='warn'?'var(--amber2)':'var(--red)'};">${localData.status_label}</span>
+          </div>
+          <div style="font-size:11px;color:var(--t2);">${localData.context || ''}</div>
+          ${secciones ? `<div style="margin-top:10px;padding:10px 12px;background:var(--bg3);border-radius:6px;border:1px solid var(--border);"><div style="font-size:9px;font-weight:700;letter-spacing:1.2px;color:var(--t3);text-transform:uppercase;margin-bottom:6px;">Desglose por sección</div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;">${secciones}</div></div>` : ''}
+          ${integridad}
+        `}
+      </div>`;
+  }
+
+  // Render full
+  host.innerHTML = `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.02);animation:slideDown 0.25s ease-out;">
+      <div style="padding:12px 16px;background:linear-gradient(180deg,rgba(45,155,142,0.06) 0%,transparent 100%);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;color:var(--teal2);text-transform:uppercase;">🛡 Food Cost · 3 niveles de control</div>
+        <button onclick="toggleFoodCostDetail();" style="background:none;border:none;color:var(--t3);font-size:18px;cursor:pointer;padding:0 4px;">×</button>
+      </div>
+
+      <!-- L1 BC -->
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+          <span style="font-family:var(--mono);font-size:9px;color:var(--t3);border:1px solid var(--border2);padding:1px 5px;border-radius:3px;">L1</span>
+          <span style="font-family:var(--font-title);font-size:13px;font-weight:600;color:var(--t1);">Bodega Central</span>
+          <span style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-left:auto;">owner · ${l1.owner}</span>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+          <span style="font-family:var(--font-title);font-weight:700;font-size:22px;color:${l1.status==='ok'?'var(--t1)':l1.status==='warn'?'var(--amber2)':'var(--red)'};">${l1.value_label}</span>
+          <span style="font-size:11px;color:var(--t3);font-family:var(--mono);">target ${l1.target_label}</span>
+          <span style="font-size:11px;color:${l1.status==='ok'?'var(--green2)':l1.status==='warn'?'var(--amber2)':'var(--red)'};">${l1.status_label}</span>
+        </div>
+        <div style="font-size:11px;color:var(--t2);margin-bottom:10px;">${l1.context}</div>
+        ${l1Cats ? `<div style="padding:10px 12px;background:var(--bg3);border-radius:6px;border:1px solid var(--border);"><div style="font-size:9px;font-weight:700;letter-spacing:1.2px;color:var(--t3);text-transform:uppercase;margin-bottom:6px;">Desglose compras · ${l1.desglose_compras.total_label}</div>${l1Cats}</div>` : ''}
+      </div>
+
+      ${l2Block}
+    </div>
+  `;
 }
 
 function renderLocalRow(l) {
@@ -2218,14 +2506,27 @@ document.getElementById('obs-photo-input').addEventListener('change', (e) => {
   reader.readAsDataURL(file);
 });
 
-function init() {
+async function init() {
   renderClock();
-  renderAll();
+  renderAll();   // primo render con mock (lampo)
   setInterval(renderClock, 30000);
   // Auto-rerender FASCIA 2 ogni minuto per aggiornare momento attivo (solo se non forzato)
   setInterval(() => {
     if (STATE.forcedMomentIdx === null && STATE.simulatedMinutes === null) renderFascia2();
   }, 60000);
+
+  // ── DASH-GO-WIRING-FASCIA1 v1 ──
+  // Fetch dati reali e re-render Fascia 1 quando arrivano
+  const data = await fetchDashboardData();
+  if (data) {
+    renderFascia1();   // ora con dati live (override mock)
+  }
+
+  // Auto-refresh ogni 5 min (rispetta cache GAS lato server)
+  setInterval(async () => {
+    const fresh = await fetchDashboardData();
+    if (fresh) renderFascia1();
+  }, 5 * 60 * 1000);
 }
 init();
 </script>
