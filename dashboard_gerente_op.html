@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0E0D0C">
-<title>PINSA · Dashboard Gerente Operaciones</title>
+<title>PINSA · Dashboard Gerente Operaciones · V13</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232D9B8E'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-weight='bold' font-size='18' fill='white'>P</text></svg>">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -159,6 +159,38 @@ body.view-local {
 .ctx-exit:hover { background: rgba(212,134,10,0.35); }
 .ctx-exit:active { transform: scale(0.97); }
 .ctx-x { font-size: 14px; line-height: 1; font-weight: 600; }
+
+/* V13 · ctx-mock-tag per indicare drill-down con dati mock fallback */
+.ctx-mock-tag {
+  display: inline-block;
+  padding: 2px 6px;
+  margin-left: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  background: rgba(212,134,10,0.20);
+  color: var(--amber2);
+  border: 1px solid rgba(212,134,10,0.40);
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+/* V13 · KPI mock state — dimmed con badge esplicito */
+.kpi-metric.is-mock { opacity: 0.65; }
+.kpi-metric.is-mock .kpi-metric-num { color: var(--t2); }
+.kpi-mock-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  background: rgba(160,160,170,0.18);
+  color: var(--t3);
+  border: 1px solid rgba(160,160,170,0.30);
+  border-radius: 3px;
+  vertical-align: middle;
+}
 
 @keyframes pulse {
   0%   { box-shadow: 0 0 0 0 rgba(212,134,10,0.6); }
@@ -929,7 +961,7 @@ body.view-local .obs-submit { background: var(--amber); }
         <div class="kpi-quedan">
           <div class="kpi-quedan-label">Quedan</div>
           <div class="kpi-quedan-value mono" id="kpi-quedan-value">26 días</div>
-          <div class="kpi-quedan-status" id="kpi-quedan-status">vas adelantado · +52 puntos</div>
+          <div class="kpi-quedan-status" id="kpi-quedan-status">cargando…</div>
         </div>
       </div>
 
@@ -1596,14 +1628,15 @@ function renderClock() {
 
 // ============ RENDER · FASCIA 1 ============
 function renderKpiMetrics(metrics) {
-  // metrics: array di {label, value, status, class, sub?}
+  // metrics: array di {label, value, status, class, sub?, is_mock?}
   const wrap = document.getElementById('kpi-metrics');
   wrap.innerHTML = '';
   metrics.forEach(m => {
     const el = document.createElement('div');
-    el.className = `kpi-metric ${m.class || ''}`;
+    el.className = `kpi-metric ${m.class || ''}${m.is_mock ? ' is-mock' : ''}`;
+    const mockBadge = m.is_mock ? '<span class="kpi-mock-badge">MOCK</span>' : '';
     el.innerHTML = `
-      <div class="kpi-metric-label">${m.label}</div>
+      <div class="kpi-metric-label">${m.label}${mockBadge}</div>
       <div class="kpi-metric-value">
         <span class="kpi-metric-num">${m.value}</span>
         <span class="kpi-metric-status">${m.status || ''}</span>
@@ -1647,15 +1680,44 @@ function renderFascia1() {
     document.getElementById('kpi-day-info').textContent = dayInfo;
     document.getElementById('kpi-prog-fill').style.width = bonoPct + '%';
 
+    // V13 · Messaggio "adelantado/atrasado/en ritmo" dal payload (B2 fix)
+    const statusEl = document.getElementById('kpi-quedan-status');
+    if (statusEl) {
+      if (api && api.go_consolidado.bono.message) {
+        statusEl.textContent = api.go_consolidado.bono.message;
+        statusEl.className = 'kpi-quedan-status ' + (api.go_consolidado.bono.message_class || 'ok');
+      } else {
+        statusEl.textContent = 'cargando…';
+        statusEl.className = 'kpi-quedan-status';
+      }
+    }
+    // V13 · Quedan días dal payload (U5 fix off-by-one)
+    const quedanEl = document.getElementById('kpi-quedan-value');
+    if (quedanEl && api && api.month) {
+      const dias = api.month.days_in_month - api.month.day;
+      quedanEl.textContent = dias + ' días';
+    }
+
     // KPI metrics 4-up
     if (api) {
-      renderKpiMetrics(api.go_consolidado.kpi_metrics.map(k => ({
-        label:  k.label,
-        value:  k.value_label,
-        status: k.status_label,
-        class:  k.status,
-        sub:    k.sub || (k.is_composite ? 'click para detalle' : null)
-      })));
+      renderKpiMetrics(api.go_consolidado.kpi_metrics.map(k => {
+        // V13 · U1: distinguo "Food cost" (mensile GO) da "Food cost cons." (composite L1+L2)
+        let labelOut = k.label;
+        if (k.id === 'foodcost' && k.is_composite) {
+          labelOut = 'Food cost cons.';
+        }
+        // V13 · U2: KPI mock (RRHH) con sub esplicito "datos pendientes"
+        let subOut = k.sub || (k.is_composite ? 'click para detalle' : null);
+        if (k.is_mock && !subOut) subOut = 'datos pendientes';
+        return {
+          label:  labelOut,
+          value:  k.value_label,
+          status: k.status_label,
+          class:  k.status,
+          sub:    subOut,
+          is_mock: !!k.is_mock
+        };
+      }));
     } else {
       renderKpiMetrics([
         { label:'Ventas',    value:'CLP 8.4M', status:'68%',       class:'ok' },
@@ -1679,9 +1741,9 @@ function renderFascia1() {
       Object.keys(byLocal).forEach(id => {
         const l = byLocal[id];
         if (l.status === 'pending_onboarding') {
-          body.appendChild(renderPlaceholderRow({ id, name: id.toUpperCase(), estado: 'PRONTO', jl: 'onboarding pendiente' }));
+          body.appendChild(renderPlaceholderRow({ id, name: id.toUpperCase(), estado: 'PRONTO', jl: 'ya viene' }));
         } else {
-          // Construyo objeto compatible con renderLocalRow desde API
+          // Construyo objeto compatible con renderLocalRow desde API + locales_semana
           body.appendChild(renderLocalRow(_apiLocalToRow(id, l, api)));
         }
       });
@@ -1689,34 +1751,124 @@ function renderFascia1() {
       LOCALES.forEach(l => body.appendChild(renderLocalRow(l)));
       PLACEHOLDERS.forEach(l => body.appendChild(renderPlaceholderRow(l)));
     }
-    body.appendChild(renderConsolidatedRow());
+    body.appendChild(renderConsolidatedRow(api));
 
     // Render Food Cost detail (si abierto)
     renderFoodCostDetail();
   } else {
     // Vista local drill-down
-    const local = LOCALES.find(x => x.id === STATE.view);
-    const drill = LOCAL_DRILL[STATE.view];
-    f1Title.textContent = `Como va ${local.sigla}`;
-    f1Sub.textContent   = `Local ${local.sigla} · semana 19`;
-    headTitle.textContent = 'Detalle por sección · merma';
-    ctx.innerHTML = `${drill.headline}`;
+    const localId   = STATE.view;
+    const localApi  = api && api.locales_semana ? api.locales_semana[localId] : null;
+    const localMock = LOCALES.find(x => x.id === localId);
+    const sigla     = localId === 'cdl' ? 'Candelaria' : (localId === 'rsc' ? 'Riesco' : localId);
+
+    f1Title.textContent = `Como va ${sigla}`;
+    f1Sub.textContent   = `Local ${sigla} · ${api && api.week ? api.week.label : 'semana'}`;
+    headTitle.textContent = 'Detalle por sección';
     renderDataTag();
-    document.getElementById('kpi-percent').textContent = local.avance + '%';
-    document.getElementById('kpi-target-amount').textContent = local.bono.v === '0' ? 'sin bono' : 'CLP ' + local.bono.v;
-    document.getElementById('kpi-day-info').textContent = drill.bono_status;
-    document.getElementById('kpi-prog-fill').style.width = local.avance + '%';
 
-    renderKpiMetrics([
-      { label:'Ventas semanal', value: local.ventas.v,   status: local.ventas.target,   class: local.ventas.class },
-      { label:'Food cost',      value: local.foodcost.v, status: local.foodcost.status, class: local.foodcost.class },
-      { label:'RRHH cost',      value: local.rrhh.v,     status: local.rrhh.status,     class: local.rrhh.class, sub:'pendiente turnos' },
-      { label:'Merma',          value: local.merma.v,    status: local.merma.status,    class: local.merma.class }
-    ]);
+    if (localApi && localApi.ventas) {
+      // V13 · Datos API live (locales_semana)
+      const t = localApi.targets;
+      const v = localApi.ventas;
+      const fc = localApi.food_cost;
+      const m = localApi.merma;
+      const b = localApi.bono;
 
-    body.innerHTML = '';
-    drill.secciones.forEach(s => body.appendChild(renderSeccionRow(s)));
+      ctx.innerHTML = `${sigla} · ${api.week.label} · target ${_fmtClp(t.target_ventas_clp)} · bono ${_fmtClp(t.bono_clp_full)}`;
+      document.getElementById('kpi-percent').textContent = b.percent + '%';
+      document.getElementById('kpi-target-amount').textContent = b.target_clp ? _fmtClp(b.target_clp) : 'sin bono';
+      // Status linea bono
+      let bonoStatusTxt = '';
+      if (b.percent === 0) bonoStatusTxt = 'Aún sin avance esta semana';
+      else if (b.percent >= 95) bonoStatusTxt = 'Bono asegurado · ' + b.percent + '% del target';
+      else if (b.percent >= 60) bonoStatusTxt = 'En camino · si mantiene ritmo, ' + _fmtClp(b.target_clp) + ' asegurado';
+      else bonoStatusTxt = 'En riesgo · ' + b.percent + '% del target';
+      document.getElementById('kpi-day-info').textContent = bonoStatusTxt;
+      document.getElementById('kpi-prog-fill').style.width = b.percent + '%';
+
+      renderKpiMetrics([
+        {
+          label:'Ventas semanal',
+          value: _fmtClp(v.total_clp),
+          status: '/' + _fmtClp(t.target_ventas_clp),
+          class: v.status
+        },
+        {
+          label:'Food cost',
+          value: fc.value_pct > 0 ? fc.value_pct + '%' : '—',
+          status: fc.value_pct > 0 ? '≤' + fc.target_pct + '%' : 'sin datos',
+          class: fc.status
+        },
+        {
+          label:'RRHH cost',
+          value: '—',
+          status: 'pendiente turnos',
+          class: 'unav',
+          sub: 'pendiente turnos'
+        },
+        {
+          label:'Merma',
+          value: m.total_pct + '%',
+          status: '≤' + m.target_pct + '%',
+          class: m.status
+        }
+      ]);
+
+      // Tabla secciones detalle (live)
+      body.innerHTML = '';
+      if (localApi.secciones_detalle && localApi.secciones_detalle.length) {
+        localApi.secciones_detalle.forEach(s => {
+          body.appendChild(renderSeccionRowLive(s));
+        });
+      }
+    } else {
+      // Fallback mock (V13 · solo si API offline)
+      const drill = LOCAL_DRILL[localId];
+      ctx.innerHTML = `${drill.headline} <span class="ctx-mock-tag">MOCK</span>`;
+      document.getElementById('kpi-percent').textContent = (localMock ? localMock.avance : 0) + '%';
+      document.getElementById('kpi-target-amount').textContent = localMock && localMock.bono.v === '0' ? 'sin bono' : 'CLP ' + (localMock ? localMock.bono.v : '?');
+      document.getElementById('kpi-day-info').textContent = drill.bono_status;
+      document.getElementById('kpi-prog-fill').style.width = (localMock ? localMock.avance : 0) + '%';
+
+      renderKpiMetrics([
+        { label:'Ventas semanal', value: localMock.ventas.v,   status: localMock.ventas.target,   class: localMock.ventas.class },
+        { label:'Food cost',      value: localMock.foodcost.v, status: localMock.foodcost.status, class: localMock.foodcost.class },
+        { label:'RRHH cost',      value: localMock.rrhh.v,     status: localMock.rrhh.status,     class: localMock.rrhh.class, sub:'pendiente turnos' },
+        { label:'Merma',          value: localMock.merma.v,    status: localMock.merma.status,    class: localMock.merma.class }
+      ]);
+
+      body.innerHTML = '';
+      drill.secciones.forEach(s => body.appendChild(renderSeccionRow(s)));
+    }
   }
+}
+
+// V13 · Render fila sección con datos live (ventas + merma)
+function renderSeccionRowLive(s) {
+  const row = document.createElement('div');
+  row.className = 'local-row';
+  row.style.cursor = 'default';
+  const mermaClass = s.merma_status || 'ok';
+  const mermaLabel = s.merma_status === 'ok' ? 'cumple' :
+                     s.merma_status === 'warn' ? 'en riesgo' : 'no cumple';
+  row.innerHTML = `
+    <div>
+      <div class="local-name">${s.name}</div>
+      <div class="local-status">merma · ${mermaLabel}</div>
+    </div>
+    <div class="local-mobile-only" style="text-align:right;">
+      <div class="local-progress ${mermaClass}">${s.merma_pct}%</div>
+      <div class="local-meta">target ≤${s.merma_target_pct}%</div>
+    </div>
+    <div class="local-cell ${mermaClass}">${s.merma_pct}%<div class="local-cell-meta">target ≤${s.merma_target_pct}%</div></div>
+    <div class="local-cell">${s.venta_clp ? _fmtClp(s.venta_clp) : '—'}<div class="local-cell-meta">venta semanal</div></div>
+    <div class="local-cell">—<div class="local-cell-meta">food cost</div></div>
+    <div class="local-cell unav">—<div class="local-cell-meta">RRHH</div></div>
+    <div class="local-cell ${mermaClass}">${s.merma_clp ? _fmtClp(s.merma_clp) : '—'}<div class="local-cell-meta">merma $</div></div>
+    <div class="local-cell" style="text-align:right;">—<div class="local-cell-meta">bono</div></div>
+  `;
+  return row;
 }
 
 // ── helpers para render con API ──
@@ -1945,24 +2097,59 @@ function renderPlaceholderRow(l) {
   return row;
 }
 
-function renderConsolidatedRow() {
+function renderConsolidatedRow(api) {
   const row = document.createElement('div');
   row.className = 'local-row consolidated';
-  row.innerHTML = `
-    <div>
-      <div class="local-name">CONSOLIDADO</div>
-      <div class="local-status">2 locales activos</div>
-    </div>
-    <div class="local-mobile-only" style="text-align:right;">
-      <div class="local-progress">68%</div>
-      <div class="local-meta">3 metas</div>
-    </div>
-    <div class="local-cell ok">CLP 4.0M<div class="local-cell-meta">/5.1M</div></div>
-    <div class="local-cell ok">33%<div class="local-cell-meta">≤35%</div></div>
-    <div class="local-cell warn">23.5%<div class="local-cell-meta">≤22% pend</div></div>
-    <div class="local-cell warn">4.6%<div class="local-cell-meta">≤4%</div></div>
-    <div class="local-cell ok" style="text-align:right;">200K<div class="local-cell-meta">GO mensual</div></div>
-  `;
+
+  const c = api && api.consolidado_semanal ? api.consolidado_semanal : null;
+
+  if (c) {
+    // V13 · Datos LIVE
+    const ventasV = _fmtClp(c.ventas_clp);
+    const ventasT = '/' + _fmtClp(c.ventas_target_clp);
+    const ventasClass = c.ventas_pct >= 95 ? 'ok' : (c.ventas_pct >= 60 ? 'warn' : 'bad');
+
+    const fcClass = c.food_cost_pct === 0 ? 'unav' :
+                    (c.food_cost_pct <= c.food_cost_target_pct ? 'ok' :
+                     c.food_cost_pct <= c.food_cost_target_pct * 1.10 ? 'warn' : 'bad');
+    const fcVal = c.food_cost_pct > 0 ? c.food_cost_pct + '%' : '—';
+
+    const mermaClass = c.merma_pct <= c.merma_target_pct ? 'ok' :
+                       c.merma_pct <= c.merma_target_pct * 1.20 ? 'warn' : 'bad';
+
+    row.innerHTML = `
+      <div>
+        <div class="local-name">CONSOLIDADO</div>
+        <div class="local-status">${c.n_locales_activos} local${c.n_locales_activos!==1?'es':''} activo${c.n_locales_activos!==1?'s':''}</div>
+      </div>
+      <div class="local-mobile-only" style="text-align:right;">
+        <div class="local-progress">${c.ventas_pct}%</div>
+        <div class="local-meta">vs target</div>
+      </div>
+      <div class="local-cell ${ventasClass}">${ventasV}<div class="local-cell-meta">${ventasT}</div></div>
+      <div class="local-cell ${fcClass}">${fcVal}<div class="local-cell-meta">≤${c.food_cost_target_pct}%</div></div>
+      <div class="local-cell unav">—<div class="local-cell-meta">pendiente</div></div>
+      <div class="local-cell ${mermaClass}">${c.merma_pct}%<div class="local-cell-meta">≤${c.merma_target_pct}%</div></div>
+      <div class="local-cell ok" style="text-align:right;">${_fmtClp(c.bono_total_clp)}<div class="local-cell-meta">bonos JL semanal</div></div>
+    `;
+  } else {
+    // Fallback mock (V13 · solo si API offline)
+    row.innerHTML = `
+      <div>
+        <div class="local-name">CONSOLIDADO <span class="ctx-mock-tag">MOCK</span></div>
+        <div class="local-status">2 locales activos</div>
+      </div>
+      <div class="local-mobile-only" style="text-align:right;">
+        <div class="local-progress">68%</div>
+        <div class="local-meta">3 metas</div>
+      </div>
+      <div class="local-cell ok">CLP 4.0M<div class="local-cell-meta">/5.1M</div></div>
+      <div class="local-cell ok">33%<div class="local-cell-meta">≤35%</div></div>
+      <div class="local-cell warn">23.5%<div class="local-cell-meta">≤22% pend</div></div>
+      <div class="local-cell warn">4.6%<div class="local-cell-meta">≤4%</div></div>
+      <div class="local-cell ok" style="text-align:right;">200K<div class="local-cell-meta">GO mensual</div></div>
+    `;
+  }
   return row;
 }
 
