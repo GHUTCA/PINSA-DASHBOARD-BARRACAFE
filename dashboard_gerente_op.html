@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0E0D0C">
-<title>PINSA · Dashboard Gerente Operaciones · V14.2</title>
+<title>PINSA · Dashboard Gerente Operaciones · V14.3</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232D9B8E'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-weight='bold' font-size='18' fill='white'>P</text></svg>">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -178,6 +178,13 @@ body.view-local {
 /* V13 · KPI mock state — dimmed con badge esplicito */
 .kpi-metric.is-mock { opacity: 0.65; }
 .kpi-metric.is-mock .kpi-metric-num { color: var(--t2); }
+/* V14.3 · stato pendiente (RRHH en proceso) */
+.kpi-metric.is-pending { opacity: 0.55; }
+.kpi-metric.is-pending .kpi-metric-num { color: var(--t3); }
+.kpi-metric.is-pending .kpi-metric-status { color: var(--t3); letter-spacing: 1px; }
+/* V14.3 · KPI cliccabile (food cost popup) */
+.kpi-metric.is-clickable { cursor: pointer; transition: opacity 0.15s; }
+.kpi-metric.is-clickable:hover { opacity: 0.85; }
 .kpi-mock-badge {
   display: inline-block;
   margin-left: 6px;
@@ -413,7 +420,9 @@ body.view-local {
 .kpi-percent {
   font-family: var(--font-title); font-size: 44px; font-weight: 600; color: var(--teal2);
   line-height: 1; letter-spacing: -1.5px;
+  transition: opacity 0.15s;
 }
+.kpi-percent:hover { opacity: 0.82; }
 .kpi-target  { font-size: 13px; color: var(--t1); }
 .kpi-target-num { font-family: var(--mono); }
 .kpi-day { display: block; font-size: 11px; color: var(--t3); margin-top: 2px; }
@@ -1113,19 +1122,18 @@ body.view-local .obs-submit { background: var(--amber); }
       </div>
 
       <div class="kpi-main">
-        <div class="kpi-percent mono" id="kpi-percent">68%</div>
+        <div class="kpi-percent mono" id="kpi-percent" onclick="showBonoPopup()" style="cursor:pointer" title="click para ver detalle">68%</div>
         <div class="kpi-target">
           avance hacia <span class="kpi-target-num" id="kpi-target-amount">CLP 200.000</span>
-          <span class="kpi-day" id="kpi-day-info">día 5 de 31 · esperado 16%</span>
+          <span class="kpi-day" id="kpi-day-info">cargando…</span>
         </div>
       </div>
 
       <div class="kpi-progress">
         <div class="kpi-progress-fill" id="kpi-prog-fill" style="width:68%"></div>
-        <div class="kpi-progress-tick" style="left:16%"></div>
       </div>
       <div class="kpi-progress-labels">
-        <span>0</span><span>esperado: 16%</span><span>100%</span>
+        <span>0</span><span id="kpi-progress-mid">·</span><span>100%</span>
       </div>
 
       <div class="kpi-metrics" id="kpi-metrics"></div>
@@ -1775,20 +1783,20 @@ function renderClock() {
 
 // ============ RENDER · FASCIA 1 ============
 function renderKpiMetrics(metrics) {
-  // metrics: array di {label, value, status, class, sub?, is_mock?}
+  // V14.3 · metrics: array di {label, value, status, class, sub?, is_pending?, is_clickable?}
   const wrap = document.getElementById('kpi-metrics');
   wrap.innerHTML = '';
   metrics.forEach(m => {
     const el = document.createElement('div');
-    el.className = `kpi-metric ${m.class || ''}${m.is_mock ? ' is-mock' : ''}`;
-    const mockBadge = m.is_mock ? '<span class="kpi-mock-badge">MOCK</span>' : '';
+    el.className = `kpi-metric ${m.class || ''}${m.is_pending ? ' is-pending' : ''}${m.is_clickable ? ' is-clickable' : ''}`;
+    const subColor = m.is_pending ? 'var(--t3)' : 'var(--amber2)';
     el.innerHTML = `
-      <div class="kpi-metric-label">${m.label}${mockBadge}</div>
+      <div class="kpi-metric-label">${m.label}</div>
       <div class="kpi-metric-value">
         <span class="kpi-metric-num">${m.value}</span>
         <span class="kpi-metric-status">${m.status || ''}</span>
       </div>
-      ${m.sub ? `<div class="kpi-metric-target" style="font-size:9px;color:var(--amber2);">${m.sub}</div>` : ''}
+      ${m.sub ? `<div class="kpi-metric-target" style="font-size:9px;color:${subColor};">${m.sub}</div>` : ''}
     `;
     wrap.appendChild(el);
   });
@@ -1816,23 +1824,47 @@ function renderFascia1() {
       : 'Bono mensual GO · consolidado todos los locales';
     renderDataTag();
 
-    // KPI bono header
-    const bonoPct = api ? api.go_consolidado.bono.percent : 68;
-    const bonoTarget = api ? _fmtClp(api.go_consolidado.bono.target_clp) : 'CLP 200.000';
-    const dayInfo = api
-      ? `día ${api.month.day} de ${api.month.days_in_month} · esperado ${api.go_consolidado.bono.expected_pct_today}%`
-      : 'día 5 de 31 · esperado 16%';
+    // V14.3 · KPI bono header con messaggio onesto basato su breakdown
+    const bonoData = api ? api.go_consolidado.bono : null;
+    const bonoPct = bonoData ? bonoData.percent : 0;
+    const bonoTarget = bonoData ? _fmtClp(bonoData.target_clp) : 'CLP 0';
+
+    // Messaggio "X de Y metas cumplen" + nota pendientes
+    let dayInfo;
+    if (bonoData && bonoData.breakdown) {
+      const cumplen = bonoData.cumplen;
+      const activos = bonoData.activos;
+      const total = bonoData.total_kpis;
+      const pendientes = total - activos;
+      let msg = `${cumplen} de ${activos} metas cumplen`;
+      if (pendientes > 0) msg += ` · ${pendientes} pendiente`;
+      dayInfo = msg;
+    } else {
+      dayInfo = 'cargando…';
+    }
     document.getElementById('kpi-percent').textContent = bonoPct + '%';
     document.getElementById('kpi-target-amount').textContent = bonoTarget;
     document.getElementById('kpi-day-info').textContent = dayInfo;
     document.getElementById('kpi-prog-fill').style.width = bonoPct + '%';
+    // Mid label progress: mostra "X de Y" sotto la barra
+    const midEl = document.getElementById('kpi-progress-mid');
+    if (midEl && bonoData) midEl.textContent = `${bonoData.cumplen}/${bonoData.activos}`;
 
-    // V13 · Messaggio "adelantado/atrasado/en ritmo" dal payload (B2 fix)
+    // Salvo i dati bono in cache per il popup
+    window.__lastBonoData = bonoData;
+
+    // V14.3 · "Quedan días" + indicatore proiezione ventas (sostituisce "vas adelantado +X puntos")
     const statusEl = document.getElementById('kpi-quedan-status');
     if (statusEl) {
-      if (api && api.go_consolidado.bono.message) {
-        statusEl.textContent = api.go_consolidado.bono.message;
-        statusEl.className = 'kpi-quedan-status ' + (api.go_consolidado.bono.message_class || 'ok');
+      // Cerco il KPI ventas nel payload per estrarre la proiezione
+      const ventasKpi = api && api.go_consolidado.kpi_metrics
+        ? api.go_consolidado.kpi_metrics.find(k => k.id === 'ventas')
+        : null;
+      if (ventasKpi && ventasKpi.proyeccion_pct != null) {
+        const pp = ventasKpi.proyeccion_pct;
+        const cls = ventasKpi.status === 'ok' ? 'ok' : (ventasKpi.status === 'warn' ? 'warn' : 'bad');
+        statusEl.textContent = `proyección ${pp}% · ${ventasKpi.proyeccion_label}`;
+        statusEl.className = 'kpi-quedan-status ' + cls;
       } else {
         statusEl.textContent = 'cargando…';
         statusEl.className = 'kpi-quedan-status';
@@ -1845,31 +1877,58 @@ function renderFascia1() {
       quedanEl.textContent = dias + ' días';
     }
 
-    // KPI metrics 4-up
+    // V14.3 · KPI metrics 4-up con nuova logica per categoria
     if (api) {
       renderKpiMetrics(api.go_consolidado.kpi_metrics.map(k => {
-        // V13 · U1: distinguo "Food cost" (mensile GO) da "Food cost cons." (composite L1+L2)
         let labelOut = k.label;
-        if (k.id === 'foodcost' && k.is_composite) {
-          labelOut = 'Food cost cons.';
+        let subOut = k.sub || null;
+        let valueOut = k.value_label;
+        let statusOut = k.status_label;
+        let classOut = k.status;
+        let isPending = false;
+        let isClickable = false;
+
+        // V14.3 · Ventas: mostra acumulado + proiezione come sub
+        if (k.id === 'ventas') {
+          // Sub line con proiezione
+          if (k.proyeccion_label) {
+            subOut = `proy ${k.proyeccion_label} (${k.proyeccion_pct}%)`;
+          }
+          // Status label = % acumulado (info), classe colore = proiezione
+          // Ma se cumple proiezione, no rosso
         }
-        // V13 · U2: KPI mock (RRHH) con sub esplicito "datos pendientes"
-        let subOut = k.sub || (k.is_composite ? 'click para detalle' : null);
-        if (k.is_mock && !subOut) subOut = 'datos pendientes';
+
+        // V14.3 · Food cost: label "Food cost" + ⓘ click
+        if (k.id === 'foodcost') {
+          labelOut = 'Food cost';
+          subOut = 'ⓘ click para detalle';
+          isClickable = true;
+        }
+
+        // V14.3 · RRHH pendiente: stato grigio "EN PROCESO"
+        if (k.id === 'rrhh' || k.is_pending) {
+          isPending = true;
+          classOut = 'unav';   // grigio
+          valueOut = '—';
+          statusOut = 'EN PROCESO';
+          subOut = 'pendiente turnos';
+        }
+
         return {
           label:  labelOut,
-          value:  k.value_label,
-          status: k.status_label,
-          class:  k.status,
+          value:  valueOut,
+          status: statusOut,
+          class:  classOut,
           sub:    subOut,
-          is_mock: !!k.is_mock
+          is_pending: isPending,
+          is_clickable: isClickable
         };
       }));
     } else {
       renderKpiMetrics([
         { label:'Ventas',    value:'CLP 8.4M', status:'68%',       class:'ok' },
         { label:'Food cost', value:'33%',      status:'cumple',    class:'ok' },
-        { label:'RRHH cost', value:'23.5%',    status:'en riesgo', class:'warn', sub:'pendiente turnos' },
+        { label:'RRHH cost', value:'—',        status:'EN PROCESO', class:'unav', sub:'pendiente turnos', is_pending:true },
         { label:'Merma',     value:'4.6%',     status:'en riesgo', class:'warn' }
       ]);
     }
@@ -2163,24 +2222,157 @@ function closeTrustPopup() {
   if (m) m.style.display = 'none';
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// V14.3 · BONO GO POPUP (PATTERN-AUTO-CONSULTABLE)
+// ════════════════════════════════════════════════════════════════════════
+function showBonoPopup() {
+  const bono = window.__lastBonoData;
+  if (!bono || !bono.breakdown) return;
+
+  let modal = document.getElementById('bono-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'bono-modal';
+    modal.className = 'trust-modal-overlay';   // riuso CSS trust modal
+    modal.onclick = (e) => { if (e.target === modal) closeBonoPopup(); };
+    document.body.appendChild(modal);
+  }
+
+  // Color del badge bono in base al pct
+  const bonoClass = bono.percent >= 100 ? 'high' : bono.percent >= 50 ? 'partial' : 'critical';
+  const bonoColor = bonoClass === 'high' ? '#5BB89F' : bonoClass === 'partial' ? 'var(--amber2)' : 'var(--red)';
+  const bonoLabel = bonoClass === 'high' ? 'todas las metas activas cumplen' : bonoClass === 'partial' ? 'parcial · revisar metas' : 'crítico · varias metas no cumplen';
+
+  // Render breakdown KPI
+  const breakdownHtml = (bono.breakdown || []).map(b => {
+    let badge, color, detail;
+    if (b.cumple === null) {
+      badge = 'PENDIENTE';
+      color = 'var(--t3)';
+      detail = b.reason === 'pendiente' ? 'no cuenta hasta que datos esten listos' : '';
+    } else if (b.cumple === true) {
+      badge = 'CUMPLE';
+      color = '#5BB89F';
+      detail = `${b.target || ''}`;
+    } else if (b.status === 'warn') {
+      badge = 'EN RIESGO';
+      color = 'var(--amber2)';
+      detail = `${b.target || ''}`;
+    } else {
+      badge = 'NO CUMPLE';
+      color = 'var(--red)';
+      detail = `${b.target || ''}`;
+    }
+    return `
+      <div class="trust-check">
+        <div class="trust-check-head">
+          <span class="trust-check-label">${b.label}</span>
+          <span class="trust-check-peso">${b.value}</span>
+          <span class="trust-check-score" style="color:${color};">${badge}</span>
+        </div>
+        ${detail ? `<div class="trust-check-detail">${detail}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  const notaHtml = bono.nota
+    ? `<div class="trust-modal-info" style="margin-top:8px;border-left:2px solid var(--amber2);"><strong>Nota:</strong> ${bono.nota}</div>`
+    : '';
+
+  modal.innerHTML = `
+    <div class="trust-modal-card" onclick="event.stopPropagation();">
+      <div class="trust-modal-header">
+        <div>
+          <div class="trust-modal-title">Bono GO · ${bono.percent}% logrado</div>
+          <div class="trust-modal-sub" style="color:${bonoColor};">${bonoLabel}</div>
+        </div>
+        <button class="trust-modal-close" onclick="closeBonoPopup()">×</button>
+      </div>
+      <div class="trust-modal-body">
+        <div class="trust-modal-formula">
+          <strong>Cómo se calcula:</strong> ${bono.formula || '(cumple_activos / total_activos) × 100'}.
+          Cada KPI vale igual. KPIs en proceso (sin datos) NO entran en el cálculo hasta que estén listos.
+        </div>
+        <div style="margin-bottom:8px;font-size:11px;color:var(--t2);">
+          <strong>${bono.cumplen} de ${bono.activos} metas activas cumplen</strong>
+          ${bono.activos < bono.total_kpis ? ` · ${bono.total_kpis - bono.activos} pendiente` : ''}
+        </div>
+        ${breakdownHtml}
+        ${notaHtml}
+        <div class="trust-modal-info" style="margin-top:8px;">
+          <strong>Umbrales aplicados:</strong>
+          <ul>
+            <li><strong>Ventas</strong> · proyección fin de mes ≥95% target = cumple · ≥85% = en riesgo · &lt;85% = no cumple</li>
+            <li><strong>Food cost</strong> · ≤target = cumple · ≤target×1.10 = en riesgo · &gt;target×1.10 = no cumple</li>
+            <li><strong>Merma</strong> · ≤target = cumple · ≤target×1.10 = en riesgo · &gt;target×1.10 = no cumple</li>
+            <li><strong>RRHH</strong> · pendiente turnos · activará cuando se conecte sistema</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  `;
+  modal.style.display = 'flex';
+}
+
+function closeBonoPopup() {
+  const m = document.getElementById('bono-modal');
+  if (m) m.style.display = 'none';
+}
+
 function _apiLocalToRow(id, l, api) {
-  // Convierto datos API a formato renderLocalRow esperado
+  // V14.3 · Riga locale con dati reali (era vuota con —)
+  // Per Cdl unico locale attivo: usa i KPI del go_consolidado che già rappresentano Cdl
   const sigla = id === 'cdl' ? 'Candelaria' : (id === 'rsc' ? 'Riesco' : id);
   const fcStatus = l.status_label || 'cumple';
   const fcClass  = l.status || 'ok';
-  return {
+
+  // Estraggo metriche da go_consolidado (per ahora coincide con Cdl)
+  let row = {
     id: id,
     sigla: sigla,
     estado: 'ACTIVO',
     jl: 'JL activo',
-    avance: 0,  // por ahora, calcular cuando tengamos datos semanales
+    avance: 0,
     metas: '— calculando',
     ventas:   { v: '—', target: '', status: '', class: 'unav' },
     foodcost: { v: l.value_label || '—', target: l.target_label || '', status: fcStatus, class: fcClass },
-    rrhh:     { v: '—', target: '≤22%', status: 'pendiente turnos', class: 'unav', mock: true },
+    rrhh:     { v: '—', target: '', status: 'EN PROCESO', class: 'unav', mock: true },
     merma:    { v: '—', target: '', status: '', class: 'unav' },
     bono:     { v: '0', label: '— calculando', class: 'unav' }
   };
+
+  if (api && api.go_consolidado) {
+    const kpis = api.go_consolidado.kpi_metrics || [];
+    const kpiV = kpis.find(k => k.id === 'ventas');
+    const kpiM = kpis.find(k => k.id === 'merma');
+    const bono = api.go_consolidado.bono;
+    if (kpiV) {
+      row.ventas = {
+        v: kpiV.value_label,
+        target: kpiV.target_label || '',
+        status: `${kpiV.status_label}`,
+        class: kpiV.status
+      };
+    }
+    if (kpiM) {
+      row.merma = {
+        v: kpiM.value_label,
+        target: kpiM.target_label || '',
+        status: kpiM.status_label,
+        class: kpiM.status
+      };
+    }
+    if (bono) {
+      row.bono = {
+        v: _fmtClp(bono.target_clp || 0),
+        label: `${bono.percent}% logrado`,
+        class: bono.percent >= 100 ? 'ok' : (bono.percent >= 50 ? 'warn' : 'bad')
+      };
+      row.avance = bono.percent;
+      row.metas = `${bono.cumplen}/${bono.activos} metas` + ((bono.total_kpis - bono.activos) > 0 ? ' · 1 pendiente' : '');
+    }
+  }
+
+  return row;
 }
 
 // ============ FOOD COST DETAIL · 3 NIVELES ============
