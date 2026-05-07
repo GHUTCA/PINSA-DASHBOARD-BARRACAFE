@@ -369,6 +369,24 @@ async function load(){
     // V2.1 · Estraggo bloque local dall'API (se disponibile e local attivo)
     const apiLocal = (apiResp && apiResp.locales_mes && apiResp.locales_mes[CFG.api_local_id]) || null;
 
+    // V2.2 · Mappe per sezione · da V3.8 secciones_detalle (source of truth FC + merma per sez)
+    const apiSecFc = {};   // 'Barra Cafe' -> food_cost_pct (numero, già %)
+    const apiSecMerma = {}; // 'Barra Cafe' -> merma_pct (numero, già %)
+    if(apiLocal && Array.isArray(apiLocal.secciones_detalle)){
+      // L'API usa nomi corti ('Café','Jugos','Alimentos','Helados')
+      // Il dashboard usa nomi lunghi ('Barra Cafe','Barra Jugos',...)
+      // Inverto api_sec_map: {Barra Cafe: Café} -> {Café: Barra Cafe}
+      const inv = {};
+      Object.keys(CFG.api_sec_map).forEach(k => inv[CFG.api_sec_map[k]] = k);
+      apiLocal.secciones_detalle.forEach(d => {
+        const longName = inv[d.name];
+        if(longName){
+          apiSecFc[longName]    = (typeof d.food_cost_pct === 'number') ? d.food_cost_pct : null;
+          apiSecMerma[longName] = (typeof d.merma_pct === 'number')     ? d.merma_pct     : null;
+        }
+      });
+    }</parameter>
+
     // VENTAS MES — separato Local vs Eventos
     // Una venta es "Evento" si la columna E (Tipo) === 'Evento', sino es Local.
     const vMes=vR.filter(r=>{const d=parseD(r['Fecha']);return d&&d.getMonth()+1===mn&&d.getFullYear()===yr;});
@@ -406,6 +424,16 @@ async function load(){
       const vS=$n(last['Venta Semanal $']);
       const cS=$n(last['Costo Total Semanal $']);
       const fc=vS>0?cS/vS:null;
+      // V2.2 · Guard rail settimana parziale: se la settimana corrente ha pochi giorni
+      // con venta (<3), i valori mP/fc settimanali sono fuorvianti (es. 1 giorno con
+      // $4.900 venta e $27K costo → fc 564%). In quel caso forziamo a null per mostrare "—".
+      const diasVentaSem = $n(last['Totales dias con venta'] || last['Dias con venta'] || 0);
+      const settimanaParziale = (diasVentaSem > 0 && diasVentaSem < 3);
+      const mPSafe = settimanaParziale ? null : mP;
+      const fcSafe = (settimanaParziale || fc === null) ? null : (Math.abs(fc) > 1 ? null : fc);
+      // Nota: anche se la settimana è "completa", se fc esce > 100% (1.0 in frazione)
+      // significa costo > venta → matematicamente possibile ma operativamente sbagliato.
+      // Lo nascondo per non dare un numero che mette in dubbio tutto il dashboard.
       const cumM=last['Cumple Merma']==='TRUE';
       const cumC=last['Cumple Costo']==='TRUE';
       const wk=last['Semana']||'';
@@ -416,15 +444,30 @@ async function load(){
         return d&&d.getMonth()+1===mn&&d.getFullYear()===yr;
       });
       const wkMesEff=wkMes.length?wkMes:[last].filter(Boolean);
-      const mMes=wkMesEff.length?wkMesEff.reduce((a,r)=>a+($p(r['% Merma Sobre Venta'])||0),0)/wkMesEff.length:null;
-      const fcMes=wkMesEff.length?(()=>{
-        const valid=wkMesEff.filter(r=>$n(r['Venta Semanal $'])>0);
-        return valid.length?valid.reduce((a,r)=>a+($n(r['Costo Total Semanal $'])/$n(r['Venta Semanal $'])),0)/valid.length:null;
-      })():null;
+      // V2.2 · mMes e fcMes · OVERRIDE da API V3.8 quando disponibile (source of truth mensile)
+      // Il calcolo legacy delle BARRA_* settimanali falsa il dato quando le settimane
+      // sono parziali (es. Helados W19 con 1 giorno → fc 564% / merma 344%).
+      // L'API V3.8 calcola dai movimientos reali e ventas reali del mese.
+      let mMes, fcMes;
+      const apiMermaSec = apiSecMerma[s.n];
+      const apiFcSec    = apiSecFc[s.n];
+      if(typeof apiMermaSec === 'number'){
+        mMes = apiMermaSec/100; // legacy in frazione 0..1
+      } else {
+        mMes = wkMesEff.length ? wkMesEff.reduce((a,r)=>a+($p(r['% Merma Sobre Venta'])||0),0)/wkMesEff.length : null;
+      }
+      if(typeof apiFcSec === 'number'){
+        fcMes = apiFcSec/100;
+      } else {
+        fcMes = wkMesEff.length ? (()=>{
+          const valid = wkMesEff.filter(r=>$n(r['Venta Semanal $'])>0);
+          return valid.length ? valid.reduce((a,r)=>a+($n(r['Costo Total Semanal $'])/$n(r['Venta Semanal $'])),0)/valid.length : null;
+        })() : null;
+      }
       const cumMmes=wkMesEff.length>0&&wkMesEff.every(r=>r['Cumple Merma']==='TRUE');
       const cumCmes=wkMesEff.length>0&&wkMesEff.every(r=>r['Cumple Costo']==='TRUE');
 
-      return{...s,ok:true,mP,fc,cumM,cumC,wk,hist,vS,cS,mMes,fcMes,cumMmes,cumCmes,nSem:wkMesEff.length};
+      return{...s,ok:true,mP:mPSafe,fc:fcSafe,cumM,cumC,wk,hist,vS,cS,mMes,fcMes,cumMmes,cumCmes,nSem:wkMesEff.length,settimanaParziale};
     });
 
     const sOK=secs.filter(s=>s.ok);
@@ -479,9 +522,14 @@ async function load(){
             s.mP = mPct/100;
             s.cumM = (mPct <= apiMermaTargetPct);
           }
-          // fc per-sezione: legacy non affidabile, lo neutralizzo se API attiva
-          s.fc = null;
-          s.cumC = cOK; // assumo coerenza con totale locale (no info granulare)
+          // V2.2 · fc settimanale: lascio quello calcolato (con guard rail già applicato).
+          // mMes/fcMes mensili sono già stati sovrascritti da API nel secs.map sopra.
+          // Per cumC sezione: uso il food_cost_status dell'API se presente
+          if(corta && bySec[corta] && apiSecFc[s.n] != null){
+            s.cumC = (apiSecFc[s.n] <= apiFcTargetPct);
+          } else {
+            s.cumC = cOK;
+          }
         });
       }
     }
