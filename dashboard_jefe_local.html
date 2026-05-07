@@ -440,36 +440,44 @@ async function load(){
     // Prima: card mostravano sempre l'ultima settimana (bug toggle MES_OFFSET).
     // Ora: usiamo i totali mensili calcolati dall'API per il mese selezionato (mn/yr).
     // Anche per-sezione: mP e fc vengono sostituiti con i valori API quando disponibili.
+    // NOTA: l'API ritorna numeri JSON, NON stringhe. Usiamo Number() / +x per coercion,
+    // non $n() (che è per stringhe CSV legacy con $ e virgole).
     let apiUsed=false;
     if(apiLocal && apiLocal.food_cost && apiLocal.merma){
+      const num = v => (typeof v === 'number' && !isNaN(v)) ? v : 0;
       // Totali locale (decimali, coerenti con scala legacy: mLoc/fcLoc sono frazioni 0..1)
-      const apiFcPct = $n(apiLocal.food_cost.value_pct);     // es. 16.0
-      const apiMermaPct = $n(apiLocal.merma.total_pct);      // es. 0.8
-      const apiFcTargetPct = $n(apiLocal.food_cost.target_pct);   // es. 25
-      const apiMermaTargetPct = $n(apiLocal.merma.target_pct);    // es. 1.0
+      const apiFcPct = num(apiLocal.food_cost.value_pct);     // es. 16.0
+      const apiMermaPct = num(apiLocal.merma.total_pct);      // es. 0.8
+      const apiFcTargetPct = num(apiLocal.food_cost.target_pct);   // es. 25
+      const apiMermaTargetPct = num(apiLocal.merma.target_pct);    // es. 1.0
       // Solo se l'API ha effettivamente dati per il mese (>0). Altrimenti tengo legacy.
       if(apiFcPct>0 || apiMermaPct>0){
         fcLoc = apiFcPct/100;
         mLoc  = apiMermaPct/100;
         // Soglie dinamiche dall'API · sovrascrivono CFG.cm/CFG.ms hardcoded
-        CFG.cm = apiFcTargetPct/100;
-        CFG.ca = apiFcTargetPct/100;       // warn=target (cumple ≤target)
-        CFG.ms = apiMermaTargetPct/100;
-        CFG.mn = apiMermaTargetPct/100;
-        CFG.mc = apiMermaTargetPct/100*1.5; // crítica oltre +50%
+        if(apiFcTargetPct>0){
+          CFG.cm = apiFcTargetPct/100;
+          CFG.ca = apiFcTargetPct/100;       // warn=target (cumple ≤target)
+        }
+        if(apiMermaTargetPct>0){
+          CFG.ms = apiMermaTargetPct/100;
+          CFG.mn = apiMermaTargetPct/100;
+          CFG.mc = apiMermaTargetPct/100*1.5; // crítica oltre +50%
+        }
         cOK = (apiFcPct>0 && apiFcPct<=apiFcTargetPct);
         mOK = (apiMermaPct<=apiMermaTargetPct);
         apiUsed=true;
 
-        // Override per-sezione: mP (% merma) e fc (food cost)
+        // Override per-sezione: mP (% merma)
         // L'API non espone fc per sezione (solo per locale), quindi azzero fc
         // e lo nascondo nelle UI per-sezione (—). Manteniamo solo mP.
         const bySec = (apiLocal.merma.by_seccion)||{};
         secs.forEach(s=>{
           const corta = CFG.api_sec_map[s.n];
           if(corta && bySec[corta]){
-            s.mP = $n(bySec[corta].merma_pct)/100;
-            s.cumM = (s.mP <= apiMermaTargetPct/100);
+            const mPct = num(bySec[corta].merma_pct);
+            s.mP = mPct/100;
+            s.cumM = (mPct <= apiMermaTargetPct);
           }
           // fc per-sezione: legacy non affidabile, lo neutralizzo se API attiva
           s.fc = null;
