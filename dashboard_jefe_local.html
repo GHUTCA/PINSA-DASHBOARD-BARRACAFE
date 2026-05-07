@@ -251,7 +251,15 @@ const CFG={
     {n:'Barra Jugos', g:'LÍQUIDOS', u:PROXY('https://docs.google.com/spreadsheets/d/e/2PACX-1vRgfxyaHuTXg2q9ozPN-SjmqRWKU5hk4MJ2vynH7qY2ek7mWKRxFbE3J05Wp1Wn24OlwVqkMCmP9B2v/pub?gid=1918460946&single=true&output=csv')},
     {n:'Barra Helados',   g:'SÓLIDOS', u:PROXY('https://docs.google.com/spreadsheets/d/e/2PACX-1vQc0tyemN3uQzvq0jZXRP99uPaLNEtjRQs2UB1YBWdJ6ZDhVOSrjAXPt0E-yh09_5Mav9kUXTgejK_O/pub?gid=1918460946&single=true&output=csv')},
     {n:'Barra Alimentos', g:'SÓLIDOS', u:PROXY('https://docs.google.com/spreadsheets/d/e/2PACX-1vQHwGrTFlMFwFsk-RlHDYbNWQPDGIvg2TofLV0vJxAru1qrZnVT8Okk9dISgB2lzLKpJW2QUx61dMyX/pub?gid=1918460946&single=true&output=csv')},
-  ]
+  ],
+  // V2.1 · API GAS V3.7 source of truth · usata per costo+merma+target (override BARRA_*)
+  api_url:'https://script.google.com/macros/s/AKfycbx3LDa92dBW_g9q0xHhDlk_Q0_CLqTCnJejUYT71-_0HU-__oi36cHEMWRyhw9gn5HA/exec',
+  api_local_id:'cdl', // payload.locales_mes[api_local_id]
+  // Mapping nome sezione JL (con "Barra ") → nome corto API ("Café"/"Jugos"/...)
+  api_sec_map:{
+    'Barra Cafe':'Café','Barra Jugos':'Jugos',
+    'Barra Alimentos':'Alimentos','Barra Helados':'Helados'
+  }
 };
 
 function csv(t){
@@ -338,13 +346,28 @@ async function load(){
   const dR = dM - dA;
 
   try{
-    const [vR,bR,bodR,repR,...sRaw]=await Promise.all([
+    // V2.1 · API GAS V3.7 (source of truth costo+merma)
+    // - Mes corriente (MES_OFFSET=0): chiamata pulita, sfrutta cache pre-warm 5min
+    // - Mes anterior (MES_OFFSET=-1): demo_month + nocache=1 (skip cache, dati storici puri)
+    let apiUrl;
+    if(window.MES_OFFSET === 0){
+      apiUrl = CFG.api_url;
+    } else {
+      const apiMes = `${yr}-${String(mn).padStart(2,'0')}`;
+      apiUrl = `${CFG.api_url}?demo_month=${apiMes}&nocache=1`;
+    }
+
+    const [vR,bR,bodR,repR,apiResp,...sRaw]=await Promise.all([
       fetch1(CFG.url_v).catch(()=>[]),
       fetch1(CFG.url_b).catch(()=>[]),
       fetch1(CFG.url_bod).catch(()=>[]),
       fetch1(CFG.url_rep).catch(()=>[]),
+      fetch(apiUrl).then(r=>r.json()).catch(e=>{console.warn('API V3.7 fetch failed, fallback legacy',e);return null;}),
       ...CFG.secs.map(s=>fetch1(s.u).then(rows=>({...s,ok:true,rows})).catch(()=>({...s,ok:false,rows:[]})))
     ]);
+
+    // V2.1 · Estraggo bloque local dall'API (se disponibile e local attivo)
+    const apiLocal = (apiResp && apiResp.locales_mes && apiResp.locales_mes[CFG.api_local_id]) || null;
 
     // VENTAS MES — separato Local vs Eventos
     // Una venta es "Evento" si la columna E (Tipo) === 'Evento', sino es Local.
@@ -405,12 +428,55 @@ async function load(){
     });
 
     const sOK=secs.filter(s=>s.ok);
-    const mLoc=sOK.length?sOK.reduce((a,s)=>a+(s.mP||0),0)/sOK.length:null;
+    // Calcoli legacy da BARRA_* (fallback se API non disponibile)
+    let mLoc=sOK.length?sOK.reduce((a,s)=>a+(s.mP||0),0)/sOK.length:null;
     const fcSecs=sOK.filter(s=>s.fc!==null);
-    const fcLoc=fcSecs.length?fcSecs.reduce((a,s)=>a+s.fc,0)/fcSecs.length:null;
-    const mOK=sOK.length>0&&sOK.every(s=>s.cumM);
-    const cOK=sOK.length>0&&sOK.every(s=>s.cumC);
+    let fcLoc=fcSecs.length?fcSecs.reduce((a,s)=>a+s.fc,0)/fcSecs.length:null;
+    let mOK=sOK.length>0&&sOK.every(s=>s.cumM);
+    let cOK=sOK.length>0&&sOK.every(s=>s.cumC);
     const lastWk=sOK.length?sOK[0].wk:'—';
+
+    // V2.1 · OVERRIDE da API GAS V3.7 (source of truth)
+    // Prima: card mostravano sempre l'ultima settimana (bug toggle MES_OFFSET).
+    // Ora: usiamo i totali mensili calcolati dall'API per il mese selezionato (mn/yr).
+    // Anche per-sezione: mP e fc vengono sostituiti con i valori API quando disponibili.
+    let apiUsed=false;
+    if(apiLocal && apiLocal.food_cost && apiLocal.merma){
+      // Totali locale (decimali, coerenti con scala legacy: mLoc/fcLoc sono frazioni 0..1)
+      const apiFcPct = $n(apiLocal.food_cost.value_pct);     // es. 16.0
+      const apiMermaPct = $n(apiLocal.merma.total_pct);      // es. 0.8
+      const apiFcTargetPct = $n(apiLocal.food_cost.target_pct);   // es. 25
+      const apiMermaTargetPct = $n(apiLocal.merma.target_pct);    // es. 1.0
+      // Solo se l'API ha effettivamente dati per il mese (>0). Altrimenti tengo legacy.
+      if(apiFcPct>0 || apiMermaPct>0){
+        fcLoc = apiFcPct/100;
+        mLoc  = apiMermaPct/100;
+        // Soglie dinamiche dall'API · sovrascrivono CFG.cm/CFG.ms hardcoded
+        CFG.cm = apiFcTargetPct/100;
+        CFG.ca = apiFcTargetPct/100;       // warn=target (cumple ≤target)
+        CFG.ms = apiMermaTargetPct/100;
+        CFG.mn = apiMermaTargetPct/100;
+        CFG.mc = apiMermaTargetPct/100*1.5; // crítica oltre +50%
+        cOK = (apiFcPct>0 && apiFcPct<=apiFcTargetPct);
+        mOK = (apiMermaPct<=apiMermaTargetPct);
+        apiUsed=true;
+
+        // Override per-sezione: mP (% merma) e fc (food cost)
+        // L'API non espone fc per sezione (solo per locale), quindi azzero fc
+        // e lo nascondo nelle UI per-sezione (—). Manteniamo solo mP.
+        const bySec = (apiLocal.merma.by_seccion)||{};
+        secs.forEach(s=>{
+          const corta = CFG.api_sec_map[s.n];
+          if(corta && bySec[corta]){
+            s.mP = $n(bySec[corta].merma_pct)/100;
+            s.cumM = (s.mP <= apiMermaTargetPct/100);
+          }
+          // fc per-sezione: legacy non affidabile, lo neutralizzo se API attiva
+          s.fc = null;
+          s.cumC = cOK; // assumo coerenza con totale locale (no info granulare)
+        });
+      }
+    }
 
     // SECTORES
     const gMap={};secs.forEach(s=>{if(!gMap[s.g])gMap[s.g]=[];gMap[s.g].push(s);});
