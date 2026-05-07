@@ -219,6 +219,11 @@ const URLS = {
   inventario:      BASE + "&gid=1427645798"
 };
 
+// V2 · API GAS V3.8 · source of truth FC + merma per sezione
+const API_URL = 'https://script.google.com/macros/s/AKfycbx3LDa92dBW_g9q0xHhDlk_Q0_CLqTCnJejUYT71-_0HU-__oi36cHEMWRyhw9gn5HA/exec';
+const API_LOCAL = 'cdl';
+const API_SECCION = 'Jugos'; // ← ATTENZIONE: cambia per ogni Barra (Café/Jugos/Helados/Alimentos)
+
 const BONO_POTENCIAL = 30000;
 
 // ============================================================
@@ -285,13 +290,17 @@ async function loadData() {
     </div>`;
 
   try {
-    const [semanales, merma_diaria, inventario] = await Promise.all([
+    const [semanales, merma_diaria, inventario, apiResp] = await Promise.all([
       fetchCSV(URLS.kpi_semanales),
       fetchCSV(URLS.kpi_merma),
-      fetchCSV(URLS.inventario)
+      fetchCSV(URLS.inventario),
+      fetch(API_URL).then(r=>r.json()).catch(e=>{
+        console.warn('API V3.8 fetch failed, fallback legacy', e);
+        return null;
+      })
     ]);
 
-    renderDashboard(semanales, merma_diaria, inventario);
+    renderDashboard(semanales, merma_diaria, inventario, apiResp);
   } catch(e) {
     document.getElementById('main-content').innerHTML = `
       <div class="error-box">
@@ -304,7 +313,7 @@ async function loadData() {
 // ============================================================
 // RENDER
 // ============================================================
-function renderDashboard(semanales, merma_diaria, inventario) {
+function renderDashboard(semanales, merma_diaria, inventario, apiResp) {
   const now = new Date();
   const semanaActual = getWeekCode(now);
   const hoy = now.toISOString().split('T')[0];
@@ -312,12 +321,40 @@ function renderDashboard(semanales, merma_diaria, inventario) {
   // --- Datos semana actual ---
   const semana = semanales.find(r => r['Semana'] === semanaActual) || {};
   const diasConVenta = parseNum(semana['Totales dias con venta'] || '0');
-  const merma_pct = parsePct(semana['% Merma Sobre Venta'] || '0');
   const diasOK = parseNum(semana['Dias OK Merma <=0,3%'] || semana['Dias OK Merma <=0.3%'] || '0');
   const diasCriticos = parseNum(semana['Dias Criticos Merma >0,6%'] || semana['Dias Criticos Merma >0.6%'] || '0');
-  const margen_raw = parsePct(semana['Margen % Semanal'] || '0'); const costo_pct = diasConVenta === 0 ? 0 : (1 - margen_raw);
-  const cumpleMerma = semana['Cumple Merma'] === 'TRUE' || semana['Cumple Merma'] === 'true';
-  const cumpleCosto = semana['Cumple Costo'] === 'TRUE' || semana['Cumple Costo'] === 'true';
+
+  // V2 · merma_pct e costo_pct calcolati con priorità API V3.8 (source of truth mensile)
+  // Legacy (fallback): merma_pct dalla colonna semanale, costo_pct = 1 - margen
+  let merma_pct = parsePct(semana['% Merma Sobre Venta'] || '0');
+  const margen_raw = parsePct(semana['Margen % Semanal'] || '0');
+  let costo_pct = diasConVenta === 0 ? 0 : (1 - margen_raw);
+
+  // V2 · Override da API V3.8 quando disponibile
+  // L'API restituisce dati MENSILI, calcolati dai movimientos reali e ventas reali.
+  // Più affidabili dei dati settimanali quando la settimana è parziale.
+  const apiSec = apiResp && apiResp.locales_mes && apiResp.locales_mes[API_LOCAL]
+    && apiResp.locales_mes[API_LOCAL].secciones_detalle
+    ? apiResp.locales_mes[API_LOCAL].secciones_detalle.find(s => s.name === API_SECCION)
+    : null;
+  let usingApi = false;
+  if(apiSec){
+    if(typeof apiSec.merma_pct === 'number')     merma_pct = apiSec.merma_pct/100;
+    if(typeof apiSec.food_cost_pct === 'number') costo_pct = apiSec.food_cost_pct/100;
+    usingApi = true;
+  }
+
+  // V2 · Guard rail settimana parziale: se l'API NON è disponibile e la settimana
+  // ha < 3 giorni con venta, i numeri legacy sono fuorvianti. Forzo a 0 (UI mostra "—" o messaggio).
+  if(!usingApi && diasConVenta > 0 && diasConVenta < 3){
+    merma_pct = 0;
+    costo_pct = 0;
+  }
+
+  // V2 · cumple* ricalcolati sui valori effettivi (non più dalla colonna 'Cumple X' del CSV)
+  // Soglie: merma ≤1.0% (target Mayo), costo ≤25% (target Mayo da bono_thresholds_go!F2)
+  const cumpleMerma = merma_pct > 0 && merma_pct <= 0.01;
+  const cumpleCosto = costo_pct > 0 && costo_pct <= 0.25;
   const bonoMerma = parseNum(semana['Bono Merma $'] || '0');
   const bonoCosto = parseNum(semana['Bono Costo $'] || '0');
   const bonoTotal = bonoMerma + bonoCosto;
