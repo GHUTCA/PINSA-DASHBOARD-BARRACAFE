@@ -485,6 +485,18 @@ body.modal-open { overflow: hidden; }
 }
 .kpi-percent:hover { opacity: 0.82; }
 
+  .kpi-percent-prefix {
+  display: block;
+  font-family: var(--font-title);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.6px;
+  color: var(--t3);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  line-height: 1;
+}
+  
 /* V14.4 · Target block (FIX A) - bono CLP visivamente prominente */
 .kpi-target-block {
   display: flex; flex-direction: column; gap: 4px;
@@ -2166,7 +2178,14 @@ function renderFascia1() {
       kpiPercentEl.setAttribute('title', 'click para ver detalle del bono');
       kpiPercentEl.style.cursor = '';
     }
-
+    
+    // Reset prefix PROYECCIÓN se presente (era aggiunto in vista Cdl)
+    const kpiPercentEl2 = document.getElementById('kpi-percent');
+    if (kpiPercentEl2 && kpiPercentEl2.querySelector('.kpi-percent-prefix')) {
+      // Bono GO non vuole prefix, restituisco solo il numero
+      kpiPercentEl2.textContent = bonoPct + '%';
+    }
+    
     // Context line (la api-status-tag se añade en renderDataTag)
     ctx.innerHTML = api
       ? 'Bono mensual GO · consolidado todos los locales'
@@ -2379,7 +2398,9 @@ function renderFascia1() {
       }
 
       // ── Numero grande = % proy vs target ventas ──
+      // V20.2a · Aggiunto prefix PROYECCIÓN per chiarezza (vs ventas acumuladas card sotto)
       const kpiPercentEl = document.getElementById('kpi-percent');
+      kpiPercentEl.innerHTML = '<span class="kpi-percent-prefix">PROYECCIÓN</span>' + pctProy + '%';
       kpiPercentEl.textContent = pctProy + '%';
       // V20.2a · click su % no hace nada en vista local (no popup bono JL)
       kpiPercentEl.removeAttribute('onclick');
@@ -2528,7 +2549,7 @@ function renderEstaSemanaBlock(es, bonoJl, targetsLocal) {
         <div class="esta-semana-kpi-meta">${es.ventas_pct}% · ${ritmoTxt}</div>
       </div>
       <div class="esta-semana-kpi">
-        <div class="esta-semana-kpi-label">Falta</div>
+        <div class="esta-semana-kpi-label">Falta semanal</div>
         <div class="esta-semana-kpi-value ${pctClass}">${faltaSem > 0 ? _fmtClp(faltaSem) : '✓'}</div>
         <div class="esta-semana-kpi-meta">${faltaTxt}</div>
       </div>
@@ -2537,14 +2558,25 @@ function renderEstaSemanaBlock(es, bonoJl, targetsLocal) {
   `;
 }
 
-// V13 · Render fila sección con datos live (ventas + merma)
+// V20.2a · Render fila sección · 6 colonne allineate a header (Sección | Ventas | FC | RRHH | Merma | Bono)
 function renderSeccionRowLive(s) {
   const row = document.createElement('div');
   row.className = 'local-row';
   row.style.cursor = 'default';
+
   const mermaClass = s.merma_status || 'ok';
+  const fcClass    = s.food_cost_status === 'unav' ? '' : (s.food_cost_status || '');
   const mermaLabel = s.merma_status === 'ok' ? 'cumple' :
                      s.merma_status === 'warn' ? 'en riesgo' : 'no cumple';
+
+  // FC display: si food_cost_pct > 0 mostro %, sennò —
+  const fcDisplay = (s.food_cost_pct && s.food_cost_pct > 0)
+    ? s.food_cost_pct + '%'
+    : '—';
+  const fcMeta = (s.food_cost_pct && s.food_cost_pct > 0)
+    ? '≤' + s.food_cost_target_pct + '%'
+    : 'sin datos';
+
   row.innerHTML = `
     <div>
       <div class="local-name">${s.name}</div>
@@ -2552,14 +2584,13 @@ function renderSeccionRowLive(s) {
     </div>
     <div class="local-mobile-only" style="text-align:right;">
       <div class="local-progress ${mermaClass}">${s.merma_pct}%</div>
-      <div class="local-meta">target ≤${s.merma_target_pct}%</div>
+      <div class="local-meta">merma · target ≤${s.merma_target_pct}%</div>
     </div>
-    <div class="local-cell ${mermaClass}">${s.merma_pct}%<div class="local-cell-meta">target ≤${s.merma_target_pct}%</div></div>
     <div class="local-cell">${s.venta_clp ? _fmtClp(s.venta_clp) : '—'}<div class="local-cell-meta">venta mes</div></div>
-    <div class="local-cell">—<div class="local-cell-meta">food cost</div></div>
-    <div class="local-cell unav">—<div class="local-cell-meta">RRHH</div></div>
-    <div class="local-cell ${mermaClass}">${s.merma_clp ? _fmtClp(s.merma_clp) : '—'}<div class="local-cell-meta">merma CLP</div></div>
-    <div class="local-cell" style="text-align:right;">—<div class="local-cell-meta">bono</div></div>
+    <div class="local-cell ${fcClass}">${fcDisplay}<div class="local-cell-meta">${fcMeta}</div></div>
+    <div class="local-cell unav">—<div class="local-cell-meta">pendiente turnos</div></div>
+    <div class="local-cell ${mermaClass}">${s.merma_pct}%<div class="local-cell-meta">≤${s.merma_target_pct}% · ${s.merma_clp ? _fmtClp(s.merma_clp) : '—'}</div></div>
+    <div class="local-cell" style="text-align:right;">—<div class="local-cell-meta">no aplica</div></div>
   `;
   return row;
 }
