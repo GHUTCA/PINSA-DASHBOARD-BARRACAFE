@@ -2004,10 +2004,16 @@ function renderFascia1() {
         let isClickable = false;
         let onclickStr = null;
 
-        // V14.4 · Ventas: valore = acumulado · status = "% del target" · sub = proyección
+       // V14.5 · Ventas (F2-BUG-001 fix):
+        //   - value = acumulado (quello che hai in mano)
+        //   - status = "% del target" in stile neutro (no semaforo sull'acumulado)
+        //   - sub = proyección + % del target · QUI sta il colore reale
+        //   - class = ereditata da k.status (calcolata API su PROYECCIÓN)
         if (k.id === 'ventas') {
           statusOut = (k.status_label || '') + ' del target';
-          if (k.proyeccion_label) {
+          if (k.proyeccion_label && k.proyeccion_pct != null) {
+            subOut = `proy ${k.proyeccion_label} · ${k.proyeccion_pct}% target`;
+          } else if (k.proyeccion_label) {
             subOut = `proy ${k.proyeccion_label}`;
           }
         }
@@ -2115,13 +2121,25 @@ function renderFascia1() {
       document.getElementById('kpi-day-info').textContent = bonoStatusTxt;
       document.getElementById('kpi-prog-fill').style.width = b.percent + '%';
 
-      renderKpiMetrics([
-        {
-          label:'Ventas mes',
-          value: _fmtClp(v.total_clp),
-          status: '/' + _fmtClp(t.target_ventas_clp),
-          class: v.status
-        },
+      // V14.5 · F2-BUG-001 fix · ventas drill-down allineato a GO consolidado
+        // value=acumulado · status="X% del target" · sub="proy CLP Y · Z% target"
+        // class ereditata da v.status (API calcola su PROYECCIÓN come per GO)
+        (function() {
+          var pctAcum = t.target_ventas_clp > 0
+            ? Math.round(v.total_clp / t.target_ventas_clp * 100) : 0;
+          var subProy = null;
+          if (v.proyeccion_clp != null && t.target_ventas_clp > 0) {
+            var pctProy = Math.round(v.proyeccion_clp / t.target_ventas_clp * 100);
+            subProy = 'proy ' + _fmtClp(v.proyeccion_clp) + ' · ' + pctProy + '% target';
+          }
+          return {
+            label: 'Ventas mes',
+            value: _fmtClp(v.total_clp),
+            status: pctAcum + '% del target',
+            sub: subProy,
+            class: v.status
+          };
+        })(),
         {
           label:'Food cost',
           value: fc.value_pct > 0 ? fc.value_pct + '%' : '—',
