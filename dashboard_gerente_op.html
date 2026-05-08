@@ -256,6 +256,35 @@ body.view-local {
   margin-top: 3px;
 }
 
+/* V20.2a · Sub-line bono JL mensual dentro esta-semana */
+.esta-semana-bono-jl {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  display: flex; align-items: baseline; gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+.esta-semana-bono-jl-label {
+  color: var(--t3);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-size: 9px;
+  font-weight: 700;
+}
+.esta-semana-bono-jl-value {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--t1);
+}
+.esta-semana-bono-jl-value.ok   { color: var(--teal2); }
+.esta-semana-bono-jl-value.warn { color: var(--amber2); }
+.esta-semana-bono-jl-value.bad  { color: var(--red); }
+.esta-semana-bono-jl-meta {
+  color: var(--t3);
+  font-size: 10px;
+}
+  
 /* V14.2 · Trust Score Modal Popup */
 .trust-modal-overlay {
   display: none;
@@ -2123,6 +2152,21 @@ function renderFascia1() {
     f1Sub.textContent   = api ? api.month.label : 'Mayo 2026';
     headTitle.textContent = 'Detalle por local · click para drill-down';
 
+    // V20.2a · Reset etichette "Peso del local"→"Quedan", "Quedan"→"Proyección fin mes"
+    // (modificate quando si entra in vista Cdl, qui le riportiamo a default GO)
+    const quedanLabel = document.querySelector('.kpi-quedan-label');
+    if (quedanLabel) quedanLabel.textContent = 'Quedan';
+    const proyLabelEl = document.querySelector('#kpi-proy-block .kpi-proy-label');
+    if (proyLabelEl) proyLabelEl.textContent = 'Proyección fin mes';
+
+    // Re-attach click bono popup (rimosso in vista Cdl)
+    const kpiPercentEl = document.getElementById('kpi-percent');
+    if (kpiPercentEl && !kpiPercentEl.getAttribute('onclick')) {
+      kpiPercentEl.setAttribute('onclick', 'showBonoPopup()');
+      kpiPercentEl.setAttribute('title', 'click para ver detalle del bono');
+      kpiPercentEl.style.cursor = '';
+    }
+
     // Context line (la api-status-tag se añade en renderDataTag)
     ctx.innerHTML = api
       ? 'Bono mensual GO · consolidado todos los locales'
@@ -2293,36 +2337,73 @@ function renderFascia1() {
     renderDataTag();
 
     if (localApi && localApi.ventas) {
-      // V14 · Datos API live (locales_mes)
+      // V20.2a · Vista Cdl · hero = avance VENTAS (no más bono JL)
+      // Filosofia: el GO se pregunta "Cdl me hace ganar mi bono GO?"
+      // → mostramos venta vs target Cdl en grande, lo demás es contexto.
       const t  = localApi.targets;
       const v  = localApi.ventas;
       const fc = localApi.food_cost;
       const m  = localApi.merma;
-      const b  = localApi.bono;
-      const es = localApi.esta_semana;  // V14 · giro de boa
+      const b  = localApi.bono;        // bono JL (relegato a esta-semana sub)
+      const es = localApi.esta_semana;
 
-      ctx.innerHTML = `${sigla} · ${api.month.label} · target ${_fmtClp(t.target_ventas_clp)} · bono ${_fmtClp(t.bono_clp_full)}`;
-      document.getElementById('kpi-percent').textContent = b.percent + '%';
-      document.getElementById('kpi-target-amount').textContent = b.target_clp ? _fmtClp(b.target_clp) : 'sin bono';
-      // Status linea bono — V14 mensile
-      let bonoStatusTxt = '';
-      if (b.percent === 0) bonoStatusTxt = 'Aún sin avance este mes';
-      else if (b.percent >= 95) bonoStatusTxt = 'Bono asegurado · ' + b.percent + '% del target';
-      else if (b.percent >= 60) bonoStatusTxt = 'En camino · ' + b.percent + '% logrado';
-      else bonoStatusTxt = 'En riesgo · ' + b.percent + '% del target';
-      document.getElementById('kpi-day-info').textContent = bonoStatusTxt;
-      document.getElementById('kpi-prog-fill').style.width = b.percent + '%';
+      // Calculo peso Cdl sul totale (target_ventas Cdl / target_ventas GO)
+      const targetGoVentas = api && api.go_consolidado && api.go_consolidado.kpi_metrics
+        ? (api.go_consolidado.kpi_metrics.find(k => k.id === 'ventas') || {}).target_ventas_clp || 0
+        : 0;
+      const pesoLocalPct = (targetGoVentas > 0 && t.target_ventas_clp > 0)
+        ? Math.round(t.target_ventas_clp / targetGoVentas * 100)
+        : 100;
 
-      // V14.5 · F2-BUG-001 fix · ventas drill-down allineato a GO consolidado
-      // value=acumulado · status="X% del target" · sub="proy CLP Y · Z% target"
-      // class ereditata da v.status (API calcola su PROYECCIÓN come per GO)
+      // ── Hero centrale: avance VENTAS proy vs target ──
+      const pctProy = (v.proyeccion_clp != null && t.target_ventas_clp > 0)
+        ? Math.round(v.proyeccion_clp / t.target_ventas_clp * 100) : 0;
+      const ventasProyClp = v.proyeccion_clp || 0;
+
+      ctx.innerHTML = `Local ${sigla} · ${api.month.label} · target CLP ${_fmtClp(t.target_ventas_clp).replace('CLP ','')}`;
+
+      // V20.2a · "Quedan" cambia in "Peso del local" + giorni sotto
+      const quedanLabel = document.querySelector('.kpi-quedan-label');
+      if (quedanLabel) quedanLabel.textContent = 'Peso del local';
+      document.getElementById('kpi-quedan-value').textContent = pesoLocalPct + '%';
+      // Aggiungo giorni come sub line (riuso kpi-proy-block ma con altro contenuto)
+      const proyBlock = document.getElementById('kpi-proy-block');
+      if (proyBlock) {
+        proyBlock.style.display = 'block';
+        const proyLabel = proyBlock.querySelector('.kpi-proy-label');
+        const proyValue = document.getElementById('kpi-proy-value');
+        const proyPct   = document.getElementById('kpi-proy-pct');
+        if (proyLabel) proyLabel.textContent = 'Quedan';
+        if (proyValue) { proyValue.textContent = (api.month.days_in_month - api.month.day) + ' días'; proyValue.className = 'kpi-proy-value mono'; }
+        if (proyPct)   proyPct.textContent = '';
+      }
+
+      // ── Numero grande = % proy vs target ventas ──
+      const kpiPercentEl = document.getElementById('kpi-percent');
+      kpiPercentEl.textContent = pctProy + '%';
+      // V20.2a · click su % no hace nada en vista local (no popup bono JL)
+      kpiPercentEl.removeAttribute('onclick');
+      kpiPercentEl.removeAttribute('title');
+      kpiPercentEl.style.cursor = 'default';
+
+      document.getElementById('kpi-target-amount').textContent = 'CLP ' + _fmtClp(t.target_ventas_clp).replace('CLP ','');
+
+      // Status linea: descrive il momento ventas
+      let ventasStatusTxt = '';
+      if (pctProy >= 95)      ventasStatusTxt = 'En camino · proy ' + _fmtClp(ventasProyClp);
+      else if (pctProy >= 85) ventasStatusTxt = 'Atrasado leve · proy ' + _fmtClp(ventasProyClp);
+      else                    ventasStatusTxt = 'Atrasado · proy ' + _fmtClp(ventasProyClp);
+      document.getElementById('kpi-day-info').textContent = ventasStatusTxt;
+      document.getElementById('kpi-prog-fill').style.width = Math.min(100, pctProy) + '%';
+
+      // ── 4 KPI cards (idem GO consolidado) ──
+      // Ventas mes mantiene la misma forma del GO consolidado per coerenza
       renderKpiMetrics([
         (function() {
           var pctAcum = t.target_ventas_clp > 0
             ? Math.round(v.total_clp / t.target_ventas_clp * 100) : 0;
           var subProy = null;
           if (v.proyeccion_clp != null && t.target_ventas_clp > 0) {
-            var pctProy = Math.round(v.proyeccion_clp / t.target_ventas_clp * 100);
             subProy = 'proy ' + _fmtClp(v.proyeccion_clp) + ' · ' + pctProy + '% target';
           }
           return {
@@ -2355,8 +2436,8 @@ function renderFascia1() {
         }
       ]);
 
-      // V14 · Blocco "Esta semana" (giro de boa)
-      renderEstaSemanaBlock(es);
+      // V14 · Blocco "Esta semana" (giro de boa) · V20.2a · ahora con info bono JL
+      renderEstaSemanaBlock(es, b, t);
 
       // Tabla secciones detalle (mensile)
       body.innerHTML = '';
@@ -2388,7 +2469,8 @@ function renderFascia1() {
 }
 
 // V14 · Render blocco "Esta semana" (giro de boa) sotto KPI metrics
-function renderEstaSemanaBlock(es) {
+function renderEstaSemanaBlock(es, bonoJl, targetsLocal) {
+  // V20.2a · Acepta bonoJl (b) y targetsLocal (t) opzionali per render bono JL mensual
   let host = document.getElementById('esta-semana-host');
   if (!host) {
     const wrap = document.getElementById('kpi-metrics');
@@ -2406,19 +2488,33 @@ function renderEstaSemanaBlock(es) {
 
   const ventasFmt = _fmtClp(es.ventas_clp);
   const targetFmt = _fmtClp(es.ventas_target_clp);
-  const bonoFmt   = _fmtClp(es.bono_clp_full);
   // V14.5 · F2-BUG-003 fix · soglie normalizzate sul tempo trascorso settimana
-  // Logica: confronto pct ventas vs pct esperado (lineare sui 7 giorni)
-  // - en ritmo (≥ esperado)        → ok
-  // - leggermente atrasado (≥80% esperado) → warn  
-  // - atrasado serio (<80% esperado)       → bad
-  // Esempi giovedì (4/7 = 57% esperado):
-  //   ventas 60% → ok · ventas 50% → warn · ventas 30% → bad
   const ratio = es.pct_esperado_sem > 0 ? (es.ventas_pct / es.pct_esperado_sem) : 1;
   const pctClass  = ratio >= 1.0 ? 'ok' : ratio >= 0.80 ? 'warn' : 'bad';
   const ritmoTxt  = es.ventas_pct >= es.pct_esperado_sem
     ? `en ritmo · día ${es.dias_trascurridos}/7`
     : `atrasado · esperado ${es.pct_esperado_sem}%`;
+
+  // V20.2a · Falta CLP a target semanal
+  const faltaSem = Math.max(0, es.ventas_target_clp - es.ventas_clp);
+  const faltaTxt = faltaSem > 0
+    ? `faltan ${_fmtClp(faltaSem)} para meta`
+    : 'meta semanal cumplida';
+
+  // V20.2a · Bono JL info (mensual, NO semanal). Solo se pasados parametros.
+  let bonoJlBlock = '';
+  if (bonoJl && targetsLocal) {
+    const bonoJlPct  = bonoJl.percent || 0;
+    const bonoJlClp  = _fmtClp(targetsLocal.bono_clp_full || 0);
+    const bonoJlClass = bonoJlPct >= 95 ? 'ok' : bonoJlPct >= 60 ? 'warn' : 'bad';
+    bonoJlBlock = `
+      <div class="esta-semana-bono-jl">
+        <span class="esta-semana-bono-jl-label">Bono JL mensual</span>
+        <span class="esta-semana-bono-jl-value ${bonoJlClass}">${bonoJlPct}%</span>
+        <span class="esta-semana-bono-jl-meta">de ${bonoJlClp} · vista JL completa →</span>
+      </div>
+    `;
+  }
 
   host.innerHTML = `
     <div class="esta-semana-header">
@@ -2432,11 +2528,12 @@ function renderEstaSemanaBlock(es) {
         <div class="esta-semana-kpi-meta">${es.ventas_pct}% · ${ritmoTxt}</div>
       </div>
       <div class="esta-semana-kpi">
-        <div class="esta-semana-kpi-label">Bono semanal</div>
-        <div class="esta-semana-kpi-value">${bonoFmt}</div>
-        <div class="esta-semana-kpi-meta">si cumple target</div>
+        <div class="esta-semana-kpi-label">Falta</div>
+        <div class="esta-semana-kpi-value ${pctClass}">${faltaSem > 0 ? _fmtClp(faltaSem) : '✓'}</div>
+        <div class="esta-semana-kpi-meta">${faltaTxt}</div>
       </div>
     </div>
+    ${bonoJlBlock}
   `;
 }
 
