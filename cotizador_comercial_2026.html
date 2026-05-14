@@ -1035,7 +1035,6 @@ function onCambioEmpresa(){
     );
     if(!ok){
       // Annulla il cambio: rimetti il valore precedente
-      // Il "precedente" è il primo tipo trovato
       const tipoTrovato = lineasProductos[0].tipo;
       const empresaPrev = tipoTrovato === 'PRODUCTO_EXO' ? 'EXO' :
                           tipoTrovato === 'PRODUCTO_BKS' ? 'BKS' : 'PINSA';
@@ -1044,11 +1043,13 @@ function onCambioEmpresa(){
     }
     // Conferma: svuota solo le linee productos, lascia gli EXTRA
     LINEAS = LINEAS.filter(l => l.tipo === 'EXTRA');
-    renderResumen(); recalc(); calcBreakEven();
   }
   
-  // Aggiorna label bottone
+  // Aggiorna label bottone + render (anche se non c'erano linee, gli header si aggiornano)
   actualizarBotonProductos(empresa);
+  renderResumen();
+  recalc();
+  calcBreakEven();
 }
 
 function actualizarBotonProductos(empresa){
@@ -1423,35 +1424,49 @@ function actualizarNota(id,val){
 
 // ── RENDER RESUMEN ─────────────────────────────────
 function renderResumen(){
-  const pinsa=LINEAS.filter(l=>l.tipo==='RECETA');
-  const extras=LINEAS.filter(l=>l.tipo==='EXTRA');
-  const total=LINEAS.length;
-  document.getElementById('cot-count').textContent=`(${total} items)`;
+  const empresa = document.getElementById('empresa-grupo').value || 'PINSA';
+  // Productos = RECETA (PINSA) + PRODUCTO_EXO + PRODUCTO_BKS (dipende empresa)
+  const productos = LINEAS.filter(l =>
+    l.tipo === 'RECETA' || l.tipo === 'PRODUCTO_EXO' || l.tipo === 'PRODUCTO_BKS'
+  );
+  const extras = LINEAS.filter(l => l.tipo === 'EXTRA');
+  const total = LINEAS.length;
+  document.getElementById('cot-count').textContent = `(${total} items)`;
 
-  // Riga PINSA
-  const pinsaCosto=pinsa.reduce((s,l)=>s+l.q*l.costo_u,0);
-  const pinsaPV=pinsa.reduce((s,l)=>s+l.q*l.pv_u,0);
-  const pinsaMg=pinsaPV>0?((pinsaPV-pinsaCosto)/pinsaPV*100):0;
-  document.getElementById('res-pinsa-sub').textContent=`${pinsa.length} items`;
-  document.getElementById('res-pinsa-pv').textContent=fmtCLP(pinsaPV);
-  setMgPct('res-pinsa-pct',pinsaMg,pinsa.length);
+  // Riga Productos (label dinamica)
+  const prodCosto = productos.reduce((s,l)=>s+l.q*l.costo_u, 0);
+  const prodPV = productos.reduce((s,l)=>s+l.q*l.pv_u, 0);
+  const prodMg = prodPV > 0 ? ((prodPV - prodCosto)/prodPV*100) : 0;
+  document.getElementById('res-pinsa-sub').textContent = `${productos.length} items`;
+  document.getElementById('res-pinsa-pv').textContent = fmtCLP(prodPV);
+  setMgPct('res-pinsa-pct', prodMg, productos.length);
+  
+  // Label dinamica "Productos PINSA/EXO/BKS"
+  const labelEl = document.querySelector('#res-pinsa-sub')?.parentElement?.querySelector('.res-label');
+  if(labelEl) labelEl.textContent = 'Productos ' + empresa;
+  
+  // Header sezione lista "PRODUCTOS PINSA/EXO/BKS"
+  const secProdTitulo = document.querySelector('#det-pinsa-wrap .pr-sec-t');
+  if(secProdTitulo){
+    secProdTitulo.innerHTML = 'Productos ' + empresa + ' <span id="cot-count" style="color:var(--t3);font-weight:400;font-size:10px">(' + total + ' items)</span>';
+  }
 
-  // Riga EXTRAS
-  const extCosto=extras.reduce((s,l)=>s+l.q*l.costo_u,0);
-  const extPV=extras.reduce((s,l)=>s+l.q*l.pv_u,0);
-  const extMg=extPV>0?((extPV-extCosto)/extPV*100):0;
-  document.getElementById('res-ext-sub').textContent=`${extras.length} items`;
-  document.getElementById('res-ext-pv').textContent=fmtCLP(extPV);
-  setMgPct('res-ext-pct',extMg,extras.length);
+  // Riga EXTRAS (invariato)
+  const extCosto = extras.reduce((s,l)=>s+l.q*l.costo_u, 0);
+  const extPV = extras.reduce((s,l)=>s+l.q*l.pv_u, 0);
+  const extMg = extPV > 0 ? ((extPV - extCosto)/extPV*100) : 0;
+  document.getElementById('res-ext-sub').textContent = `${extras.length} items`;
+  document.getElementById('res-ext-pv').textContent = fmtCLP(extPV);
+  setMgPct('res-ext-pct', extMg, extras.length);
 
   // TOTALE
-  const totCosto=pinsaCosto+extCosto;
-  const totPV=pinsaPV+extPV;
-  const totMg=totPV>0?((totPV-totCosto)/totPV*100):0;
-  document.getElementById('res-tot-pv').textContent=fmtCLP(totPV);
-  setMgPct('res-tot-pct',totMg,total);
+  const totCosto = prodCosto + extCosto;
+  const totPV = prodPV + extPV;
+  const totMg = totPV > 0 ? ((totPV - totCosto)/totPV*100) : 0;
+  document.getElementById('res-tot-pv').textContent = fmtCLP(totPV);
+  setMgPct('res-tot-pct', totMg, total);
 
-  // IVA display — solo visualizzazione, non cambia i KPI netti
+  // IVA display
   const ivaAmt = Math.round(totPV * IVA_PCT / 100);
   const totConIva = totPV + ivaAmt;
   const elIva = document.getElementById('res-iva');
@@ -1459,10 +1474,17 @@ function renderResumen(){
   if(elIva) elIva.textContent = fmtCLP(ivaAmt);
   if(elTotIva) elTotIva.textContent = fmtCLP(totConIva);
 
-  // Linee dettaglio PINSA
-  document.getElementById('lines-pinsa').innerHTML=pinsa.length?pinsa.map(l=>lineaHTML(l)).join(''):'<div style="padding:10px 14px;font-size:11px;color:var(--t3)">Sin productos PINSA</div>';
+  // Linee dettaglio Productos (PINSA o EXO o BKS)
+  const emptyMsg = empresa === 'PINSA'
+    ? 'Sin productos PINSA'
+    : 'Sin paquetes ' + empresa;
+  document.getElementById('lines-pinsa').innerHTML = productos.length
+    ? productos.map(l => lineaHTML(l)).join('')
+    : '<div style="padding:10px 14px;font-size:11px;color:var(--t3)">' + emptyMsg + '</div>';
   // Linee dettaglio EXTRAS
-  document.getElementById('lines-extras').innerHTML=extras.length?extras.map(l=>lineaHTML(l)).join(''):'<div style="padding:10px 14px;font-size:11px;color:var(--t3)">Sin extras</div>';
+  document.getElementById('lines-extras').innerHTML = extras.length
+    ? extras.map(l => lineaHTML(l)).join('')
+    : '<div style="padding:10px 14px;font-size:11px;color:var(--t3)">Sin extras</div>';
 }
 
 function lineaHTML(l){
