@@ -422,8 +422,8 @@ async function loadData(){
     /* Construir mapa ID_Cliente → RazonSocial */
     const cliMap = buildClienteMap(txtCli);
 
-    /* Construir cotizaciones */
-    const rows = txtCot.trim().split('\n').slice(1).map(l=>splitLine(l));
+    /* Construir cotizaciones — parser CSV robusto che gestisce newline dentro virgolette */
+    const rows = parseCSV(txtCot).slice(1); // slice(1) per saltare header
     rawData = buildFromCSV(rows, cliMap);
 
     renderAll();
@@ -459,6 +459,43 @@ function splitLine(line){
   }
   r.push(cur.trim());
   return r;
+}
+
+/* Parser CSV robusto: gestisce newline dentro virgolette (campi multilinea come Notas) */
+function parseCSV(text){
+  const rows = [];
+  let row = [];
+  let cur = '';
+  let inQ = false;
+  for(let i = 0; i < text.length; i++){
+    const c = text[i];
+    if(c === '"'){
+      if(inQ && text[i+1] === '"'){
+        cur += '"';
+        i++;
+      } else {
+        inQ = !inQ;
+      }
+    } else if(c === ',' && !inQ){
+      row.push(cur.trim());
+      cur = '';
+    } else if((c === '\n' || c === '\r') && !inQ){
+      // Fine riga solo se NON dentro virgolette
+      if(c === '\r' && text[i+1] === '\n') i++; // gestisce \r\n
+      row.push(cur.trim());
+      if(row.length > 0 && row.some(x => x !== '')) rows.push(row);
+      row = [];
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  // Ultima riga se non terminata da newline
+  if(cur || row.length){
+    row.push(cur.trim());
+    if(row.some(x => x !== '')) rows.push(row);
+  }
+  return rows;
 }
 
 /* ============================================================
