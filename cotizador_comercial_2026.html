@@ -653,6 +653,64 @@ input[type="date"]::-webkit-datetime-edit-text{color:var(--t3);}
   </div>
 </div>
 
+<!-- MODAL PRODUCTO EXO/BKS -->
+<div class="modal-ov" id="modal-prod-emp">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-t" id="modal-prod-emp-titulo">Agregar Paquete EXO</div>
+
+    <div class="fg">
+      <label>Descripción del paquete *</label>
+      <textarea id="pe-desc" rows="3" placeholder="ej. Almuerzo Ejecutivo · 12 bocados (6 fríos + 6 calientes) · barra libre soft drinks · servicio mesero incluido" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--t1);padding:7px 10px;font-size:13px;font-family:'DM Sans',sans-serif;outline:none;resize:vertical"></textarea>
+    </div>
+
+    <div class="fr">
+      <div class="fg">
+        <label>N° Pax *</label>
+        <input type="number" id="pe-pax" placeholder="100" min="1" oninput="calcMargenProdEmp()">
+      </div>
+      <div class="fg">
+        <label>Costo por Pax $</label>
+        <input type="text" id="pe-costo" placeholder="$0" oninput="onCostoProdEmpInput(this)">
+      </div>
+      <div class="fg">
+        <label>PV por Pax $</label>
+        <input type="text" id="pe-pv" placeholder="$0" oninput="onPVProdEmpInput(this)">
+      </div>
+    </div>
+
+    <div style="background:var(--bg4);border-radius:6px;padding:10px 14px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--t3);margin-bottom:4px">
+        <span>Margen calculado</span>
+        <span id="pe-mg-show" style="font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--green)">—</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--t3);margin-bottom:4px">
+        <span>Total Neto</span>
+        <span id="pe-tot-neto" style="font-family:'DM Mono',monospace;font-size:13px;color:var(--t1)">$0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--t3)">
+        <span>Total c/ IVA</span>
+        <span id="pe-tot-bruto" style="font-family:'DM Mono',monospace;font-size:13px;color:var(--fu)">$0</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <input type="checkbox" id="pe-guardar-bd" checked style="cursor:pointer">
+      <label for="pe-guardar-bd" style="font-size:12px;color:var(--t2);cursor:pointer;margin:0">
+        💾 Guardar este paquete en BD para reusarlo
+      </label>
+    </div>
+
+    <p style="font-size:11px;color:var(--t3);margin-top:4px;margin-bottom:0">💡 Si desactivas la opción, este paquete se usará solo en esta cotización sin guardarlo.</p>
+
+    <div class="modal-act">
+      <button class="btn btn-secondary" onclick="cerrarModal('modal-prod-emp')">Cancelar</button>
+      <button class="btn btn-primary" onclick="agregarProductoEmp()">Agregar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL PERDIDA -->
+
 <!-- MODAL PERDIDA -->
 <div class="modal-ov" id="modal-perdida">
   <div class="modal" style="max-width:380px">
@@ -1049,11 +1107,172 @@ function buscarProdEmp(q){
     </div>`).join('');
 }
 
-// Stub temporaneo · sarà rimpiazzato nel Blocco C col modal vero
+// Stato: se stiamo editando un paquete BD (id) o creandone uno nuovo (null)
+let PROD_EMP_EDIT_ID = null;
+
 function abrirModalProdEmp(id_producto){
   cerrarDDs();
-  // TODO Blocco C: aprire modal vero
-  showToast('Modal in arrivo nel prossimo blocco · id=' + (id_producto || 'NUEVO'), 'ok');
+  const empresa = document.getElementById('empresa-grupo').value || 'PINSA';
+  if(empresa !== 'EXO' && empresa !== 'BKS'){
+    showToast('Empresa debe ser EXO o BKS','err');
+    return;
+  }
+  
+  PROD_EMP_EDIT_ID = id_producto || null;
+  
+  // Titolo modal
+  const titulo = document.getElementById('modal-prod-emp-titulo');
+  titulo.textContent = id_producto
+    ? 'Editar Paquete ' + empresa + ' (se guardará como nuevo)'
+    : 'Nuevo Paquete ' + empresa;
+  
+  // Pre-popola se editing
+  if(id_producto){
+    const data = empresa === 'EXO' ? PRODUCTOS_EXO : PRODUCTOS_BKS;
+    const p = data.find(x => x.id_producto === id_producto);
+    if(p){
+      document.getElementById('pe-desc').value = p.descripcion || '';
+      document.getElementById('pe-pax').value = p.num_pax_default || '';
+      document.getElementById('pe-costo').value = p.costo_u ? '$' + Math.round(p.costo_u).toLocaleString('es-CL') : '';
+      document.getElementById('pe-pv').value = p.pv_u ? '$' + Math.round(p.pv_u).toLocaleString('es-CL') : '';
+    }
+  } else {
+    // Reset campi
+    document.getElementById('pe-desc').value = '';
+    document.getElementById('pe-pax').value = '';
+    document.getElementById('pe-costo').value = '';
+    document.getElementById('pe-pv').value = '';
+  }
+  
+  document.getElementById('pe-guardar-bd').checked = true;
+  calcMargenProdEmp();
+  abrirModal('modal-prod-emp');
+  setTimeout(() => document.getElementById('pe-desc').focus(), 50);
+}
+
+function onCostoProdEmpInput(input){
+  // Formatta input come $X.XXX
+  const num = limpiarNum(input.value);
+  input.value = num > 0 ? '$' + Math.round(num).toLocaleString('es-CL') : '';
+  calcMargenProdEmp();
+}
+
+function onPVProdEmpInput(input){
+  const num = limpiarNum(input.value);
+  input.value = num > 0 ? '$' + Math.round(num).toLocaleString('es-CL') : '';
+  calcMargenProdEmp();
+}
+
+function calcMargenProdEmp(){
+  const costo = limpiarNum(document.getElementById('pe-costo').value);
+  const pv = limpiarNum(document.getElementById('pe-pv').value);
+  const pax = parseInt(document.getElementById('pe-pax').value) || 0;
+  
+  const margenEl = document.getElementById('pe-mg-show');
+  const totNetoEl = document.getElementById('pe-tot-neto');
+  const totBrutoEl = document.getElementById('pe-tot-bruto');
+  
+  if(pv > 0){
+    const margen = ((pv - costo) / pv * 100);
+    margenEl.textContent = margen.toFixed(1) + '%';
+    // Colore margen: verde se >=MARGEN_MIN_ABS, amber se >=MARGEN_ALERTA, rojo se inferiore
+    if(margen >= MARGEN_MIN_ABS) margenEl.style.color = 'var(--green)';
+    else if(margen >= MARGEN_ALERTA) margenEl.style.color = 'var(--amber)';
+    else margenEl.style.color = 'var(--rojo)';
+  } else {
+    margenEl.textContent = '—';
+    margenEl.style.color = 'var(--t3)';
+  }
+  
+  if(pv > 0 && pax > 0){
+    const totNeto = pv * pax;
+    const totBruto = Math.round(totNeto * 1.19);
+    totNetoEl.textContent = fmtCLP(totNeto);
+    totBrutoEl.textContent = fmtCLP(totBruto);
+  } else {
+    totNetoEl.textContent = '$0';
+    totBrutoEl.textContent = '$0';
+  }
+}
+
+async function agregarProductoEmp(){
+  const empresa = document.getElementById('empresa-grupo').value || 'PINSA';
+  if(empresa !== 'EXO' && empresa !== 'BKS'){
+    showToast('Empresa debe ser EXO o BKS','err');
+    return;
+  }
+  
+  const desc = document.getElementById('pe-desc').value.trim();
+  if(!desc){ showToast('Descripción obligatoria','err'); document.getElementById('pe-desc').focus(); return; }
+  
+  const pax = parseInt(document.getElementById('pe-pax').value) || 0;
+  if(pax <= 0){ showToast('N° Pax obligatorio','err'); document.getElementById('pe-pax').focus(); return; }
+  
+  const costo = limpiarNum(document.getElementById('pe-costo').value);
+  const pv = limpiarNum(document.getElementById('pe-pv').value);
+  if(pv <= 0){ showToast('PV por Pax obligatorio','err'); document.getElementById('pe-pv').focus(); return; }
+  
+  const guardarBD = document.getElementById('pe-guardar-bd').checked;
+  const tipoLinea = empresa === 'EXO' ? 'PRODUCTO_EXO' : 'PRODUCTO_BKS';
+  let id_ref = '';
+  
+  // Salva in BD se richiesto
+  if(guardarBD){
+    try{
+      const r = await fetch(GAS_URL, {
+        method:'POST',
+        headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({
+          action:'saveProductoEmpresa',
+          payload:{
+            empresa: empresa,
+            descripcion: desc,
+            num_pax_default: pax,
+            costo_u: costo,
+            pv_u: pv,
+            creado_por: document.getElementById('creado-por').value || 'GC'
+          }
+        })
+      });
+      const txt = await r.text();
+      const d = JSON.parse(txt);
+      if(d.ok){
+        id_ref = d.id_producto;
+        // Aggiorna array locale per riusabilità immediata
+        const nuevo = {
+          id_producto: d.id_producto,
+          descripcion: desc,
+          num_pax_default: pax,
+          costo_u: costo,
+          pv_u: pv,
+          activo: 'SI'
+        };
+        if(empresa === 'EXO') PRODUCTOS_EXO.push(nuevo);
+        else PRODUCTOS_BKS.push(nuevo);
+      } else {
+        console.warn('saveProductoEmpresa error:', d.error);
+      }
+    } catch(e){
+      console.warn('saveProductoEmpresa exception:', e);
+    }
+  }
+  
+  // Aggiungi linea alla cotización
+  LINEAS.push({
+    id: Date.now(),
+    tipo: tipoLinea,
+    id_ref: id_ref,
+    descripcion: desc,
+    q: pax,
+    costo_u: costo,
+    pv_u: pv
+  });
+  
+  renderResumen();
+  recalc();
+  calcBreakEven();
+  cerrarModal('modal-prod-emp');
+  showToast('＋ ' + desc.substring(0, 40) + (desc.length>40?'...':''), 'ok');
 }
 
 // ── LINEAS ─────────────────────────────────────────
