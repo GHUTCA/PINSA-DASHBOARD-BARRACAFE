@@ -1217,8 +1217,28 @@ async function agregarProductoEmp(){
   const tipoLinea = empresa === 'EXO' ? 'PRODUCTO_EXO' : 'PRODUCTO_BKS';
   let id_ref = '';
   
-  // Salva in BD se richiesto
-  if(guardarBD){
+  // ── SMART DETECTION (Opzione A) ─────────────────────────────
+  // Se stiamo editando da BD e i valori sono identici all'originale, riusa id_ref
+  let isEditingMode = !!PROD_EMP_EDIT_ID;
+  let isUnchanged = false;
+  if(isEditingMode){
+    const data = empresa === 'EXO' ? PRODUCTOS_EXO : PRODUCTOS_BKS;
+    const orig = data.find(x => x.id_producto === PROD_EMP_EDIT_ID);
+    if(orig){
+      const sameDesc = (orig.descripcion || '').trim() === desc;
+      const samePax  = (parseInt(orig.num_pax_default) || 0) === pax;
+      const sameCosto = (parseFloat(orig.costo_u) || 0) === costo;
+      const samePv   = (parseFloat(orig.pv_u) || 0) === pv;
+      isUnchanged = sameDesc && samePax && sameCosto && samePv;
+    }
+  }
+  
+  if(isEditingMode && isUnchanged){
+    // Riusa as-is: no save in BD
+    id_ref = PROD_EMP_EDIT_ID;
+    console.log('[smart-detect] Paquete invariato — riusa', id_ref);
+  } else if(guardarBD){
+    // Nuovo paquete o variante modificata → salva in BD
     try{
       const r = await fetch(GAS_URL, {
         method:'POST',
@@ -1250,13 +1270,20 @@ async function agregarProductoEmp(){
         };
         if(empresa === 'EXO') PRODUCTOS_EXO.push(nuevo);
         else PRODUCTOS_BKS.push(nuevo);
+        console.log('[smart-detect] Nuovo paquete salvato', id_ref);
       } else {
         console.warn('saveProductoEmpresa error:', d.error);
       }
     } catch(e){
       console.warn('saveProductoEmpresa exception:', e);
     }
+  } else {
+    // Modal nuevo libre + checkbox guardar OFF: nessun salvataggio
+    console.log('[smart-detect] Linea libre senza salvataggio');
   }
+  
+  // Reset stato editing
+  PROD_EMP_EDIT_ID = null;
   
   // Aggiungi linea alla cotización
   LINEAS.push({
