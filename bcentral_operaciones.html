@@ -2577,6 +2577,14 @@ async function resolverDif(idEntrega, sku, safe, accion) {
 }
 
 async function confirmarDespacho(solId, safe, nItems, local) {
+  // ═══ PATCH BUG #36-BC · disable immediato PRIMA di costruire payload ═══
+  const btn = document.querySelector(`#det-${safe} button:last-child`);
+  if (btn) {
+    if (btn.disabled) return; // già in volo, ignora secondo click
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Enviando...';
+  }
+  
   const grupRows = STATE.solicitudes.filter(r => {
     const id=r['ID Solicitud']||r['_col1']||('SOL-'+r['Fecha']);
     return id===solId;
@@ -2586,10 +2594,15 @@ async function confirmarDespacho(solId, safe, nItems, local) {
     return { sku:r['SKU']||'', desc:r['Descripcion']||'', utm:r['UTM']||'', qSol:limpiarNum(r['Q Solicitada']||'0'), qConf:inp?parseFloat(inp.value)||0:0 };
   });
   const nota = document.getElementById('nota-desp-'+safe)?.value||'';
-  const btn  = document.querySelector(`#det-${safe} button:last-child`);
-  if (btn) { btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Enviando...'; }
-
   const res = await callGAS({ action:'despacharSolicitud', local:CFG.local, localDest:local, solicitudId:solId, items, notas:nota, operador:SESSION?SESSION.nombre:'', fecha:today() });
+  
+  // Se duplicado rilevato dal backend, no riabilitare il bottone (è già processato)
+  if (res && res.duplicado === true) {
+    showToast('⚠️ Solicitud ya despachada anteriormente · refrescando...', 'warn');
+    setTimeout(()=>location.reload(), 2000);
+    return;
+  }
+  
   if (btn) { btn.disabled=false; btn.innerHTML=`✓ Confirmar Envío → ${local}`; }
   if (res && res.ok!==false) {
     showToast('✅ Despacho confirmado → '+local,'success');
