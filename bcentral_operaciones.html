@@ -741,6 +741,44 @@
 </div>
 
 <!-- ══════════════════════════════════════════════════════ -->
+<!-- MODAL — ANULAR OC                                       -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="anular-oc-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.85);backdrop-filter:blur(6px);overflow-y:auto;padding:16px;">
+  <div style="max-width:480px;margin:8vh auto 0;background:var(--bg2);border:1px solid var(--border2);border-radius:14px;overflow:hidden;">
+    <div style="background:#3A1A1A;border-bottom:1px solid #5A2828;padding:18px 20px;">
+      <div style="font-size:10px;font-weight:700;letter-spacing:2.5px;color:#E08080;text-transform:uppercase;margin-bottom:4px">ANULAR ORDEN DE COMPRA</div>
+      <div style="font-size:17px;font-weight:700;color:#F0EBE5;letter-spacing:-0.3px">¿Confirmar anulación?</div>
+      <div style="font-size:11px;color:#A88888;margin-top:4px;font-family:var(--mono)" id="anular-oc-id">—</div>
+    </div>
+    <div style="padding:16px 20px;">
+      <div style="background:rgba(184,84,80,0.08);border-left:3px solid var(--red);padding:10px 12px;border-radius:6px;font-size:12px;color:var(--t2);margin-bottom:14px;line-height:1.45">
+        Esta OC quedará marcada como <strong style="color:var(--red)">ANULADA</strong> y desaparecerá de Pendientes de Recepción. La acción queda registrada en OC_Log con timestamp y motivo.
+      </div>
+      <div class="field" style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:600;color:var(--t2);margin-bottom:6px;display:block">Motivo de anulación</label>
+        <select id="anular-oc-motivo-sel" onchange="anularOCToggleLibre()" style="width:100%;padding:10px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-size:13px">
+          <option value="">— Seleccionar motivo —</option>
+          <option value="Proveedor no responde">Proveedor no responde</option>
+          <option value="Cambio de precios">Cambio de precios</option>
+          <option value="Error en el pedido">Error en el pedido</option>
+          <option value="Stock encontrado en BC">Stock encontrado en BC</option>
+          <option value="Producto no disponible">Producto no disponible</option>
+          <option value="Otro">Otro (especificar abajo)</option>
+        </select>
+      </div>
+      <div id="anular-oc-libre-wrap" style="display:none;margin-bottom:10px">
+        <label style="font-size:11px;font-weight:600;color:var(--t2);margin-bottom:6px;display:block">Detalle motivo</label>
+        <textarea id="anular-oc-motivo-libre" rows="2" placeholder="Describir motivo (mínimo 5 caracteres)..." style="width:100%;padding:10px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-size:13px;resize:vertical;font-family:inherit"></textarea>
+      </div>
+    </div>
+    <div style="padding:14px 20px 20px;display:flex;gap:10px;">
+      <button onclick="cerrarModalAnularOC()" style="flex:1;padding:13px;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;color:var(--t2);font-size:14px;font-weight:600;cursor:pointer">Cancelar</button>
+      <button id="anular-oc-confirm-btn" onclick="confirmarAnularOC()" style="flex:1;padding:13px;background:var(--red);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">🚫 Confirmar anulación</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
 <!-- MÓDULO 5 — PROVEEDORES -->
 <!-- ══════════════════════════════════════════════════════ -->
 <div id="mod-proveedores">
@@ -1948,6 +1986,68 @@ async function renderOCRecepcion() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// ANULAR OC · modal + flow · v1.0 · 15-MAY-2026
+// ══════════════════════════════════════════════════════════════
+let ANULAR_OC_CTX = null; // { safe, ocId }
+
+function abrirModalAnularOC(safe, ocId) {
+  ANULAR_OC_CTX = { safe, ocId };
+  document.getElementById('anular-oc-id').textContent = ocId;
+  document.getElementById('anular-oc-motivo-sel').value = '';
+  document.getElementById('anular-oc-motivo-libre').value = '';
+  document.getElementById('anular-oc-libre-wrap').style.display = 'none';
+  document.getElementById('anular-oc-modal').style.display = 'block';
+}
+
+function cerrarModalAnularOC() {
+  document.getElementById('anular-oc-modal').style.display = 'none';
+  ANULAR_OC_CTX = null;
+}
+
+function anularOCToggleLibre() {
+  const v = document.getElementById('anular-oc-motivo-sel').value;
+  document.getElementById('anular-oc-libre-wrap').style.display = (v === 'Otro') ? 'block' : 'none';
+}
+
+async function confirmarAnularOC() {
+  if (!ANULAR_OC_CTX) return;
+  const sel = document.getElementById('anular-oc-motivo-sel').value;
+  if (!sel) { showToast('Seleccioná un motivo','err'); return; }
+  let motivo = sel;
+  if (sel === 'Otro') {
+    const libre = document.getElementById('anular-oc-motivo-libre').value.trim();
+    if (libre.length < 5) { showToast('Detalle motivo mín. 5 caracteres','err'); return; }
+    motivo = libre;
+  }
+  const btn = document.getElementById('anular-oc-confirm-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Anulando...';
+  try {
+    const res = await callGAS({
+      action:   'anularOC',
+      local:    CFG.local,
+      ocId:     ANULAR_OC_CTX.ocId,
+      motivo:   motivo,
+      operador: SESSION ? SESSION.nombre : ''
+    });
+    if (res && res.ok) {
+      const card = document.getElementById('oc-card-' + ANULAR_OC_CTX.safe);
+      if (card) card.style.display = 'none';
+      showToast('🚫 OC ' + ANULAR_OC_CTX.ocId + ' anulada','ok');
+      cerrarModalAnularOC();
+      // Refresh lista per coerenza
+      setTimeout(() => { if (typeof renderOCRecepcion === 'function') renderOCRecepcion(); }, 600);
+    } else {
+      showToast('Error: ' + (res && res.error ? res.error : 'desconocido'),'err');
+    }
+  } catch(e) {
+    showToast('Error de conexión','err');
+  }
+  btn.disabled = false;
+  btn.innerHTML = '🚫 Confirmar anulación';
+}
+
+// ══════════════════════════════════════════════════════════════
 // ocRecepTogglePorSKU — expand/collapse card + lazy-load dettaglio SKU
 // ══════════════════════════════════════════════════════════════
 async function ocRecepTogglePorSKU(safe) {
@@ -2010,7 +2110,10 @@ async function ocRecepTogglePorSKU(safe) {
     <div class="field" style="margin-bottom:10px"><label>Notas / diferencias globales</label>
       <input type="text" id="nota-recep-${safe}" placeholder="Faltantes, precios, motivo diferencia...">
     </div>
-    <button class="btn btn-green" onclick="confirmarRecepcionOCPorSKU('${safe}','${skuSafes}',${tieneNegociado},${totalOC})">✓ Confirmar Recepción</button>`;
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button class="btn btn-green" style="flex:1" onclick="confirmarRecepcionOCPorSKU('${safe}','${skuSafes}',${tieneNegociado},${totalOC})">✓ Confirmar Recepción</button>
+      <button onclick="abrirModalAnularOC('${safe}','${ocId.replace(/'/g,"\\'")}')" style="padding:10px 14px;background:rgba(184,84,80,0.12);border:1px solid var(--red);border-radius:8px;color:var(--red);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">🚫 Anular OC</button>
+    </div>`;
 }
 
 // ══════════════════════════════════════════════════════════════
