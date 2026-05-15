@@ -219,4 +219,3 @@ if (typeof window !== 'undefined') {
   window.linkShared = linkShared;
 }
 
-feat(arch): registro centrale LOCALES + blindatura path-based · v1.0
