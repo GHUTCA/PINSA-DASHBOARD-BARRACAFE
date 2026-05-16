@@ -83,13 +83,13 @@ const LOCALES = {
     gas_bound_barra_helados:  'https://script.google.com/macros/s/AKfycbxLXrZFDcJCpikTtjekruVSRGzswptybxzOUdSk55z8GwI0yzqemiHW6Gls-FxHJwj1bQ/exec',
 
     // CSV publish token (CONTROL_RIESCO_2026)
-    csv_token: '2PACX-1vSenW0lq5mM3wYh56n-dmf2raU0LO06Y-rQ3g6YBuBTP5lRcTElG3HWQBLE7PVRuPYUAvbs2OlyQUZx',
+    csv_token: '2PACX-1vSenW0lq5mM3wYh56n-dmf2raU0L006Y-rQ3g6YBuBTP5lRcTElG3HWQBLE7PVRuPYUAvbs2OlyQUZx',
 
-    // CSV publish tokens specifici BARRA · pubblicati 15-MAY-2026 LATE NIGHT
-    csv_token_barra_cafe:     '2PACX-1vQE6GeVl47w1yweCg4UGK3Q8bHlneFMtVgoTCcEypOGuryJ8Ns-eFIH6ZGcxtTUBT9fc-iGb6tshw2Q',
-    csv_token_barra_jugos:    '2PACX-1vTy26k8xgoqvxiAMRvuBjYZXV9cWrN3ynfQU-eGzdYuDKd9_qXyt81L0WaTMOSmUOsF4XAAyFgZ73EF',
-    csv_token_barra_alimen:   '2PACX-1vSIH_aCKGj-t16rf2e3ctLj_s3zhQ1uWhegsQubjilQx2VBGbzHR6oWZkmyasw6ccoRHGLt5fgm2hpe',
-    csv_token_barra_helados:  '2PACX-1vQ1fagHLxBN7H8Ujd65I_EqbqdDbEDyYXG-FewahKf-eF6JN8RiyMmRBZ0-xq6JNiDxAgMy6r-Q4jY_',
+    // CSV publish tokens specifici BARRA · TODO da pubblicare i 4 spreadsheet sezione Riesco
+    csv_token_barra_cafe:     '', // TODO pubblicare CONTROL_BARRA_CAFE_RIESCO
+    csv_token_barra_jugos:    '', // TODO pubblicare CONTROL_BARRA_JUGOS_RIESCO
+    csv_token_barra_alimen:   '', // TODO pubblicare CONTROL_BARRA_ALIMEN_RIESCO
+    csv_token_barra_helados:  '', // TODO pubblicare CONTROL_BARRA_HELADOS_RIESCO
 
     accent_color: '#C4622D',
   },
@@ -218,4 +218,3 @@ if (typeof window !== 'undefined') {
   window.getLocalDisplayName = getLocalDisplayName;
   window.linkShared = linkShared;
 }
-
