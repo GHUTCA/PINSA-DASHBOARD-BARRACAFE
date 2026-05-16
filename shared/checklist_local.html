@@ -717,10 +717,47 @@ body::after{
 // ═══════════════════════════════════════
 // DATA
 // ═══════════════════════════════════════
-const EQUIPO = {
-  AM: ['Maira Rosales Lugo','Matias Salgado','Leddy Perez','Angel Roa','David Maturana','Mauro'],
-  PM: ['Maira Rosales Lugo','Matias Salgado','Leddy Perez','Angel Roa','David Maturana','Mauro']
-};
+// EQUIPO caricato dinamicamente da CONTROL_MAESTRO > PARAMETROS
+// Filtra per LOCAL_CFG.nome (col Q del CSV)
+var NOMBRES_LOCAL = []; // popolato da cargarNombresFromCSV()
+var PARAMETROS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=58421555&single=true&output=csv';
+
+function cargarNombresFromCSV() {
+  var nomeLocal = (LOCAL_CFG && LOCAL_CFG.nome) ? LOCAL_CFG.nome : 'Candelaria';
+  fetch(PARAMETROS_CSV_URL + '&t=' + Date.now())
+    .then(function(r){return r.text();})
+    .then(function(txt){
+      var lines = txt.split("\n");
+      var lista = [];
+      lines.forEach(function(line){
+        var cols = line.split(',');
+        var nombre = (cols[15]||'').trim().replace(/^"|"$/g,'');
+        var local  = (cols[16]||'').trim().replace(/^"|"$/g,'');
+        if (nombre && local === nomeLocal && nombre !== 'Usuario' && lista.indexOf(nombre) === -1) {
+          lista.push(nombre);
+        }
+      });
+      NOMBRES_LOCAL = lista;
+      actualizarSelectNombres();
+    })
+    .catch(function(){
+      // Fallback minimo se CSV non raggiungibile
+      NOMBRES_LOCAL = ['Mauro'];
+      actualizarSelectNombres();
+    });
+}
+
+function actualizarSelectNombres() {
+  var sel = document.getElementById('sel-nombre');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Seleccionar nombre —</option>';
+  NOMBRES_LOCAL.forEach(function(n){
+    var opt = document.createElement('option');
+    opt.value = n;
+    opt.textContent = n;
+    sel.appendChild(opt);
+  });
+}
 
 const APERTURA = [
   { group:'🏢 General · Antes 9:00 AM', items:[
@@ -974,19 +1011,8 @@ function formatDate() {
   return `${dias[d.getDay()]} ${d.getDate()} ${meses[d.getMonth()]}`;
 }
 
-function updateSelNombre() {
-  const turno = document.getElementById('sel-turno').value;
-  const sel = document.getElementById('sel-nombre');
-  sel.innerHTML = '<option value="">— Seleccionar nombre —</option>';
-  if (turno && EQUIPO[turno]) {
-    EQUIPO[turno].forEach(n => {
-      const opt = document.createElement('option');
-      opt.value = n; opt.textContent = n;
-      sel.appendChild(opt);
-    });
-  }
-}
-document.getElementById('sel-turno').addEventListener('change', updateSelNombre);
+// Rimosso updateSelNombre legacy · ora i nomi vengono caricati da CSV PARAMETROS
+// indipendentemente dal turno (AM/PM hanno gli stessi operatori)
 
 function iniciarSesion() {
   const turno = document.getElementById('sel-turno').value;
@@ -1512,6 +1538,8 @@ function showToast(msg, type='') {
 // INIT
 // ═══════════════════════════════════════
 document.getElementById('header-date').textContent = formatDate();
+// Carica nomi operatori dal CSV PARAMETROS per il locale corrente
+cargarNombresFromCSV();
 
 // ══════════════════════════════════════════════
 // SISTEMA REPORTAR PROBLEMA
