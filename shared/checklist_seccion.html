@@ -104,6 +104,51 @@ body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse
 .firma-done-icon{font-size:32px;margin-bottom:8px;}
 .firma-done-text{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:var(--green2);margin-bottom:4px;}
 .firma-done-sub{font-size:12px;color:var(--t2);}
+
+/* ── FIRMA DONE BIG (Turno chiuso) ── */
+.firma-done-big{
+  text-align:center;padding:28px 20px;
+  background:rgba(61,170,110,0.08);
+  border:1px solid rgba(61,170,110,0.25);
+  border-radius:12px;
+}
+.firma-done-big .firma-done-icon{font-size:48px;margin-bottom:12px;}
+.firma-done-big .firma-done-text{font-size:18px;font-family:'Syne',sans-serif;font-weight:700;color:var(--green2);margin-bottom:12px;}
+.firma-done-big .firma-done-sub{font-size:13px;color:var(--t1);line-height:1.8;}
+.btn-whatsapp{
+  width:100%;padding:14px;margin-top:14px;
+  background:rgba(37,211,102,0.10);
+  border:1px solid rgba(37,211,102,0.40);
+  border-radius:8px;color:#25D366;
+  font-family:'Instrument Sans',sans-serif;font-size:13px;font-weight:600;
+  cursor:pointer;transition:all 0.2s;letter-spacing:0.3px;
+}
+.btn-whatsapp:hover{
+  background:rgba(37,211,102,0.18);
+  border-color:#25D366;
+  color:#52E081;
+}
+.btn-ver-detalle{
+  background:rgba(196,98,45,0.10);
+  border:1px solid rgba(196,98,45,0.35);
+  color:var(--tc2);padding:13px 20px;border-radius:8px;
+  font-family:'Instrument Sans',sans-serif;font-size:13px;font-weight:600;
+  cursor:pointer;transition:all 0.2s;width:100%;
+  letter-spacing:0.3px;
+}
+.btn-ver-detalle:hover{
+  background:rgba(196,98,45,0.18);
+  border-color:var(--tc);
+  color:var(--t1);
+}
+.btn-ver-detalle:active{transform:translateY(1px);}
+
+/* ── LOCK MODE checklist post-firma ── */
+.section.locked .progress-wrap{display:none;}
+.section.locked .group{opacity:0.7;}
+.section.locked .group-body{display:none;}
+.section.locked.show-detalle .group-body{display:block;}
+.section.locked .check-item{pointer-events:none;cursor:default;}
 .historial-empty{text-align:center;padding:40px 20px;color:var(--t2);font-size:13px;line-height:1.6;}
 .historial-item{background:var(--bg2);border:1px solid var(--bg3);border-radius:8px;padding:14px 16px;margin-bottom:10px;}
 .historial-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
@@ -479,7 +524,31 @@ function upFirma(t){
 function renderFirma(tipo){
   var el=document.getElementById('firma-'+tipo);
   var raw=localStorage.getItem('firma-'+LOCAL_ID+'-'+SECCION+'-'+tipo+'-'+getDateKey()+'-'+(SESSION.turno||''));
-  if(raw){var f=JSON.parse(raw);el.innerHTML='<div class="firma-title">✅ Turno firmado</div><div class="firma-done"><div class="firma-done-icon">✅</div><div class="firma-done-text">'+(tipo==='apertura'?'Apertura':'Cierre')+' completado</div><div class="firma-done-sub">'+f.nombre+' · Turno '+f.turno+' · '+f.hora+'</div></div>';return;}
+  if(raw){
+    var f=JSON.parse(raw);
+    var tipoLabel=tipo==='apertura'?'Apertura':'Cierre';
+    var hasJL=!!(JL_POR_LOCAL[LOCAL]);
+    var whatsappBtn=hasJL?
+      '<button class="btn-whatsapp" onclick="sendWhatsAppSeccion(\''+tipo+'\')">📤 Enviar resumen al Jefe Local</button>':
+      '';
+    el.innerHTML='<div class="firma-done firma-done-big">'
+      +'<div class="firma-done-icon">✅</div>'
+      +'<div class="firma-done-text">¡'+tipoLabel+' completada!</div>'
+      +'<div class="firma-done-sub">'
+        +f.nombre+' · Turno '+f.turno+'<br>'
+        +SECCION_LABEL+'<br>'
+        +'Firmada a las '+f.hora+'<br>'
+        +'<span style="color:var(--t2);font-size:11px">'+f.items_ok+'/'+f.items_total+' ítems completados</span>'
+      +'</div>'
+      +whatsappBtn
+      +'<hr style="border:none;border-top:1px solid var(--bg3);margin:16px 0">'
+      +'<button class="btn-ver-detalle" onclick="toggleDetalle(\''+tipo+'\')">'
+        +'<span id="detalle-label-'+tipo+'">👁 Ver detalle (solo lectura)</span>'
+      +'</button>'
+    +'</div>';
+    lockChecklist(tipo);
+    return;
+  }
   el.innerHTML='<div class="firma-title">📝 Firma de turno</div><div class="firma-grid"><div><div class="firma-field-label">Sección</div><div class="firma-field-val">'+SECCION_LABEL+'</div></div><div><div class="firma-field-label">Operador</div><div class="firma-field-val name">'+(SESSION.nombre||'—')+'</div></div><div><div class="firma-field-label">Turno</div><div class="firma-field-val">'+(SESSION.turno||'—')+'</div></div><div><div class="firma-field-label">Fecha</div><div class="firma-field-val">'+formatDate()+'</div></div></div><button class="btn-firma" onclick="firmar(\''+tipo+'\')">✅ Confirmar y firmar turno</button><div class="firma-pending" id="firma-pending-'+tipo+'"></div>';
   upFirma(tipo);
 }
@@ -564,6 +633,75 @@ function cerrarSesion(){
 
 var PARAMETROS_CSV_URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=58421555&single=true&output=csv';
 var NOMBRES_POR_LOCAL={};
+
+// USUARIOS: lookup JL per locale per WhatsApp post-firma
+// Tabella USUARIOS in CONTROL_MAESTRO col P-V (Nombre, Cargo, Cargo Detail, Local, Email, Activo, Celular)
+// Stesso CSV PARAMETROS (stesso gid), parsing diverso
+var JL_POR_LOCAL={}; // { 'Candelaria': '56969082375', 'Riesco': '56969082375' }
+
+function cargarUsuariosJL(){
+  fetch(PARAMETROS_CSV_URL+'&t='+Date.now())
+    .then(function(r){return r.text();})
+    .then(function(txt){
+      var lines=txt.split('\n');
+      var mapa={};
+      lines.forEach(function(line){
+        var cols=_splitCsvLine(line);
+        // Col P=15 Nombre, Q=16 Cargo, S=18 Local, U=20 Activo, V=21 Celular
+        var cargo=(cols[16]||'').trim();
+        var local=(cols[18]||'').trim();
+        var activo=(cols[20]||'').trim().toUpperCase();
+        var celular=(cols[21]||'').trim().replace(/[^0-9]/g,''); // solo cifre
+        if(cargo==='JL' && local && activo==='SI' && celular){
+          mapa[local]=celular;
+        }
+      });
+      JL_POR_LOCAL=mapa;
+    })
+    .catch(function(){
+      JL_POR_LOCAL={};
+    });
+}
+
+// Lock + Ver detalle (post-firma)
+function lockChecklist(tipo){
+  var sec=document.getElementById('sec-'+tipo);
+  if(sec) sec.classList.add('locked');
+}
+
+function toggleDetalle(tipo){
+  var sec=document.getElementById('sec-'+tipo);
+  var label=document.getElementById('detalle-label-'+tipo);
+  if(!sec) return;
+  var showing=sec.classList.toggle('show-detalle');
+  if(label){
+    label.textContent=showing?'🔼 Ocultar detalle':'👁 Ver detalle (solo lectura)';
+  }
+  sec.querySelectorAll('.group').forEach(function(g){
+    if(showing) g.classList.add('open');
+    else g.classList.remove('open');
+  });
+}
+
+// Invio WhatsApp al JL del locale con messaggio precompilato
+function sendWhatsAppSeccion(tipo){
+  var firmaKey='firma-'+LOCAL_ID+'-'+SECCION+'-'+tipo+'-'+getDateKey()+'-'+(SESSION.turno||'');
+  var raw=localStorage.getItem(firmaKey);
+  if(!raw){showToast('⚠️ Firma non trovata','');return;}
+  var f=JSON.parse(raw);
+  var telJL=JL_POR_LOCAL[LOCAL]||''; // LOCAL è il nome display (Candelaria/Riesco)
+  if(!telJL){
+    showToast('⚠️ Sin teléfono JL configurado','');
+    return;
+  }
+  var tipoLabel=tipo==='apertura'?'Apertura':'Cierre';
+  var msg='✅ '+tipoLabel+' '+SECCION_LABEL+' · '+LOCAL+'\n'
+    +'Operador: '+f.nombre+'\n'
+    +'Turno: '+f.turno+' · '+f.hora+'\n'
+    +'Ítems: '+f.items_ok+'/'+f.items_total+' completados';
+  var url='https://wa.me/'+telJL+'?text='+encodeURIComponent(msg);
+  window.open(url,'_blank');
+}
 
 function cargarNombres(){
   fetch(PARAMETROS_CSV_URL+'&t='+Date.now())
@@ -1032,6 +1170,7 @@ function showToast(msg,type){var t=document.getElementById('toast');t.textConten
     });
   }
   cargarNombres();
+  cargarUsuariosJL();
   document.getElementById('h-local').textContent=LOCAL;
   document.getElementById('h-seccion').textContent=SECCION_LABEL;
   document.getElementById('h-date').textContent=formatDate();
