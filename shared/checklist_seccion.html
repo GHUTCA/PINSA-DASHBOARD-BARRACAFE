@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>Checklist Sección · PINSA</title>
+<title id="page-title">Checklist Sección · PINSA</title>
+<!-- V2.0 · Multi-local · path-based + blindatura Y2 · usa locales_config.js -->
+<script src="locales_config.js"></script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23C4622D'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-weight='bold' font-size='18' fill='white'>P</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Instrument+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -184,8 +186,7 @@ body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse
     <div class="field-label">Local</div>
     <select class="field-select" id="sel-local" onchange="onLocalChange()">
       <option value="">— Seleccionar local —</option>
-      <option value="Candelaria">Candelaria</option>
-      <option value="Riesco">Riesco</option>
+      <!-- Opzioni popolate dinamicamente da locales_config.js (solo locali attivi) -->
     </select>
     <div class="field-label">Sección</div>
     <select class="field-select" id="sel-seccion" onchange="onSeccionChange()">
@@ -363,10 +364,16 @@ body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse
 
 <script>
 var params=new URLSearchParams(window.location.search);
-var LOCAL=(params.get('local')||'Candelaria').trim();
+// MULTI-LOCAL: LOCAL_ID via helper centrale (cdl/rsc/mut), poi nome display via registro
+var LOCAL_ID=(typeof getCurrentLocal==='function')?getCurrentLocal('cdl'):'cdl';
+var LOCAL_CFG=(typeof getLocalConfig==='function')?getLocalConfig(LOCAL_ID):{nome:'Candelaria',id:'cdl'};
+var LOCAL=LOCAL_CFG.nome||'Candelaria'; // legacy var, usata come nome display nei messaggi
 var SECCION=(params.get('seccion')||'cafe').trim().toLowerCase();
 // sector: 'liquidos' → solo cafe+jugos | 'solidos' → solo alimentos+helados | '' → tutti
 var SECTOR=(params.get('sector')||'').trim().toLowerCase();
+
+// Helper namespacing storage: tutte le key includono LOCAL_ID
+function getStorageKeyPrefix(){return LOCAL_ID+'-'+getDateKey();}
 var LABELS={cafe:'Barra Café',jugos:'Barra Jugos',alimentos:'Barra Alimentos',helados:'Barra Helados'};
 var SECCION_LABEL=LABELS[SECCION]||SECCION;
 var SECTOR_SECCIONES={liquidos:['cafe','jugos'],solidos:['alimentos','helados'],'':['cafe','jugos','alimentos','helados']};
@@ -409,7 +416,7 @@ var CE={
 function getChecks(t){return (CC[t]||[]).concat((CE[SECCION]&&CE[SECCION][t])||[]);}
 
 function getDateKey(){var d=new Date();return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();}
-function sKey(t){return 'chk-'+SECCION+'-'+t+'-'+getDateKey()+'-'+(SESSION.turno||'');}
+function sKey(t){return 'chk-'+LOCAL_ID+'-'+SECCION+'-'+t+'-'+getDateKey()+'-'+(SESSION.turno||'');}
 function getSaved(t){try{return JSON.parse(localStorage.getItem(sKey(t)))||{};}catch(e){return {};}}
 function setSaved(t,d){localStorage.setItem(sKey(t),JSON.stringify(d));}
 
@@ -471,7 +478,7 @@ function upFirma(t){
 
 function renderFirma(tipo){
   var el=document.getElementById('firma-'+tipo);
-  var raw=localStorage.getItem('firma-'+LOCAL+'-'+SECCION+'-'+tipo+'-'+getDateKey()+'-'+(SESSION.turno||''));
+  var raw=localStorage.getItem('firma-'+LOCAL_ID+'-'+SECCION+'-'+tipo+'-'+getDateKey()+'-'+(SESSION.turno||''));
   if(raw){var f=JSON.parse(raw);el.innerHTML='<div class="firma-title">✅ Turno firmado</div><div class="firma-done"><div class="firma-done-icon">✅</div><div class="firma-done-text">'+(tipo==='apertura'?'Apertura':'Cierre')+' completado</div><div class="firma-done-sub">'+f.nombre+' · Turno '+f.turno+' · '+f.hora+'</div></div>';return;}
   el.innerHTML='<div class="firma-title">📝 Firma de turno</div><div class="firma-grid"><div><div class="firma-field-label">Sección</div><div class="firma-field-val">'+SECCION_LABEL+'</div></div><div><div class="firma-field-label">Operador</div><div class="firma-field-val name">'+(SESSION.nombre||'—')+'</div></div><div><div class="firma-field-label">Turno</div><div class="firma-field-val">'+(SESSION.turno||'—')+'</div></div><div><div class="firma-field-label">Fecha</div><div class="firma-field-val">'+formatDate()+'</div></div></div><button class="btn-firma" onclick="firmar(\''+tipo+'\')">✅ Confirmar y firmar turno</button><div class="firma-pending" id="firma-pending-'+tipo+'"></div>';
   upFirma(tipo);
@@ -483,7 +490,7 @@ function firmar(tipo){
   var done=Object.keys(saved).filter(function(k){return saved[k];}).length;
   var hora=new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
   var reg={nombre:SESSION.nombre,turno:SESSION.turno,fecha:formatDate(),hora:hora,seccion:SECCION_LABEL,local:LOCAL,tipo:tipo,items_ok:done,items_total:total};
-  localStorage.setItem('firma-'+LOCAL+'-'+SECCION+'-'+tipo+'-'+getDateKey()+'-'+SESSION.turno,JSON.stringify(reg));
+  localStorage.setItem('firma-'+LOCAL_ID+'-'+SECCION+'-'+tipo+'-'+getDateKey()+'-'+SESSION.turno,JSON.stringify(reg));
   renderFirma(tipo);
   showToast('✅ Turno firmado','success');
   enviarASheets(reg);
@@ -514,25 +521,26 @@ function enviarASheets(reg){
 }
 
 function iniciarSesion(){
-  var localSel=document.getElementById('sel-local').value||LOCAL;
+  var localIdSel=document.getElementById('sel-local').value||LOCAL_ID;
   var seccionSel=document.getElementById('sel-seccion').value||SECCION;
   var turno=document.getElementById('sel-turno').value;
   var nombre=document.getElementById('sel-nombre').value;
-  if(!localSel||!seccionSel||!turno||!nombre){showToast('⚠️ Selecciona local, sección, turno y nombre');return;}
-  // Aggiorna le variabili globali con la selezione del form
-  LOCAL=localSel;
+  if(!localIdSel||!seccionSel||!turno||!nombre){showToast('⚠️ Selecciona local, sección, turno y nombre');return;}
+  // Aggiorna variabili globali con la selezione del form (LOCAL_ID è cdl/rsc/mut, LOCAL è nome display)
+  LOCAL_ID=localIdSel;
+  LOCAL_CFG=(typeof getLocalConfig==='function')?getLocalConfig(LOCAL_ID):{nome:LOCAL_ID,id:LOCAL_ID};
+  LOCAL=LOCAL_CFG.nome||LOCAL_ID;
   SECCION=seccionSel;
   SECCION_LABEL=LABELS[SECCION]||SECCION;
-  SESSION={nombre:nombre,turno:turno,fecha:formatDate(),local:LOCAL,seccion:SECCION};
-  localStorage.setItem('session-'+LOCAL+'-'+SECCION+'-'+getDateKey(),JSON.stringify(SESSION));
+  SESSION={nombre:nombre,turno:turno,fecha:formatDate(),local:LOCAL,localId:LOCAL_ID,seccion:SECCION};
+  localStorage.setItem('session-'+LOCAL_ID+'-'+SECCION+'-'+getDateKey(),JSON.stringify(SESSION));
   initCargarDatos();
-  // Aggiorna header con i valori reali
   mostrarApp();
 }
 
 function cerrarSesion(){
   SESSION={};
-  localStorage.removeItem('session-'+LOCAL+'-'+SECCION+'-'+getDateKey());
+  localStorage.removeItem('session-'+LOCAL_ID+'-'+SECCION+'-'+getDateKey());
   // Reset tutti i SELECT a vuoto/default
   document.getElementById('sel-local').selectedIndex=0;
   document.getElementById('sel-seccion').selectedIndex=0;
@@ -567,7 +575,9 @@ function cargarNombres(){
         }
       });
       NOMBRES_POR_LOCAL=mapa;
-      actualizarSelectNombres(document.getElementById('sel-local').value||LOCAL);
+      var sel=document.getElementById('sel-local').value;
+      var nomeParaNombres=sel?((typeof getLocalConfig==='function')?(getLocalConfig(sel).nome||sel):sel):LOCAL;
+      actualizarSelectNombres(nomeParaNombres);
     })
     .catch(function(){
       // Fallback hardcoded
@@ -591,9 +601,12 @@ function actualizarSelectNombres(local){
 }
 
 function onLocalChange(){
-  var v=document.getElementById('sel-local').value;
-  document.getElementById('ol-local').textContent=v;
-  actualizarSelectNombres(v);
+  var v=document.getElementById('sel-local').value; // ora è LOCAL_ID (cdl/rsc/mut)
+  var cfg=(typeof getLocalConfig==='function')?getLocalConfig(v):{nome:v};
+  var nomeDisplay=cfg.nome||v;
+  document.getElementById('ol-local').textContent=nomeDisplay;
+  // actualizarSelectNombres si aspetta il NOME del locale (Candelaria/Riesco) perché il CSV PARAMETROS usa quello
+  actualizarSelectNombres(nomeDisplay);
 }
 
 function onSeccionChange(){
@@ -644,7 +657,7 @@ function showSection(id,el){
 
 function renderHistorial(){
   var el=document.getElementById('historial-content');
-  var keys=Object.keys(localStorage).filter(function(k){return k.startsWith('firma-'+LOCAL+'-'+SECCION+'-');});
+  var keys=Object.keys(localStorage).filter(function(k){return k.startsWith('firma-'+LOCAL_ID+'-'+SECCION+'-');});
   if(!keys.length){el.innerHTML='<div class="historial-empty">📭 No hay registros aún.</div>';return;}
   el.innerHTML=keys.sort(function(a,b){return b.localeCompare(a);}).map(function(k){try{var d=JSON.parse(localStorage.getItem(k));return'<div class="historial-item"><div class="historial-header"><div class="historial-tipo">'+(d.tipo==='apertura'?'🌅 Apertura':'🌙 Cierre')+'</div><div class="historial-fecha">'+(d.fecha||'')+'</div></div><div class="historial-body"><strong>'+d.nombre+'</strong> · Turno '+d.turno+' · '+d.hora+'<br>Items: <strong>'+d.items_ok+'/'+d.items_total+'</strong></div></div>';}catch(e){return'';}}).join('');
 }
@@ -889,7 +902,7 @@ function mrSelMotivo(btn,m){
 }
 
 function mrGetMermaKey(){
-  return 'merma-reg-'+LOCAL+'-'+SECCION+'-'+getDateKey()+'-'+(SESSION.turno||'');
+  return 'merma-reg-'+LOCAL_ID+'-'+SECCION+'-'+getDateKey()+'-'+(SESSION.turno||'');
 }
 
 function mrSaveLocal(registros){
@@ -1000,11 +1013,27 @@ function showToast(msg,type){var t=document.getElementById('toast');t.textConten
   if(olImg) olImg.style.backgroundImage = 'url(' + LOGO_B64 + ')';
   var hImg = document.getElementById('header-logo-img');
   if(hImg) hImg.src = LOGO_B64;
+  // Popola dropdown locale da registro centrale (solo locali attivi)
+  if(typeof LOCALES!=='undefined'){
+    var selLocal=document.getElementById('sel-local');
+    Object.keys(LOCALES).forEach(function(id){
+      var cfg=LOCALES[id];
+      if(cfg.attivo){
+        var opt=document.createElement('option');
+        opt.value=id;
+        opt.textContent=cfg.nome;
+        selLocal.appendChild(opt);
+      }
+    });
+  }
   cargarNombres();
   document.getElementById('h-local').textContent=LOCAL;
   document.getElementById('h-seccion').textContent=SECCION_LABEL;
   document.getElementById('h-date').textContent=formatDate();
   document.getElementById('ol-local').textContent=LOCAL;
+  // Aggiorna title browser tab
+  var t=document.getElementById('page-title');
+  if(t)t.textContent='Checklist Sección · '+LOCAL;
 
   // Precarica subito i CSV sólidos — PRIMA del login, così sono pronti quando servono
   precargarSiSolidos();
