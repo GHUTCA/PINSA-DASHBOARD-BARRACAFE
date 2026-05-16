@@ -4893,11 +4893,54 @@ let SESSION = null;
     .then(r => r.ok ? r.text() : '')
     .then(txt => {
       if (!txt || txt.includes('<!DOCTYPE')) return;
-      const rows = parseCSV(txt);
-      const fromCSV = rows.filter(r => (r['Local']||'').trim()===CFG.local && (r['Usuario']||'').trim() && (r['PWD']||'').trim())
-        .map(r => ({n:(r['Usuario']||'').trim(), c:(r['Cargo']||'').trim(), p:(r['PWD']||'').trim(), t:parseInt(r['Tipo']||'9')}));
-      if (!fromCSV.length) return;
-      // Ordina alfabeticamente anche dal CSV
+      // Parser dedicato tabella login — PARAMETROS è un foglio "sporco":
+      // gli header Usuario/Local/PWD/Cargo/Tipo NON sono in riga 1, sono
+      // in mezzo al foglio. Cerchiamo la riga header ovunque sia.
+      function _splitCSVLine(line) {
+        const out = []; let cur = '', q = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') { q = !q; }
+          else if (ch === ',' && !q) { out.push(cur); cur = ''; }
+          else { cur += ch; }
+        }
+        out.push(cur);
+        return out.map(s => s.trim().replace(/^"|"$/g, ''));
+      }
+      const lines = txt.split('\n');
+      // 1) trova la riga header della tabella login
+      let hdrIdx = -1, cU = -1, cL = -1, cP = -1, cC = -1, cT = -1;
+      for (let i = 0; i < lines.length; i++) {
+        const cols = _splitCSVLine(lines[i]);
+        const u = cols.indexOf('Usuario');
+        const l = cols.indexOf('Local');
+        const p = cols.indexOf('PWD');
+        if (u !== -1 && l !== -1 && p !== -1) {
+          hdrIdx = i; cU = u; cL = l; cP = p;
+          cC = cols.indexOf('Cargo');
+          cT = cols.indexOf('Tipo');
+          break;
+        }
+      }
+      if (hdrIdx === -1) return; // header non trovato → resta EQUIPO_FB
+      // 2) leggi le righe sotto l'header, filtra per locale corrente
+      const fromCSV = [];
+      for (let i = hdrIdx + 1; i < lines.length; i++) {
+        const cols = _splitCSVLine(lines[i]);
+        const nombre = (cols[cU] || '').trim();
+        const local  = (cols[cL] || '').trim();
+        const pwd    = (cols[cP] || '').trim();
+        if (!nombre || !pwd) continue;        // riga vuota → stop tabella
+        if (local !== CFG.local) continue;     // filtro locale
+        fromCSV.push({
+          n: nombre,
+          c: (cC !== -1 ? (cols[cC] || '') : '').trim() || 'Operador',
+          p: pwd,
+          t: parseInt((cT !== -1 ? cols[cT] : '') || '9') || 9
+        });
+      }
+      if (!fromCSV.length) return; // nessun operatore per questo locale → resta EQUIPO_FB
+      // 3) ordina e ripopola la select
       fromCSV.sort((a,b) => a.n.localeCompare(b.n, 'es'));
       sel.innerHTML = '<option value="">— Selecciona tu nombre —</option>';
       fromCSV.forEach(u => {
@@ -4906,7 +4949,7 @@ let SESSION = null;
         o.textContent = u.n + ' · ' + u.c;
         sel.appendChild(o);
       });
-      // Aggiorna EQUIPO_FB con dati CSV
+      // Aggiorna EQUIPO_FB con dati CSV (serve a doLogin per validare la password)
       EQUIPO_FB.length = 0;
       fromCSV.forEach(u => EQUIPO_FB.push(u));
     })
