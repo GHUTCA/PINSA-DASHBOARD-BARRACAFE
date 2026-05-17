@@ -506,30 +506,6 @@
     '.pa-help-paso b{color:#52C882}' +
     '</style>';
 
-  var MARKUP =
-    '<div class="pa-box">' +
-      '<div class="pa-logo"></div>' +
-      '<div class="pa-sub">Sistema Operativo · Acceso</div>' +
-      '<div id="pa-step-lista" style="width:100%">' +
-        '<div class="pa-h">¿Quién eres?</div>' +
-        '<div id="pa-lista"></div>' +
-      '</div>' +
-      '<div id="pa-step-pin">' +
-        '<button id="pa-back">← Cambiar</button>' +
-        '<div id="pa-pin-titulo">Ingresa tu PIN</div>' +
-        '<div id="pa-pin-user"></div>' +
-        '<div id="pa-pin-sub"></div>' +
-        '<div id="pa-pin-paso"></div>' +
-        '<div id="pa-dots">' +
-          '<span class="pa-dot"></span><span class="pa-dot"></span>' +
-          '<span class="pa-dot"></span><span class="pa-dot"></span>' +
-        '</div>' +
-        '<div id="pa-teclado"></div>' +
-      '</div>' +
-    '</div>' +
-    '<div id="pa-toast"></div>' +
-    HELP_FAB + HELP_PANEL;
-
   // ── FAB AYUDA · brand PINSA (NORMA_BOTON_AYUDA v2.0) ──────────────
   // Adattato: vive dentro l'overlay di login (z-index sopra), niente tab.
   var HELP_FAB =
@@ -574,6 +550,31 @@
         '</div>' +
       '</div>' +
     '</div>';
+
+  var MARKUP =
+    '<div class="pa-box">' +
+      '<div class="pa-logo"></div>' +
+      '<div class="pa-sub">Sistema Operativo · Acceso</div>' +
+      '<div id="pa-step-lista" style="width:100%">' +
+        '<div class="pa-h">¿Quién eres?</div>' +
+        '<div id="pa-lista"></div>' +
+      '</div>' +
+      '<div id="pa-step-pin">' +
+        '<button id="pa-back">← Cambiar</button>' +
+        '<div id="pa-pin-titulo">Ingresa tu PIN</div>' +
+        '<div id="pa-pin-user"></div>' +
+        '<div id="pa-pin-sub"></div>' +
+        '<div id="pa-pin-paso"></div>' +
+        '<div id="pa-dots">' +
+          '<span class="pa-dot"></span><span class="pa-dot"></span>' +
+          '<span class="pa-dot"></span><span class="pa-dot"></span>' +
+        '</div>' +
+        '<div id="pa-teclado"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div id="pa-toast"></div>' +
+    HELP_FAB + HELP_PANEL;
+
 
   global.PinsitaAuth = PinsitaAuth;
 
