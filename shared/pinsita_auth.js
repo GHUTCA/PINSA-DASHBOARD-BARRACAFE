@@ -330,34 +330,26 @@
       return;
     }
     bloquear(true);
+    var pinElegido = pinBuffer;          // memorizza prima di azzerare
+    modo = 'login';                       // esce dalla modalita' set_pin subito
+    pinBuffer = ''; pinTmp = '';
     llamarGAS({
       accion: 'set_pin', local: CFG.local,
-      nombre: seleccion.nombre, pin_nuevo: pinBuffer
+      nombre: seleccion.nombre, pin_nuevo: pinElegido
     }).then(function (res) {
       bloquear(false);
       if (res && res.ok) {
-        // PIN creato → fa subito login con quel PIN
-        var pinDef = pinBuffer;
-        modo = 'login'; pinBuffer = '';
-        llamarGAS({
-          accion: 'login', local: CFG.local, nombre: seleccion.nombre,
-          pin: pinDef, dispositivo: navigator.userAgent.slice(0, 60)
-        }).then(function (r2) {
-          if (r2 && r2.ok && !r2.primer_acceso) {
-            guardarSesion(seleccion.nombre, r2.cargo, r2.turno);
-            ocultarOverlay();
-            aplicarGating(r2.cargo);
-          } else {
-            toast('PIN creado · vuelve a ingresar');
-            volverALista();
-          }
-        }).catch(function () { toast('PIN creado · vuelve a ingresar'); volverALista(); });
+        // set_pin e' anche login: entra diretto con cargo+turno restituiti
+        guardarSesion(seleccion.nombre, res.cargo, res.turno);
+        ocultarOverlay();
+        aplicarGating(res.cargo);
         return;
       }
-      pinTmp = ''; pinBuffer = ''; setPinTitulo('Crea tu PIN'); pintarPin();
+      // PIN rifiutato dal GAS → ricomincia la creazione
+      setPinTitulo('Crea tu PIN'); pintarPin();
       toast('PIN no válido · usa 4 dígitos');
     }).catch(function () {
-      bloquear(false); pinTmp = ''; pinBuffer = ''; pintarPin();
+      bloquear(false); pintarPin();
       toast('Sin conexión · reintenta');
     });
   }
