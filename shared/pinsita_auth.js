@@ -187,9 +187,14 @@
     var cont = document.getElementById('pa-lista');
     if (!cont) return;
     if (!USERS.length) {
-      // fallback: nessuna lista → l'utente scrive il proprio nome
+      // fallback: nessuna lista → l'utente scrive il proprio nome.
+      // Il GAS normalizza (minuscole, accenti, spazi): l'utente puo' scrivere naturale.
       cont.innerHTML =
-        '<input id="pa-nombre-input" placeholder="Escribe tu nombre" ' +
+        '<div style="font-size:11.5px;color:var(--t3,#6A6460);margin-bottom:8px;line-height:1.45">' +
+        'Escribe tu <b style="color:var(--t2,#A8A29C)">nombre y apellido</b>, ' +
+        'como aparece en tu registro.</div>' +
+        '<input id="pa-nombre-input" placeholder="Ej: Jorge Pérez" autocomplete="off" ' +
+        'autocapitalize="words" spellcheck="false" ' +
         'style="width:100%;padding:13px 14px;background:var(--card2);border:1px solid var(--b2);' +
         'border-radius:8px;color:var(--t1);font-size:14px;font-family:inherit">';
       var btn = document.createElement('button');
