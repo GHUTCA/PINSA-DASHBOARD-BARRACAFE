@@ -1,21 +1,24 @@
 /* ════════════════════════════════════════════════════════════════════
- *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.0
+ *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.1
  *  Una sola copia in /shared/ · incluso da ogni hub di locale.
  *
+ *  v1.1 · la lista utenti arriva dal GAS (azione lista_usuarios),
+ *         non da un CSV. Una sola fonte, un solo canale.
+ *         Il codice locale (rsc/cdl) e' quello del foglio: nessuna traduzione.
+ *
  *  Cosa fa:
- *   - Mostra una schermata di login (nome + foto/iniziali + PIN 4 cifre)
- *   - Verifica via GAS doPost (auth_pinsita) · niente PIN in chiaro
- *   - Gestisce primo accesso / reset PIN (l'utente sceglie il suo PIN)
- *   - Apre sessione 8h in localStorage (durata turno · NORMA_DISENO §3)
+ *   - Schermata login (lista nome + foto/iniziali + PIN 4 cifre)
+ *   - Verifica via GAS doPost · niente PIN in chiaro (SHA-256 + salt)
+ *   - Primo accesso / reset PIN: l'utente sceglie e riconferma il PIN
+ *   - Sessione 8h in localStorage (durata turno · NORMA_DISENO §3)
  *   - Gating: nasconde le card che il ruolo non puo' aprire (§4)
  *
- *  Come si usa in un hub (es. rsc/index.html):
- *   1. <script src="../shared/locales_config.js"></script>  (gia' presente di norma)
- *   2. <script src="../shared/pinsita_auth.js"></script>
- *   3. In fondo, dopo il resto:  PinsitaAuth.init({ local:'rsc', accent:'#D4A030' });
+ *  Uso in un hub (es. rsc/index.html), prima di </body>:
+ *   <script src="../shared/pinsita_auth.js"></script>
+ *   <script>PinsitaAuth.init({ local:'rsc', accent:'#D4A030' });</script>
  *
- *  Gating · ogni card che va protetta porta  data-roles="JL,GO"
- *  (lista codici cargo separati da virgola). Card senza l'attributo = visibile a tutti.
+ *  Gating · ogni card protetta porta  data-roles="JL,GO"
+ *  (codici cargo separati da virgola). Card senza l'attributo = visibile a tutti.
  * ════════════════════════════════════════════════════════════════════ */
 (function (global) {
   'use strict';
@@ -29,10 +32,6 @@
     JB:'Jefe de Bodega', CC:'Chef Cocina Central',
     GC:'Gerente Comercial', GG:'Gerencia General'
   };
-  // CSV anagrafica utenti — tab "usuarios" di CTRL_OBJETIVOS pubblicato.
-  // Serve SOLO a popolare la lista nomi+foto (dati non sensibili).
-  // La verifica del PIN passa sempre dal GAS. Compilare al deploy:
-  var USUARIOS_CSV = '';   // <-- URL CSV pub del tab "usuarios" (gid). Se '' → lista da GAS-less fallback.
 
   // ── STATO INTERNO ─────────────────────────────────────────────────
   var CFG = { local:'cdl', accent:'#C4622D' };
@@ -52,8 +51,10 @@
       var ses = leerSesion();
       if (ses) { aplicarGating(ses.role); return; }   // sessione valida → entra
       construirOverlay();
-      cargarUsuarios();
+      var ov = document.getElementById('pa-overlay');
+      if (ov) ov.style.setProperty('--pa-accent', CFG.accent);
       mostrarOverlay();
+      cargarUsuarios();
     },
     logout: function () {
       try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
@@ -100,7 +101,7 @@
         cards[i].style.display = 'none';
       }
     }
-    // se un blocco (.grid) resta senza card visibili, nasconde anche la sua intestazione
+    // se un blocco (.grid) resta senza card visibili, nasconde anche l'intestazione
     var grids = document.querySelectorAll('.grid');
     for (var g = 0; g < grids.length; g++) {
       var vis = grids[g].querySelectorAll('.card');
@@ -138,61 +139,8 @@
   }
 
   // ════════════════════════════════════════════════════════════════
-  //  CARICAMENTO LISTA UTENTI
-  // ════════════════════════════════════════════════════════════════
-  function cargarUsuarios() {
-    if (!USUARIOS_CSV) { renderListaUsuarios(); return; }   // niente CSV → lista vuota, si scrive il nome
-    fetch(USUARIOS_CSV + (USUARIOS_CSV.indexOf('?') === -1 ? '?' : '&') + 't=' + Date.now(),
-          { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.text() : ''; })
-      .then(function (txt) {
-        if (!txt || txt.indexOf('<!DOCTYPE') !== -1) { renderListaUsuarios(); return; }
-        USERS = parseUsuarios(txt);
-        renderListaUsuarios();
-      })
-      .catch(function () { renderListaUsuarios(); });
-  }
-
-  // tab "usuarios": local | nombre | cargo | foto_url | pin_hash | ...
-  function parseUsuarios(txt) {
-    var lines = txt.split('\n'), out = [];
-    if (!lines.length) return out;
-    var hdr = splitCSV(lines[0]).map(function (h) { return h.trim().toLowerCase(); });
-    var iL = hdr.indexOf('local'), iN = hdr.indexOf('nombre'),
-        iC = hdr.indexOf('cargo'), iF = hdr.indexOf('foto_url'),
-        iE = hdr.indexOf('estado');
-    for (var i = 1; i < lines.length; i++) {
-      var c = splitCSV(lines[i]);
-      var loc = (c[iL] || '').trim().toLowerCase();
-      var nom = (c[iN] || '').trim();
-      if (!nom) continue;
-      if (loc !== CFG.local.toLowerCase()) continue;
-      if (iE !== -1 && (c[iE] || '').trim().toUpperCase() !== 'ACTIVO') continue;
-      out.push({
-        nombre: nom,
-        cargo:  (iC !== -1 ? (c[iC] || '') : '').trim() || 'OP',
-        foto:   (iF !== -1 ? (c[iF] || '') : '').trim()
-      });
-    }
-    out.sort(function (a, b) { return a.nombre.localeCompare(b.nombre, 'es'); });
-    return out;
-  }
-
-  function splitCSV(line) {
-    var out = [], cur = '', q = false;
-    for (var i = 0; i < line.length; i++) {
-      var ch = line[i];
-      if (ch === '"') q = !q;
-      else if (ch === ',' && !q) { out.push(cur); cur = ''; }
-      else cur += ch;
-    }
-    out.push(cur);
-    return out.map(function (s) { return s.trim().replace(/^"|"$/g, ''); });
-  }
-
-  // ════════════════════════════════════════════════════════════════
   //  CHIAMATA AL GAS
-  //  Nota: Content-Type text/plain → niente preflight CORS su Apps Script.
+  //  Content-Type text/plain → niente preflight CORS su Apps Script.
   //  Il body resta JSON, il GAS lo legge con JSON.parse(e.postData.contents).
   // ════════════════════════════════════════════════════════════════
   function llamarGAS(payload) {
@@ -201,6 +149,18 @@
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload)
     }).then(function (r) { return r.json(); });
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  //  CARICAMENTO LISTA UTENTI (dal GAS · azione lista_usuarios)
+  // ════════════════════════════════════════════════════════════════
+  function cargarUsuarios() {
+    llamarGAS({ accion: 'lista_usuarios', local: CFG.local })
+      .then(function (res) {
+        USERS = (res && res.ok && res.usuarios) ? res.usuarios : [];
+        renderListaUsuarios();
+      })
+      .catch(function () { USERS = []; renderListaUsuarios(); });
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -215,7 +175,6 @@
     construirTeclado();
     document.getElementById('pa-back').onclick = volverALista;
   }
-
   function mostrarOverlay() {
     document.getElementById('pa-overlay').style.display = 'flex';
   }
@@ -282,7 +241,7 @@
   function irAPin() {
     pinBuffer = ''; pinTmp = ''; modo = 'login';
     document.getElementById('pa-step-lista').style.display = 'none';
-    document.getElementById('pa-step-pin').style.display = 'block';
+    document.getElementById('pa-step-pin').style.display = 'flex';
     document.getElementById('pa-pin-user').textContent = seleccion.nombre;
     setPinTitulo('Ingresa tu PIN');
     pintarPin();
@@ -486,14 +445,6 @@
       '</div>' +
     '</div>' +
     '<div id="pa-toast"></div>';
-
-  // accent iniettato come variabile CSS sull'overlay
-  var _origInit = PinsitaAuth.init;
-  PinsitaAuth.init = function (opts) {
-    _origInit(opts);
-    var ov = document.getElementById('pa-overlay');
-    if (ov) ov.style.setProperty('--pa-accent', CFG.accent);
-  };
 
   global.PinsitaAuth = PinsitaAuth;
 
