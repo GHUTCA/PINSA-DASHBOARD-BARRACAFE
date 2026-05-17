@@ -179,6 +179,25 @@
     document.body.appendChild(ov);
     construirTeclado();
     document.getElementById('pa-back').onclick = volverALista;
+    // FAB Ayuda: apre/chiude il panel help
+    document.getElementById('pa-help-fab').onclick = function () {
+      document.getElementById('pa-help-overlay').classList.add('on');
+    };
+    document.getElementById('pa-help-close').onclick = function () {
+      document.getElementById('pa-help-overlay').classList.remove('on');
+    };
+    document.getElementById('pa-help-overlay').onclick = function (e) {
+      if (e.target === this) this.classList.remove('on');
+    };
+  }
+  // mostra/nasconde il FAB Ayuda (solo nella schermata PIN)
+  function mostrarHelp(on) {
+    var w = document.getElementById('pa-help-wrap');
+    if (w) w.classList.toggle('on', !!on);
+    if (!on) {
+      var o = document.getElementById('pa-help-overlay');
+      if (o) o.classList.remove('on');
+    }
   }
   function mostrarOverlay() {
     document.getElementById('pa-overlay').style.display = 'flex';
@@ -263,11 +282,13 @@
       setPinPaso('Ingresa tu PIN', '', '');
     }
     pintarPin();
+    mostrarHelp(true);
   }
   function volverALista() {
     document.getElementById('pa-step-pin').style.display = 'none';
     document.getElementById('pa-step-lista').style.display = 'block';
     seleccion = null; pinBuffer = '';
+    mostrarHelp(false);
   }
   // aggiorna titolo + sottotitolo esplicativo + indicatore di passo
   function setPinPaso(titulo, sub, paso) {
@@ -441,6 +462,48 @@
       'background:#C0392B;color:#fff;font-size:13px;font-weight:600;padding:11px 20px;border-radius:8px;' +
       'opacity:0;transition:all .25s;pointer-events:none;z-index:9100}' +
     '#pa-toast.on{opacity:1;transform:translateX(-50%) translateY(0)}' +
+    // ── FAB AYUDA · brand PINSA (sempre arancio, NORMA §11) ──────────
+    '@keyframes paHaloPulse{0%{transform:scale(1);opacity:.55}70%{transform:scale(1.6);opacity:0}100%{transform:scale(1.6);opacity:0}}' +
+    '@keyframes paBulbGlow{0%,100%{filter:drop-shadow(0 0 2px rgba(255,220,150,.4))}50%{filter:drop-shadow(0 0 6px rgba(255,220,150,.9))}}' +
+    '@keyframes paSparkleSpin{0%,100%{transform:rotate(0deg) scale(1);opacity:.9}50%{transform:rotate(180deg) scale(1.15);opacity:1}}' +
+    '#pa-help-wrap{position:fixed;bottom:22px;right:22px;width:64px;height:64px;z-index:9200;display:none}' +
+    '#pa-help-wrap.on{display:block}' +
+    '#pa-help-wrap .pa-help-halo{position:absolute;inset:0;border-radius:50%;pointer-events:none;' +
+      'background:radial-gradient(circle,rgba(196,98,29,.55) 0%,rgba(196,98,29,0) 65%);animation:paHaloPulse 2.4s ease-out infinite}' +
+    '#pa-help-wrap .pa-help-halo.delayed{animation-delay:1.2s}' +
+    '#pa-help-fab{position:relative;z-index:2;width:64px;height:64px;border-radius:50%;cursor:pointer;padding:0;' +
+      'background:radial-gradient(circle at 30% 25%,#E07030 0%,#C4621D 55%,#9A4C11 100%);' +
+      'border:1.5px solid rgba(255,220,180,.25);color:#FFF4E6;' +
+      'box-shadow:0 8px 22px rgba(0,0,0,.5),0 3px 8px rgba(196,98,29,.55),inset 0 2px 0 rgba(255,255,255,.18),inset 0 -3px 6px rgba(0,0,0,.25);' +
+      'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:transform .18s ease-out}' +
+    '#pa-help-fab:hover{transform:scale(1.08)}' +
+    '#pa-help-fab:active{transform:scale(.96);transition:transform .08s}' +
+    '#pa-help-fab svg{animation:paBulbGlow 2.6s ease-in-out infinite;margin-top:-2px}' +
+    '#pa-help-fab .pa-help-sparkle{animation:paSparkleSpin 3.2s ease-in-out infinite;transform-origin:center}' +
+    '#pa-help-fab .pa-help-label{font-size:9px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;' +
+      'color:#FFE9D1;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.4)}' +
+    '#pa-help-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9300;' +
+      'align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto}' +
+    '#pa-help-overlay.on{display:flex}' +
+    '.pa-help-card{background:#1A1A1A;border:1px solid rgba(196,98,29,.3);border-radius:12px;width:100%;max-width:480px;' +
+      'box-shadow:0 20px 60px rgba(0,0,0,.6)}' +
+    '.pa-help-head{padding:14px 18px;border-bottom:1px solid rgba(196,98,29,.2);display:flex;' +
+      'justify-content:space-between;align-items:center;' +
+      'background:linear-gradient(135deg,rgba(196,98,29,.14) 0%,rgba(160,79,20,.06) 100%)}' +
+    '.pa-help-head-t{font-size:15px;font-weight:700;color:#F2EDE6}' +
+    '#pa-help-close{background:rgba(192,57,43,.15);border:1px solid rgba(192,57,43,.4);color:#E07070;' +
+      'font-size:12px;font-weight:600;padding:6px 14px;border-radius:16px;cursor:pointer}' +
+    '.pa-help-body{padding:16px 18px}' +
+    '.pa-help-blk{border-left:3px solid;padding:10px 12px;border-radius:4px;margin-bottom:10px}' +
+    '.pa-help-blk:last-child{margin-bottom:0}' +
+    '.pa-help-rapido{background:rgba(74,144,217,.12);border-color:#6BA8E5}' +
+    '.pa-help-pasos{background:rgba(61,170,110,.10);border-color:#52C882}' +
+    '.pa-help-cuidado{background:rgba(212,134,10,.12);border-color:#D4860A}' +
+    '.pa-help-tag{font-size:9px;font-weight:700;letter-spacing:1.5px;margin-bottom:6px;color:#A8A29C}' +
+    '.pa-help-txt{font-size:12.5px;color:#F2EDE6;line-height:1.5}' +
+    '.pa-help-paso{font-size:12.5px;color:#F2EDE6;line-height:1.5;margin-bottom:5px}' +
+    '.pa-help-paso:last-child{margin-bottom:0}' +
+    '.pa-help-paso b{color:#52C882}' +
     '</style>';
 
   var MARKUP =
@@ -464,7 +527,53 @@
         '<div id="pa-teclado"></div>' +
       '</div>' +
     '</div>' +
-    '<div id="pa-toast"></div>';
+    '<div id="pa-toast"></div>' +
+    HELP_FAB + HELP_PANEL;
+
+  // ── FAB AYUDA · brand PINSA (NORMA_BOTON_AYUDA v2.0) ──────────────
+  // Adattato: vive dentro l'overlay di login (z-index sopra), niente tab.
+  var HELP_FAB =
+    '<div id="pa-help-wrap">' +
+      '<div class="pa-help-halo"></div>' +
+      '<div class="pa-help-halo delayed"></div>' +
+      '<button id="pa-help-fab" aria-label="Ayuda contextual">' +
+        '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+          '<g opacity="0.7"><path d="M12 1.2v1.8M12 21v1.8M3 12H1.2M22.8 12H21M4.8 4.8 3.6 3.6M20.4 3.6 19.2 4.8" stroke="#FFE9D1" stroke-width="1.1" stroke-linecap="round"/></g>' +
+          '<path d="M12 3.2c-3.3 0-6 2.7-6 6 0 2.2 1.15 4.1 2.85 5.24V16a1 1 0 0 0 1 1h4.3a1 1 0 0 0 1-1v-1.56C16.85 13.3 18 11.4 18 9.2c0-3.3-2.7-6-6-6Z" fill="#FFF7E6" stroke="#FFF4E6" stroke-width="0.9" stroke-linejoin="round"/>' +
+          '<path d="M10 7.8c.9-.6 1.8-.6 2.7 0M10.5 9.2h3M12 10.5v4" stroke="#D47012" stroke-width="1.2" stroke-linecap="round" fill="none"/>' +
+          '<path d="M10 18h4M10.6 20h2.8" stroke="#FFF4E6" stroke-width="1.4" stroke-linecap="round"/>' +
+          '<g class="pa-help-sparkle"><path d="M19.8 3.4l.5 1.1 1.1.5-1.1.5-.5 1.1-.5-1.1-1.1-.5 1.1-.5.5-1.1Z" fill="#FFD89A" fill-opacity="0.95"/></g>' +
+        '</svg>' +
+        '<span class="pa-help-label">Ayuda</span>' +
+      '</button>' +
+    '</div>';
+
+  var HELP_PANEL =
+    '<div id="pa-help-overlay">' +
+      '<div class="pa-help-card">' +
+        '<div class="pa-help-head">' +
+          '<div class="pa-help-head-t">¿Cómo creo mi PIN?</div>' +
+          '<button id="pa-help-close" aria-label="Cerrar ayuda">✕ Cerrar</button>' +
+        '</div>' +
+        '<div class="pa-help-body">' +
+          '<div class="pa-help-blk pa-help-rapido">' +
+            '<div class="pa-help-tag">⚡ LO RÁPIDO</div>' +
+            '<div class="pa-help-txt">Tu PIN son 4 números que eliges tú. Nadie más los ve — ni tu jefe.</div>' +
+          '</div>' +
+          '<div class="pa-help-blk pa-help-pasos">' +
+            '<div class="pa-help-tag">📋 LOS 3 PASOS</div>' +
+            '<div class="pa-help-paso"><b>1.</b> Elige 4 números fáciles de recordar para ti.</div>' +
+            '<div class="pa-help-paso"><b>2.</b> Digítalos una vez (Paso 1 de 2).</div>' +
+            '<div class="pa-help-paso"><b>3.</b> Vuelve a digitarlos igual para confirmar (Paso 2 de 2).</div>' +
+          '</div>' +
+          '<div class="pa-help-blk pa-help-cuidado">' +
+            '<div class="pa-help-tag">⚠️ CUIDADO CON ESTO</div>' +
+            '<div class="pa-help-txt">No uses 1234 ni tu fecha de nacimiento — son fáciles de adivinar. ' +
+            'Si olvidaste tu PIN, pídele a tu Jefe de Local que lo reinicie: no se puede recuperar, solo crear uno nuevo.</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
 
   global.PinsitaAuth = PinsitaAuth;
 
