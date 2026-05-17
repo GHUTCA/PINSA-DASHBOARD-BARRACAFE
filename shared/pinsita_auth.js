@@ -208,7 +208,7 @@
       btn.onclick = function () {
         var v = document.getElementById('pa-nombre-input').value.trim();
         if (!v) { toast('Escribe tu nombre'); return; }
-        seleccion = { nombre: v, cargo: '', foto: '' };
+        seleccion = { nombre: v, cargo: '', foto: '', tiene_pin: null };
         irAPin();
       };
       cont.appendChild(btn);
@@ -249,11 +249,19 @@
 
   // ── PASSAGGIO ALLA SCHERMATA PIN ──────────────────────────────────
   function irAPin() {
-    pinBuffer = ''; pinTmp = ''; modo = 'login';
+    pinBuffer = ''; pinTmp = '';
     document.getElementById('pa-step-lista').style.display = 'none';
     document.getElementById('pa-step-pin').style.display = 'flex';
     document.getElementById('pa-pin-user').textContent = seleccion.nombre;
-    setPinPaso('Ingresa tu PIN', '', '');
+    // se l'utente NON ha ancora un PIN → va dritto a "Crea tu PIN" (niente
+    // schermata "Ingresa tu PIN" sprecata). tiene_pin arriva da lista_usuarios.
+    if (seleccion.tiene_pin === false) {
+      modo = 'set_pin';
+      setPinPaso('Crea tu PIN', 'Elige 4 dígitos que puedas recordar.', 'Paso 1 de 2');
+    } else {
+      modo = 'login';
+      setPinPaso('Ingresa tu PIN', '', '');
+    }
     pintarPin();
   }
   function volverALista() {
@@ -416,7 +424,8 @@
     '#pa-pin-titulo{font-size:15px;font-weight:600;color:var(--t1,#F2EDE6)}' +
     '#pa-pin-user{font-size:12px;color:var(--pa-accent);margin:3px 0 6px;font-weight:600}' +
     '#pa-pin-sub{font-size:12px;color:var(--t2,#A8A29C);margin-bottom:10px;text-align:center;max-width:240px;line-height:1.45}' +
-    '#pa-pin-paso{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3,#6A6460);margin-bottom:18px;font-weight:700}' +
+    '#pa-pin-paso{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--pa-accent);margin-bottom:18px;font-weight:800;padding:4px 12px;border:1px solid var(--pa-accent);border-radius:12px}' +
+    '#pa-pin-paso:empty{display:none}' +
     '#pa-dots{display:flex;gap:14px;margin-bottom:24px}' +
     '.pa-dot{width:14px;height:14px;border-radius:50%;border:2px solid var(--b2,#2C2C2C);transition:all .15s}' +
     '.pa-dot.on{background:var(--pa-accent);border-color:var(--pa-accent)}' +
