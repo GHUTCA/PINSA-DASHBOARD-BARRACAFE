@@ -253,7 +253,7 @@
     document.getElementById('pa-step-lista').style.display = 'none';
     document.getElementById('pa-step-pin').style.display = 'flex';
     document.getElementById('pa-pin-user').textContent = seleccion.nombre;
-    setPinTitulo('Ingresa tu PIN');
+    setPinPaso('Ingresa tu PIN', '', '');
     pintarPin();
   }
   function volverALista() {
@@ -261,7 +261,12 @@
     document.getElementById('pa-step-lista').style.display = 'block';
     seleccion = null; pinBuffer = '';
   }
-  function setPinTitulo(t) { document.getElementById('pa-pin-titulo').textContent = t; }
+  // aggiorna titolo + sottotitolo esplicativo + indicatore di passo
+  function setPinPaso(titulo, sub, paso) {
+    document.getElementById('pa-pin-titulo').textContent = titulo;
+    document.getElementById('pa-pin-sub').textContent = sub || '';
+    document.getElementById('pa-pin-paso').textContent = paso || '';
+  }
 
   // ── TASTIERINO PIN ────────────────────────────────────────────────
   function construirTeclado() {
@@ -301,7 +306,7 @@
       bloquear(false);
       if (res && res.ok && res.primer_acceso) {     // primo accesso o reset
         modo = 'set_pin'; pinBuffer = ''; pinTmp = '';
-        setPinTitulo(res.motivo === 'reset' ? 'Crea un PIN nuevo' : 'Crea tu PIN');
+        setPinPaso('Crea tu PIN', 'Elige 4 dígitos que puedas recordar.', 'Paso 1 de 2');
         pintarPin();
         toast('Elige un PIN de 4 dígitos');
         return;
@@ -328,15 +333,15 @@
   function manejarSetPin() {
     if (!pinTmp) {                       // primo inserimento
       pinTmp = pinBuffer; pinBuffer = '';
-      setPinTitulo('Repite el PIN');
+      setPinPaso('Confirma tu PIN', 'Vuelve a digitar los mismos 4 dígitos.', 'Paso 2 de 2');
       pintarPin();
       return;
     }
     if (pinBuffer !== pinTmp) {           // conferma errata
       pinTmp = ''; pinBuffer = '';
-      setPinTitulo('Crea tu PIN');
+      setPinPaso('Crea tu PIN', 'Elige 4 dígitos que puedas recordar.', 'Paso 1 de 2');
       pintarPin();
-      toast('Los PIN no coinciden, intenta de nuevo');
+      toast('No coinciden · empecemos de nuevo');
       return;
     }
     bloquear(true);
@@ -356,7 +361,7 @@
         return;
       }
       // PIN rifiutato dal GAS → ricomincia la creazione
-      setPinTitulo('Crea tu PIN'); pintarPin();
+      setPinPaso('Crea tu PIN', 'Elige 4 dígitos que puedas recordar.', 'Paso 1 de 2'); pintarPin();
       toast('PIN no válido · usa 4 dígitos');
     }).catch(function () {
       bloquear(false); pintarPin();
@@ -409,7 +414,9 @@
       'color:var(--t2,#A8A29C);font-size:12px;padding:5px 11px;border-radius:8px;cursor:pointer;margin-bottom:14px}' +
     '#pa-back:hover{border-color:var(--pa-accent);color:var(--pa-accent)}' +
     '#pa-pin-titulo{font-size:15px;font-weight:600;color:var(--t1,#F2EDE6)}' +
-    '#pa-pin-user{font-size:12px;color:var(--pa-accent);margin:3px 0 20px;font-weight:600}' +
+    '#pa-pin-user{font-size:12px;color:var(--pa-accent);margin:3px 0 6px;font-weight:600}' +
+    '#pa-pin-sub{font-size:12px;color:var(--t2,#A8A29C);margin-bottom:10px;text-align:center;max-width:240px;line-height:1.45}' +
+    '#pa-pin-paso{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3,#6A6460);margin-bottom:18px;font-weight:700}' +
     '#pa-dots{display:flex;gap:14px;margin-bottom:24px}' +
     '.pa-dot{width:14px;height:14px;border-radius:50%;border:2px solid var(--b2,#2C2C2C);transition:all .15s}' +
     '.pa-dot.on{background:var(--pa-accent);border-color:var(--pa-accent)}' +
@@ -439,6 +446,8 @@
         '<button id="pa-back">← Cambiar</button>' +
         '<div id="pa-pin-titulo">Ingresa tu PIN</div>' +
         '<div id="pa-pin-user"></div>' +
+        '<div id="pa-pin-sub"></div>' +
+        '<div id="pa-pin-paso"></div>' +
         '<div id="pa-dots">' +
           '<span class="pa-dot"></span><span class="pa-dot"></span>' +
           '<span class="pa-dot"></span><span class="pa-dot"></span>' +
