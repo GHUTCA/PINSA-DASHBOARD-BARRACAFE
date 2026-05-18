@@ -635,7 +635,9 @@ function cerrarSesion(){
 }
 
 var PARAMETROS_CSV_URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=58421555&single=true&output=csv';
-var NOMBRES_POR_LOCAL={};
+// MIGRAZIONE: nomi operatori da CTRL_OBJETIVOS foglio 'usuarios' (non più da PARAMETROS)
+var USUARIOS_CSV_URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vTlbFUjpe0FjZ5ZvREGI6tZv2eugyv5IJxl7VJZAtN9OmWcoB1WKhpHlcPwfmEaUznZe3OFSfG2uf66/pub?gid=962267698&single=true&output=csv';
+  var NOMBRES_POR_LOCAL={};
 
 // USUARIOS: lookup JL per locale per WhatsApp post-firma
 // Tabella USUARIOS in CONTROL_MAESTRO col P-V (Nombre, Cargo, Cargo Detail, Local, Email, Activo, Celular)
@@ -707,18 +709,24 @@ function sendWhatsAppSeccion(tipo){
 }
 
 function cargarNombres(){
-  fetch(PARAMETROS_CSV_URL+'&t='+Date.now())
+  // Fonte: CTRL_OBJETIVOS > foglio 'usuarios' — col 0=local(rsc/cdl) 1=nombre 2=cargo 6=estado
+  fetch(USUARIOS_CSV_URL+'&t='+Date.now())
     .then(function(r){return r.text();})
     .then(function(txt){
-      var lines=txt.split("\n");
+      var lines=txt.replace(/\r/g,'').split("\n");
       var mapa={};
-      lines.forEach(function(line){
+      lines.slice(1).forEach(function(line){          // slice(1): salta l'header
         var cols=line.split(',');
-        var nombre=(cols[15]||'').trim().replace(/^"|"$/g,'');
-        var local=(cols[16]||'').trim().replace(/^"|"$/g,'');
-        if(nombre && local && nombre!=='Usuario'){
-          if(!mapa[local])mapa[local]=[];
-          if(!mapa[local].includes(nombre))mapa[local].push(nombre);
+        var localId=(cols[0]||'').trim().replace(/^"|"$/g,'').toLowerCase();
+        var nombre =(cols[1]||'').trim().replace(/^"|"$/g,'');
+        var cargo  =(cols[2]||'').trim().replace(/^"|"$/g,'').toUpperCase();
+        var estado =(cols[6]||'').trim().replace(/^"|"$/g,'').toUpperCase();
+        // Solo operatori attivi. Il JL non va nel dropdown nomi.
+        if(localId && nombre && cargo==='OP' && estado==='ACTIVO'){
+          // La mappa è indicizzata per NOME display (Candelaria/Riesco): converto da localId
+          var nomeLoc=(typeof getLocalConfig==='function')?(getLocalConfig(localId).nome||localId):localId;
+          if(!mapa[nomeLoc])mapa[nomeLoc]=[];
+          if(!mapa[nomeLoc].includes(nombre))mapa[nomeLoc].push(nombre);
         }
       });
       NOMBRES_POR_LOCAL=mapa;
@@ -727,8 +735,7 @@ function cargarNombres(){
       actualizarSelectNombres(nomeParaNombres);
     })
     .catch(function(){
-      // Fallback se CSV non raggiungibile (network down)
-      // Lista vuota → l'operatore vede dropdown vuoto e capisce che c'è un problema connessione
+      // Fallback se CSV non raggiungibile (network down) — dropdown vuoto, l'operatore capisce
       NOMBRES_POR_LOCAL={};
       actualizarSelectNombres(LOCAL);
       showToast('⚠️ Sin conexión · revisa internet','');
