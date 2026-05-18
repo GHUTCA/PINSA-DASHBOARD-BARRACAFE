@@ -720,20 +720,25 @@ body::after{
 // EQUIPO caricato dinamicamente da CONTROL_MAESTRO > PARAMETROS
 // Filtra per LOCAL_CFG.nome (col Q del CSV)
 var NOMBRES_LOCAL = []; // popolato da cargarNombresFromCSV()
-var PARAMETROS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=58421555&single=true&output=csv';
-
+// MIGRAZIONE: nomi operatori da CTRL_OBJETIVOS foglio 'usuarios' (non più da PARAMETROS)
+var USUARIOS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTlbFUjpe0FjZ5ZvREGI6tZv2eugyv5IJxl7VJZAtN9OmWcoB1WKhpHlcPwfmEaUznZe3OFSfG2uf66/pub?gid=962267698&single=true&output=csv';
 function cargarNombresFromCSV() {
-  var nomeLocal = (LOCAL_CFG && LOCAL_CFG.nome) ? LOCAL_CFG.nome : 'Candelaria';
-  fetch(PARAMETROS_CSV_URL + '&t=' + Date.now())
-    .then(function(r){return r.text();})
+  // Fonte: CTRL_OBJETIVOS > foglio 'usuarios'
+  // Colonne: 0=local(rsc/cdl) 1=nombre 2=cargo 6=estado
+  fetch(USUARIOS_CSV_URL + '&t=' + Date.now())
+    .then(function(r){ return r.text(); })
     .then(function(txt){
-      var lines = txt.split("\n");
+      var lines = txt.replace(/\r/g,'').split('\n');
       var lista = [];
-      lines.forEach(function(line){
+      lines.slice(1).forEach(function(line){          // slice(1): salta l'header
         var cols = line.split(',');
-        var nombre = (cols[15]||'').trim().replace(/^"|"$/g,'');
-        var local  = (cols[16]||'').trim().replace(/^"|"$/g,'');
-        if (nombre && local === nomeLocal && nombre !== 'Usuario' && lista.indexOf(nombre) === -1) {
+        var local  = (cols[0]||'').trim().replace(/^"|"$/g,'').toLowerCase();
+        var nombre = (cols[1]||'').trim().replace(/^"|"$/g,'');
+        var cargo  = (cols[2]||'').trim().replace(/^"|"$/g,'').toUpperCase();
+        var estado = (cols[6]||'').trim().replace(/^"|"$/g,'').toUpperCase();
+        // Solo operatori attivi di QUESTO locale. Il JL non va nel dropdown "Tu nombre".
+        if (local === LOCAL_ID && cargo === 'OP' && estado === 'ACTIVO'
+            && nombre && lista.indexOf(nombre) === -1) {
           lista.push(nombre);
         }
       });
@@ -741,8 +746,8 @@ function cargarNombresFromCSV() {
       actualizarSelectNombres();
     })
     .catch(function(){
-      // Fallback minimo se CSV non raggiungibile
-      NOMBRES_LOCAL = ['Mauro'];
+      // Fallback se CSV non raggiungibile (network down) — lista vuota, l'operatore capisce
+      NOMBRES_LOCAL = [];
       actualizarSelectNombres();
     });
 }
