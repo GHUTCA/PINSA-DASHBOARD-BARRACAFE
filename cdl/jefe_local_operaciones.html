@@ -521,18 +521,6 @@
     .kpi-grid { grid-template-columns: 1fr; }
   }
 
-  /* ── LOGIN SCREEN ── */
-  #login-screen{position:fixed;inset:0;z-index:900;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;}
-  #login-screen.hidden{display:none}
-  .ls-card{width:100%;max-width:360px;background:var(--bg2);border:1px solid var(--border2);border-top:2px solid var(--blue);border-radius:var(--radius);padding:24px 20px}
-  .ls-title{font-size:17px;font-weight:500;color:var(--t1);margin-bottom:3px}
-  .ls-sub{font-size:12px;color:var(--t3);margin-bottom:20px}
-  .ls-label{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3);margin-bottom:6px;display:block}
-  .ls-select,.ls-input{width:100%;padding:10px 12px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-family:var(--font);font-size:13px;outline:none;appearance:none;margin-bottom:14px}
-  .ls-input{letter-spacing:3px;font-family:var(--mono)}
-  .ls-btn{width:100%;padding:12px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer}
-  .ls-err{margin-top:10px;padding:9px 12px;background:rgba(192,57,43,.12);border:1px solid rgba(192,57,43,.3);border-radius:6px;font-size:12px;color:var(--red);display:none}
-  .ls-err.show{display:block}
   /* ── LOGOUT ── */
   #logout-modal{position:fixed;inset:0;z-index:950;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:24px}
   #logout-modal.hidden{display:none}
@@ -623,19 +611,6 @@
 </head>
 <body>
 
-<!-- ══ LOGIN SCREEN ══════════════════════════════════════════════════ -->
-<div id="login-screen">
-  <div class="ls-card">
-    <div class="ls-title">Panel Operativo</div>
-    <div class="ls-sub">Jefe de Local · Candelaria</div>
-    <label class="ls-label">Tu nombre</label>
-    <select class="ls-select" id="ls-nombre"><option value="">— Selecciona tu nombre —</option></select>
-    <label class="ls-label">Contraseña</label>
-    <input class="ls-input" type="password" id="ls-pwd" placeholder="······" maxlength="10" autocomplete="off">
-    <button class="ls-btn" onclick="doLogin()">Ingresar al sistema</button>
-    <div class="ls-err" id="ls-err">Nombre o contraseña incorrectos</div>
-  </div>
-</div>
 <!-- ══ LOGOUT MODAL ══════════════════════════════════════════════════ -->
 <div id="logout-modal" class="hidden">
   <div class="lm-card">
@@ -4872,134 +4847,32 @@ init().catch(console.error);
 // ══════════════════════════════════════════════════════
 // LOGIN / SESSION  (aggiunto — non tocca nulla del codice originale)
 // ══════════════════════════════════════════════════════
-const EQUIPO_FB = [{"n": 'Francisco', "c": 'Jefe de Local', "p": '123456', "t": 4}, {"n": 'Mauro', "c": 'Gerente Operaciones', "p": '123456', "t": 2}, {"n": 'Francisco Chavez', "c": 'Jefe Bodega', "p": '888888', "t": 3}, {"n": 'Maria Rosales Lugo', "c": 'Operador de Sección', "p": '654321', "t": 9}, {"n": 'Matias Salgado', "c": 'Operador de Sección', "p": '654321', "t": 9}, {"n": 'Leddy Perez', "c": 'Operador de Sección', "p": '654321', "t": 9}, {"n": 'Angel Roa', "c": 'Operador de Sección', "p": '654321', "t": 9}, {"n": 'David Maturana', "c": 'Operador de Sección', "p": '654321', "t": 9}, {"n": 'Valentina', "c": 'Pastelería', "p": '777777', "t": 5}, {"n": 'Liz', "c": 'Chef', "p": '777777', "t": 5}, {"n": 'Kele', "c": 'Gerente', "p": '999999', "t": 1}, {"n": 'Nea', "c": 'Gerente', "p": '999999', "t": 1}];
-
 let SESSION = null;
 
-(function initLogin() {
-  // Popola select dal fallback — ordinato alfabeticamente
-  const sel = document.getElementById('ls-nombre');
-  const sorted = [...EQUIPO_FB].sort((a,b) => a.n.localeCompare(b.n, 'es'));
-  sorted.forEach(u => {
-    const o = document.createElement('option');
-    o.value = u.n;
-    o.textContent = u.n + ' · ' + u.c;
-    sel.appendChild(o);
-  });
-  // Tenta caricamento da PARAMETROS in background
-  const TOKEN_M = '2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt';
-  const GID_P   = '58421555';
-  fetch('https://docs.google.com/spreadsheets/d/e/' + TOKEN_M + '/pub?gid=' + GID_P + '&single=true&output=csv&t=' + Date.now(), {cache:'no-store'})
-    .then(r => r.ok ? r.text() : '')
-    .then(txt => {
-      if (!txt || txt.includes('<!DOCTYPE')) return;
-      // Parser dedicato tabella login — PARAMETROS è un foglio "sporco":
-      // gli header Usuario/Local/PWD/Cargo/Tipo NON sono in riga 1, sono
-      // in mezzo al foglio. Cerchiamo la riga header ovunque sia.
-      function _splitCSVLine(line) {
-        const out = []; let cur = '', q = false;
-        for (let i = 0; i < line.length; i++) {
-          const ch = line[i];
-          if (ch === '"') { q = !q; }
-          else if (ch === ',' && !q) { out.push(cur); cur = ''; }
-          else { cur += ch; }
-        }
-        out.push(cur);
-        return out.map(s => s.trim().replace(/^"|"$/g, ''));
-      }
-      const lines = txt.split('\n');
-      // 1) trova la riga header della tabella login
-      let hdrIdx = -1, cU = -1, cL = -1, cP = -1, cC = -1, cT = -1;
-      for (let i = 0; i < lines.length; i++) {
-        const cols = _splitCSVLine(lines[i]);
-        const u = cols.indexOf('Usuario');
-        const l = cols.indexOf('Local');
-        const p = cols.indexOf('PWD');
-        if (u !== -1 && l !== -1 && p !== -1) {
-          hdrIdx = i; cU = u; cL = l; cP = p;
-          cC = cols.indexOf('Cargo');
-          cT = cols.indexOf('Tipo');
-          break;
-        }
-      }
-      if (hdrIdx === -1) return; // header non trovato → resta EQUIPO_FB
-      // 2) leggi le righe sotto l'header, filtra per locale corrente
-      const fromCSV = [];
-      for (let i = hdrIdx + 1; i < lines.length; i++) {
-        const cols = _splitCSVLine(lines[i]);
-        const nombre = (cols[cU] || '').trim();
-        const local  = (cols[cL] || '').trim();
-        const pwd    = (cols[cP] || '').trim();
-        if (!nombre || !pwd) continue;        // riga vuota → stop tabella
-        if (local !== CFG.local) continue;     // filtro locale
-        fromCSV.push({
-          n: nombre,
-          c: (cC !== -1 ? (cols[cC] || '') : '').trim() || 'Operador',
-          p: pwd,
-          t: parseInt((cT !== -1 ? cols[cT] : '') || '9') || 9
-        });
-      }
-      if (!fromCSV.length) return; // nessun operatore per questo locale → resta EQUIPO_FB
-      // 3) ordina e ripopola la select
-      fromCSV.sort((a,b) => a.n.localeCompare(b.n, 'es'));
-      sel.innerHTML = '<option value="">— Selecciona tu nombre —</option>';
-      fromCSV.forEach(u => {
-        const o = document.createElement('option');
-        o.value = u.n;
-        o.textContent = u.n + ' · ' + u.c;
-        sel.appendChild(o);
-      });
-      // Aggiorna EQUIPO_FB con dati CSV (serve a doLogin per validare la password)
-      EQUIPO_FB.length = 0;
-      fromCSV.forEach(u => EQUIPO_FB.push(u));
-    })
-    .catch(() => {});
-})();
-
-function doLogin() {
-  const nombre = document.getElementById('ls-nombre').value.trim();
-  const pwd    = document.getElementById('ls-pwd').value.trim();
-  const err    = document.getElementById('ls-err');
-  err.classList.remove('show');
-  if (!nombre) { err.textContent='Selecciona tu nombre.'; err.classList.add('show'); return; }
-  if (!pwd)    { err.textContent='Ingresa tu contraseña.'; err.classList.add('show'); return; }
-  const u = EQUIPO_FB.find(x => x.n === nombre);
-  if (!u || u.p !== pwd) {
-    err.textContent='Nombre o contraseña incorrectos.';
-    err.classList.add('show');
-    document.getElementById('ls-pwd').value = '';
-    return;
-  }
-  SESSION = {nombre:u.n, cargo:u.c, tipo:u.t};
-  // movOperador usa SESSION.nombre
+// ── SESIÓN · vía PinsitaAuth (módulo único · NORMA_DISENO) ──────────
+// El panel ya no tiene login propio. PinsitaAuth.init muestra el login
+// PIN si no hay sesión válida; si la hay, reconstruimos SESSION local.
+function _aplicarSesionPinsita() {
+  var s = (window.PinsitaAuth && PinsitaAuth.sesion) ? PinsitaAuth.sesion() : null;
+  if (!s) return;
+  SESSION = { nombre: s.user, cargo: s.role };
   if (typeof movOperador !== 'undefined') { movOperador = SESSION.nombre; }
-  // Mostra header chip + salir
-  const chip = document.getElementById('hdr-operador-chip');
-  if (chip) { chip.textContent = SESSION.nombre + ' · ' + SESSION.cargo; chip.style.display=''; }
-  const btnSalir = document.getElementById('btn-salir');
+  var chip = document.getElementById('hdr-operador-chip');
+  if (chip) {
+    chip.textContent = SESSION.cargo ? (SESSION.nombre + ' · ' + SESSION.cargo) : SESSION.nombre;
+    chip.style.display = '';
+  }
+  var btnSalir = document.getElementById('btn-salir');
   if (btnSalir) btnSalir.style.display = '';
-  // Nascondi login
-  document.getElementById('login-screen').classList.add('hidden');
-  document.getElementById('ls-pwd').value = '';
 }
-
-document.addEventListener('keydown', function(e) {
-  if (e.key==='Enter' && !document.getElementById('login-screen').classList.contains('hidden')) doLogin();
-});
 
 function askLogout()    { document.getElementById('logout-modal').classList.remove('hidden'); }
 function cancelLogout() { document.getElementById('logout-modal').classList.add('hidden'); }
 function confirmLogout() {
   document.getElementById('logout-modal').classList.add('hidden');
-  SESSION = null;
-  if (typeof movOperador !== 'undefined') movOperador = '';
-  const chip = document.getElementById('hdr-operador-chip');
-  if (chip) { chip.textContent=''; chip.style.display='none'; }
-  const btnSalir = document.getElementById('btn-salir');
-  if (btnSalir) btnSalir.style.display='none';
-  document.getElementById('ls-pwd').value='';
-  document.getElementById('ls-err').classList.remove('show');
-  document.getElementById('login-screen').classList.remove('hidden');
+  if (window.PinsitaAuth && PinsitaAuth.logout) { PinsitaAuth.logout(); return; }
+  try { localStorage.removeItem('pinsita_session'); } catch (e) {}
+  location.reload();
 }
 </script>
 
@@ -5564,6 +5437,13 @@ function helpRender() {
     <div id="help-content" style="flex:1;overflow-y:auto;padding:16px 20px"></div>
   </div>
 </div>
+
+<!-- ══ AUTH · módulo único PINSITA (NORMA_DISENO · una sola puerta) ══ -->
+<script src="../shared/pinsita_auth.js"></script>
+<script>
+  PinsitaAuth.init({ local:'cdl', accent:'#C4622D' });
+  _aplicarSesionPinsita();
+</script>
 
 </body>
 </html>
