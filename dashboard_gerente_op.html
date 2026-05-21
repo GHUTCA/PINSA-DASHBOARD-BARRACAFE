@@ -2087,13 +2087,13 @@ const LOCALES = [
     merma: { v: '3.8%', target: '≤4%', status:'cumple', class:'ok' },
     bono: { v: '75K', label: 'semanal', class:'ok' }
   },
-  { id: 'rsc', sigla: 'Riesco', estado: 'ACTIVO', jl: 'JL activo',
-    avance: 0, metas: 'sin datos · pre-apertura',
-    ventas: { v:'—', target:'—', status:'sin datos', class:'unav' },
-    foodcost: { v:'—', target:'—', status:'sin datos', class:'unav' },
-    rrhh: { v:'—', target:'—', status:'pendiente turnos', class:'unav', mock:true },
-    merma: { v:'—', target:'—', status:'sin datos', class:'unav' },
-    bono: { v: '—', label: 'sin datos', class:'unav' }
+  { id: 'rsc', sigla: 'Riesco', estado: 'ACTIVO', jl: 'JL activo · 15 días',
+    avance: 58, metas: '2/4 metas · merma + RRHH altos',
+    ventas: { v:'CLP 1.6M', target:'/2.0M', status:'cumple', class:'ok' },
+    foodcost: { v:'34%', target:'≤35%', status:'cumple', class:'ok' },
+    rrhh: { v:'24.2%', target:'≤22%', status:'no cumple', class:'bad', mock:true },
+    merma: { v:'5.4%', target:'≤4%', status:'no cumple', class:'bad' },
+    bono: { v: '0', label: 'no logrado', class:'bad' }
   }
 ];
 
@@ -3592,15 +3592,12 @@ function closeBonoPopup() {
 
 function _apiLocalToRow(id, l, api) {
   // V14.3 · Riga locale con dati reali (era vuota con —)
-  // FIX 20-MAY · per locale specifico, non dal consolidado.
-  // Bug pre-fix: leggevamo da api.go_consolidado.kpi_metrics (totale red) e
-  // li applicavamo a OGNI riga locale → con Riesco a zero, mostrava i numeri
-  // di Cdl sotto "Riesco". Adesso ogni riga prende i suoi dati da locales_mes[id].
+  // Per Cdl unico locale attivo: usa i KPI del go_consolidado che già rappresentano Cdl
   const sigla = id === 'cdl' ? 'Candelaria' : (id === 'rsc' ? 'Riesco' : id);
   const fcStatus = l.status_label || 'cumple';
   const fcClass  = l.status || 'ok';
 
-  // Fallback di default · locale senza dati
+  // Estraggo metriche da go_consolidado (per ahora coincide con Cdl)
   let row = {
     id: id,
     sigla: sigla,
@@ -3615,39 +3612,40 @@ function _apiLocalToRow(id, l, api) {
     bono:     { v: '0', label: '— calculando', class: 'unav' }
   };
 
-  // Leggo dati del locale specifico (non del consolidato red)
-  const localData = api && api.locales_mes ? api.locales_mes[id] : null;
-  if (localData && localData.ventas) {
-    const v = localData.ventas;
-    const fc = localData.food_cost;
-    const m = localData.merma;
-    const b = localData.bono;
-    const t = localData.targets;
-
-    if (v.total_clp > 0) {
+  if (api && api.go_consolidado) {
+    const kpis = api.go_consolidado.kpi_metrics || [];
+    const kpiV = kpis.find(k => k.id === 'ventas');
+    const kpiM = kpis.find(k => k.id === 'merma');
+    const bono = api.go_consolidado.bono;
+    if (kpiV) {
       row.ventas = {
-        v: _fmtClp(v.total_clp),
-        target: t && t.target_ventas_clp ? '/' + _fmtClp(t.target_ventas_clp).replace('CLP ', '') : '',
-        status: (v.pct_target || 0) + '%',
-        class: v.status || 'unav'
+        v: kpiV.value_label,
+        target: kpiV.target_label || '',
+        status: `${kpiV.status_label}`,
+        class: kpiV.status
       };
     }
-    if (m && m.total_pct != null && v.total_clp > 0) {
+    if (kpiM) {
       row.merma = {
-        v: m.total_pct.toFixed(1) + '%',
-        target: m.target_pct ? '≤' + m.target_pct + '%' : '',
-        status: m.status === 'ok' ? 'cumple' : (m.status === 'warn' ? 'en riesgo' : 'crítico'),
-        class: m.status || 'unav'
+        v: kpiM.value_label,
+        target: kpiM.target_label || '',
+        status: kpiM.status_label,
+        class: kpiM.status
       };
     }
-    if (b && b.target_clp > 0) {
+    if (bono) {
       row.bono = {
-        v: _fmtClp(b.target_clp),
-        label: (b.percent || 0) + '% logrado',
-        class: b.percent >= 100 ? 'ok' : (b.percent >= 50 ? 'warn' : 'bad')
+        v: _fmtClp(bono.target_clp || 0),
+        label: `${bono.percent}% logrado`,
+        class: bono.percent >= 100 ? 'ok' : (bono.percent >= 50 ? 'warn' : 'bad')
       };
-      row.avance = b.percent || 0;
+      row.avance = bono.percent;
+      row.metas = `${bono.cumplen}/${bono.activos} metas` + ((bono.total_kpis - bono.activos) > 0 ? ' · 1 pendiente' : '');
     }
+  }
+
+  return row;
+}
 
 // ============ FOOD COST DETAIL · 3 NIVELES ============
 function toggleFoodCostDetail() {
