@@ -2095,7 +2095,7 @@ async function ocRecepTogglePorSKU(safe) {
       </div>
       <div class="row2" style="margin-bottom:6px">
         <div class="field"><label>Precio neto factura (por UPC)</label>
-          <input type="text" inputmode="numeric" id="pfac-${safe}-${skuSafe}" placeholder="$0" style="font-family:var(--mono)" oninput="ocRecepRecalcSKU('${safe}','${skuSafe}',${tieneNegociado})" onblur="ocRecepFmtPrecio(this);ocRecepRecalcSKU('${safe}','${skuSafe}',${tieneNegociado})">
+          <input type="text" inputmode="numeric" id="pfac-${safe}-${skuSafe}" placeholder="Ingresar precio factura..." style="font-family:var(--mono)" oninput="ocRecepRecalcSKU('${safe}','${skuSafe}',${tieneNegociado})" onblur="ocRecepFmtPrecio(this);ocRecepRecalcSKU('${safe}','${skuSafe}',${tieneNegociado})">
         </div>
         <div class="field"><label>Precio OC (por UPC)</label>
           <input type="text" inputmode="numeric" id="poc-${safe}-${skuSafe}" value="${fmtCLP(it.precioOC)}" readonly style="font-family:var(--mono);opacity:0.55">
@@ -2117,6 +2117,17 @@ async function ocRecepTogglePorSKU(safe) {
       <button class="btn btn-green" style="flex:1" onclick="confirmarRecepcionOCPorSKU('${safe}','${skuSafes}',${tieneNegociado},${totalOC})">✓ Confirmar Recepción</button>
       <button onclick="abrirModalAnularOC('${safe}','${ocId.replace(/'/g,"\\'")}')" style="padding:10px 14px;background:rgba(184,84,80,0.12);border:1px solid var(--red);border-radius:8px;color:var(--red);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">🚫 Anular OC</button>
     </div>`;
+
+  // Focus automático en el primer campo precio factura vacío (BUG-1 fix)
+  setTimeout(() => {
+    const firstSkuSafe = items[0] ? String(items[0].sku||'').replace(/[^a-zA-Z0-9]/g,'-') + '-0' : null;
+    if (firstSkuSafe) {
+      const firstPfac = document.getElementById('pfac-' + safe + '-' + firstSkuSafe);
+      if (firstPfac && (!firstPfac.value || firstPfac.value === '$0')) {
+        firstPfac.focus();
+      }
+    }
+  }, 100);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2254,6 +2265,27 @@ async function confirmarRecepcionOCPorSKU(safe, skuSafesCsv, tieneNegociado, tot
     });
   }
   if (!totalItemsConQ) { showToast('Ingresa Q recibida en al menos un SKU','error'); return; }
+
+  // BUG-1 fix · Validación SKU con precioFactura $0 pero qRecibida > 0
+  // Sin esta confirmación el sistema genera DIFERENCIA fasulla + NC al proveedor
+  const skusSinPrecio = items.filter(it => it.qRecibida > 0 && (it.precioFactura === 0 || it.precioFactura === null || isNaN(it.precioFactura)));
+  if (skusSinPrecio.length > 0) {
+    const lista = skusSinPrecio.map(it => '· ' + (it.desc || it.sku)).join('\n');
+    const msg = 'Hay ' + skusSinPrecio.length + ' SKU sin precio factura ingresado:\n\n' + lista + '\n\n' +
+                'Si confirmas con $0, el sistema generará DIFERENCIA' +
+                (tieneNegociado ? ' y/o NC al proveedor' : '') + '.\n\n' +
+                '¿Confirmar igualmente?';
+    if (!confirm(msg)) {
+      // Foco al primer pfac vuoto del primero SKU sin precio
+      const firstSinPrecio = skusSinPrecio[0];
+      const idx = items.findIndex(x => x.sku === firstSinPrecio.sku);
+      const skuSafe = String(firstSinPrecio.sku||'').replace(/[^a-zA-Z0-9]/g,'-') + '-' + idx;
+      const inp = document.getElementById('pfac-' + safe + '-' + skuSafe);
+      if (inp) inp.focus();
+      return;
+    }
+  }
+
   const nota = document.getElementById('nota-recep-'+safe)?.value || '';
   const btn = document.querySelector(`#recep-${safe} .btn-green`);
   if (btn) { btn.disabled = true; btn.innerHTML='<span class="spinner"></span> Registrando...'; }
