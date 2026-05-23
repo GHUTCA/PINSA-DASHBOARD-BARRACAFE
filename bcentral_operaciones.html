@@ -1281,7 +1281,7 @@ function goTab(name) {
 
   // Carichi lazy
   if (name === 'movimientos') bcMovRenderRecientes();
-  if (name === 'despacho')   loadDespacho();
+  if (name === 'despacho')   renderDespacho();
   if (name === 'oc' && STATE.ocTabActual === 'recepcion') renderOCRecepcion();
   if (name === 'conteo' && !STATE.conteo.length) loadConteoBC();
   if (name === 'proveedores') {
@@ -1683,7 +1683,7 @@ async function refrescarTodo() {
   // Aggiorna il tab attivo
   const t = STATE.tab;
   if (t==='inventario')  { renderInventario(); }
-  if (t==='despacho')    { loadDespacho(); }
+  if (t==='despacho')    { renderDespacho(); }
   if (t==='movimientos') { bcMovCargarProveedores(); bcMovRenderRecientes(); }
   if (t==='proveedores') { renderProveedoresList(prov); }
   if (t==='conteo')      { STATE.conteo=[]; loadConteoBC(); }
@@ -2348,21 +2348,13 @@ function despToggleYMarcar(detId, solId, cardId) {
   }
 }
 
-// ═══ NUOVA loadDespacho · ricarica CSV dal foglio (chiamata esplicita) ═══
-async function loadDespacho() {
+// ═══ renderDespacho · ASYNC con loadCSV interno (ripristino post-rollback 23-may LATE) ═══
+async function renderDespacho() {
   const el = document.getElementById('desp-sol-list');
+  if (!el) return;
   el.innerHTML='<div class="loading-card"><div class="spinner"></div></div>';
   const rows = await loadCSV(CFG.GID.solicitud);
   STATE.solicitudes = rows;
-  renderDespacho();  // poi renderizza dallo STATE appena caricato
-}
-
-// ═══ renderDespacho · render PURO dallo STATE, NIENTE I/O ═══
-// (era async + loadCSV — ora sincrono e leggero)
-function renderDespacho() {
-  const el = document.getElementById('desp-sol-list');
-  if (!el) return;
-  const rows = STATE.solicitudes || [];
 
   const locales = [...new Set(rows.map(r=>(r['Local']||'').trim()).filter(Boolean))];
   const pillsEl = document.getElementById('desp-local-pills');
@@ -2744,15 +2736,18 @@ async function confirmarDespacho(solId, safe, nItems, local) {
     showToast('✅ Despacho confirmado → '+local,'success');
     
     // ═══════════════════════════════════════════════════════════════════
-    // 🆕 SOFT-UPDATE COMPLETO · 23-may LATE
-    // Il CSV pubblico ha cache server-side 5-15 min. Per dare feedback
-    // immediato all'operatore (evita click multipli per confusione), 
-    // aggiorniamo STATE manualmente con il risultato atteso.
+    // 🆕 ROLLBACK 23-may LATE · "hide locale" minimale
+    // ═══════════════════════════════════════════════════════════════════
+    // Logica:
+    //   (a) Marca como ENVIADO in STATE.solicitudes SOLO i SKU appena despachati
+    //       (per coerenza interna, così se ri-renderizziamo non riappaiono).
+    //   (b) Nascondi visivamente la card della SOL appena confermata, così
+    //       l'operatore vede subito che il click è andato e non riclicca.
+    //   (c) Niente decremento STATE.inventario (l'inventario si aggiorna al
+    //       prossimo Actualizar/cambio tab che fa loadCSV).
+    //   (d) Niente setTimeout di reload silenzioso (causa di interferenze).
     // ═══════════════════════════════════════════════════════════════════
     
-    // (1) Marca SOLO i SKU effettivamente despachati come ENVIADO in STATE.solicitudes
-    //     Caso "mix" SOL-1610: 3 erano già ENVIADO, 1 era SOLICITADO → solo quello che
-    //     abbiamo despachato passa adesso, gli altri restano com'erano.
     const skusDespachados = new Set(
       items.filter(it => (parseFloat(it.qConf)||0) > 0).map(it => String(it.sku).trim())
     );
@@ -2760,61 +2755,13 @@ async function confirmarDespacho(solId, safe, nItems, local) {
       const id = r['ID Solicitud']||r['_col1']||('SOL-'+r['Fecha']);
       if (id !== solId) return r;
       const skuRow = String(r['SKU']||'').trim();
-      if (!skusDespachados.has(skuRow)) return r;  // SKU non despachato in questo round
+      if (!skusDespachados.has(skuRow)) return r;
       return Object.assign({}, r, {'Estado': 'ENVIADO'});
     });
     
-    // (2) Decrementa stock UO e UPC in STATE.inventario per ogni SKU despachato
-    //     Calcola anche il valor diff per i KPI Inventario.
-    items.forEach(it => {
-      const qConf = parseFloat(it.qConf) || 0;
-      if (qConf <= 0) return;
-      const skuStr = String(it.sku).trim();
-      STATE.inventario = STATE.inventario.map(invRow => {
-        if (String(invRow['SKU']||'').trim() !== skuStr) return invRow;
-        // Decrementa Inventario UO (campo principale che renderDespacho legge per stock disponible)
-        const invUOAct = limpiarNum(invRow['Inventario UO']||'0');
-        const invUPCAct = limpiarNum(invRow['Inventario UPC']||'0');
-        // Costo per ricalcolo Valor Inventario
-        const costoUnit = limpiarNum(invRow['Costo UTM']||'0');
-        // Decremento: 1 UO sale = -1 UO de stock
-        // Per UPC il decremento dipende da quanto pesa 1 UO in UPC. Per ora decrementiamo UO 
-        // (UPC verrà ricalcolato al prossimo loadCSV). Per il front end di Despacho è abbastanza
-        // perché legge 'Inventario UO' / 'Inventario UPC' direttamente.
-        const newUO = Math.max(0, invUOAct - qConf);
-        const newUPC = invUPCAct;  // non tocchiamo UPC qui — sarà ricalcolato al refresh
-        const newValor = newUPC * costoUnit;
-        return Object.assign({}, invRow, {
-          'Inventario UO': String(newUO),
-          'Valor Inventario $': '$' + Math.round(newValor).toLocaleString('es-CL')
-        });
-      });
-    });
-    
-    // (3) Re-render Despacho dallo STATE aggiornato (no CSV reload)
-    renderDespacho();
-    
-    // (4) Se l'utente ha il tab Inventario aperto in qualche momento, lo aggiorniamo
-    //     (KPI + lista). renderInventario è idempotente.
-    if (typeof renderInventario === 'function' && STATE.inventario.length) {
-      renderInventario();
-    }
-    
-    // (5) Trigger reload silenzioso in background dopo 8 secondi: a quel punto la cache CSV
-    //     dovrebbe essere già aggiornata (Google /pub invalida cache anche più rapidamente
-    //     con cache-buster + no-store). Reload silenzioso = solo aggiorna STATE, no re-render
-    //     visivo invadente; se nuovi dati cambiano qualcosa, renderDespacho lo riflette.
-    setTimeout(async () => {
-      try {
-        const freshSol = await loadCSV(CFG.GID.solicitud);
-        if (freshSol && freshSol.length) STATE.solicitudes = freshSol;
-        const freshInv = await loadCSV(CFG.GID.inventario);
-        if (freshInv && freshInv.length) STATE.inventario = freshInv;
-        // Re-render solo se l'utente è ancora su Despacho
-        if (STATE.tab === 'despacho') renderDespacho();
-        if (STATE.tab === 'inventario' && typeof renderInventario === 'function') renderInventario();
-      } catch(e) { /* silenzioso, non bloccare l'operatore */ }
-    }, 8000);
+    // Hide visivo della card SOL appena confermata
+    const cardEl = document.getElementById('card-'+safe);
+    if (cardEl) cardEl.style.display = 'none';
     
   } else {
     showToast('Error: '+(res?.error||'sin respuesta'),'error');
