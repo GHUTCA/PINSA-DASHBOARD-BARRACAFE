@@ -3283,7 +3283,18 @@ function recepRenderGrupo(g, open) {
   const idSafe   = g.id.replace(/[^a-zA-Z0-9]/g,'-');
   const isPend   = estado === 'pendiente' || estado === 'parcial';
   const opacity  = isPend ? '' : 'opacity:0.75;';
-  const borderCol= estado==='diferencia' ? 'rgba(192,57,43,0.4)' : estado==='recibido' ? 'rgba(15,110,86,0.3)' : 'var(--border)';
+
+  // BUG-4 fix · CONS appena arrivata = "NO LEÍDA" hasta que se abra
+  // localStorage key 'consLeidos' = array degli ID già letti
+  let consLeidos = [];
+  try { consLeidos = JSON.parse(localStorage.getItem('consLeidos') || '[]'); } catch(e) {}
+  const isNoLeida = isPend && !consLeidos.includes(g.id);
+  const noLeidaBadgeHTML = isNoLeida
+    ? `<span style="background:rgba(196,98,29,0.18);color:var(--orange2);border:1px solid rgba(196,98,29,0.4);font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 7px;border-radius:10px;margin-left:6px">NO LEÍDA</span>`
+    : '';
+
+  const borderCol = isNoLeida ? 'var(--orange2)' : (estado==='diferencia' ? 'rgba(192,57,43,0.4)' : estado==='recibido' ? 'rgba(15,110,86,0.3)' : 'var(--border)');
+  const borderWidth = isNoLeida ? '2px' : '1px';
 
   // Productos rows
   const prodsHTML = g.prods.map((p,i) => {
@@ -3331,10 +3342,10 @@ function recepRenderGrupo(g, open) {
       </button>
     </div>` : '';
 
-  return `<div style="background:var(--bg2);border:1px solid ${borderCol};border-radius:8px;margin-bottom:10px;overflow:hidden;${opacity}">
-    <div onclick="recepToggle('det-${idSafe}')" style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px">
-      <div>
-        <div style="font-size:11px;font-family:var(--mono);color:var(--t3);margin-bottom:2px">${g.id}</div>
+  return `<div style="background:var(--bg2);border:${borderWidth} solid ${borderCol};border-radius:8px;margin-bottom:10px;overflow:hidden;${opacity}">
+    <div onclick="recepToggleConRead('det-${idSafe}','${g.id.replace(/'/g,"\\'")}')" style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-family:var(--mono);color:var(--t3);margin-bottom:2px">${g.id}${noLeidaBadgeHTML}</div>
         <div style="font-size:13px;font-weight:500;color:var(--t1)">${g.prods.length} productos · ${fmtDate(g.fecha)}</div>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
@@ -3358,6 +3369,22 @@ function recepRenderGrupo(g, open) {
 function recepToggle(id) {
   const el = document.getElementById(id);
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+// BUG-4 fix · toggle + marca CONS como leída en localStorage
+function recepToggleConRead(detId, consId) {
+  recepToggle(detId);
+  try {
+    const consLeidos = JSON.parse(localStorage.getItem('consLeidos') || '[]');
+    if (!consLeidos.includes(consId)) {
+      consLeidos.push(consId);
+      // Mantener solo últimos 200 para no inflar localStorage
+      if (consLeidos.length > 200) consLeidos.shift();
+      localStorage.setItem('consLeidos', JSON.stringify(consLeidos));
+      // Re-render para quitar el badge + bordo arancio
+      renderRecepcion();
+    }
+  } catch(e) {}
 }
 
 function recepCheckInput(el, esperado) {
