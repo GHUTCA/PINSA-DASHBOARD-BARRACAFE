@@ -1427,6 +1427,7 @@ const CFG = {
 // ════════════════════════════════════════════════════════
 const STATE = {
   tab: 'movimientos',
+  recepFiltroFecha: 'hoyAyer',  // BUG-3-bis · 'hoyAyer' | '7d' | '30d'
   inventario: [],
   reposicion: [],
   confirmacion: [],
@@ -3229,6 +3230,36 @@ async function recargarYRenderRecepcion() {
   renderRecepcion();
 }
 
+// BUG-3-bis · Helper filtro fecha entregas
+function recepFiltrarPorFecha(grupos, filtro) {
+  if (!filtro || filtro === 'all') return grupos;
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  let cutoff;
+  if (filtro === 'hoyAyer') {
+    cutoff = new Date(hoy);
+    cutoff.setDate(cutoff.getDate() - 1);  // ayer 00:00
+  } else if (filtro === '7d') {
+    cutoff = new Date(hoy);
+    cutoff.setDate(cutoff.getDate() - 7);
+  } else if (filtro === '30d') {
+    cutoff = new Date(hoy);
+    cutoff.setDate(cutoff.getDate() - 30);
+  } else {
+    return grupos;
+  }
+  return grupos.filter(g => {
+    if (!g.fecha) return false;
+    const f = new Date(g.fecha);
+    return !isNaN(f) && f >= cutoff;
+  });
+}
+
+function recepSetFiltro(f) {
+  STATE.recepFiltroFecha = f;
+  renderRecepcion();
+}
+
 function renderRecepcion() {
   // BUG-3 fix · filtro che esclude righe vuote, MA non filtra recentlyConfirmed
   // (quelle vengono solo "promosse" a stato RECIBIDO localmente se il CSV
@@ -3282,9 +3313,35 @@ function renderRecepcion() {
     pendientes.forEach(g => { html += recepRenderGrupo(g, true); });
   }
 
+  // BUG-3-bis · filtro data applicato SOLO a "Últimas Entregas" (no a pendientes)
+  const filtro = STATE.recepFiltroFecha || 'hoyAyer';
+  const recientesFiltradas = recepFiltrarPorFecha(recientes, filtro);
+
+  // Header + pills di filtro (sempre visibili se ci sono recientes nel CSV)
   if (recientes.length) {
-    html += `<div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;color:var(--t3);margin:16px 0 8px">Últimas entregas</div>`;
-    recientes.forEach(g => { html += recepRenderGrupo(g, false); });
+    const pillStyle = (active) =>
+      `padding:4px 11px;border-radius:14px;font-size:11px;font-weight:${active?'700':'500'};cursor:pointer;` +
+      `border:1px solid ${active?'var(--blue)':'var(--border2)'};` +
+      `background:${active?'rgba(74,111,165,0.15)':'var(--bg2)'};` +
+      `color:${active?'var(--blue2)':'var(--t3)'};line-height:1`;
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px;gap:8px;flex-wrap:wrap">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;color:var(--t3)">
+        Últimas entregas · <span style="color:var(--t2);font-weight:700">${recientesFiltradas.length}</span> de ${recientes.length}
+      </div>
+      <div style="display:flex;gap:6px">
+        <span onclick="recepSetFiltro('hoyAyer')" style="${pillStyle(filtro==='hoyAyer')}">Hoy + Ayer</span>
+        <span onclick="recepSetFiltro('7d')" style="${pillStyle(filtro==='7d')}">7 días</span>
+        <span onclick="recepSetFiltro('30d')" style="${pillStyle(filtro==='30d')}">30 días</span>
+      </div>
+    </div>`;
+
+    if (recientesFiltradas.length) {
+      recientesFiltradas.forEach(g => { html += recepRenderGrupo(g, false); });
+    } else {
+      html += `<div style="padding:16px;text-align:center;color:var(--t3);font-size:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px">
+        Sin entregas en este rango · cambia el filtro para ver más
+      </div>`;
+    }
   }
 
   list.innerHTML = html;
