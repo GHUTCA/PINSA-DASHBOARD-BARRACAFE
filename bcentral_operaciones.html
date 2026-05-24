@@ -1256,12 +1256,67 @@ async function callGAS(payload) {
   } catch(e) { return { ok: false, error: e.toString() }; }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// BUG-2 fix · CROSS-TAB REFRESH (on-demand, no setTimeout, no race)
+// ═══════════════════════════════════════════════════════════════════
+// STATE.dirty = quali tab hanno dati stantii e devono refreshare al
+// prossimo goTab. Si marca dopo ogni azione di scrittura; il refresh
+// è on-demand (avviene SOLO quando l'operatore arriva sul tab),
+// con loadCSV mirato (un solo CSV per tab, non un reload completo).
+// Pattern sicuro: nessun setTimeout silenzioso, nessun decremento STATE.
+// ═══════════════════════════════════════════════════════════════════
+if (!STATE.dirty) {
+  STATE.dirty = {
+    inventario:  false,
+    despacho:    false,
+    oc:          false,
+    movimientos: false,
+    conteo:      false,
+    proveedores: false
+  };
+}
+
+function markDirty(tabsArr) {
+  if (!Array.isArray(tabsArr)) tabsArr = [tabsArr];
+  tabsArr.forEach(t => { if (t in STATE.dirty) STATE.dirty[t] = true; });
+}
+
+async function refreshTabIfDirty(tab) {
+  if (!STATE.dirty[tab]) return;
+  try {
+    if (tab === 'inventario' && CFG.GID.inventario) {
+      const fresh = await loadCSV(CFG.GID.inventario);
+      if (fresh && fresh.length) STATE.inventario = fresh;
+    }
+    else if (tab === 'despacho' && CFG.GID.solicitud) {
+      const fresh = await loadCSV(CFG.GID.solicitud);
+      if (fresh && fresh.length) STATE.solicitudes = fresh;
+    }
+    else if (tab === 'oc' && CFG.GID.oc_log) {
+      const fresh = await loadCSV(CFG.GID.oc_log);
+      if (fresh && fresh.length) STATE.ocLog = fresh;
+    }
+    else if (tab === 'movimientos' && CFG.GID.movimientos) {
+      const fresh = await loadCSV(CFG.GID.movimientos);
+      if (fresh && fresh.length) STATE.movimientos = fresh;
+    }
+    else if (tab === 'conteo' && CFG.GID.conteo) {
+      const fresh = await loadCSV(CFG.GID.conteo);
+      if (fresh && fresh.length) STATE.conteo = fresh;
+    }
+  } catch (e) {
+    // fallback silenzioso: il tab mostra dati cache, l'operatore può fare Actualizar
+  }
+  STATE.dirty[tab] = false;
+}
+
+  
 // ════════════════════════════════════════════════════════
 // NAVEGACIÓN TABS
 // ════════════════════════════════════════════════════════
 const TAB_LIST = ['movimientos','despacho','inventario','oc','proveedores','conteo'];
 
-function goTab(name) {
+async function goTab(name) {
   STATE.tab = name;
   document.querySelectorAll('#mod-inventario,#mod-oc,#mod-despacho,#mod-conteo,#mod-proveedores,#mod-movimientos').forEach(m => m.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
@@ -1269,7 +1324,6 @@ function goTab(name) {
   const idx = TAB_LIST.indexOf(name);
   const tabs = document.querySelectorAll('.nav-tab');
   if (idx >= 0 && tabs[idx]) tabs[idx].classList.add('active');
-
   // Calcola top dinamico
   const hdr = document.querySelector('.header');
   const nav = document.querySelector('.nav-scroll');
@@ -1279,19 +1333,22 @@ function goTab(name) {
     if (el) el.style.top = top + 'px';
   }
 
+  // BUG-2 fix · refresh dati se il tab è dirty (dopo un'azione di scrittura su altro tab)
+  // Si fa PRIMA del render, così il render usa dati freschi
+  await refreshTabIfDirty(name);
+
   // Carichi lazy
   if (name === 'movimientos') bcMovRenderRecientes();
   if (name === 'despacho')   renderDespacho();
   if (name === 'oc' && STATE.ocTabActual === 'recepcion') renderOCRecepcion();
   if (name === 'conteo' && !STATE.conteo.length) loadConteoBC();
+  if (name === 'inventario')  renderInventario();
   if (name === 'proveedores') {
     if (!STATE.proveedores.length) renderProveedores();
     else renderProveedoresList(STATE.proveedores);
   }
-
   // Aggiorna carrito bar
   actualizarCarritoBar();
-
   // FAB conteo
   const fab = document.getElementById('cteo-fab');
   if (fab) fab.style.display = (name === 'conteo' && Object.keys(STATE.conteoInputs).length > 0) ? 'block' : 'none';
@@ -1921,6 +1978,10 @@ async function emitirOC() {
   btn.disabled=false; btn.innerHTML='📧 Emitir OC';
   if (allOk && ocIds.length) {
     showToast('✅ '+ocIds.length+' OC'+(ocIds.length>1?'s':'')+' emitida'+(ocIds.length>1?'s':'')+(esInfra?' · ⚠ Requiere aprobación JO':' · Pendiente aprobación JO'), 'success');
+
+    // BUG-2 fix · invalida OC stesso (la nuova OC va in sub-tab Recepción como pendiente)
+    markDirty(['oc']);
+
     const recEl = document.getElementById('oc-recientes-list');
     if (recEl.querySelector('.empty')) recEl.innerHTML='';
     ocIds.forEach(ocId => {
@@ -2304,6 +2365,11 @@ async function confirmarRecepcionOCPorSKU(safe, skuSafesCsv, tieneNegociado, tot
     let msg = '✅ Recepción confirmada · ' + (res.escritos||0) + ' SKU registrados';
     if (res.hasDiff) msg += ' · con diferencias';
     showToast(msg, 'success');
+
+    // BUG-2 fix · invalida Inventario, Movimientos e OC
+    // (recepción ha incrementato stock, scritto Ingreso Proveedor, OC passa a RECIBIDA)
+    markDirty(['inventario','movimientos','oc']);
+
     STATE.ocConfirmadas = STATE.ocConfirmadas || new Set();
     STATE.ocConfirmadas.add(ocId);
     if (card) card.remove();
@@ -2766,6 +2832,10 @@ async function confirmarDespacho(solId, safe, nItems, local) {
   if (btn) { btn.disabled=false; btn.innerHTML=`✓ Confirmar Envío → ${local}`; }
   if (res && res.ok!==false) {
     showToast('✅ Despacho confirmado → '+local,'success');
+    
+    // BUG-2 fix · invalida Inventario e Movimientos
+    // (despacho ha decrementato stock e scritto nuova riga Entrega BLocal)
+    markDirty(['inventario','movimientos']);
     
     // ═══════════════════════════════════════════════════════════════════
     // 🆕 ROLLBACK 23-may LATE · "hide locale" minimale
