@@ -3230,11 +3230,24 @@ async function recargarYRenderRecepcion() {
 }
 
 function renderRecepcion() {
-  const allRows  = STATE.confirmacion.filter(r =>
-    r['ID Entrega'] && r['ID Entrega'] !== '' &&
-    !(STATE.recentlyConfirmed && STATE.recentlyConfirmed.has(r['ID Entrega']))
-  );
-  const grupos   = recepAgrupar(allRows);
+  // BUG-3 fix · filtro che esclude righe vuote, MA non filtra recentlyConfirmed
+  // (quelle vengono solo "promosse" a stato RECIBIDO localmente se il CSV
+  // pubblico ha cache stantia ma il backend ha già scritto)
+  const allRows = STATE.confirmacion.filter(r => r['ID Entrega'] && r['ID Entrega'] !== '');
+
+  // Override locale: se la confermo da poco, force Q Recibida = Q Esperada
+  // per evitare che appaia come "pendiente" finché la cache CSV pubblica non si aggiorna
+  const recentSet = STATE.recentlyConfirmed || new Set();
+  if (recentSet.size > 0) {
+    allRows.forEach(r => {
+      if (recentSet.has(r['ID Entrega']) && (!r['Q Recibida UPC'] || r['Q Recibida UPC'] === '')) {
+        // Clone difensivo per non mutare STATE.confirmacion
+        r['Q Recibida UPC'] = r['Q Esperada UPC'];
+      }
+    });
+  }
+
+  const grupos = recepAgrupar(allRows);
   const todayStr = today();
 
   // KPI
