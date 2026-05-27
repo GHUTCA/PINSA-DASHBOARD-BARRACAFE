@@ -1,16 +1,22 @@
 /* ════════════════════════════════════════════════════════════════════
- *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.3
+ *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.4
  *  Una sola copia in /shared/ · incluso da ogni hub di locale + Portal.
  *
  *  v1.1 · la lista utenti arriva dal GAS (azione lista_usuarios),
  *         non da un CSV. Una sola fonte, un solo canale.
  *         Il codice locale (rsc/cdl) e' quello del foglio: nessuna traduzione.
  *
- *  v1.3 (27-may-2026) · aggiunta API PinsitaAuth.initOnPortal()
+ *  *  v1.3 (27-may-2026) · aggiunta API PinsitaAuth.initOnPortal()
  *         Login PIN inline sul Portal nuovo (AUTH-1-bis).
  *         Scope-aware: scope='cdl'/'rsc' carica utenti del locale + corporate;
  *         scope vuoto (Operacion/Estrategia) carica solo corporate.
  *         Riusa overlay/tastiera/set_pin/ayuda esistenti.
+ *
+ *  v1.4 (27-may-2026 tarde) · fix bfcache nel Portal.
+ *         Bug X: dopo login + navigate a card, ritorno con VOLVER non
+ *         iniettava il chip Salir (initOnPortal non rieseguito dalla bfcache).
+ *         Bug Y: ritorno da bfcache mostrava overlay PIN residuo sopra il Portal.
+ *         Fix: listener 'pageshow' in initOnPortal — chiude overlay e inietta chip.
  *
  *  Cosa fa:
  *   - Schermata login (lista nome + foto/iniziali + PIN 4 cifre)
@@ -97,6 +103,17 @@
       // badge utente in header se sessione attiva
       var ses = leerSesion();
       if (ses) inyectarBarraUsuarioPortal(ses);
+
+      // v1.4 · fix bfcache: al ritorno da una card (VOLVER → history.back)
+      // il browser ripristina la pagina dalla bfcache senza rieseguire initOnPortal.
+      // Conseguenza: overlay residuo aperto e/o chip non iniettato.
+      // pageshow scatta SIA al primo load SIA al restore dalla bfcache.
+      window.addEventListener('pageshow', function () {
+        if (!modoPortal) return;
+        cerrarOverlayPortal();         // idempotente: chiude overlay se presente
+        var s = leerSesion();
+        if (s) inyectarBarraUsuarioPortal(s);  // ha guard interno anti-duplica
+      });
     },
     logout: function () {
       try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
