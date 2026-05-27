@@ -1,12 +1,12 @@
 /* ════════════════════════════════════════════════════════════════════
- *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.2
+ *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.3
  *  Una sola copia in /shared/ · incluso da ogni hub di locale + Portal.
  *
  *  v1.1 · la lista utenti arriva dal GAS (azione lista_usuarios),
  *         non da un CSV. Una sola fonte, un solo canale.
  *         Il codice locale (rsc/cdl) e' quello del foglio: nessuna traduzione.
  *
- *  v1.2 (27-may-2026) · aggiunta API PinsitaAuth.initOnPortal()
+ *  v1.3 (27-may-2026) · aggiunta API PinsitaAuth.initOnPortal()
  *         Login PIN inline sul Portal nuovo (AUTH-1-bis).
  *         Scope-aware: scope='cdl'/'rsc' carica utenti del locale + corporate;
  *         scope vuoto (Operacion/Estrategia) carica solo corporate.
@@ -215,9 +215,9 @@
       var raw = localStorage.getItem(SESSION_KEY);
       if (!raw) return null;
       var s = JSON.parse(raw);
-      // v1.2: nel Portal accettiamo qualsiasi local valido (cdl, rsc, *, ...)
-      // negli hub locali, scartiamo sessioni di altri locali
-      if (!modoPortal && s.local !== CFG.local) return null;
+      // v1.3: nel Portal accettiamo qualsiasi local valido (cdl, rsc, *, ...)
+      // negli hub locali, accettiamo sessione del locale O sessione corporate (*)
+      if (!modoPortal && s.local !== '*' && s.local !== CFG.local) return null;
       if (!s.expiresAt || s.expiresAt < Date.now()) {   // scaduta
         localStorage.removeItem(SESSION_KEY);
         return null;
@@ -319,6 +319,12 @@
     ov.id = 'pa-overlay';
     ov.innerHTML = ESTILO + MARKUP;
     document.body.appendChild(ov);
+    // v1.3: pa-toast come figlio diretto di body (fuori da overlay nascosto)
+    if (!document.getElementById('pa-toast')) {
+      var tst = document.createElement('div');
+      tst.id = 'pa-toast';
+      document.body.appendChild(tst);
+    }
     construirTeclado();
     document.getElementById('pa-back').onclick = volverALista;
     // v1.2 · close button (visibile solo in modoPortal)
@@ -741,7 +747,6 @@
         '<div id="pa-teclado"></div>' +
       '</div>' +
     '</div>' +
-    '<div id="pa-toast"></div>' +
     HELP_FAB + HELP_PANEL;
 
 
