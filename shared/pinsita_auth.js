@@ -1,10 +1,16 @@
 /* ════════════════════════════════════════════════════════════════════
- *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.1
- *  Una sola copia in /shared/ · incluso da ogni hub di locale.
+ *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.2
+ *  Una sola copia in /shared/ · incluso da ogni hub di locale + Portal.
  *
  *  v1.1 · la lista utenti arriva dal GAS (azione lista_usuarios),
  *         non da un CSV. Una sola fonte, un solo canale.
  *         Il codice locale (rsc/cdl) e' quello del foglio: nessuna traduzione.
+ *
+ *  v1.2 (27-may-2026) · aggiunta API PinsitaAuth.initOnPortal()
+ *         Login PIN inline sul Portal nuovo (AUTH-1-bis).
+ *         Scope-aware: scope='cdl'/'rsc' carica utenti del locale + corporate;
+ *         scope vuoto (Operacion/Estrategia) carica solo corporate.
+ *         Riusa overlay/tastiera/set_pin/ayuda esistenti.
  *
  *  Cosa fa:
  *   - Schermata login (lista nome + foto/iniziali + PIN 4 cifre)
@@ -43,6 +49,14 @@
   var pinBuffer = '';      // cifre PIN digitate
   var modo = 'login';      // 'login' | 'set_pin'
   var pinTmp = '';         // primo PIN durante set_pin (per la conferma)
+  
+  // ── v1.2 · STATO PORTALE ──────────────────────────────────────────
+  // Quando true, init e' stato chiamato come initOnPortal:
+  // - leerSesion() NON scarta sessioni di altri locali
+  // - confirmarPin() / manejarSetPin() al successo non chiamano aplicarGating()
+  //   ma navigano alla card cliccata (cardPendiente.href) se autorizzato
+  var modoPortal = false;
+  var cardPendiente = null;   // {href, roles[], scope} card cliccata in attesa di login
 
   // ════════════════════════════════════════════════════════════════
   //  API PUBBLICA
@@ -61,12 +75,137 @@
       mostrarOverlay();
       cargarUsuarios();
     },
+    // ── v1.2 · API per il Portal ─────────────────────────────────
+    // Setup: NON apre overlay subito. Intercetta i click sulle card e
+    // mostra overlay solo se sessione assente. Mostra badge utente se attiva.
+    initOnPortal: function (opts) {
+      CFG.accent = (opts && opts.accent) || '#C4622D';
+      modoPortal = true;
+      // costruisci overlay (nascosto) per poterlo aprire al primo click
+      construirOverlay();
+      var ov = document.getElementById('pa-overlay');
+      if (ov) ov.style.setProperty('--pa-accent', CFG.accent);
+      var lg = ov && ov.querySelector('.pa-logo');
+      if (lg) lg.style.backgroundImage = "url('" + LOGO_PINSA + "')";
+
+      // intercetta click su tutte le card con data-roles
+      var cards = document.querySelectorAll('a.card[data-roles]');
+      for (var i = 0; i < cards.length; i++) {
+        cards[i].addEventListener('click', onPortalCardClick);
+      }
+
+      // badge utente in header se sessione attiva
+      var ses = leerSesion();
+      if (ses) inyectarBarraUsuarioPortal(ses);
+    },
     logout: function () {
       try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
       location.reload();
     },
     sesion: function () { return leerSesion(); }
   };
+
+  // ════════════════════════════════════════════════════════════════
+  //  v1.2 · LOGICA PORTALE · click sulle card
+  // ════════════════════════════════════════════════════════════════
+  function onPortalCardClick(ev) {
+    var card = ev.currentTarget;
+    var rolesAttr = card.getAttribute('data-roles') || '';
+    var scopeAttr = card.getAttribute('data-local-scope') || '';
+    var href      = card.getAttribute('href') || '';
+    var roles     = rolesAttr.split(',').map(function (r) { return r.trim().toUpperCase(); });
+
+    var ses = leerSesion();
+
+    // ─── Caso 1: sessione attiva ───
+    if (ses) {
+      if (!rolPermitido(roles, ses.role) || !localPermitido(scopeAttr, ses.local)) {
+        ev.preventDefault();
+        toast('No autorizado para esta area');
+        return;
+      }
+      // autorizzato → click naturale procede al href
+      return;
+    }
+
+    // ─── Caso 2: sessione assente → overlay login ───
+    ev.preventDefault();
+    cardPendiente = { href: href, roles: roles, scope: scopeAttr };
+
+    // Scope-aware: usa scope della card o '*' se vuoto (corporate-only)
+    CFG.local = scopeAttr || '*';
+    mostrarOverlay();
+    // reset stato per overlay fresh
+    seleccion = null; pinBuffer = ''; pinTmp = ''; modo = 'login';
+    var stepL = document.getElementById('pa-step-lista');
+    var stepP = document.getElementById('pa-step-pin');
+    if (stepL) stepL.style.display = 'block';
+    if (stepP) stepP.style.display = 'none';
+    mostrarHelp(false);
+    cargarUsuarios();
+  }
+
+  function rolPermitido(roles, sessionRole) {
+    if (!roles || !roles.length || (roles.length === 1 && !roles[0])) return true;
+    return roles.indexOf(String(sessionRole || '').toUpperCase()) !== -1;
+  }
+
+  function localPermitido(scopeAttr, sessionLocal) {
+    if (!scopeAttr) return true;                          // card senza scope = qualsiasi local autorizzato
+    if (sessionLocal === '*') return true;                // utente corporate entra ovunque
+    return String(sessionLocal || '').toLowerCase() === scopeAttr.toLowerCase();
+  }
+
+  function inyectarBarraUsuarioPortal(ses) {
+    var hr = document.querySelector('header .hright');
+    if (!hr || document.getElementById('pa-userchip')) return;
+    var chip = document.createElement('div');
+    chip.id = 'pa-userchip';
+    chip.style.cssText =
+      'display:flex;align-items:center;gap:8px;padding:5px 10px;border:1px solid var(--b2);' +
+      'border-radius:16px;font-size:11px;color:var(--t2);cursor:default';
+    var localTxt = (ses.local && ses.local !== '*') ? ' · ' + esc(ses.local) : '';
+    chip.innerHTML =
+      '<span style="color:var(--t1);font-weight:600">' + esc(ses.user) + '</span>' +
+      '<span>· ' + esc(ROL_NOMBRE[ses.role] || ses.role) + localTxt + '</span>' +
+      '<button id="pa-logout" title="Cerrar sesion" style="background:rgba(192,57,43,0.15);' +
+      'border:1px solid rgba(192,57,43,0.4);color:#E07070;font-size:10px;font-weight:700;' +
+      'padding:3px 8px;border-radius:12px;cursor:pointer">Salir</button>';
+    hr.insertBefore(chip, hr.firstChild);
+    document.getElementById('pa-logout').onclick = function () { PinsitaAuth.logout(); };
+  }
+
+  function cerrarOverlayPortal() {
+    ocultarOverlay();
+    cardPendiente = null;
+    seleccion = null; pinBuffer = ''; pinTmp = ''; modo = 'login';
+  }
+
+  function finalizarLoginPortal(res) {
+    // salva sessione con local detectato (CFG.local riflette quello chiesto a lista_usuarios)
+    guardarSesion(seleccion.nombre, res.cargo, res.turno, CFG.local);
+
+    var ses = leerSesion();
+    var cd = cardPendiente;
+    cardPendiente = null;
+
+    if (!cd) {
+      ocultarOverlay();
+      inyectarBarraUsuarioPortal(ses);
+      return;
+    }
+
+    // verifica autorizzazione card cliccata
+    if (!rolPermitido(cd.roles, ses.role) || !localPermitido(cd.scope, ses.local)) {
+      ocultarOverlay();
+      inyectarBarraUsuarioPortal(ses);
+      toast('No autorizado para esta area');
+      return;
+    }
+
+    // autorizzato → naviga
+    window.location.href = cd.href;
+  }
 
   // ════════════════════════════════════════════════════════════════
   //  SESSIONE
@@ -76,7 +215,9 @@
       var raw = localStorage.getItem(SESSION_KEY);
       if (!raw) return null;
       var s = JSON.parse(raw);
-      if (!s || s.local !== CFG.local) return null;     // sessione di altro locale
+      // v1.2: nel Portal accettiamo qualsiasi local valido (cdl, rsc, *, ...)
+      // negli hub locali, scartiamo sessioni di altri locali
+      if (!modoPortal && s.local !== CFG.local) return null;
       if (!s.expiresAt || s.expiresAt < Date.now()) {   // scaduta
         localStorage.removeItem(SESSION_KEY);
         return null;
@@ -85,9 +226,10 @@
     } catch (e) { return null; }
   }
 
-  function guardarSesion(user, role, turno) {
+  function guardarSesion(user, role, turno, localOverride) {
     var s = {
-      user: user, role: role, local: CFG.local,
+      user: user, role: role,
+      local: localOverride || CFG.local,
       turno: turno || '', expiresAt: Date.now() + SESSION_HORAS * 3600 * 1000
     };
     try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) {}
@@ -179,6 +321,16 @@
     document.body.appendChild(ov);
     construirTeclado();
     document.getElementById('pa-back').onclick = volverALista;
+    // v1.2 · close button (visibile solo in modoPortal)
+    var bc = document.getElementById('pa-close-portal');
+    if (bc) bc.onclick = cerrarOverlayPortal;
+    // v1.2 · ESC chiude overlay solo se modoPortal (negli hub non c'e' uscita)
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && modoPortal) {
+        var ov = document.getElementById('pa-overlay');
+        if (ov && ov.style.display !== 'none') cerrarOverlayPortal();
+      }
+    });
     // FAB Ayuda: apre/chiude il panel help
     document.getElementById('pa-help-fab').onclick = function () {
       document.getElementById('pa-help-overlay').classList.add('on');
@@ -201,6 +353,9 @@
   }
   function mostrarOverlay() {
     document.getElementById('pa-overlay').style.display = 'flex';
+    // v1.2 · mostra "close" solo se modoPortal
+    var bc = document.getElementById('pa-close-portal');
+    if (bc) bc.style.display = modoPortal ? 'inline-block' : 'none';
   }
   function ocultarOverlay() {
     var ov = document.getElementById('pa-overlay');
@@ -341,9 +496,14 @@
         return;
       }
       if (res && res.ok) {                          // login riuscito
-        guardarSesion(seleccion.nombre, res.cargo, res.turno);
-        ocultarOverlay();
-        aplicarGating(res.cargo);
+        // v1.2: branching modoPortal vs hub locale
+        if (modoPortal) {
+          finalizarLoginPortal(res);
+        } else {
+          guardarSesion(seleccion.nombre, res.cargo, res.turno);
+          ocultarOverlay();
+          aplicarGating(res.cargo);
+        }
         return;
       }
       // errori
@@ -383,10 +543,14 @@
     }).then(function (res) {
       bloquear(false);
       if (res && res.ok) {
-        // set_pin e' anche login: entra diretto con cargo+turno restituiti
-        guardarSesion(seleccion.nombre, res.cargo, res.turno);
-        ocultarOverlay();
-        aplicarGating(res.cargo);
+        // set_pin e' anche login: branching modoPortal vs hub locale
+        if (modoPortal) {
+          finalizarLoginPortal(res);
+        } else {
+          guardarSesion(seleccion.nombre, res.cargo, res.turno);
+          ocultarOverlay();
+          aplicarGating(res.cargo);
+        }
         return;
       }
       // PIN rifiutato dal GAS → ricomincia la creazione
@@ -424,7 +588,11 @@
     '#pa-overlay{position:fixed;inset:0;z-index:9000;display:none;align-items:center;' +
       'justify-content:center;background:#0F0F0F;font-family:inherit}' +
     '#pa-overlay.pa-busy{pointer-events:none;opacity:.7}' +
-    '.pa-box{width:100%;max-width:380px;padding:32px 26px;display:flex;flex-direction:column;align-items:center}' +
+    '.pa-box{width:100%;max-width:380px;padding:32px 26px;display:flex;flex-direction:column;align-items:center;position:relative}' +
+    '#pa-close-portal{position:absolute;top:14px;right:14px;background:rgba(255,255,255,0.06);' +
+      'border:1px solid var(--b2,#2C2C2C);color:var(--t2,#A8A29C);font-size:13px;padding:4px 10px;' +
+      'border-radius:8px;cursor:pointer;line-height:1;display:none}' +
+    '#pa-close-portal:hover{border-color:var(--pa-accent);color:var(--pa-accent)}' +
     '.pa-logo{width:175px;height:43px;background-repeat:no-repeat;'+
       'background-position:center;background-size:contain}' +
     '.pa-sub{font-size:12px;color:var(--t3,#6A6460);margin:4px 0 24px}' +
@@ -553,6 +721,7 @@
 
   var MARKUP =
     '<div class="pa-box">' +
+      '<button id="pa-close-portal" aria-label="Cancelar login" title="Cancelar y volver al Portal">✕</button>' +
       '<div class="pa-logo"></div>' +
       '<div class="pa-sub">Sistema Operativo · Acceso</div>' +
       '<div id="pa-step-lista" style="width:100%">' +
