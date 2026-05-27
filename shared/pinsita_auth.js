@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════════
- *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.4
+ *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.5
  *  Una sola copia in /shared/ · incluso da ogni hub di locale + Portal.
  *
  *  v1.1 · la lista utenti arriva dal GAS (azione lista_usuarios),
@@ -9,7 +9,7 @@
  *  *  v1.3 (27-may-2026) · aggiunta API PinsitaAuth.initOnPortal()
  *         Login PIN inline sul Portal nuovo (AUTH-1-bis).
  *         Scope-aware: scope='cdl'/'rsc' carica utenti del locale + corporate;
- *         scope vuoto (Operacion/Estrategia) carica solo corporate.
+ *         scope vuoto (Operaciofunction finalizarLogn/Estrategia) carica solo corporate.
  *         Riusa overlay/tastiera/set_pin/ayuda esistenti.
  *
  *  v1.4 (27-may-2026 tarde) · fix bfcache nel Portal.
@@ -199,8 +199,10 @@
   }
 
   function finalizarLoginPortal(res) {
-    // salva sessione con local detectato (CFG.local riflette quello chiesto a lista_usuarios)
-    guardarSesion(seleccion.nombre, res.cargo, res.turno, CFG.local);
+    // v1.5 · usa res.local dal GAS (verita' autorevole) invece di CFG.local
+    // CFG.local riflette il scope della card cliccata, non il local reale dell'utente.
+    // Utenti corporate (local='*') venivano salvati col scope della card → gating sbagliato.
+    guardarSesion(seleccion.nombre, res.cargo, res.turno, res.local || CFG.local);
 
     var ses = leerSesion();
     var cd = cardPendiente;
