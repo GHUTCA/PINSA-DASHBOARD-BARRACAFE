@@ -256,58 +256,12 @@
   /* ── PROV items ── */
   .prov-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 8px; }
 
-  /* ── LOGIN ── */
-  #login-screen { position: fixed; inset: 0; z-index: 900; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
-  #login-screen.hidden { display: none; }
-  .ls-card { width: 100%; max-width: 360px; background: var(--bg2); border: 1px solid var(--border2); border-top: 2px solid var(--orange); border-radius: var(--radius); padding: 24px 20px; }
-  .ls-title { font-size: 17px; font-weight: 500; color: var(--t1); margin-bottom: 3px; }
-  .ls-sub { font-size: 12px; color: var(--t3); margin-bottom: 20px; }
-  .ls-label { font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--t3); margin-bottom: 6px; display: block; }
-  .ls-select, .ls-input { width: 100%; padding: 10px 12px; background: var(--bg3); border: 1px solid var(--border2); border-radius: 8px; color: var(--t1); font-family: var(--font); font-size: 13px; outline: none; appearance: none; margin-bottom: 14px; }
-  .ls-input { letter-spacing: 3px; font-family: var(--mono); }
-  .ls-btn { width: 100%; padding: 12px; background: var(--orange); color: #fff; border: none; border-radius: 8px; font-family: var(--font); font-size: 13px; font-weight: 600; cursor: pointer; }
-  .ls-err { margin-top: 10px; padding: 9px 12px; background: rgba(192,57,43,.12); border: 1px solid rgba(192,57,43,.3); border-radius: 6px; font-size: 12px; color: var(--red); display: none; }
-  .ls-err.show { display: block; }
-
-  /* ── LOGOUT ── */
-  #logout-modal { position: fixed; inset: 0; z-index: 950; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center; padding: 24px; }
-  #logout-modal.hidden { display: none; }
-  .lm-card { width: 100%; max-width: 320px; background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 24px 20px; text-align: center; }
-  .lm-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .lm-cancel { padding: 10px; background: transparent; border: 1px solid var(--border2); border-radius: 8px; color: var(--t2); font-family: var(--font); font-size: 12px; cursor: pointer; }
-  .lm-confirm { padding: 10px; background: var(--red); border: none; border-radius: 8px; color: #fff; font-family: var(--font); font-size: 12px; font-weight: 600; cursor: pointer; }
   .salir-btn { padding: 4px 12px; background: transparent; border: 1px solid rgba(192,57,43,.35); border-radius: 6px; color: var(--red); font-family: var(--font); font-size: 10px; letter-spacing: .8px; text-transform: uppercase; cursor: pointer; }
 
   @media (max-width: 360px) { .row2 { grid-template-columns: 1fr; } .kpi-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
-
-<!-- LOGIN -->
-<div id="login-screen">
-  <div class="ls-card">
-    <div class="ls-title">PINSA · Bodega Central</div>
-    <div class="ls-sub">Panel Operativo · Candelaria</div>
-    <label class="ls-label">Tu nombre</label>
-    <select class="ls-select" id="ls-nombre"><option value="">— Selecciona tu nombre —</option></select>
-    <label class="ls-label">Contraseña</label>
-    <input class="ls-input" type="password" id="ls-pwd" placeholder="······" maxlength="10" autocomplete="off">
-    <button class="ls-btn" onclick="doLogin()">Ingresar al sistema</button>
-    <div class="ls-err" id="ls-err">Nombre o contraseña incorrectos</div>
-  </div>
-</div>
-
-<!-- LOGOUT MODAL -->
-<div id="logout-modal" class="hidden">
-  <div class="lm-card">
-    <div style="font-size:15px;font-weight:500;color:var(--t1);margin-bottom:5px">¿Salir del sistema?</div>
-    <div style="font-size:12px;color:var(--t3);margin-bottom:20px">Tu sesión se cerrará.</div>
-    <div class="lm-btns">
-      <button class="lm-cancel" onclick="cancelLogout()">Cancelar</button>
-      <button class="lm-confirm" onclick="confirmLogout()">Sí, salir</button>
-    </div>
-  </div>
-</div>
 
 <!-- HEADER -->
 <div class="header">
@@ -3524,73 +3478,46 @@ async function init() {
 }
 
 // ════════════════════════════════════════════════════════
-// LOGIN / SESSION
+// SESSION · letta dal Portal via pinsita_session (NORMA_DISENO §3)
 // ════════════════════════════════════════════════════════
-const EQUIPO_BC = [
-  {n:'Francisco Chavez', c:'Jefe Bodega',          p:'888888', t:3},
-  {n:'Mauro',            c:'Gerente Operaciones',   p:'123456', t:2},
-  {n:'Kele',             c:'Gerente',               p:'999999', t:1},
-  {n:'Admin',            c:'Administrador',          p:'000000', t:1},
-];
+// Nessun login interno: l'identita arriva da L0 Portal.
+// Se la sessione e' assente o scaduta → redirect al Portal.
+// pinsita_session = { user, role, local, expiresAt }
+//
+// Nota log_accesos: il GAS auth registra il 'local' dell'hub da
+// cui si e' entrati al Portal (rsc/cdl/etc), non 'bc'. Qui dentro
+// la BC non scrive nuovi log_accesos · usiamo solo i campi user/role.
 
 let SESSION = null;
 
-(function initLogin() {
-  const sel=document.getElementById('ls-nombre');
-  const sorted=[...EQUIPO_BC].sort((a,b)=>a.n.localeCompare(b.n,'es'));
-  sorted.forEach(u=>{ const o=document.createElement('option'); o.value=u.n; o.textContent=u.n+' · '+u.c; sel.appendChild(o); });
-  // Tenta carico da PARAMETROS
-  if (CFG.TOKEN) {
-    fetch(`https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=58421555&single=true&output=csv&t=${Date.now()}`,{cache:'no-store'})
-      .then(r=>r.ok?r.text():'')
-      .then(txt=>{
-        if(!txt||txt.includes('<!DOCTYPE')) return;
-        const rows=parseCSV(txt);
-        const fromCSV=rows.filter(r=>(r['Local']||'').trim()==='Bodega Central'&&r['Usuario']&&r['PWD'])
-          .map(r=>({n:r['Usuario'].trim(),c:(r['Cargo']||'').trim(),p:r['PWD'].trim(),t:parseInt(r['Tipo']||'3')}));
-        if(!fromCSV.length) return;
-        fromCSV.sort((a,b)=>a.n.localeCompare(b.n,'es'));
-        sel.innerHTML='<option value="">— Selecciona tu nombre —</option>';
-        fromCSV.forEach(u=>{const o=document.createElement('option');o.value=u.n;o.textContent=u.n+' · '+u.c;sel.appendChild(o);});
-        EQUIPO_BC.length=0; fromCSV.forEach(u=>EQUIPO_BC.push(u));
-      }).catch(()=>{});
+(function initSessionFromPortal() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem('pinsita_session') || 'null'); } catch(e) {}
+  const now = Date.now();
+  if (!s || !s.expiresAt || s.expiresAt < now || !s.user) {
+    // Sessione assente/scaduta → torna al Portal
+    location.href = 'portal.html';
+    return;
   }
+  SESSION = { nombre: s.user, cargo: s.role || '' };
+  const chip = document.getElementById('hdr-operador-chip');
+  if (chip) { chip.textContent = SESSION.nombre + (SESSION.cargo ? ' · ' + SESSION.cargo : ''); chip.style.display = ''; }
+  const btn = document.getElementById('btn-salir');
+  if (btn) btn.style.display = '';
 })();
 
-function doLogin() {
-  const nombre=document.getElementById('ls-nombre').value.trim();
-  const pwd=document.getElementById('ls-pwd').value.trim();
-  const err=document.getElementById('ls-err');
-  err.classList.remove('show');
-  if(!nombre){err.textContent='Selecciona tu nombre.';err.classList.add('show');return;}
-  if(!pwd){err.textContent='Ingresa tu contraseña.';err.classList.add('show');return;}
-  const u=EQUIPO_BC.find(x=>x.n===nombre);
-  if(!u||u.p!==pwd){err.textContent='Nombre o contraseña incorrectos.';err.classList.add('show');document.getElementById('ls-pwd').value='';return;}
-  SESSION={nombre:u.n,cargo:u.c,tipo:u.t};
-  const chip=document.getElementById('hdr-operador-chip');
-  if(chip){chip.textContent=SESSION.nombre+' · '+SESSION.cargo;chip.style.display='';}
-  document.getElementById('btn-salir').style.display='';
-  document.getElementById('login-screen').classList.add('hidden');
-  document.getElementById('ls-pwd').value='';
+function askLogout() {
+  if (confirm('¿Salir del sistema? Tu sesion se cerrara.')) confirmLogout();
 }
 
-document.addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&!document.getElementById('login-screen').classList.contains('hidden')) doLogin();
-});
-
-function askLogout()    { document.getElementById('logout-modal').classList.remove('hidden'); }
-function cancelLogout() { document.getElementById('logout-modal').classList.add('hidden'); }
 function confirmLogout() {
-  document.getElementById('logout-modal').classList.add('hidden');
-  SESSION=null;
-  const chip=document.getElementById('hdr-operador-chip');
-  if(chip){chip.textContent='';chip.style.display='none';}
-  document.getElementById('btn-salir').style.display='none';
-  document.getElementById('ls-pwd').value='';
-  document.getElementById('ls-err').classList.remove('show');
-  document.getElementById('login-screen').classList.remove('hidden');
+  try { localStorage.removeItem('pinsita_session'); } catch(e) {}
+  SESSION = null;
+  location.href = 'portal.html';
 }
 
+function cancelLogout() { /* no-op · era per il modal rimosso */ }
+  
 init().catch(console.error);
 </script>
 
