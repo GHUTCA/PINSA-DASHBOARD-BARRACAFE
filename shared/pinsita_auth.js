@@ -144,6 +144,7 @@
         } else if (chip) {
           chip.remove();  // bfcache: rimuovi chip residuo dopo logout+forward
         }
+      }
       inject();
       window.addEventListener('pageshow', inject);
     },
