@@ -115,9 +115,29 @@
         if (s) inyectarBarraUsuarioPortal(s);  // ha guard interno anti-duplica
       });
     },
-    logout: function () {
+    logout: function (redirectUrl) {
       try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
-      location.reload();
+      if (redirectUrl) location.href = redirectUrl;
+      else location.reload();
+    },
+    // ── v1.6 · API per pagine shell (no gating, no overlay) ──────
+    // Inietta SOLO il chip operatore + bottone Salir se sessione attiva.
+    // Non blocca l'ingresso (vetrina pubblica come bcentral_operaciones).
+    // Idempotente (guard #pa-userchip in inyectarBarraUsuarioPortal).
+    // Robusta a bfcache via listener pageshow.
+    // opts.redirectAfterLogout: dove andare dopo Salir (default 'portal.html').
+    //   Per file in sottocartelle passare path relativo: '../portal.html'.
+    inyectarSalirSolo: function (opts) {
+      var redirectUrl = (opts && opts.redirectAfterLogout) || 'portal.html';
+      function inject() {
+        var s = leerSesion();
+        if (!s) return;
+        inyectarBarraUsuarioPortal(s);          // ha guard #pa-userchip
+        var btn = document.getElementById('pa-logout');
+        if (btn) btn.onclick = function () { PinsitaAuth.logout(redirectUrl); };
+      }
+      inject();
+      window.addEventListener('pageshow', inject);
     },
     sesion: function () { return leerSesion(); }
   };
