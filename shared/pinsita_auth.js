@@ -104,15 +104,20 @@
       var ses = leerSesion();
       if (ses) inyectarBarraUsuarioPortal(ses);
 
-      // v1.4 · fix bfcache: al ritorno da una card (VOLVER → history.back)
-      // il browser ripristina la pagina dalla bfcache senza rieseguire initOnPortal.
-      // Conseguenza: overlay residuo aperto e/o chip non iniettato.
+      // v1.4 · fix bfcache al ritorno da una card (VOLVER → history.back)
+      // v1.6 · fix bfcache anche su forward dopo logout: rimuovi chip residuo
+      //        se sessione assente (DOM ripristinato ha il chip del precedente login).
       // pageshow scatta SIA al primo load SIA al restore dalla bfcache.
       window.addEventListener('pageshow', function () {
         if (!modoPortal) return;
-        cerrarOverlayPortal();         // idempotente: chiude overlay se presente
+        cerrarOverlayPortal();
         var s = leerSesion();
-        if (s) inyectarBarraUsuarioPortal(s);  // ha guard interno anti-duplica
+        var chip = document.getElementById('pa-userchip');
+        if (s) {
+          if (!chip) inyectarBarraUsuarioPortal(s);
+        } else if (chip) {
+          chip.remove();
+        }
       });
     },
     logout: function (redirectUrl) {
@@ -131,16 +136,18 @@
       var redirectUrl = (opts && opts.redirectAfterLogout) || 'portal.html';
       function inject() {
         var s = leerSesion();
-        if (!s) return;
-        inyectarBarraUsuarioPortal(s);          // ha guard #pa-userchip
-        var btn = document.getElementById('pa-logout');
-        if (btn) btn.onclick = function () { PinsitaAuth.logout(redirectUrl); };
+        var chip = document.getElementById('pa-userchip');
+        if (s) {
+          if (!chip) inyectarBarraUsuarioPortal(s);
+          var btn = document.getElementById('pa-logout');
+          if (btn) btn.onclick = function () { PinsitaAuth.logout(redirectUrl); };
+        } else if (chip) {
+          chip.remove();  // bfcache: rimuovi chip residuo dopo logout+forward
+        }
       }
       inject();
       window.addEventListener('pageshow', inject);
     },
-    sesion: function () { return leerSesion(); }
-  };
 
   // ════════════════════════════════════════════════════════════════
   //  v1.2 · LOGICA PORTALE · click sulle card
