@@ -134,13 +134,15 @@
     //   Per file in sottocartelle passare path relativo: '../portal.html'.
     inyectarSalirSolo: function (opts) {
       var redirectUrl = (opts && opts.redirectAfterLogout) || 'portal.html';
-      function inject() {
+      function inject(e) {
         var s = leerSesion();
         var chip = document.getElementById('pa-userchip');
         if (s) {
           if (!chip) inyectarBarraUsuarioPortal(s);
           var btn = document.getElementById('pa-logout');
           if (btn) btn.onclick = function () { PinsitaAuth.logout(redirectUrl); };
+        } else if (e && e.persisted) {
+          location.href = redirectUrl;  // bfcache restore senza sessione: torna a porta ufficiale
         } else if (chip) {
           chip.remove();  // bfcache: rimuovi chip residuo dopo logout+forward
         }
