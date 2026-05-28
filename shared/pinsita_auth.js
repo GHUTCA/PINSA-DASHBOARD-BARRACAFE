@@ -144,10 +144,11 @@
         } else if (chip) {
           chip.remove();  // bfcache: rimuovi chip residuo dopo logout+forward
         }
-      }
       inject();
       window.addEventListener('pageshow', inject);
     },
+    sesion: function () { return leerSesion(); }
+  };
 
   // ════════════════════════════════════════════════════════════════
   //  v1.2 · LOGICA PORTALE · click sulle card
