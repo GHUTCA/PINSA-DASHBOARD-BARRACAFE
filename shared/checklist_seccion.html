@@ -570,12 +570,12 @@ function firmar(tipo){
 
 function enviarASheets(reg){
   document.getElementById('sending-overlay').classList.add('show');
+
   // Merma solo rilevante per il Cierre — per Apertura indica sin_registro
   var mermaVal='sin_registro';
   if(reg.tipo==='cierre'){
     var mermaKey='merma-reg-'+LOCAL_ID+'-'+SECCION+'-'+getDateKey()+'-'+SESSION.turno;
     var mermaRaw=localStorage.getItem(mermaKey);
-    // Se ci sono mermas registrate, considera 'registrada'; altrimenti 'sin_confirmar'
     if(mermaRaw){
       try{
         var arr=JSON.parse(mermaRaw);
@@ -583,18 +583,42 @@ function enviarASheets(reg){
       }catch(e){mermaVal='sin_confirmar';}
     }
   }
-  fetch(GAS_URL,{
-    method:'POST',
-    mode:'no-cors',
-    body:JSON.stringify({action:'checklistSeccion',fecha:new Date().toISOString().split('T')[0],local:reg.local,seccion:reg.seccion,operador:reg.nombre,turno:reg.turno,tipo:reg.tipo,items_ok:reg.items_ok+'/'+reg.items_total,items_total:reg.items_total,merma:mermaVal})
-  })
+
+  // Payload canonico — fecha ISO, seccion = SECCION_LABEL (con acento, come en Checklist_Log)
+  var payload={
+    action:'checklistSeccion',
+    fecha:new Date().toISOString().split('T')[0],
+    local:reg.local,
+    seccion:reg.seccion,
+    operador:reg.nombre,
+    turno:reg.turno,
+    tipo:reg.tipo,
+    items_ok:reg.items_ok+'/'+reg.items_total,
+    items_total:reg.items_total,
+    merma:mermaVal
+  };
+
+  // 1) Mete en cola local (se reintenta al próximo avvio se falla la verifica)
+  encolarFirma(payload);
+
+  // 2) POST no-cors (escribe) — la risposta è opaque, NO ci fidiamo
+  fetch(GAS_URL,{method:'POST',mode:'no-cors',body:JSON.stringify(payload)})
   .then(function(){
+    // 3) Verifica REAL via JSONP — el foglio confirma si la firma llegó
+    return verificarFirmaEnSheet(payload);
+  })
+  .then(function(existe){
     document.getElementById('sending-overlay').classList.remove('show');
-    showToast('📊 Guardado en sistema','success');
+    if(existe){
+      desencolarFirma(payload);
+      showToast('📊 Guardado en sistema','success');
+    }else{
+      showToast('⚠️ NO confirmado · reintenta al reabrir','');
+    }
   })
   .catch(function(){
     document.getElementById('sending-overlay').classList.remove('show');
-    showToast('⚠️ Guardado local','');
+    showToast('⚠️ Sin confirmación · queda en cola','');
   });
 }
 
