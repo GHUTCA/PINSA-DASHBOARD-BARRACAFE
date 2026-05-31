@@ -622,6 +622,78 @@ function enviarASheets(reg){
   });
 }
 
+// ════════════════════════════════════════════════════════════════
+// COLA DE FIRMAS + VERIFICACIÓN REAL (fail-loud)
+// La firma se considera "guardada" solo si el foglio la confirma via JSONP.
+// Si no, queda en cola y se reintenta al reabrir la app (retryColaFirmas).
+// Clave dedup: fecha+local+seccion+turno+tipo (igual que el GAS).
+// ════════════════════════════════════════════════════════════════
+var COLA_FIRMAS_KEY='cola-firmas-pendientes';
+
+function _claveFirma(p){
+  return [p.fecha,p.local,p.seccion,p.turno,p.tipo].join('|');
+}
+
+function _leerCola(){
+  try{return JSON.parse(localStorage.getItem(COLA_FIRMAS_KEY))||[];}catch(e){return [];}
+}
+
+function _guardarCola(arr){
+  localStorage.setItem(COLA_FIRMAS_KEY,JSON.stringify(arr));
+}
+
+function encolarFirma(payload){
+  var cola=_leerCola();
+  var k=_claveFirma(payload);
+  // no duplicar en cola
+  if(!cola.some(function(p){return _claveFirma(p)===k;})){
+    cola.push(payload);
+    _guardarCola(cola);
+  }
+}
+
+function desencolarFirma(payload){
+  var k=_claveFirma(payload);
+  _guardarCola(_leerCola().filter(function(p){return _claveFirma(p)!==k;}));
+}
+
+// Verifica via JSONP que la firma esté en Checklist_Log.
+// Resuelve true/false. Timeout 8s → false (no confirmado).
+function verificarFirmaEnSheet(payload){
+  return new Promise(function(resolve){
+    var cb='cbFirma_'+Date.now()+'_'+Math.floor(Math.random()*100000);
+    var done=false;
+    var timer=setTimeout(function(){
+      if(done)return; done=true;
+      cleanup(); resolve(false);
+    },8000);
+    function cleanup(){
+      try{delete window[cb];}catch(e){window[cb]=undefined;}
+      if(s&&s.parentNode)s.parentNode.removeChild(s);
+      clearTimeout(timer);
+    }
+    window[cb]=function(resp){
+      if(done)return; done=true;
+      cleanup();
+      resolve(!!(resp&&resp.ok&&resp.existe));
+    };
+    var qs='action=verificarChecklist'
+      +'&local='+encodeURIComponent(payload.local)
+      +'&seccion='+encodeURIComponent(payload.seccion)
+      +'&fecha='+encodeURIComponent(payload.fecha)
+      +'&turno='+encodeURIComponent(payload.turno)
+      +'&tipo='+encodeURIComponent(payload.tipo)
+      +'&callback='+cb;
+    var s=document.createElement('script');
+    s.src=GAS_URL+'?'+qs;
+    s.onerror=function(){
+      if(done)return; done=true;
+      cleanup(); resolve(false);
+    };
+    document.body.appendChild(s);
+  });
+}
+  
 function iniciarSesion(){
   var localIdSel=document.getElementById('sel-local').value||LOCAL_ID;
   var seccionSel=document.getElementById('sel-seccion').value||SECCION;
