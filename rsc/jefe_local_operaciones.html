@@ -1021,12 +1021,18 @@
     <!-- Resultados búsqueda (dropdown) -->
     <div id="sol-search-results" style="display:none;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;margin-bottom:6px;max-height:200px;overflow-y:auto"></div>
 
-    <!-- Resumen carrito -->
-    <div id="sol-carrito-bar" style="display:none;background:rgba(74,111,165,0.08);border:1px solid rgba(74,111,165,0.3);border-radius:8px;padding:8px 12px;display:none;justify-content:space-between;align-items:center">
-      <div style="font-size:12px;color:var(--t2)">
-        🛒 <span id="sol-carrito-count">0</span> productos · <span id="sol-carrito-uo" style="color:var(--blue2);font-weight:700;font-family:var(--mono)">0</span> UO <span id="sol-carrito-valor" style="display:none;color:var(--green2);font-weight:700;margin-left:4px"></span>
+    <!-- Resumen carrito — clic para expandir/colapsar el detalle -->
+    <div id="sol-carrito-bar" onclick="solToggleCarrito()" style="display:none;background:rgba(74,111,165,0.08);border:1px solid rgba(74,111,165,0.3);border-radius:8px;padding:8px 12px;display:none;justify-content:space-between;align-items:center;cursor:pointer">
+      <div style="font-size:12px;color:var(--t2);display:flex;align-items:center;gap:6px">
+        🛒 <span><span id="sol-carrito-count">0</span> productos · <span id="sol-carrito-uo" style="color:var(--blue2);font-weight:700;font-family:var(--mono)">0</span> UO <span id="sol-carrito-valor" style="display:none;color:var(--green2);font-weight:700;margin-left:4px"></span></span>
+        <span id="sol-carrito-chevron" style="color:var(--t3);font-size:11px;transition:transform .15s">▸</span>
       </div>
-      <button onclick="solReset()" style="font-size:10px;color:var(--t3);background:none;border:none;cursor:pointer;padding:2px 6px">Vaciar</button>
+      <button onclick="event.stopPropagation();solReset()" style="font-size:10px;color:var(--t3);background:none;border:none;cursor:pointer;padding:2px 6px">Vaciar</button>
+    </div>
+
+    <!-- Detalle carrito colapsable (dentro del sticky) -->
+    <div id="sol-carrito-detalle" style="display:none;margin-top:6px;max-height:34vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px">
+      <div id="sol-carrito-list"></div>
     </div>
 
   </div>
@@ -1037,16 +1043,6 @@
 
     <!-- ═══ SUB-PANE: NUEVO PEDIDO (default) ═══ -->
     <div id="sol-sub-nuevo">
-
-    <!-- CARRITO — productos agregados -->
-    <div id="sol-carrito-section" style="display:none">
-      <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--blue2);margin-bottom:8px">En tu pedido</div>
-      <div id="sol-carrito-list"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0 20px">
-        <button class="btn btn-ghost" onclick="solReset()">Vaciar pedido</button>
-        <button class="btn btn-primary" id="btn-enviar-solicitud2" onclick="solAskConfirm()" disabled>Enviar a BC</button>
-      </div>
-    </div>
 
     <!-- ALERTAS — sugeridos por el sistema -->
     <div id="sol-alertas-section">
@@ -1432,6 +1428,7 @@ const STATE = {
   // solicitud en curso
   solicitudQtys: {},      // sku → cantidad en UO
   solicitudConf: {},      // sku → true si el usuario confirmó la Q (false = sugerido intacto)
+  carritoExpanded: false, // detalle del carrito colapsable (sticky)
 
   // V117 — carrito entrega a sección
   carritoEntrega: [],     // [{sku, desc, unidad, uoDesc, cantidad, obs, destino}]
@@ -2725,9 +2722,8 @@ function solUpdateCarritoBar() {
   const skus  = Object.keys(STATE.solicitudQtys).filter(s => STATE.solicitudQtys[s] > 0);
   const total = skus.reduce((a,s) => a + STATE.solicitudQtys[s], 0);
   const bar   = document.getElementById('sol-carrito-bar');
-  const sec   = document.getElementById('sol-carrito-section');
+  const det   = document.getElementById('sol-carrito-detalle');
   const btn1  = document.getElementById('btn-enviar-solicitud');
-  const btn2  = document.getElementById('btn-enviar-solicitud2');
   const warn  = document.getElementById('sol-sin-confirmar');
   const sinConf = solSinConfirmar();
 
@@ -2735,9 +2731,7 @@ function solUpdateCarritoBar() {
     document.getElementById('sol-carrito-count').textContent = skus.length;
     document.getElementById('sol-carrito-uo').textContent   = total;
     if (bar) bar.style.display = 'flex';
-    if (sec) sec.style.display = 'block';
     if (btn1) { btn1.disabled = false; btn1.innerHTML = `Enviar · ${skus.length} prod`; }
-    if (btn2) btn2.disabled = false;
     if (warn) {
       warn.style.display = sinConf > 0 ? 'block' : 'none';
       warn.textContent   = sinConf > 0 ? `⚠ ${sinConf} con Q sugerida sin confirmar` : '';
@@ -2751,12 +2745,21 @@ function solUpdateCarritoBar() {
     }
   } else {
     if (bar) bar.style.display = 'none';
-    if (sec) sec.style.display = 'none';
+    if (det) det.style.display = 'none'; // se vacía → colapsa
+    STATE.carritoExpanded = false;
     if (btn1) { btn1.disabled = true; btn1.innerHTML = 'Enviar a BC'; }
-    if (btn2) btn2.disabled = true;
     if (warn) warn.style.display = 'none';
   }
   solRenderCarrito();
+}
+
+// Expandir / colapsar el detalle del carrito (dentro del sticky)
+function solToggleCarrito() {
+  STATE.carritoExpanded = !STATE.carritoExpanded;
+  const det = document.getElementById('sol-carrito-detalle');
+  const chv = document.getElementById('sol-carrito-chevron');
+  if (det) det.style.display = STATE.carritoExpanded ? 'block' : 'none';
+  if (chv) chv.style.transform = STATE.carritoExpanded ? 'rotate(90deg)' : 'rotate(0deg)';
 }
 
 // Cuenta los SKU en el pedido cuya Q sigue siendo la sugerida (no confirmada por el usuario)
