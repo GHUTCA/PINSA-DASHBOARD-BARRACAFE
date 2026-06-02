@@ -553,6 +553,10 @@
   .sol-btn:active{background:var(--bg4)}
   .sol-num{width:88px;height:44px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--t1);font-size:20px;font-weight:700;text-align:center;font-family:var(--mono);outline:none;padding:0 4px}
   .sol-num.edited{border-color:var(--blue);color:var(--blue2)}
+  .sol-num.sugerido{border-color:var(--amber);color:var(--amber);background:rgba(212,134,10,0.06)}
+  .sol-item.sugerido{border-color:rgba(212,134,10,0.5);background:rgba(212,134,10,0.05)}
+  .sol-item.flash{animation:solflash .4s ease}
+  @keyframes solflash{0%{background:rgba(26,144,112,0.18)}100%{background:rgba(74,111,165,0.05)}}
   .sol-uo{font-size:10px;color:var(--t3);white-space:nowrap;text-align:right}
   .sol-uo.edited{color:var(--blue2)}
   .sol-uo.nopedir{color:var(--red)}
@@ -600,6 +604,7 @@
     scrollbar-width:none;
   }
   .sol-scroll::-webkit-scrollbar{display:none}
+  #sol-carrito-detalle::-webkit-scrollbar{display:none}
   /* label sugerido più grande */
   .sol-sug{font-size:11px;color:var(--t3);white-space:nowrap;font-weight:500}
   .sol-sug span{color:var(--t2);font-weight:700;font-size:12px}
@@ -983,6 +988,7 @@
         Enviar a BC
       </button>
     </div>
+    <div id="sol-sin-confirmar" style="display:none;font-size:11px;color:var(--amber);text-align:right;margin:-4px 0 8px;font-weight:600"></div>
 
     <!-- Sub-tabs Nuevo Pedido / Mis Pedidos -->
     <div id="sol-subtabs" style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:10px">
@@ -1016,12 +1022,20 @@
     <!-- Resultados búsqueda (dropdown) -->
     <div id="sol-search-results" style="display:none;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;margin-bottom:6px;max-height:200px;overflow-y:auto"></div>
 
-    <!-- Resumen carrito -->
-    <div id="sol-carrito-bar" style="display:none;background:rgba(74,111,165,0.08);border:1px solid rgba(74,111,165,0.3);border-radius:8px;padding:8px 12px;display:none;justify-content:space-between;align-items:center">
-      <div style="font-size:12px;color:var(--t2)">
-        🛒 <span id="sol-carrito-count">0</span> productos · <span id="sol-carrito-uo" style="color:var(--blue2);font-weight:700;font-family:var(--mono)">0</span> UO
+    <!-- Resumen carrito — clic para expandir/colapsar el detalle -->
+    <div id="sol-carrito-bar" onclick="solToggleCarrito()" style="display:none;background:rgba(74,111,165,0.16);border:1px solid var(--blue);border-radius:8px;padding:9px 12px;display:none;justify-content:space-between;align-items:center;cursor:pointer">
+      <div style="font-size:12px;color:var(--t1);display:flex;align-items:center;gap:6px">
+        🛒 <span><span id="sol-carrito-count">0</span> productos · <span id="sol-carrito-uo" style="color:var(--blue2);font-weight:700;font-family:var(--mono)">0</span> UO <span id="sol-carrito-valor" style="display:none;color:var(--green2);font-weight:700;margin-left:4px"></span></span>
       </div>
-      <button onclick="solReset()" style="font-size:10px;color:var(--t3);background:none;border:none;cursor:pointer;padding:2px 6px">Vaciar</button>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span id="sol-carrito-toggle-label" style="font-size:11px;color:var(--blue2);font-weight:600"><span id="sol-carrito-toggle-txt">Ver pedido</span> <span id="sol-carrito-chevron" style="display:inline-block;transition:transform .15s">▾</span></span>
+        <button onclick="event.stopPropagation();solReset()" style="font-size:10px;color:var(--t3);background:none;border:none;cursor:pointer;padding:2px 6px">Vaciar</button>
+      </div>
+    </div>
+
+    <!-- Detalle carrito colapsable (dentro del sticky) -->
+    <div id="sol-carrito-detalle" style="display:none;margin-top:6px;max-height:34vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px;scrollbar-width:none">
+      <div id="sol-carrito-list"></div>
     </div>
 
   </div>
@@ -1032,16 +1046,6 @@
 
     <!-- ═══ SUB-PANE: NUEVO PEDIDO (default) ═══ -->
     <div id="sol-sub-nuevo">
-
-    <!-- CARRITO — productos agregados -->
-    <div id="sol-carrito-section" style="display:none">
-      <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--blue2);margin-bottom:8px">En tu pedido</div>
-      <div id="sol-carrito-list"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0 20px">
-        <button class="btn btn-ghost" onclick="solReset()">Vaciar pedido</button>
-        <button class="btn btn-primary" id="btn-enviar-solicitud2" onclick="solAskConfirm()" disabled>Enviar a BC</button>
-      </div>
-    </div>
 
     <!-- ALERTAS — sugeridos por el sistema -->
     <div id="sol-alertas-section">
@@ -1394,6 +1398,16 @@ const CFG = {
 
   META_VENTAS_SEM: 16000000,
   secciones: ['Barra Cafe','Barra Jugos','Barra Alimentos','Barra Helados'],
+
+  // ── PEDIDO · valor estimado · PREDISPUESTO Y APAGADO ──
+  // Encender (true) SÓLO cuando BD_INSUMOS nuevo resuelva la ambigüedad UO/UPC.
+  // Hoy hay 120/341 SKU donde "Valor por UPC" != "Valor Unidad Neto" (packs):
+  // multiplicar la Q (en UO) por la columna equivocada da valores ×12/×25/×100.
+  // Por eso el valor NO se muestra hasta que la fuente esté limpia (fail-loud: ningún número falso).
+  // Lectura de precio: tab BD_Insumos ya está en STATE.bdInsumos (gid 514178276,
+  // token del local que el panel ya tiene → NO requiere TOKEN_MAESTRO).
+  PEDIDO_VALOR_ENABLED: false,
+  PEDIDO_VALOR_COL: 'Valor Unidad Neto', // precio por 1 UO (a confirmar con BD_INSUMOS nuevo)
 };
 
 // ════════════════════════════════════════════════════════
@@ -1415,7 +1429,9 @@ const STATE = {
   conteoInputs: {},       // sku → {raw, uo}
 
   // solicitud en curso
-  solicitudQtys: {},      // sku → cantidad confirmada
+  solicitudQtys: {},      // sku → cantidad en UO
+  solicitudConf: {},      // sku → true si el usuario confirmó la Q (false = sugerido intacto)
+  carritoExpanded: false, // detalle del carrito colapsable (sticky)
 
   // V117 — carrito entrega a sección
   carritoEntrega: [],     // [{sku, desc, unidad, uoDesc, cantidad, obs, destino}]
@@ -2663,29 +2679,112 @@ function solGetSugerido(sku) {
   return parseFloat(r['Pedido en UO']||r['Pedido Sugerido en UO']||r['Pedido Confirmado en UO']||0);
 }
 
+// ── Valor estimado · PREDISPUESTO Y APAGADO (ver CFG.PEDIDO_VALOR_ENABLED) ──
+// Devuelve null mientras el flag esté off → el render no dibuja ningún "$".
+// El día que BD_INSUMOS esté limpio: CFG.PEDIDO_VALOR_ENABLED=true y el valor aparece solo.
+function valorLinea(sku) {
+  if (!CFG.PEDIDO_VALOR_ENABLED) return null;
+  const bdi = STATE.bdInsumos.find(b => String(b['SKU']||'').trim() === String(sku));
+  if (!bdi) return null;
+  const precio = parseFloat(String(bdi[CFG.PEDIDO_VALOR_COL] || '0').replace(/[^0-9.\-]/g,'')) || 0;
+  const qty    = parseFloat(STATE.solicitudQtys[sku]) || 0;
+  return precio * qty;
+}
+function solValorTotal() {
+  if (!CFG.PEDIDO_VALOR_ENABLED) return null;
+  return Object.keys(STATE.solicitudQtys)
+    .filter(s => STATE.solicitudQtys[s] > 0)
+    .reduce((a,s) => a + (valorLinea(s) || 0), 0);
+}
+function fmtCLP(n) { return '$' + Math.round(n).toLocaleString('es-CL'); }
+
 // ── Carrito ──
+// Stepper inline reutilizable (lista búsqueda + alertas + carrito).
+// Refleja el estado conf: ambar = sugerido sin confirmar, azul = confirmado.
+function solStepperInline(sku) {
+  const qty  = STATE.solicitudQtys[sku] || 0;
+  const conf = STATE.solicitudConf[sku] === true;
+  const numClass = conf ? 'sol-num edited' : 'sol-num sugerido';
+  return `<div class="sol-row" onclick="event.stopPropagation()">
+      <div class="sol-btn" onclick="event.stopPropagation();solStep('${sku}',-1)">−</div>
+      <input class="${numClass}" id="sol-${sku}" type="number" inputmode="decimal" min="0" step="0.5"
+        value="${qty}" onchange="updateSolQty('${sku}',this.value)" onclick="event.stopPropagation();this.select()" onfocus="this.select()">
+      <div class="sol-btn" onclick="event.stopPropagation();solStep('${sku}',1)">+</div>
+    </div>`;
+}
+
+// Etiqueta de estado bajo el stepper: "confirmado" (verde) / "sin confirmar" (ambar).
+function solRowStatus(sku) {
+  const conf = STATE.solicitudConf[sku] === true;
+  return conf
+    ? `<span style="font-size:10px;color:var(--green2);font-weight:600">✓ confirmado</span>`
+    : `<span style="font-size:10px;color:var(--amber);font-weight:600">⚠ sin confirmar</span>`;
+}
+
 function solUpdateCarritoBar() {
   const skus  = Object.keys(STATE.solicitudQtys).filter(s => STATE.solicitudQtys[s] > 0);
   const total = skus.reduce((a,s) => a + STATE.solicitudQtys[s], 0);
   const bar   = document.getElementById('sol-carrito-bar');
-  const sec   = document.getElementById('sol-carrito-section');
+  const det   = document.getElementById('sol-carrito-detalle');
   const btn1  = document.getElementById('btn-enviar-solicitud');
-  const btn2  = document.getElementById('btn-enviar-solicitud2');
+  const warn  = document.getElementById('sol-sin-confirmar');
+  const sinConf = solSinConfirmar();
 
   if (skus.length > 0) {
     document.getElementById('sol-carrito-count').textContent = skus.length;
     document.getElementById('sol-carrito-uo').textContent   = total;
     if (bar) bar.style.display = 'flex';
-    if (sec) sec.style.display = 'block';
     if (btn1) { btn1.disabled = false; btn1.innerHTML = `Enviar · ${skus.length} prod`; }
-    if (btn2) btn2.disabled = false;
+    if (warn) {
+      warn.style.display = sinConf > 0 ? 'block' : 'none';
+      warn.textContent   = sinConf > 0 ? `⚠ ${sinConf} con Q sugerida sin confirmar` : '';
+    }
+    // Valor estimado — sólo si la fuente de precio está habilitada (CFG.PEDIDO_VALOR_ENABLED)
+    const valEl = document.getElementById('sol-carrito-valor');
+    if (valEl) {
+      const vt = solValorTotal();
+      if (vt === null) { valEl.style.display = 'none'; }
+      else { valEl.style.display = 'inline'; valEl.textContent = '· ' + fmtCLP(vt); }
+    }
   } else {
     if (bar) bar.style.display = 'none';
-    if (sec) sec.style.display = 'none';
+    if (det) det.style.display = 'none'; // se vacía → colapsa
+    STATE.carritoExpanded = false;
     if (btn1) { btn1.disabled = true; btn1.innerHTML = 'Enviar a BC'; }
-    if (btn2) btn2.disabled = true;
+    if (warn) warn.style.display = 'none';
   }
   solRenderCarrito();
+  solSyncCarritoToggle();
+}
+
+// Expandir / colapsar el detalle del carrito (dentro del sticky)
+function solToggleCarrito() {
+  STATE.carritoExpanded = !STATE.carritoExpanded;
+  solSyncCarritoToggle();
+}
+
+// Sincroniza UI del toggle (detalle visible, chevron, label) con STATE.carritoExpanded
+function solSyncCarritoToggle() {
+  const det = document.getElementById('sol-carrito-detalle');
+  const chv = document.getElementById('sol-carrito-chevron');
+  const txt = document.getElementById('sol-carrito-toggle-txt');
+  const exp = !!STATE.carritoExpanded;
+  if (det) det.style.display = exp ? 'block' : 'none';
+  if (chv) chv.style.transform = exp ? 'rotate(180deg)' : 'rotate(0deg)';
+  if (txt) txt.textContent = exp ? 'Ocultar' : 'Ver pedido';
+}
+
+// Lleva el scroll del detalle al final (mostrar el último producto agregado)
+function solScrollCarritoFinal() {
+  const det = document.getElementById('sol-carrito-detalle');
+  if (det && STATE.carritoExpanded) det.scrollTop = det.scrollHeight;
+}
+
+// Cuenta los SKU en el pedido cuya Q sigue siendo la sugerida (no confirmada por el usuario)
+function solSinConfirmar() {
+  return Object.keys(STATE.solicitudQtys)
+    .filter(s => STATE.solicitudQtys[s] > 0 && STATE.solicitudConf[s] !== true)
+    .length;
 }
 
 function solRenderCarrito() {
@@ -2697,24 +2796,19 @@ function solRenderCarrito() {
   el.innerHTML = skus.map(sku => {
     const desc   = solGetDesc(sku);
     const descUO = solGetDescUO(sku);
-    const qty    = STATE.solicitudQtys[sku];
     const est    = solGetEstado(sku);
+    const conf   = STATE.solicitudConf[sku] === true;
     const badge  = est === 'QUIEBRE' ? `<span class="status status-err" style="font-size:9px;padding:2px 6px">${est}</span>`
                  : est === 'ATENCION' ? `<span class="status status-warn" style="font-size:9px;padding:2px 6px">${est}</span>` : '';
-    return `<div class="sol-item modified" id="sol-item-${sku}">
+    return `<div class="sol-item${conf?' modified':' sugerido'}" id="sol-item-${sku}">
       <div class="sol-info">
         <div class="sol-name">${desc}</div>
         <div class="sol-meta"><span style="font-family:var(--mono);color:var(--blue2);font-size:10px">${sku}</span>${descUO ? ' · '+descUO : ''} ${badge}</div>
       </div>
       <div class="sol-qty">
-        <div class="sol-row">
-          <div class="sol-btn" onclick="solStep('${sku}',-1)">−</div>
-          <input class="sol-num edited" id="sol-${sku}" type="number" inputmode="decimal" min="0" step="0.5"
-            value="${qty}" onchange="updateSolQty('${sku}',this.value)" onclick="this.select()" onfocus="this.select()">
-          <div class="sol-btn" onclick="solStep('${sku}',1)">+</div>
-        </div>
-        <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:4px">
-          <div style="font-size:10px;color:var(--t3)">UO</div>
+        ${solStepperInline(sku)}
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:4px">
+          ${solRowStatus(sku)}
           <button onclick="solEliminar('${sku}')" style="font-size:10px;color:var(--red);background:none;border:none;cursor:pointer;padding:0;line-height:1">× Quitar</button>
         </div>
       </div>
@@ -2751,8 +2845,16 @@ function solBuscar(q) {
     const descUO = r['Descripcion UO'] || r['H'] || '';
     const est    = solGetEstado(sku);
     const inCart = STATE.solicitudQtys[sku] > 0;
+    const conf   = STATE.solicitudConf[sku] === true;
     const estColor = est === 'QUIEBRE' ? 'var(--red)' : est === 'ATENCION' ? 'var(--amber)' : 'var(--t3)';
-    return `<div onclick="solAgregar('${sku}')" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px"
+    const rightCol = inCart
+      ? `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+           ${solStepperInline(sku)}
+           ${solRowStatus(sku)}
+         </div>`
+      : `<div style="font-size:11px;color:var(--t3)">Stock: <span style="color:${stock>0?'var(--green2)':'var(--red)'};font-weight:600">${stock} UO</span></div>
+         <div style="font-size:10px;color:var(--blue2);margin-top:1px">+ agregar</div>`;
+    return `<div id="solrow-${sku}" onclick="${inCart?'':`solAgregar('${sku}')`}" style="padding:10px 14px;${inCart?'':'cursor:pointer;'}border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px"
       onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background=''">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${desc}</div>
@@ -2763,8 +2865,7 @@ function solBuscar(q) {
         </div>
       </div>
       <div style="text-align:right;flex-shrink:0">
-        <div style="font-size:11px;color:var(--t3)">Stock: <span style="color:${stock>0?'var(--green2)':'var(--red)'};font-weight:600">${stock} UO</span></div>
-        ${inCart ? `<div style="font-size:10px;color:var(--green2);margin-top:1px">✓ en pedido</div>` : `<div style="font-size:10px;color:var(--blue2);margin-top:1px">+ agregar</div>`}
+        ${rightCol}
       </div>
     </div>`;
   }).join('');
@@ -2776,6 +2877,7 @@ function solAgregar(sku) {
   if (!STATE.solicitudQtys[sku]) {
     const sug = solGetSugerido(sku);
     STATE.solicitudQtys[sku] = sug > 0 ? sug : 1;
+    STATE.solicitudConf[sku] = false; // Q sugerida intacta — el usuario aún no la confirmó
   }
   // Cierra búsqueda pero mantén el foco para seguir buscando
   const searchEl = document.getElementById('sol-search');
@@ -2783,6 +2885,8 @@ function solAgregar(sku) {
   document.getElementById('sol-search-results').style.display = 'none';
   solUpdateCarritoBar();
   renderSolicitud(); // refresca lista — marca como "en pedido"
+  solFlashRow(sku);
+  solScrollCarritoFinal(); // si el carrito está abierto, muestra el recién agregado abajo
   // Feedback — toast breve, no scroll forzado al carrito
   const descProd = solGetDesc(sku) || sku;
   if (!yaEstaba) showToast('✓ ' + descProd + ' agregado', 'success');
@@ -2794,6 +2898,7 @@ function solAgregar(sku) {
 function invPedir(sku, maxSug) {
   if (!STATE.solicitudQtys[sku]) {
     STATE.solicitudQtys[sku] = maxSug > 0 ? maxSug : 1;
+    STATE.solicitudConf[sku] = false; // Q sugerida intacta
   }
   solUpdateCarritoBar();
   goTab('solicitud');
@@ -2802,6 +2907,7 @@ function invPedir(sku, maxSug) {
 
 function solEliminar(sku) {
   delete STATE.solicitudQtys[sku];
+  delete STATE.solicitudConf[sku];
   solUpdateCarritoBar();
 }
 
@@ -2834,10 +2940,12 @@ function renderSolicitud() {
     const sug  = solGetSugerido(sku);
     const descUO = solGetDescUO(sku);
     const inCart = STATE.solicitudQtys[sku] > 0;
+    const conf   = STATE.solicitudConf[sku] === true;
     const badgeClass = est === 'QUIEBRE' ? 'status-err' : 'status-warn';
+    const itemState = inCart ? (conf ? ' modified' : ' sugerido') : '';
 
-    return `<div class="sol-item${inCart?' modified':''}" id="sol-alerta-${sku}" onclick="solAlertaTap('${sku}')"
-      style="cursor:pointer;${inCart?'':'opacity:0.75'}">
+    return `<div class="sol-item${itemState}" id="sol-alerta-${sku}" ${inCart?'':`onclick="solAlertaTap('${sku}')"`}
+      style="${inCart?'':'cursor:pointer;opacity:0.85'}">
       <div class="sol-info">
         <div class="sol-name">${desc}</div>
         <div class="sol-meta">
@@ -2848,7 +2956,7 @@ function renderSolicitud() {
       </div>
       <div style="flex-shrink:0;text-align:right">
         ${inCart
-          ? `<div style="font-size:12px;color:var(--green2);font-weight:700">✓ ${STATE.solicitudQtys[sku]} UO<br><span style="font-size:10px;color:var(--t3)">en pedido</span></div>`
+          ? `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${solStepperInline(sku)}${solRowStatus(sku)}</div>`
           : `<div style="font-size:11px;color:var(--t3)">Sug. <span style="color:var(--t2);font-weight:600">${sug||'—'}</span> UO</div>
              <div style="font-size:11px;color:var(--blue2);margin-top:4px">+ agregar</div>`
         }
@@ -2871,24 +2979,45 @@ function solAlertaTap(sku) {
 }
 
 // ── Controles cantidad ──
+// Stateless: lee la Q desde STATE, no del DOM (el input puede existir 2 veces:
+// en la búsqueda y en el carrito → getElementById tomaría sólo el primero).
 function solStep(sku, delta) {
-  const input = document.getElementById('sol-' + sku);
-  if (!input) return;
-  const next = Math.max(0, (parseFloat(input.value)||0) + delta);
-  input.value = next;
+  const cur  = parseFloat(STATE.solicitudQtys[sku]) || 0;
+  const next = Math.max(0, cur + delta);
   updateSolQty(sku, next);
 }
 
 function updateSolQty(sku, val) {
   const qty = parseFloat(val) || 0;
   STATE.solicitudQtys[sku] = qty;
-  if (qty === 0) delete STATE.solicitudQtys[sku];
+  STATE.solicitudConf[sku] = true; // el usuario tocó la Q → confirmada
+  if (qty === 0) { delete STATE.solicitudQtys[sku]; delete STATE.solicitudConf[sku]; }
   solUpdateCarritoBar();
   renderSolicitud();
+  solRefreshBusqueda(); // si hay búsqueda abierta, refresca el stepper inline
+  solFlashRow(sku);
+}
+
+// Re-renderiza la lista de búsqueda si está visible (para reflejar Q/estado al vuelo)
+function solRefreshBusqueda() {
+  const res = document.getElementById('sol-search-results');
+  const inp = document.getElementById('sol-search');
+  if (res && res.style.display !== 'none' && inp && inp.value) solBuscar(inp.value);
+}
+
+// Micro-flash verde en la fila tocada (búsqueda y/o alerta)
+function solFlashRow(sku) {
+  ['solrow-'+sku, 'sol-alerta-'+sku, 'sol-item-'+sku].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 400);
+  });
 }
 
 function solReset() {
   STATE.solicitudQtys = {};
+  STATE.solicitudConf = {};
   document.getElementById('sol-search').value = '';
   document.getElementById('sol-search-results').style.display = 'none';
   solUpdateCarritoBar();
@@ -2903,12 +3032,18 @@ function solAskConfirm() {
   const detalle = skus.map(sku => {
     const desc = solGetDesc(sku);
     const qty  = STATE.solicitudQtys[sku];
-    return `${desc}: ${qty} UO`;
+    const noConf = STATE.solicitudConf[sku] !== true;
+    return `${noConf ? '⚠ ' : '✓ '}${desc}: ${qty} UO${noConf ? ' (sugerida)' : ''}`;
   }).join('\n');
+
+  const sinConf = solSinConfirmar();
+  const aviso = sinConf > 0
+    ? `\n\n⚠ ${sinConf} producto(s) con Q sugerida sin revisar. Puedes enviar igual, pero revísalas si no estás seguro.`
+    : '';
 
   const confirmEl = document.getElementById('sol-confirm');
   const detailEl  = document.getElementById('sol-confirm-detail');
-  if (detailEl) detailEl.textContent = detalle;
+  if (detailEl) detailEl.textContent = detalle + aviso;
   if (confirmEl) confirmEl.classList.add('show');
   confirmEl.scrollIntoView({ behavior:'smooth' });
 }
@@ -2946,6 +3081,7 @@ async function enviarSolicitud() {
   if (res && res.ok) {
     showToast('✅ Solicitud enviada — ' + items.length + ' productos', 'success');
     STATE.solicitudQtys = {};
+    STATE.solicitudConf = {};
     document.getElementById('sol-confirm').classList.remove('show');
     solUpdateCarritoBar();
     renderSolicitud();
