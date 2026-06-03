@@ -1408,6 +1408,16 @@ const CFG = {
   // token Riesco que el panel ya tiene → NO requiere TOKEN_MAESTRO).
   PEDIDO_VALOR_ENABLED: false,
   PEDIDO_VALOR_COL: 'Valor Unidad Neto', // precio por 1 UO (a confirmar con BD_INSUMOS nuevo)
+  // ── Mis Pedidos · cantidad enviada · PREDISPUESTO Y APAGADO ──
+  // Hoy el panel BC (_doDespacharSolicitud) NO escribe la cantidad despachada en
+  // Solicitud_BLocal col H (qConf). La cantidad spedita vive en Movimientos_BC col J
+  // pero NO es atribuible a la solicitud (no hay SOL-id, mismo SKU se despacha N veces).
+  // Por eso hoy mostramos solo CHIESTO + estado ENVIADO/SIN-ENVIAR (verdad cierta).
+  // El día que la patch GAS (B-completa) escriba qConf en la solicitud al despachar:
+  //   CFG.PEDIDO_QENVIADA_ENABLED = true  → aparece "pedido X · enviado Y" y el PARCIAL real.
+  // Ver doc: ISTRUZIONI_B_COMPLETA_QENVIADA_*.md
+  PEDIDO_QENVIADA_ENABLED: false,
+  PEDIDO_VENTANA_DIAS: 30, // ventana por defecto del sub-tab Mis Pedidos (era 7 hardcoded)
 };
 
 // ════════════════════════════════════════════════════════
@@ -3096,7 +3106,9 @@ async function enviarSolicitud() {
 // MIS ÚLTIMOS PEDIDOS — sub-tab dentro Pedido BC (v102)
 // Datos reales: GAS endpoint getUltimosPedidos(local, dias=7)
 // ════════════════════════════════════════════════════════
-let STATE_ultimos = { loading: false, pedidos: [], abiertos: {}, subtab: 'nuevo', loaded: false };
+let STATE_ultimos = { loading: false, pedidos: [], abiertos: {}, subtab: 'nuevo', loaded: false,
+  ventana: (CFG.PEDIDO_VENTANA_DIAS || 30), // 7 | 30 | 9999(todo)
+  vista: 'pedido' }; // 'pedido' | 'backlog'
 
 // Chiamata quando si entra su tab "Pedido BC" o quando si preme "Mis Pedidos"
 async function solCargarUltimos(forzar = false) {
@@ -3111,10 +3123,10 @@ async function solCargarUltimos(forzar = false) {
     const res = await callGAS({
       action: 'getUltimosPedidos',
       local:  CFG.local || CFG.LOCAL || 'Riesco',
-      dias:   7
+      dias:   STATE_ultimos.ventana // era 7 hardcoded · ahora ventana seleccionable
     });
     // DEBUG v104 — capire perché a volte è vuoto
-    console.log('[getUltimosPedidos] local=', CFG.local || CFG.LOCAL, 'response=', res);
+    console.log('[getUltimosPedidos] local=', CFG.local || CFG.LOCAL, 'dias=', STATE_ultimos.ventana, 'response=', res);
     STATE_ultimos.pedidos = (res && res.ok && Array.isArray(res.pedidos)) ? res.pedidos : [];
   } catch (e) {
     console.log('[getUltimosPedidos] ERROR:', e);
@@ -3123,6 +3135,19 @@ async function solCargarUltimos(forzar = false) {
   STATE_ultimos.loading = false;
   STATE_ultimos.loaded  = true;
   solRenderSubtabBadge();
+  renderUltimos();
+}
+
+// Cambia ventana temporale (7/30/todo) · forza ricarica dal GAS
+function solSetVentana(dias) {
+  STATE_ultimos.ventana = dias;
+  STATE_ultimos.loaded = false; // forza nuova fetch con la nuova finestra
+  solCargarUltimos(true);
+}
+
+// Cambia vista (pedido <-> backlog) · NON ricarica, solo re-render
+function solSetVista(vista) {
+  STATE_ultimos.vista = vista;
   renderUltimos();
 }
 
@@ -3203,12 +3228,86 @@ function _ultimosLeidos() {
   catch { return new Set(); }
 }
 
+// Colores por estado de SKU (compartido por ambas vistas)
+function _ultEstadoColor(e) {
+  const x = String(e || '').toUpperCase();
+  if (x === 'RECIBIDO')    return { bg: 'rgba(15,110,86,0.15)',  bd: 'rgba(15,110,86,0.35)',  fg: 'var(--green2)',   label: 'RECIBIDO' };
+  if (x === 'DIFERENCIA')  return { bg: 'rgba(192,57,43,0.15)',  bd: 'rgba(192,57,43,0.35)',  fg: '#E07070',          label: 'DIFERENCIA' };
+  if (x === 'ENVIADO')     return { bg: 'rgba(74,111,165,0.15)', bd: 'rgba(74,111,165,0.35)', fg: 'var(--blue2)',     label: 'ENVIADO' };
+  if (x === 'SOLICITADO')  return { bg: 'rgba(196,98,29,0.12)',  bd: 'rgba(196,98,29,0.35)',  fg: 'var(--orange2)',   label: 'SIN ENVIAR' };
+  return { bg: 'var(--bg3)', bd: 'var(--border2)', fg: 'var(--t3)', label: x || '—' };
+}
+
+// Estado AGREGADO honesto del pedido a partir de los SKU:
+//   COMPLETO  = ningún SKU SOLICITADO (todos enviado/recibido)
+//   PENDIENTE = todos los SKU SOLICITADO (nada despachado)
+//   PARCIAL   = mezcla
+function _ultEstadoPedido(prods) {
+  const ests = (prods || []).map(it => String(it.estado || '').toUpperCase());
+  if (!ests.length) return 'COMPLETO';
+  const nSol = ests.filter(e => e === 'SOLICITADO').length;
+  if (nSol === 0)            return 'COMPLETO';
+  if (nSol === ests.length)  return 'PENDIENTE';
+  return 'PARCIAL';
+}
+function _ultPedidoColor(estPed) {
+  if (estPed === 'COMPLETO')  return { bg: 'rgba(15,110,86,0.15)',  bd: 'rgba(15,110,86,0.40)',  fg: 'var(--green2)',  acc: 'var(--blue)' };
+  if (estPed === 'PARCIAL')   return { bg: 'rgba(186,117,23,0.18)', bd: 'rgba(186,117,23,0.45)', fg: 'var(--amber)',   acc: 'var(--amber)' };
+  return                            { bg: 'rgba(153,60,29,0.18)',  bd: 'rgba(153,60,29,0.50)',  fg: 'var(--orange2)', acc: 'var(--orange2)' };
+}
+
+const _ULT_MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function _ultFechaFmt(fecha) {
+  if (fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    const [yy, mm, dd] = fecha.split('-');
+    return `${dd}-${_ULT_MESES[parseInt(mm) - 1] || mm}`;
+  }
+  return fecha || '—';
+}
+function _ultDiasAtras(fecha) {
+  if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return null;
+  const [yy, mm, dd] = fecha.split('-').map(Number);
+  const f = new Date(yy, mm - 1, dd);
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  return Math.round((hoy - f) / 86400000);
+}
+
+// Barra de pills: Ventana (7/30/Todo) + Vista (Por pedido / Backlog)
+function _ultPillsHTML() {
+  const v = STATE_ultimos.ventana;
+  const vista = STATE_ultimos.vista;
+  const pill = (txt, active, onclick, accent) => {
+    const bd = active ? (accent || 'var(--blue)') : 'var(--border2)';
+    const bg = active ? (accent === 'var(--orange2)' ? 'rgba(196,98,29,0.18)' : 'rgba(74,111,165,0.18)') : 'var(--bg2)';
+    const fg = active ? (accent === 'var(--orange2)' ? 'var(--orange2)' : 'var(--blue2)') : 'var(--t3)';
+    return `<span onclick="${onclick}" style="font-size:11px;padding:4px 11px;border-radius:20px;cursor:pointer;border:1px solid ${bd};background:${bg};color:${fg};font-weight:${active?'600':'400'}">${txt}</span>`;
+  };
+  // conteo backlog (SKU SOLICITADO) sui pedidos in finestra
+  let nBacklog = 0;
+  STATE_ultimos.pedidos.forEach(p => (p.productos||[]).forEach(it => {
+    if (String(it.estado||'').toUpperCase() === 'SOLICITADO') nBacklog++;
+  }));
+  const backlogBadge = nBacklog ? ` <span style="background:rgba(196,98,29,0.28);color:var(--orange2);border-radius:8px;padding:0 5px;font-size:9px;margin-left:2px">${nBacklog}</span>` : '';
+  return `
+    <div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-right:2px">Ventana</span>
+      ${pill('7 días',  v===7,    "solSetVentana(7)")}
+      ${pill('30 días', v===30,   "solSetVentana(30)")}
+      ${pill('Todo',    v>=9999,  "solSetVentana(9999)")}
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-right:2px">Vista</span>
+      ${pill('Por pedido', vista==='pedido',  "solSetVista('pedido')")}
+      ${pill('⏳ Backlog'+backlogBadge, vista==='backlog', "solSetVista('backlog')", 'var(--orange2)')}
+    </div>`;
+}
+
 function renderUltimos() {
   const cont = document.getElementById('ultimos-list');
   if (!cont) return;
 
   if (STATE_ultimos.loading) {
-    cont.innerHTML = `<div style="padding:40px 20px;text-align:center;color:var(--t3)">
+    cont.innerHTML = _ultPillsHTML() + `<div style="padding:40px 20px;text-align:center;color:var(--t3)">
       <div class="spinner" style="margin:0 auto 12px"></div>
       Cargando últimos pedidos...
     </div>`;
@@ -3216,82 +3315,128 @@ function renderUltimos() {
   }
 
   if (!STATE_ultimos.pedidos.length) {
-    cont.innerHTML = `<div style="padding:40px 20px;text-align:center;color:var(--t3);font-size:13px">
+    const txtV = STATE_ultimos.ventana >= 9999 ? '' : ` en los últimos ${STATE_ultimos.ventana} días`;
+    cont.innerHTML = _ultPillsHTML() + `<div style="padding:40px 20px;text-align:center;color:var(--t3);font-size:13px">
       <div style="font-size:32px;margin-bottom:10px">📭</div>
-      No hay pedidos en los últimos 7 días
+      No hay pedidos${txtV}
     </div>`;
     return;
   }
 
-  // Colores por estado
-  const estadoColor = (e) => {
-    const x = String(e || '').toUpperCase();
-    if (x === 'RECIBIDO')    return { bg: 'rgba(15,110,86,0.15)',  bd: 'rgba(15,110,86,0.35)',  fg: 'var(--green2)',   label: 'RECIBIDO' };
-    if (x === 'DIFERENCIA')  return { bg: 'rgba(192,57,43,0.15)',  bd: 'rgba(192,57,43,0.35)',  fg: '#E07070',          label: 'DIFERENCIA' };
-    if (x === 'ENVIADO')     return { bg: 'rgba(74,111,165,0.15)', bd: 'rgba(74,111,165,0.35)', fg: 'var(--blue2)',     label: 'ENVIADO' };
-    if (x === 'SOLICITADO')  return { bg: 'rgba(196,98,29,0.12)',  bd: 'rgba(196,98,29,0.35)',  fg: 'var(--orange2)',   label: 'SOLICITADO' };
-    return { bg: 'var(--bg3)', bd: 'var(--border2)', fg: 'var(--t3)', label: x || '—' };
-  };
+  if (STATE_ultimos.vista === 'backlog') { renderUltimosBacklog(cont); return; }
 
+  // ── VISTA POR PEDIDO ──────────────────────────────────────
   const leidos = _ultimosLeidos();
-
-  // Sort: data desc, poi ora desc
   const sorted = [...STATE_ultimos.pedidos].sort((a, b) => {
     const da = (a.fecha || '') + ' ' + (a.hora || '00:00');
     const db = (b.fecha || '') + ' ' + (b.hora || '00:00');
     return db.localeCompare(da);
   });
 
-  cont.innerHTML = sorted.map(p => {
-    const c = estadoColor(p.estado);
+  cont.innerHTML = _ultPillsHTML() + sorted.map(p => {
+    const prods = Array.isArray(p.productos) ? p.productos : [];
+    const estPed = _ultEstadoPedido(prods);
+    const cp = _ultPedidoColor(estPed);
     const open = !!STATE_ultimos.abiertos[p.idSol];
     const noLeido = !leidos.has(p.idSol);
-
-    // Parse fecha YYYY-MM-DD → "DD-abr"
-    const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-    let fechaFmt = p.fecha || '—';
-    if (p.fecha && /^\d{4}-\d{2}-\d{2}$/.test(p.fecha)) {
-      const [yy, mm, dd] = p.fecha.split('-');
-      fechaFmt = `${dd}-${meses[parseInt(mm) - 1] || mm}`;
-    }
+    const fechaFmt = _ultFechaFmt(p.fecha);
     const horaStr = p.hora || '';
-
-    const prods = Array.isArray(p.productos) ? p.productos : [];
+    const nSinEnviar = prods.filter(it => String(it.estado||'').toUpperCase()==='SOLICITADO').length;
 
     const detalle = open ? `
       <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
         ${prods.length ? prods.map(it => {
-          const cEst = estadoColor(it.estado || p.estado);
+          const cEst = _ultEstadoColor(it.estado || p.estado);
+          // ── Q · CHIESTO siempre · ENVIADO predispuesto-apagado (CFG.PEDIDO_QENVIADA_ENABLED) ──
+          const qPed = (it.qty ?? '—');
+          let qHTML = `${qPed} UO`;
+          if (CFG.PEDIDO_QENVIADA_ENABLED && it.qEnviada != null) {
+            qHTML = `ped ${qPed} · env <span style="color:${cEst.fg};font-weight:700">${it.qEnviada}</span> UO`;
+          }
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04)">
             <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t1)">${it.descripcion || it.sku || '—'}</div>
-            <div style="font-family:var(--mono);color:var(--t2);font-size:11px;min-width:60px;text-align:right">${(it.qty ?? it.qConfirmada ?? '—')} UO</div>
-            <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:${cEst.fg};min-width:72px;text-align:right">${cEst.label}</div>
+            <div style="font-family:var(--mono);color:var(--t2);font-size:11px;min-width:96px;text-align:right">${qHTML}</div>
+            <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:${cEst.fg};min-width:78px;text-align:right">${cEst.label}</div>
           </div>`;
         }).join('') : `<div style="padding:10px;text-align:center;color:var(--t3);font-size:11px">Sin detalle disponible</div>`}
       </div>` : '';
 
-    const borderStyle = noLeido
-      ? `2px solid ${c.bd.replace('0.35', '0.7')}`
-      : `1px solid ${c.bd}`;
+    const borderStyle = noLeido ? `2px solid ${cp.bd}` : `1px solid var(--border)`;
     const bgStyle = noLeido ? 'var(--bg3)' : 'var(--bg2)';
+    const subInfo = nSinEnviar > 0
+      ? `<span style="color:var(--amber)">${nSinEnviar} sin enviar</span>`
+      : `${p.totalUO ?? '—'} UO`;
 
     return `<div onclick="solTogglePedido('${p.idSol}')"
-      style="background:${bgStyle};border:${borderStyle};border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;position:relative">
-      ${noLeido ? `<div style="position:absolute;top:8px;left:-3px;width:6px;height:6px;border-radius:50%;background:${c.fg};box-shadow:0 0 6px ${c.fg}"></div>` : ''}
+      style="background:${bgStyle};border:${borderStyle};border-left:4px solid ${cp.acc};border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;position:relative">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
         <div style="flex:1;min-width:0">
           <div style="font-family:var(--mono);font-size:10px;color:var(--t3);letter-spacing:0.5px">${p.idSol || '—'}</div>
           <div style="font-size:13px;font-weight:${noLeido ? '700' : '600'};color:var(--t1);margin-top:1px">
             ${fechaFmt}${horaStr ? ` <span style="color:var(--t3);font-weight:400">${horaStr}</span>` : ''}
-            · ${p.nProductos || prods.length} productos · ${p.totalUO ?? '—'} UO
+            · ${p.nProductos || prods.length} productos · ${subInfo}
           </div>
         </div>
-        <div style="background:${c.bg};border:1px solid ${c.bd};color:${c.fg};font-size:9px;font-weight:700;letter-spacing:1.2px;padding:3px 8px;border-radius:12px">${c.label}</div>
+        <div style="background:${cp.bg};border:1px solid ${cp.bd};color:${cp.fg};font-size:9px;font-weight:700;letter-spacing:1.2px;padding:3px 9px;border-radius:12px">${estPed}</div>
         <div style="color:var(--t3);font-size:14px">${open ? '▾' : '▸'}</div>
       </div>
       ${detalle}
     </div>`;
   }).join('');
+}
+
+// ── VISTA BACKLOG: SKU SOLICITADO agregados de todos los pedidos en ventana ──
+function renderUltimosBacklog(cont) {
+  // Agrega por SKU: suma qty pedida, conserva pedido más antiguo de origen
+  const map = {};
+  STATE_ultimos.pedidos.forEach(p => {
+    (p.productos||[]).forEach(it => {
+      if (String(it.estado||'').toUpperCase() !== 'SOLICITADO') return;
+      const sku = String(it.sku||'').trim();
+      const key = sku || (it.descripcion||'');
+      if (!map[key]) map[key] = { sku, desc: it.descripcion || sku, qPed: 0, origenes: [] };
+      map[key].qPed += (parseFloat(it.qty) || 0);
+      map[key].origenes.push({ idSol: p.idSol, fecha: p.fecha });
+    });
+  });
+  const items = Object.values(map).map(m => {
+    // origen más antiguo
+    m.origenes.sort((a,b)=> (a.fecha||'').localeCompare(b.fecha||''));
+    m.origen = m.origenes[0];
+    m.dias = _ultDiasAtras(m.origen ? m.origen.fecha : null);
+    return m;
+  });
+
+  if (!items.length) {
+    cont.innerHTML = _ultPillsHTML() + `<div style="padding:40px 20px;text-align:center;color:var(--t3);font-size:13px">
+      <div style="font-size:32px;margin-bottom:10px">✅</div>
+      Sin productos en backlog · todo despachado
+    </div>`;
+    return;
+  }
+
+  // orden: más antiguo primero (lo que más espera arriba)
+  items.sort((a,b)=> (b.dias||0) - (a.dias||0));
+
+  const rows = items.map(m => {
+    const diasTxt = m.dias != null ? `pedido hace ${m.dias} día${m.dias===1?'':'s'}` : '';
+    return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;color:var(--t1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.desc}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:1px">${m.origen ? m.origen.idSol : '—'} · ${diasTxt}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:16px;font-weight:700;color:var(--amber);font-family:var(--mono)">${Math.round(m.qPed*100)/100} <span style="font-size:10px;color:var(--t3)">UO</span></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  cont.innerHTML = _ultPillsHTML() +
+    `<div style="background:rgba(196,98,29,0.10);border:1px solid rgba(196,98,29,0.30);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:var(--orange2);line-height:1.5">
+      ⏳ Productos que pediste y <b>aún no llegaron</b> (estado SOLICITADO en BC). Agrupados por producto, de todos tus pedidos en la ventana.
+    </div>
+    <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">${items.length} productos en espera</div>
+    ${rows}`;
 }
 
 
