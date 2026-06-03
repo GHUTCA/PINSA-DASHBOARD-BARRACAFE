@@ -405,6 +405,20 @@
           Registrar Movimiento
         </button>
       </div>
+
+      <!-- CARRITO MOVIMIENTOS (bloque mismo tipo) -->
+      <div id="bcmov-carrito-wrap" style="display:none;margin-top:8px">
+        <div style="display:flex;font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.4px;padding:0 12px 4px">
+          <span style="flex:1">Insumo</span>
+          <span style="width:64px;text-align:center">UPC</span>
+          <span style="width:64px;text-align:center;margin-left:8px">UO</span>
+          <span style="width:22px;margin-left:8px"></span>
+        </div>
+        <div id="bcmov-carrito-list"></div>
+        <button class="btn btn-primary" id="bcmov-bloque-btn" onclick="bcMovGuardarBloque()" style="margin-top:10px">
+          Registrar movimientos
+        </button>
+      </div>
     </div>
 
     <!-- RECIENTES HOY -->
@@ -850,6 +864,11 @@ const STATE = {
 // ════════════════════════════════════════════════════════
 let bcMovSel = null; // { sku, desc, upc, uoDesc, stockUO, stockUPC }
 
+// ── Carrito movimientos (bloque mismo tipo) · 03-jun ──
+// item: { sku, desc, upcDesc, uoDesc, qtyUPC, qtyUO, upcEqualUO }
+let bcMovCarrito = [];     // orden: último agregado primero (unshift)
+function bcMovEnCarrito(sku) { return bcMovCarrito.find(i => i.sku === sku); }
+
 function bcMovOnTipoChange() {
   const tipo = document.getElementById('bcmov-tipo').value;
   const esProv = tipo === 'Ingreso Proveedor';
@@ -857,6 +876,8 @@ function bcMovOnTipoChange() {
   document.getElementById('bcmov-costo-field').style.display = esProv ? 'block' : 'none';
   document.getElementById('bcmov-search').value = '';
   document.getElementById('bcmov-results').innerHTML = '';
+  bcMovCarrito = [];        // un bloque = un tipo → cambiar tipo limpia el carrito
+  bcMovRenderCarrito();
   bcMovClear();
   bcMovCheckAlert();
 }
@@ -947,36 +968,127 @@ function bcMovSelect(sku, desc, upcDesc, uoDesc) {
   // Si col I > 1 → dentro de 1 UPC hay múltiples UO → mostrar 2 campos
   const upcEqualUO = (_factorJ > 0 && _factorT > 0) ? Math.abs(_factorJ - _factorT) < 0.01 : true;
 
-  bcMovSel = { sku, desc, upcDesc, uoDesc, stockUPC, stockUO, upcEqualUO };
-
-  // Info insumo
-  document.getElementById('bcmov-sel-desc').textContent = desc;
-  document.getElementById('bcmov-sel-sku').textContent  = sku;
-  document.getElementById('bcmov-sel-upc').textContent  = upcDesc;
-
-  // Stock UPC — sempre visibile
-  document.getElementById('bcmov-sel-stock').textContent  = stockUPC;
-  document.getElementById('bcmov-sel-uodesc').textContent = upcDesc;
-  // Stock UO — visibile solo se UPC != UO, con descrizione UO corretta
-  const uoBox = document.getElementById('bcmov-sel-uo-box');
-  if (uoBox) uoBox.style.display = upcEqualUO ? 'none' : 'block';
-  document.getElementById('bcmov-sel-stockupc').textContent = stockUO;
-  document.getElementById('bcmov-sel-upcdesc').textContent  = uoDesc;
-
-  // Labels sopra campi quantita
-  document.getElementById('bcmov-upc-label').textContent = upcDesc;
-  document.getElementById('bcmov-uo-label').textContent  = uoDesc;
-
-  // Mostrar campo UO solo si UPC ≠ UO
-  document.getElementById('bcmov-uo-field').style.display = upcEqualUO ? 'none' : 'block';
-
-  document.getElementById('bcmov-search').value = desc;
+  // ── Carrito: agrega o actualiza (no duplica) · último arriba ──
+  const ya = bcMovEnCarrito(sku);
+  if (!ya) {
+    bcMovCarrito.unshift({ sku, desc, upcDesc, uoDesc, qtyUPC: '', qtyUO: '', upcEqualUO });
+  }
+  document.getElementById('bcmov-search').value = '';
   document.getElementById('bcmov-results').innerHTML = '';
-  document.getElementById('bcmov-selected').style.display = 'block';
-  document.getElementById('bcmov-qty-upc').value = '';
-  document.getElementById('bcmov-qty-uo').value  = '';
-  document.getElementById('bcmov-qty-upc').focus();
-  bcMovCheckAlert();
+  // El panel single queda oculto — trabajamos con el carrito
+  const selPanel = document.getElementById('bcmov-selected');
+  if (selPanel) selPanel.style.display = 'none';
+  bcMovRenderCarrito();
+  // Foco en el campo UPC del insumo recién agregado, dentro del carrito
+  setTimeout(() => {
+    const inp = document.getElementById('bcmovq-upc-' + (window.CSS && CSS.escape ? CSS.escape(sku) : sku));
+    if (inp) { inp.focus(); inp.select(); }
+  }, 80);
+}
+
+// ── Render carrito movimientos ──
+function bcMovRenderCarrito() {
+  const wrap = document.getElementById('bcmov-carrito-wrap');
+  const list = document.getElementById('bcmov-carrito-list');
+  const btn  = document.getElementById('bcmov-bloque-btn');
+  if (!wrap || !list) return;
+  if (!bcMovCarrito.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
+  wrap.style.display = 'block';
+  list.innerHTML = bcMovCarrito.map(it => {
+    const safe = String(it.sku).replace(/[^a-zA-Z0-9]/g,'-');
+    const uoInput = it.upcEqualUO
+      ? `<input type="number" disabled placeholder="—" style="width:64px;height:34px;text-align:center;font-family:var(--mono);background:var(--bg2);opacity:0.45;margin-left:8px">`
+      : `<input type="number" id="bcmovq-uo-${it.sku}" value="${it.qtyUO}" min="0" step="any" inputmode="decimal" placeholder="0" onchange="bcMovSetQty('${it.sku}','uo',this.value)" onblur="bcMovSetQty('${it.sku}','uo',this.value)" onclick="this.select()" onfocus="this.select()" style="width:64px;height:34px;text-align:center;font-family:var(--mono);font-weight:600;border-color:var(--blue);margin-left:8px">`;
+    return `<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:500;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.desc}</div>
+        <div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${it.sku} · ${it.upcDesc||''}</div>
+      </div>
+      <input type="number" id="bcmovq-upc-${it.sku}" value="${it.qtyUPC}" min="0" step="any" inputmode="decimal" placeholder="0"
+        onchange="bcMovSetQty('${it.sku}','upc',this.value)" onblur="bcMovSetQty('${it.sku}','upc',this.value)"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();bcMovSetQty('${it.sku}','upc',this.value);bcMovVolverABuscar();}"
+        onclick="this.select()" onfocus="this.select()"
+        style="width:64px;height:34px;text-align:center;font-family:var(--mono);font-weight:600">
+      ${uoInput}
+      <button onclick="bcMovQuitar('${it.sku}')" aria-label="Quitar" style="width:22px;height:22px;margin-left:8px;background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;line-height:1">✕</button>
+    </div>`;
+  }).join('');
+  if (btn) btn.textContent = 'Registrar ' + bcMovCarrito.length + ' movimiento' + (bcMovCarrito.length>1?'s':'');
+}
+
+function bcMovSetQty(sku, campo, val) {
+  const it = bcMovEnCarrito(sku);
+  if (!it) return;
+  const q = parseFloat(val) || 0;
+  if (campo === 'upc') it.qtyUPC = q > 0 ? q : '';
+  else                 it.qtyUO  = q > 0 ? q : '';
+}
+
+function bcMovQuitar(sku) {
+  bcMovCarrito = bcMovCarrito.filter(i => i.sku !== sku);
+  bcMovRenderCarrito();
+}
+
+function bcMovVolverABuscar() {
+  const s = document.getElementById('bcmov-search');
+  if (s) setTimeout(() => s.focus(), 50);
+}
+
+// ── Registrar bloque (mismo tipo) → action plural registrarMovimientosBC ──
+async function bcMovGuardarBloque() {
+  const tipo  = document.getElementById('bcmov-tipo').value;
+  const notas = document.getElementById('bcmov-notas').value.trim();
+  const prov  = document.getElementById('bcmov-proveedor').value;
+  const costo = parseFloat(document.getElementById('bcmov-costo').value)||0;
+
+  if (!tipo) { showToast('Selecciona tipo de movimiento','error'); return; }
+  if (!bcMovCarrito.length) { showToast('Agrega al menos un insumo','error'); return; }
+
+  // Validación Ingreso Proveedor (a nivel bloque, igual que el singular)
+  const EMERGENCIA = ['SUPERMERCADO','Mercado Libre','Europa Secreta'];
+  if (tipo === 'Ingreso Proveedor') {
+    if (!prov) { showToast('Selecciona un proveedor','error'); return; }
+    if (!EMERGENCIA.includes(prov)) { showToast('Usa OC Proveedor para este proveedor','error'); return; }
+    if (!costo || costo <= 0) { showToast('Ingresa el costo según boleta','error'); return; }
+  }
+
+  // Construir items — solo los que tienen alguna cantidad > 0
+  const items = bcMovCarrito
+    .map(it => ({ sku: it.sku, desc: it.desc, qtyUPC: parseFloat(it.qtyUPC)||0, qtyUO: parseFloat(it.qtyUO)||0 }))
+    .filter(it => it.qtyUPC > 0 || it.qtyUO > 0);
+
+  if (!items.length) { showToast('Ingresa cantidad en al menos un insumo','error'); return; }
+
+  const sinQty = bcMovCarrito.length - items.length;
+  if (sinQty > 0) {
+    if (!confirm(sinQty + ' insumo(s) sin cantidad serán ignorados. ¿Continuar?')) return;
+  }
+
+  const btn = document.getElementById('bcmov-bloque-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const res = await callGAS({
+    action: 'registrarMovimientosBC',
+    tipo, proveedor: prov, costoUTM: costo,
+    items, notas,
+    operador: SESSION ? SESSION.nombre : '',
+    fecha: today()
+  });
+
+  btn.disabled = false;
+  btn.textContent = 'Registrar ' + bcMovCarrito.length + ' movimiento' + (bcMovCarrito.length>1?'s':'');
+
+  if (res && res.ok) {
+    showToast('✅ ' + (res.registrados||items.length) + ' movimientos registrados', 'success');
+    bcMovCarrito = [];
+    bcMovRenderCarrito();
+    document.getElementById('bcmov-notas').value = '';
+    document.getElementById('bcmov-costo').value = '';
+    bcMovRenderRecientes();
+    loadCSV(CFG.GID.inventario).then(inv => { STATE.inventario = inv; });
+  } else {
+    showToast('Error: '+(res?.error||'sin respuesta'), 'error');
+  }
 }
 
 function bcMovClear() {
