@@ -2718,7 +2718,7 @@ function solStepperInline(sku) {
   return `<div class="sol-row" onclick="event.stopPropagation()">
       <div class="sol-btn" onclick="event.stopPropagation();solStep('${sku}',-1)">−</div>
       <input class="${numClass}" id="sol-${sku}" type="number" inputmode="decimal" min="0" step="0.5"
-        value="${qty}" onchange="updateSolQty('${sku}',this.value)" onclick="event.stopPropagation();this.select()" onfocus="this.select()">
+        value="${qty}" onchange="updateSolQty('${sku}',this.value)" onblur="updateSolQty('${sku}',this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();updateSolQty('${sku}',this.value);solVolverABuscar();}" onclick="event.stopPropagation();this.select()" onfocus="this.select()">
       <div class="sol-btn" onclick="event.stopPropagation();solStep('${sku}',1)">+</div>
     </div>`;
 }
@@ -2889,10 +2889,12 @@ function solAgregar(sku) {
     STATE.solicitudQtys[sku] = sug > 0 ? sug : 1;
     STATE.solicitudConf[sku] = false; // Q sugerida intacta — el usuario aún no la confirmó
   }
-  // Cierra búsqueda pero mantén el foco para seguir buscando
+  // Cierra búsqueda
   const searchEl = document.getElementById('sol-search');
   if (searchEl) searchEl.value = '';
   document.getElementById('sol-search-results').style.display = 'none';
+  // Abre el carrito si está cerrado, para que la fila del producto (y su Q) sea visible
+  if (!STATE.carritoExpanded) solToggleCarrito();
   solUpdateCarritoBar();
   renderSolicitud(); // refresca lista — marca como "en pedido"
   solFlashRow(sku);
@@ -2900,8 +2902,15 @@ function solAgregar(sku) {
   // Feedback — toast breve, no scroll forzado al carrito
   const descProd = solGetDesc(sku) || sku;
   if (!yaEstaba) showToast('✓ ' + descProd + ' agregado', 'success');
-  // Devolver foco a la barra de búsqueda para seguir agregando
-  if (searchEl) setTimeout(() => searchEl.focus(), 80);
+  // Foco directo en la Q del producto recién agregado (dentro del carrito, no en la
+  // lista de búsqueda — evita el id duplicado sol-${sku}, N1). El usuario digita la Q
+  // y con Enter el foco vuelve a la barra de búsqueda (solVolverABuscar).
+  setTimeout(() => {
+    const cont = document.getElementById('sol-carrito-detalle');
+    const qIn = cont ? cont.querySelector('#sol-' + (window.CSS && CSS.escape ? CSS.escape(sku) : sku)) : null;
+    if (qIn) { qIn.focus(); qIn.select(); }
+    else if (searchEl) searchEl.focus();
+  }, 90);
 }
 
 // ── Pedir desde Inventario / Análisis ──
@@ -3013,6 +3022,12 @@ function solRefreshBusqueda() {
   const res = document.getElementById('sol-search-results');
   const inp = document.getElementById('sol-search');
   if (res && res.style.display !== 'none' && inp && inp.value) solBuscar(inp.value);
+}
+
+// Tras confirmar la Q con Enter: devuelve el foco a la barra de búsqueda
+function solVolverABuscar() {
+  const s = document.getElementById('sol-search');
+  if (s) setTimeout(() => s.focus(), 50);
 }
 
 // Micro-flash verde en la fila tocada (búsqueda y/o alerta)
