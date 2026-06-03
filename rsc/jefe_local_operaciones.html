@@ -1441,6 +1441,7 @@ const STATE = {
   // solicitud en curso
   solicitudQtys: {},      // sku → cantidad en UO
   solicitudConf: {},      // sku → true si el usuario confirmó la Q (false = sugerido intacto)
+  solicitudOrden: [],     // orden de visualización del carrito: último agregado primero (unshift)
   carritoExpanded: false, // detalle del carrito colapsable (sticky)
 
   // V117 — carrito entrega a sección
@@ -2784,10 +2785,10 @@ function solSyncCarritoToggle() {
   if (txt) txt.textContent = exp ? 'Ocultar' : 'Ver pedido';
 }
 
-// Lleva el scroll del detalle al final (mostrar el último producto agregado)
+// Lleva el scroll del detalle al inicio (el último producto agregado va arriba)
 function solScrollCarritoFinal() {
   const det = document.getElementById('sol-carrito-detalle');
-  if (det && STATE.carritoExpanded) det.scrollTop = det.scrollHeight;
+  if (det && STATE.carritoExpanded) det.scrollTop = 0;
 }
 
 // Cuenta los SKU en el pedido cuya Q sigue siendo la sugerida (no confirmada por el usuario)
@@ -2797,10 +2798,30 @@ function solSinConfirmar() {
     .length;
 }
 
+// ── Orden del carrito (último agregado arriba) ──
+// Las claves de solicitudQtys son SKU numéricos → Object.keys los reordena
+// numéricamente y se pierde el orden de inserción. Por eso mantenemos un array.
+function solOrdenAdd(sku) {
+  STATE.solicitudOrden = STATE.solicitudOrden.filter(s => s !== sku);
+  STATE.solicitudOrden.unshift(sku); // el más reciente, arriba
+}
+function solOrdenRemove(sku) {
+  STATE.solicitudOrden = STATE.solicitudOrden.filter(s => s !== sku);
+}
+// Devuelve los SKU del carrito en orden de visualización (recientes arriba),
+// con fallback: cualquier SKU presente pero no listado se agrega al final.
+function solSkusOrdenados() {
+  const enCarrito = Object.keys(STATE.solicitudQtys).filter(s => STATE.solicitudQtys[s] > 0);
+  const set = new Set(enCarrito);
+  const ord = STATE.solicitudOrden.filter(s => set.has(s));
+  enCarrito.forEach(s => { if (!ord.includes(s)) ord.push(s); });
+  return ord;
+}
+
 function solRenderCarrito() {
   const el = document.getElementById('sol-carrito-list');
   if (!el) return;
-  const skus = Object.keys(STATE.solicitudQtys).filter(s => STATE.solicitudQtys[s] > 0);
+  const skus = solSkusOrdenados();
   if (!skus.length) { el.innerHTML = ''; return; }
 
   el.innerHTML = skus.map(sku => {
@@ -2888,6 +2909,7 @@ function solAgregar(sku) {
     const sug = solGetSugerido(sku);
     STATE.solicitudQtys[sku] = sug > 0 ? sug : 1;
     STATE.solicitudConf[sku] = false; // Q sugerida intacta — el usuario aún no la confirmó
+    solOrdenAdd(sku); // recién agregado → arriba del carrito
   }
   // Cierra búsqueda
   const searchEl = document.getElementById('sol-search');
@@ -2918,6 +2940,7 @@ function invPedir(sku, maxSug) {
   if (!STATE.solicitudQtys[sku]) {
     STATE.solicitudQtys[sku] = maxSug > 0 ? maxSug : 1;
     STATE.solicitudConf[sku] = false; // Q sugerida intacta
+    solOrdenAdd(sku);
   }
   solUpdateCarritoBar();
   goTab('solicitud');
@@ -2927,6 +2950,7 @@ function invPedir(sku, maxSug) {
 function solEliminar(sku) {
   delete STATE.solicitudQtys[sku];
   delete STATE.solicitudConf[sku];
+  solOrdenRemove(sku);
   solUpdateCarritoBar();
 }
 
@@ -3010,7 +3034,7 @@ function updateSolQty(sku, val) {
   const qty = parseFloat(val) || 0;
   STATE.solicitudQtys[sku] = qty;
   STATE.solicitudConf[sku] = true; // el usuario tocó la Q → confirmada
-  if (qty === 0) { delete STATE.solicitudQtys[sku]; delete STATE.solicitudConf[sku]; }
+  if (qty === 0) { delete STATE.solicitudQtys[sku]; delete STATE.solicitudConf[sku]; solOrdenRemove(sku); }
   solUpdateCarritoBar();
   renderSolicitud();
   solRefreshBusqueda(); // si hay búsqueda abierta, refresca el stepper inline
@@ -3043,6 +3067,7 @@ function solFlashRow(sku) {
 function solReset() {
   STATE.solicitudQtys = {};
   STATE.solicitudConf = {};
+  STATE.solicitudOrden = [];
   document.getElementById('sol-search').value = '';
   document.getElementById('sol-search-results').style.display = 'none';
   solUpdateCarritoBar();
@@ -3107,6 +3132,7 @@ async function enviarSolicitud() {
     showToast('✅ Solicitud enviada — ' + items.length + ' productos', 'success');
     STATE.solicitudQtys = {};
     STATE.solicitudConf = {};
+    STATE.solicitudOrden = [];
     document.getElementById('sol-confirm').classList.remove('show');
     solUpdateCarritoBar();
     renderSolicitud();
@@ -4795,6 +4821,7 @@ function invConfirmarModalPedir(sku) {
   const qty = inp ? parseFloat(inp.value) : 0;
   if (!qty || qty <= 0) { showToast('Ingresa una cantidad válida','error'); return; }
   if (!STATE.solicitudQtys[sku]) STATE.solicitudQtys[sku] = 0;
+  solOrdenAdd(sku);
   STATE.solicitudQtys[sku] = qty;
   invCerrarModalPedir(sku);
   solUpdateCarritoBar();
