@@ -761,6 +761,10 @@
             <div style="font-size:11px;font-weight:600;color:#6BAEE0;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:3px">BO</div>
             <div id="bo-label" style="font-size:13px;color:var(--t1);font-weight:500">—</div>
           </button>
+          <button id="btn-utm" onclick="selectUnidad('UTM')" style="flex:1;min-width:120px;padding:10px 12px;border-radius:8px;border:2px solid var(--border2);background:var(--bg3);cursor:pointer;text-align:left;transition:all .15s;display:none">
+            <div style="font-size:11px;font-weight:600;color:#C4621D;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:3px">Por unidad</div>
+            <div id="utm-label" style="font-size:13px;color:var(--t1);font-weight:500">—</div>
+          </button>
         </div>
       </div>
       </div>
@@ -768,7 +772,8 @@
       <!-- Quantità con unità selezionata -->
       <div class="field">
         <label>Cantidad en <span id="mov-unidad-label" style="color:var(--blue2)">UO</span></label>
-        <input type="number" id="mov-cantidad" min="0.01" step="0.01" placeholder="0.00" oninput="checkMovAlert()">
+        <input type="number" id="mov-cantidad" min="0.01" step="0.01" placeholder="0.00" oninput="checkMovAlert();movUtmPreview()" onkeydown="if(event.key==='Enter'){event.preventDefault();onBotonMovClick();}">
+        <div id="mov-utm-preview" style="display:none;font-size:12px;color:var(--blue2);margin-top:6px;font-family:var(--mono)"></div>
       </div>
       <div id="mov-alert" style="display:none;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px"></div>
 
@@ -1811,8 +1816,11 @@ function selectInsumoMov(sku, desc, utm, uoDesc) {
   const boDesc   = record['Descripcion BO'] || '';
   const boFactor = record['Factor BO - UTM'] || '';
 
+  // Factor UO->UTM (quante UTM stanno in 1 UO). Se >1, UO != UTM → abilita input por unidad.
+  const factorUO = cteoGetFactor(sku);
+
   movSelectedSKU  = sku;
-  movSelectedData = { sku, desc, utm, uoDesc, boActivo, boDesc, boFactor, unidad: 'UO' };
+  movSelectedData = { sku, desc, utm, uoDesc, boActivo, boDesc, boFactor, factorUO, unidad: 'UO' };
 
   document.getElementById('mov-sel-sku').textContent  = sku;
   document.getElementById('mov-sel-desc').textContent = desc;
@@ -1827,34 +1835,82 @@ function selectInsumoMov(sku, desc, utm, uoDesc) {
   document.getElementById('bo-label').textContent  = boDesc || '—';
   document.getElementById('btn-bo').style.display  = boActivo ? 'block' : 'none';
 
+  // Bottone "Por unidad" (UTM): solo se factor>1 (UO != unidad base) e factor noto
+  const btnUtm = document.getElementById('btn-utm');
+  const utmLbl = document.getElementById('utm-label');
+  if (btnUtm) {
+    if (factorUO > 1) {
+      btnUtm.style.display = 'block';
+      utmLbl.textContent = (utm || 'un') + ' (1 ' + (uoDesc || 'UO') + ' = ' + factorUO + ' ' + (utm || 'un') + ')';
+    } else {
+      btnUtm.style.display = 'none';
+    }
+  }
+
   // Seleziona UO di default
   selectUnidad('UO');
   document.getElementById('mov-cantidad').focus();
   checkMovAlert();
 }
 
+// Arrotonda a max 2 decimali senza code tipo 0.30000000004
+function round2(n) {
+  const f = parseFloat(n);
+  if (isNaN(f)) return 0;
+  return Math.round(f * 100) / 100;
+}
+
 function selectUnidad(tipo) {
   movSelectedData.unidad = tipo;
-  const btnUO = document.getElementById('btn-uo');
-  const btnBO = document.getElementById('btn-bo');
-  const label = document.getElementById('mov-unidad-label');
+  const btnUO  = document.getElementById('btn-uo');
+  const btnBO  = document.getElementById('btn-bo');
+  const btnUtm = document.getElementById('btn-utm');
+  const label  = document.getElementById('mov-unidad-label');
 
-  // Stile attivo/inattivo
+  // Reset stile di tutti i bottoni a "inattivo"
+  [btnUO, btnBO, btnUtm].forEach(b => {
+    if (b) { b.style.borderColor = 'var(--border2)'; b.style.background = 'var(--bg3)'; }
+  });
+
   if (tipo === 'UO') {
     btnUO.style.borderColor = 'var(--blue)';
-    btnUO.style.background  = 'rgba(74,111,165,0.14)';
-    if (btnBO) { btnBO.style.borderColor = 'var(--border2)'; btnBO.style.background = 'var(--bg3)'; }
+    btnUO.style.background   = 'rgba(74,111,165,0.14)';
     label.textContent = 'UO';
     label.style.color = 'var(--blue2)';
-  } else {
+  } else if (tipo === 'BO') {
     btnBO.style.display     = 'block';
     btnBO.style.borderColor = '#6BAEE0';
-    btnBO.style.background  = 'rgba(41,98,168,0.12)';
-    btnUO.style.borderColor = 'var(--border2)';
-    btnUO.style.background  = 'var(--bg3)';
+    btnBO.style.background   = 'rgba(41,98,168,0.12)';
     label.textContent = 'BO';
     label.style.color = '#6BAEE0';
+  } else if (tipo === 'UTM') {
+    if (btnUtm) {
+      btnUtm.style.display     = 'block';
+      btnUtm.style.borderColor = '#C4621D';
+      btnUtm.style.background   = 'rgba(196,98,29,0.12)';
+    }
+    label.textContent = (movSelectedData.utm || 'unidad');
+    label.style.color = '#C4621D';
   }
+  movUtmPreview();
+}
+
+// Preview conversione: se unidad=UTM mostra "200 un = 0,4 UO" sotto il campo
+function movUtmPreview() {
+  const prev = document.getElementById('mov-utm-preview');
+  if (!prev) return;
+  if (!movSelectedData || movSelectedData.unidad !== 'UTM') {
+    prev.style.display = 'none';
+    return;
+  }
+  const factor = parseFloat(movSelectedData.factorUO) || 1;
+  const cant   = parseFloat(document.getElementById('mov-cantidad').value);
+  if (!cant || cant <= 0 || factor <= 0) { prev.style.display = 'none'; return; }
+  const uo = round2(cant / factor);
+  const utmLbl = movSelectedData.utm || 'un';
+  const uoLbl  = movSelectedData.uoDesc || 'UO';
+  prev.style.display = 'block';
+  prev.textContent = cant + ' ' + utmLbl + ' = ' + uo + ' UO  (' + uoLbl + ')';
 }
 
 function clearMovSelected() {
@@ -1865,6 +1921,11 @@ function clearMovSelected() {
   document.getElementById('btn-mov-guardar').disabled = true;
   document.getElementById('mov-search-results').innerHTML = '';
   document.getElementById('mov-alert').style.display = 'none';
+  // Fix 3 — reset preview UTM + nascondi bottone "Por unidad"
+  const prev = document.getElementById('mov-utm-preview');
+  if (prev) prev.style.display = 'none';
+  const btnUtm = document.getElementById('btn-utm');
+  if (btnUtm) btnUtm.style.display = 'none';
 }
 
 function checkMovAlert() {
@@ -1928,6 +1989,15 @@ async function guardarMovimiento() {
   const destinoFinal = (tipo === 'Ajuste + mas' || tipo === 'Ajuste - menos' || tipo === 'Ingreso BLoc' || tipo === 'Ingreso Proveedor')
     ? 'Bodega Local' : destino;
 
+  // Fix 3 — se l'operatore ha inserito in UTM (por unidad), converti a UO e manda UO al GAS
+  let unidadFinal = movSelectedData.unidad || 'UO';
+  let cantFinal   = cant;
+  if (unidadFinal === 'UTM') {
+    const factor = parseFloat(movSelectedData.factorUO) || 1;
+    cantFinal   = round2(cant / factor);
+    unidadFinal = 'UO';
+  }
+
   // V115 — Se es Ingreso Proveedor, concatena nome proveedor + costo real pagado a obs
   let obsFinal = obs;
   if (tipo === 'Ingreso Proveedor') {
@@ -1951,9 +2021,9 @@ async function guardarMovimiento() {
     sku:         movSelectedSKU,
     desc:        movSelectedData.desc,
     utm:         movSelectedData.utm,
-    unidad:      movSelectedData.unidad || 'UO',
+    unidad:      unidadFinal,
     uoDesc:      movSelectedData.unidad === 'BO' ? movSelectedData.boDesc : movSelectedData.uoDesc,
-    cantidad:    cant,
+    cantidad:    cantFinal,
     responsable: movOperador,
     obs:         obsFinal
   };
@@ -1972,7 +2042,7 @@ async function guardarMovimiento() {
       destino: destinoFinal,
       desc:    movSelectedData.desc,
       sku:     movSelectedSKU,
-      cant,
+      cant:    cantFinal,
       resp:    movOperador
     });
     localStorage.setItem('mov_hoy_' + today(), JSON.stringify(movHoySession));
@@ -2028,9 +2098,10 @@ function renderMovRecientes() {
     return;
   }
 
-  // Ultimi 3 in ordine inverso
-  const last3 = [...items].reverse().slice(0, 3);
-  el.innerHTML = last3.map(m =>
+  // Fix 5 — mostra ultimi 3 oppure TUTTI se movVerTodos attivo
+  const reversed = [...items].reverse();
+  const visibles = movVerTodos ? reversed : reversed.slice(0, 3);
+  el.innerHTML = visibles.map(m =>
     `<div class="semaforo-row">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.desc}</div>
@@ -2042,8 +2113,15 @@ function renderMovRecientes() {
       </div>
     </div>`
   ).join('') + (items.length > 3
-    ? `<div style="text-align:center;padding-top:10px;font-size:12px;color:var(--t3)">${items.length - 3} más registrados hoy</div>`
+    ? `<div onclick="movToggleVerTodos()" style="text-align:center;padding-top:10px;font-size:12px;color:var(--blue2);cursor:pointer;font-weight:500">${movVerTodos ? '▲ Ver menos' : '▼ Ver todos hoy (' + items.length + ')'}</div>`
     : '');
+}
+
+// Fix 5 — toggle ver todos / ver menos
+let movVerTodos = false;
+function movToggleVerTodos() {
+  movVerTodos = !movVerTodos;
+  renderMovRecientes();
 }
 
 // ════════════════════════════════════════════════════════
@@ -2114,21 +2192,32 @@ function agregarAlCarritoEntrega() {
   const unidad = movSelectedData.unidad || 'UO';
   const uoDesc = unidad === 'BO' ? (movSelectedData.boDesc || '') : (movSelectedData.uoDesc || '');
 
+  // Fix 3 — se inserito in UTM, converti a UO PRIMA di mettere nel carrello (carrello uniforme in UO)
+  let unidadCarrito = unidad;
+  let cantCarrito   = cant;
+  let uoDescCarrito = uoDesc;
+  if (unidad === 'UTM') {
+    const factor  = parseFloat(movSelectedData.factorUO) || 1;
+    cantCarrito   = round2(cant / factor);
+    unidadCarrito = 'UO';
+    uoDescCarrito = movSelectedData.uoDesc || '';
+  }
+
   // Dedup: busca item con mismo sku + misma unidad
-  const idx = carrito.findIndex(it => it.sku === movSelectedSKU && it.unidad === unidad);
+  const idx = carrito.findIndex(it => it.sku === movSelectedSKU && it.unidad === unidadCarrito);
   if (idx >= 0) {
-    carrito[idx].cantidad = (parseFloat(carrito[idx].cantidad) || 0) + cant;
+    carrito[idx].cantidad = round2((parseFloat(carrito[idx].cantidad) || 0) + cantCarrito);
     if (obs) {
       carrito[idx].obs = carrito[idx].obs ? (carrito[idx].obs + ' · ' + obs) : obs;
     }
-    showToast('✓ Sumado: ahora ' + carrito[idx].cantidad + ' ' + unidad, 'success');
+    showToast('✓ Sumado: ahora ' + carrito[idx].cantidad + ' ' + unidadCarrito, 'success');
   } else {
     carrito.push({
       sku:      movSelectedSKU,
       desc:     movSelectedData.desc || '',
-      unidad:   unidad,
-      uoDesc:   uoDesc,
-      cantidad: cant,
+      unidad:   unidadCarrito,
+      uoDesc:   uoDescCarrito,
+      cantidad: cantCarrito,
       obs:      obs,
       destino:  destino
     });
@@ -2148,6 +2237,20 @@ function agregarAlCarritoEntrega() {
 function eliminarItemCarrito(idx) {
   if (!STATE.carritoEntrega) return;
   STATE.carritoEntrega.splice(idx, 1);
+  renderCarritoEntrega();
+}
+
+// Fix 1 — edita la cantidad de un item del carrito inline
+function setCarritoQty(idx, val) {
+  if (!STATE.carritoEntrega || !STATE.carritoEntrega[idx]) return;
+  const n = round2(val);
+  if (!n || n <= 0) {
+    // qty 0 o invalida → elimina la riga (con render aggiornato)
+    STATE.carritoEntrega.splice(idx, 1);
+    showToast('Item quitado del carrito', 'info');
+  } else {
+    STATE.carritoEntrega[idx].cantidad = n;
+  }
   renderCarritoEntrega();
 }
 
@@ -2194,9 +2297,13 @@ function renderCarritoEntrega() {
         ${obsLine}
       </div>
       <div style="flex-shrink:0;text-align:right">
-        <div style="font-size:15px;font-weight:700;color:var(--t1);font-family:var(--mono)">${it.cantidad}</div>
+        <input type="number" min="0.01" step="0.01" value="${it.cantidad}"
+          onchange="setCarritoQty(${idx}, this.value)"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+          style="width:64px;text-align:right;font-size:15px;font-weight:700;color:var(--t1);font-family:var(--mono);background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:4px 6px">
+        <span style="font-size:11px;color:var(--t3);margin-left:2px">${it.unidad}</span>
         <button onclick="eliminarItemCarrito(${idx})"
-          style="font-size:10px;color:var(--red);background:none;border:none;cursor:pointer;padding:2px 0;margin-top:2px">× Quitar</button>
+          style="display:block;margin-left:auto;font-size:10px;color:var(--red);background:none;border:none;cursor:pointer;padding:2px 0;margin-top:2px">× Quitar</button>
       </div>
     </div>`;
   }).join('');
@@ -2208,8 +2315,8 @@ function confirmarEntregaBatch() {
   if (!carrito.length) return;
 
   const destino = carrito[0].destino;
-  const totalUO = carrito.filter(it => it.unidad === 'UO').reduce((a, it) => a + (parseFloat(it.cantidad) || 0), 0);
-  const totalBO = carrito.filter(it => it.unidad === 'BO').reduce((a, it) => a + (parseFloat(it.cantidad) || 0), 0);
+  const totalUO = round2(carrito.filter(it => it.unidad === 'UO').reduce((a, it) => a + (parseFloat(it.cantidad) || 0), 0));
+  const totalBO = round2(carrito.filter(it => it.unidad === 'BO').reduce((a, it) => a + (parseFloat(it.cantidad) || 0), 0));
 
   const lineas = carrito.map(it => {
     const u = it.uoDesc ? (' ' + it.uoDesc) : '';
