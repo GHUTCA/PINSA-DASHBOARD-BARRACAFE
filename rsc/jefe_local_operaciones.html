@@ -1751,7 +1751,7 @@ function onMovTipoChange() {
 
 function buscarInsumoMov(q) {
   const res = document.getElementById('mov-search-results');
-  if (!q || q.length < 2) { res.innerHTML = ''; return; }
+  if (!q || q.length < 2) { renderVerTodosLink(); return; }
 
   const tipo    = document.getElementById('mov-tipo').value;
   const destino = document.getElementById('mov-destino').value;
@@ -1759,24 +1759,22 @@ function buscarInsumoMov(q) {
   // Filtra per sezione solo su Entrega Secc — per altri tipi mostra tutto
   const filtrarPorSeccion = (tipo === 'Entrega Secc' || tipo === 'Devolucion Secc') && destino;
 
+  // #1 — match a parole sciolte: normalizza (no accenti, minuscole) e spezza la query.
+  // L'insumo matcha se TUTTE le parole sono contenute nella desc, in qualsiasi ordine.
+  const palabras = movNorm(q).split(' ').filter(p => p.length > 0);
+
   const matches = STATE.bdInsumos.filter(r => {
-    // Attivi
     const activo = (r['Activo No/Activo'] || '').toString().trim().toLowerCase();
     if (activo === 'no') return false;
 
-    // Filtro sezione
-    if (filtrarPorSeccion) {
-      const seccion = (r['Seccion'] || '').toString();
-      // Col C può contenere più sezioni es. "Barra Alimentos, Cocina Central"
-      // Normalizza: rimuovi spazi extra e confronta
-      const destinoNorm = destino.replace('Barra Cafe', 'Barra Cafe').trim();
-      if (!seccion.includes(destinoNorm) && !seccion.includes(destino.trim())) return false;
-    }
+    if (filtrarPorSeccion && !insumoEnSeccion(r, destino)) return false;
 
-    const desc = (r['Descripcion'] || '').toLowerCase();
-    const sku  = (r['SKU'] || '').toString();
-    return desc.includes(q.toLowerCase()) || sku.startsWith(q);
-  }).slice(0, 7);
+    const descN = movNorm(r['Descripcion'] || '');
+    const sku   = (r['SKU'] || '').toString();
+    // SKU: match diretto. Desc: tutte le parole presenti (ordine libero).
+    if (sku.startsWith(q.trim())) return true;
+    return palabras.length > 0 && palabras.every(p => descN.indexOf(p) >= 0);
+  }).slice(0, 50);
 
   if (!matches.length) {
     const msg = filtrarPorSeccion
@@ -1786,7 +1784,25 @@ function buscarInsumoMov(q) {
     return;
   }
 
-  res.innerHTML = matches.map(r => {
+  res.innerHTML = renderInsumosList(matches);
+}
+
+// Normalizza per ricerca: minuscole, niente accenti, spazi collassati
+function movNorm(s) {
+  let x = String(s == null ? '' : s).toLowerCase();
+  if (x.normalize) x = x.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return x.replace(/\s+/g, ' ').trim();
+}
+
+// Un insumo appartiene alla sezione? (col C può avere più sezioni separate da virgola)
+function insumoEnSeccion(r, destino) {
+  const seccion = movNorm(r['Seccion'] || '');
+  return seccion.indexOf(movNorm(destino)) >= 0;
+}
+
+// Renderer unico della lista risultati (usato da ricerca e da "ver todos")
+function renderInsumosList(matches) {
+  return matches.map(r => {
     const desc    = r['Descripcion'] || '—';
     const sku     = r['SKU'] || '—';
     const utm     = r['UTM'] || '';
@@ -1807,6 +1823,39 @@ function buscarInsumoMov(q) {
       <span style="color:var(--blue2);font-size:18px">›</span>
     </div>`;
   }).join('');
+}
+
+// #2 — Link "Ver todos los de [seccion]": appare quando il campo è vuoto,
+// in Entrega/Devolucion Secc con destino scelto. Trasforma indovinare→riconoscere.
+function renderVerTodosLink() {
+  const res = document.getElementById('mov-search-results');
+  if (!res) return;
+  const tipo    = document.getElementById('mov-tipo').value;
+  const destino = document.getElementById('mov-destino').value;
+  const aplica  = (tipo === 'Entrega Secc' || tipo === 'Devolucion Secc') && destino;
+  if (!aplica) { res.innerHTML = ''; return; }
+  res.innerHTML = `<div onclick="verTodosSeccion()" style="cursor:pointer;padding:9px 12px;border:1px dashed var(--border2);border-radius:8px;font-size:12px;color:var(--blue2);text-align:center">
+    Ver todos los productos de ${destino}</div>`;
+}
+
+// Lista TUTTI gli insumi attivi della sezione destino (scorribile)
+function verTodosSeccion() {
+  const res = document.getElementById('mov-search-results');
+  const destino = document.getElementById('mov-destino').value;
+  if (!destino) { res.innerHTML = ''; return; }
+
+  const matches = STATE.bdInsumos.filter(r => {
+    const activo = (r['Activo No/Activo'] || '').toString().trim().toLowerCase();
+    if (activo === 'no') return false;
+    return insumoEnSeccion(r, destino);
+  }).sort((a, b) => String(a['Descripcion']||'').localeCompare(String(b['Descripcion']||''), 'es'));
+
+  if (!matches.length) {
+    res.innerHTML = `<div style="font-size:12px;color:var(--t3);padding:8px 0">No hay productos asignados a ${destino}</div>`;
+    return;
+  }
+  res.innerHTML = `<div style="font-size:11px;color:var(--t3);padding:4px 0 8px">${matches.length} productos en ${destino}</div>`
+    + `<div style="max-height:320px;overflow-y:auto">` + renderInsumosList(matches) + `</div>`;
 }
 
 function selectInsumoMov(sku, desc, utm, uoDesc) {
@@ -2167,9 +2216,9 @@ function onMovDestinoChange() {
     }
   }
   checkMovAlert();
+  // #2 — mostra subito il link "Ver todos" della sezione scelta (campo ricerca vuoto)
+  if (!document.getElementById('mov-search').value) renderVerTodosLink();
 }
-
-// Agrega item al carrito con dedup por sku+unidad
 function agregarAlCarritoEntrega() {
   if (!movOperador) { showToast('Confirma tu nombre primero','error'); return; }
 
