@@ -1877,7 +1877,11 @@ function ocGetFactores(sku) {
   const utm      = b['UTM'] || 'un';
   const upcDesc  = b['Descripcion UPC'] || b['Descripocion UPC'] || b['UO Descripcion Principal'] || '';
   const factorJ  = limpiarNum(b['Q UPC'] || '0'); // UTM por UPC
-  return { utm, upcDesc, factorUPC: factorJ > 0 ? factorJ : 1 };
+  // "Por unidad" en OC solo tiene sentido para productos A Granel (col D Tipo).
+  // Empacado/Preparacion/Subreceta → se pide por empaque (UPC), nunca suelto.
+  const tipo     = String(b['Tipo'] || b['Tipo Insumo'] || b['Tipo de Insumo'] || '').trim().toLowerCase();
+  const esGranel = tipo.indexOf('granel') >= 0;
+  return { utm, upcDesc, factorUPC: factorJ > 0 ? factorJ : 1, esGranel };
 }
 
 function ocRound2(n) { const f = parseFloat(n); return isNaN(f) ? 0 : Math.round(f*100)/100; }
@@ -1903,8 +1907,8 @@ function ocRenderBotones() {
     { u:'UPC', lbl:'Por empaque (UPC)', sub:(f.upcDesc||'UPC') },
     { u:'UTM', lbl:'Por unidad',        sub:(f.utm||'un') }
   ];
-  // "Por unidad" solo si UPC != unidad base (factor>1)
-  const showUTM = f.factorUPC > 1;
+  // "Por unidad" solo para productos A Granel (gr/kg/ml que se piden sueltos)
+  const showUTM = !!f.esGranel && f.factorUPC > 1;
   cont.style.gridTemplateColumns = showUTM ? '1fr 1fr' : '1fr';
   cont.innerHTML = opts.filter(o => o.u==='UPC' || showUTM).map(o => {
     const on = (o.u === sel);
