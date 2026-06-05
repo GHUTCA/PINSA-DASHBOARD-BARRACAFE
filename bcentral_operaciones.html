@@ -901,33 +901,24 @@ function bcMovBuscar(q) {
   const tipo = document.getElementById('bcmov-tipo').value;
   const esIngresoProv = tipo === 'Ingreso Proveedor';
 
-  let items = STATE.inventario.filter(r => {
-    const desc = (r['Descripcion']||'').toLowerCase();
-    const sku  = String(r['SKU']||'');
+  // 🆕 FONTE = BD_INSUMOS (catálogo autoritativo · N10), non Inventario_BC.
+  // Inventario_BC tiene solo SKU con stock físico (1xxx). Los 5xxx (Preparacion CC /
+  // Subreceta de Cocina Central) NO existen en Inventario_BC hasta el primer
+  // Ingreso CocCentr → no se podían cargar. BD_INSUMOS los tiene, activos.
+  let items = STATE.bdInsumos.filter(b => {
+    const desc = (b['Descripcion']||'').toLowerCase();
+    const sku  = String(b['SKU']||'');
     if (!desc.includes(q.toLowerCase()) && !sku.startsWith(q)) return false;
+
+    // Solo activos (col "Activo No/Activo" de BD_INSUMOS)
+    const activo = (b['Activo No/Activo']||'').toString().trim().toLowerCase();
+    if (activo !== 'si') return false;
 
     // Filtro fornitore solo per Ingreso Proveedor e se non è SUPERMERCADO
     if (esIngresoProv && prov && prov !== 'SUPERMERCADO') {
-      const bdiRow = STATE.bdInsumos.find(b =>
-        String(b['SKU']||'').trim() === String(r['SKU']||'').trim()
-      );
-      if (!bdiRow) return false;
-      // Filtro Activo
-      const activo = (bdiRow['Activo No/Activo']||'').toString().trim().toLowerCase();
-      if (activo !== 'si') return false;
-      // Filtro fornitore
-      const provP = (bdiRow['Proveedor Principal']||'').trim();
-      const provA = (bdiRow['Prov Alternativo']||'').trim();
+      const provP = (b['Proveedor Principal']||'').trim();
+      const provA = (b['Prov Alternativo']||'').trim();
       if (provP !== prov && provA !== prov) return false;
-    } else if (!esIngresoProv) {
-      // Per altri tipi filtra solo attivi
-      const bdiRow = STATE.bdInsumos.find(b =>
-        String(b['SKU']||'').trim() === String(r['SKU']||'').trim()
-      );
-      if (bdiRow) {
-        const activo = (bdiRow['Activo No/Activo']||'').toString().trim().toLowerCase();
-        if (activo !== 'si') return false;
-      }
     }
     return true;
   }).slice(0, 8);
@@ -938,7 +929,7 @@ function bcMovBuscar(q) {
   }
   res.innerHTML = items.map(r => {
     const desc = r['Descripcion']||'—', sku = r['SKU']||'';
-    const upc    = r['Descripocion UPC']||r['Descripcion UPC']||'';
+    const upc    = r['Descripcion UPC']||r['Descripocion UPC']||r['UO Descripcion Principal']||'';
     // Legge descrizione UO da BD_INSUMOS (col Q) — non da Inventario_BC che non ha questa colonna
     const bdiRow = STATE.bdInsumos.find(b => String(b['SKU']||'').trim() === String(r['SKU']||'').trim());
     const uoBC   = (bdiRow?.['UO Descripcion Principal']||bdiRow?.['Descripcion UO']||upc);
