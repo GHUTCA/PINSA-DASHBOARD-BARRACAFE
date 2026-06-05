@@ -2885,20 +2885,27 @@ function solValorTotal() {
 }
 function fmtCLP(n) { return '$' + Math.round(n).toLocaleString('es-CL'); }
 
-// ¿El insumo es A Granel? (col D Tipo) → en Pedido BC se pide por peso, no por bulto.
+// ¿El insumo es A Granel? La col "Tipo" SOLO vive en BD_INSUMOS (no en Inventario),
+// por eso leemos de STATE.bdInsumos por SKU, no de solGetInsumo (que puede dar Inventario).
+function solGetBDI(sku) {
+  return STATE.bdInsumos.find(b => String(b['SKU']||'').trim() === String(sku).trim()) || {};
+}
 function solEsGranel(sku) {
-  const r = solGetInsumo(sku) || {};
-  const tipo = String(r['Tipo'] || r['Tipo Insumo'] || '').trim().toLowerCase();
+  const tipo = String(solGetBDI(sku)['Tipo'] || '').trim().toLowerCase();
   return tipo.indexOf('granel') >= 0;
 }
-// gr (o cc) por 1 UO para granel. Si no hay factor → 1 (fail-safe, sin conversión).
+// gr (o cc) por 1 UO para granel. Fuente autorizada: BD_INSUMOS col "Facor UO UTM" (T).
+// Fallback a cteoGetFactor (Inventario col I) y luego 1 (fail-safe, sin conversión).
 function solGranelFactor(sku) {
-  const f = cteoGetFactor(sku);
-  return f > 0 ? f : 1;
+  const bdi = solGetBDI(sku);
+  const raw = String(bdi['Facor UO UTM'] || bdi['Factor UO UTM'] || '').replace(/,/g,'');
+  const fBdi = parseFloat(raw);
+  if (fBdi > 0) return fBdi;
+  const fInv = cteoGetFactor(sku);
+  return fInv > 0 ? fInv : 1;
 }
 function solGranelUTM(sku) {
-  const r = solGetInsumo(sku) || {};
-  return String(r['UTM'] || 'gr').trim() || 'gr';
+  return String(solGetBDI(sku)['UTM'] || 'gr').trim() || 'gr';
 }
 
 // Extrae la palabra-unidad del formato de compra (col H: "Pack de 6un" → "pack",
