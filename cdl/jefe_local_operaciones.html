@@ -2885,6 +2885,30 @@ function solValorTotal() {
 }
 function fmtCLP(n) { return '$' + Math.round(n).toLocaleString('es-CL'); }
 
+// Extrae la palabra-unidad del formato de compra (col H: "Pack de 6un" → "pack",
+// "Bolsa 1000 gr" → "bolsa", "Caja 100 un." → "caja", "Granel 1000 gr" → "granel").
+// Pluraliza según la cantidad. Fallback neutro "UO" si no se reconoce (nunca etiqueta falsa).
+function solUnidadLabel(sku, qty) {
+  const fmt = String(solGetDescUO(sku) || '').trim().toLowerCase();
+  const mapa = [
+    { re: /\bpack/,   sing: 'pack',   plur: 'packs'   },
+    { re: /\bbolsa/,  sing: 'bolsa',  plur: 'bolsas'  },
+    { re: /\bcaja/,   sing: 'caja',   plur: 'cajas'   },
+    { re: /\bgranel/, sing: 'granel', plur: 'granel'  },
+    { re: /\blata/,   sing: 'lata',   plur: 'latas'   },
+    { re: /\bbid[oó]n/,sing:'bidón',  plur: 'bidones' },
+    { re: /\bsaco/,   sing: 'saco',   plur: 'sacos'   },
+    { re: /\bbandeja/,sing: 'bandeja',plur: 'bandejas'},
+    { re: /\bbote/,   sing: 'bote',   plur: 'botes'   },
+    { re: /\bunidad|\bun\b|\bun\./, sing: 'unidad', plur: 'unidades' }
+  ];
+  const n = parseFloat(qty) || 0;
+  for (const m of mapa) {
+    if (m.re.test(fmt)) return (n === 1 ? m.sing : m.plur);
+  }
+  return 'UO';
+}
+
 // ── Carrito ──
 // Stepper inline reutilizable (lista búsqueda + alertas + carrito).
 // Refleja el estado conf: ambar = sugerido sin confirmar, azul = confirmado.
@@ -2892,10 +2916,14 @@ function solStepperInline(sku) {
   const qty  = STATE.solicitudQtys[sku] || 0;
   const conf = STATE.solicitudConf[sku] === true;
   const numClass = conf ? 'sol-num edited' : 'sol-num sugerido';
+  const uLbl = solUnidadLabel(sku, qty);
   return `<div class="sol-row" onclick="event.stopPropagation()">
       <div class="sol-btn" onclick="event.stopPropagation();solStep('${sku}',-1)">−</div>
-      <input class="${numClass}" id="sol-${sku}" type="number" inputmode="decimal" min="0" step="any"
-        value="${qty}" onchange="updateSolQty('${sku}',this.value)" onblur="updateSolQty('${sku}',this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();updateSolQty('${sku}',this.value);solVolverABuscar();}" onclick="event.stopPropagation();this.select()" onfocus="this.select()">
+      <div style="display:flex;flex-direction:column;align-items:center;line-height:1">
+        <input class="${numClass}" id="sol-${sku}" type="number" inputmode="decimal" min="0" step="any"
+          value="${qty}" onchange="updateSolQty('${sku}',this.value)" onblur="updateSolQty('${sku}',this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();updateSolQty('${sku}',this.value);solVolverABuscar();}" onclick="event.stopPropagation();this.select()" onfocus="this.select()">
+        <div id="sol-unidad-${sku}" style="font-size:10px;color:#C4621D;font-weight:600;margin-top:2px">${uLbl}</div>
+      </div>
       <div class="sol-btn" onclick="event.stopPropagation();solStep('${sku}',1)">+</div>
     </div>`;
 }
@@ -3010,7 +3038,7 @@ function solRenderCarrito() {
     return `<div class="sol-item${conf?' modified':' sugerido'}" id="sol-item-${sku}">
       <div class="sol-info">
         <div class="sol-name">${desc}</div>
-        <div class="sol-meta"><span style="font-family:var(--mono);color:var(--blue2);font-size:10px">${sku}</span>${descUO ? ' · '+descUO : ''} ${badge}</div>
+        <div class="sol-meta"><span style="font-family:var(--mono);color:var(--blue2);font-size:10px">${sku}</span>${descUO ? ' · <span style="color:#C4621D">'+descUO+'</span>' : ''} ${badge}</div>
       </div>
       <div class="sol-qty">
         ${solStepperInline(sku)}
@@ -3067,7 +3095,7 @@ function solBuscar(q) {
         <div style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${desc}</div>
         <div style="font-size:10px;color:var(--t3);margin-top:1px">
           <span style="font-family:var(--mono);color:var(--blue2)">${sku}</span>
-          ${descUO ? ' · '+descUO : ''}
+          ${descUO ? ' · <span style="color:#C4621D">'+descUO+'</span>' : ''}
           ${est ? `<span style="color:${estColor};font-weight:600;margin-left:4px">${est}</span>` : ''}
         </div>
       </div>
