@@ -537,16 +537,19 @@
             <div style="font-size:14px;font-weight:600;color:var(--t1)" id="oc-sel-desc">—</div>
             <div style="font-size:11px;color:var(--t3);margin-top:3px">SKU: <span id="oc-sel-sku">—</span> · <span id="oc-sel-upc">—</span></div>
           </div>
+          <div style="font-size:11px;color:var(--t3);letter-spacing:0.5px;text-transform:uppercase;margin-bottom:7px">¿En qué unidad pides?</div>
+          <div id="oc-unidad-botones" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px"></div>
           <div class="row2">
             <div class="field">
-              <label>Q Pedido (UPC)</label>
-              <input type="number" id="oc-cantidad" min="1" step="1" placeholder="0">
+              <label>Cantidad <span id="oc-cant-u" style="color:var(--blue2)">en UPC</span></label>
+              <input type="number" id="oc-cantidad" min="0" step="any" placeholder="0" oninput="ocRenderEspejo()">
             </div>
             <div class="field">
               <label>Proveedor</label>
               <select id="oc-prov-sel"><option value="">— Seleccionar —</option></select>
             </div>
           </div>
+          <div id="oc-espejo" style="display:none;margin-bottom:12px;border-radius:8px;padding:11px 13px;background:rgba(15,110,86,0.1);border:1px solid var(--green2);font-size:14px;color:var(--t1);line-height:1.5"></div>
           <button class="btn btn-secondary" onclick="ocAgregarAlCarrito()">+ Agregar al pedido</button>
         </div>
       </div>
@@ -1867,12 +1870,81 @@ function buscarInsumoOC(q) {
   }).join('');
 }
 
+// ── Selector de unidad OC · UTM→UPC en frontend, GAS sigue recibiendo qty en UPC ──
+// Factor UTM por UPC = col J ('Q UPC'). Si >1, UPC != unidad base → habilita "Por unidad".
+function ocGetFactores(sku) {
+  const b = STATE.bdInsumos.find(r => String(r['SKU']||'').trim() === String(sku).trim()) || {};
+  const utm      = b['UTM'] || 'un';
+  const upcDesc  = b['Descripcion UPC'] || b['Descripocion UPC'] || b['UO Descripcion Principal'] || '';
+  const factorJ  = limpiarNum(b['Q UPC'] || '0'); // UTM por UPC
+  return { utm, upcDesc, factorUPC: factorJ > 0 ? factorJ : 1 };
+}
+
+function ocRound2(n) { const f = parseFloat(n); return isNaN(f) ? 0 : Math.round(f*100)/100; }
+
+function ocSelectUnidad(tipo) {
+  if (!STATE.ocSelectedData) return;
+  STATE.ocSelectedData.unidad = tipo;
+  ocRenderBotones();
+  const ue = document.getElementById('oc-cant-u');
+  const f  = STATE.ocSelectedData.factores || {};
+  if (tipo === 'UTM') { ue.textContent = 'en ' + (f.utm||'un'); ue.style.color = 'var(--orange)'; }
+  else                { ue.textContent = 'en UPC';               ue.style.color = 'var(--blue2)'; }
+  ocRenderEspejo();
+}
+
+function ocRenderBotones() {
+  const d = STATE.ocSelectedData; if (!d) return;
+  const f = d.factores || {};
+  const sel = d.unidad || 'UPC';
+  const cont = document.getElementById('oc-unidad-botones');
+  const upcNom = (f.upcDesc || 'UPC').split(' ')[0] || 'UPC';
+  const opts = [
+    { u:'UPC', lbl:'Por empaque (UPC)', sub:(f.upcDesc||'UPC') },
+    { u:'UTM', lbl:'Por unidad',        sub:(f.utm||'un') }
+  ];
+  // "Por unidad" solo si UPC != unidad base (factor>1)
+  const showUTM = f.factorUPC > 1;
+  cont.style.gridTemplateColumns = showUTM ? '1fr 1fr' : '1fr';
+  cont.innerHTML = opts.filter(o => o.u==='UPC' || showUTM).map(o => {
+    const on = (o.u === sel);
+    const col = o.u==='UTM' ? 'var(--orange)' : 'var(--blue)';
+    const colTxt = o.u==='UTM' ? 'var(--orange)' : 'var(--blue2)';
+    return '<div onclick="ocSelectUnidad(\''+o.u+'\')" style="cursor:pointer;border:1.5px solid '+(on?col:'var(--border2)')+';background:'+(on?'rgba(74,111,165,0.10)':'var(--bg3)')+';border-radius:8px;padding:10px">'
+      +'<div style="font-size:11px;font-weight:600;color:'+(on?colTxt:'var(--t3)')+';text-transform:uppercase;letter-spacing:0.5px">'+o.lbl+'</div>'
+      +'<div style="font-size:12px;color:'+(on?'var(--t1)':'var(--t3)')+';margin-top:3px;line-height:1.3">'+o.sub+'</div></div>';
+  }).join('');
+}
+
+// Espejo: una frase clara de lo que se va a confirmar (en UPC, lo que recibe el GAS)
+function ocRenderEspejo() {
+  const esp = document.getElementById('oc-espejo');
+  const d = STATE.ocSelectedData;
+  if (!esp || !d) { if(esp) esp.style.display='none'; return; }
+  const f = d.factores || {};
+  const cant = parseFloat(document.getElementById('oc-cantidad').value);
+  if (!cant || cant <= 0) { esp.style.display = 'none'; return; }
+  const unidad = d.unidad || 'UPC';
+  let frase, base = f.utm || 'un';
+  const upcNom = (f.upcDesc || 'UPC').split(' ')[0] || 'UPC';
+  if (unidad === 'UTM') {
+    const upc = ocRound2(cant / f.factorUPC);
+    frase = 'Vas a confirmar <b>' + cant.toLocaleString('es-CL') + ' ' + base + '</b> = <b>' + upc.toLocaleString('es-CL') + ' ' + upcNom + (upc===1?'':'s') + '</b>';
+  } else {
+    const totalBase = ocRound2(cant * f.factorUPC);
+    frase = 'Vas a confirmar <b>' + cant.toLocaleString('es-CL') + ' ' + upcNom + (cant===1?'':'s') + ' de ' + f.factorUPC + ' ' + base + '</b> = <b>' + totalBase.toLocaleString('es-CL') + ' ' + base + '</b>';
+  }
+  esp.style.display = 'block';
+  esp.innerHTML = '<span style="color:var(--green2)">✓</span> ' + frase;
+}
+
 function ocSelectInsumo(sku, desc, upc) {
   const bdiRow = STATE.bdInsumos.find(b => String(b['SKU']||'').trim() === String(sku).trim());
   const provP  = (bdiRow?.['Proveedor Principal']||'').trim();
   const provA  = (bdiRow?.['Prov Alternativo']||'').trim();
+  const factores = ocGetFactores(sku);
   STATE.ocSelectedSKU  = sku;
-  STATE.ocSelectedData = {sku, desc, upc_desc:upc, provP, provA};
+  STATE.ocSelectedData = {sku, desc, upc_desc:upc, provP, provA, factores, unidad:'UPC'};
   document.getElementById('oc-sel-desc').textContent = desc;
   document.getElementById('oc-sel-sku').textContent  = sku;
   document.getElementById('oc-sel-upc').textContent  = upc;
@@ -1880,6 +1952,9 @@ function ocSelectInsumo(sku, desc, upc) {
   document.getElementById('oc-search-results').innerHTML = '';
   document.getElementById('oc-sel-info').style.display = 'block';
   document.getElementById('oc-cantidad').value = '';
+  // Inicializa selector de unidad (default UPC) + limpia espejo
+  ocSelectUnidad('UPC');
+  document.getElementById('oc-espejo').style.display = 'none';
   // Pre-selezionare fornitore principale nel dropdown
   const sel = document.getElementById('oc-prov-sel');
   if (sel && provP) {
@@ -1891,10 +1966,16 @@ function ocSelectInsumo(sku, desc, upc) {
 
 function ocAgregarAlCarrito() {
   if (!STATE.ocSelectedSKU) { showToast('Selecciona un producto','error'); return; }
-  const qty  = parseFloat(document.getElementById('oc-cantidad').value);
+  const cantInput = parseFloat(document.getElementById('oc-cantidad').value);
   const prov = document.getElementById('oc-prov-sel').value;
-  if (!qty || qty <= 0) { showToast('Ingresa una cantidad válida','error'); return; }
-  const {sku, desc, upc_desc, provP, provA} = STATE.ocSelectedData;
+  if (!cantInput || cantInput <= 0) { showToast('Ingresa una cantidad válida','error'); return; }
+  const {sku, desc, upc_desc, provP, provA, factores, unidad} = STATE.ocSelectedData;
+  // Si el operador ingresó "por unidad" (UTM), convertir a UPC. GAS siempre recibe qty en UPC.
+  let qty = cantInput;
+  if (unidad === 'UTM') {
+    const fac = (factores && factores.factorUPC) ? factores.factorUPC : 1;
+    qty = ocRound2(cantInput / fac);
+  }
   const bdiRow = STATE.bdInsumos.find(b => String(b['SKU']||'').trim() === String(sku).trim());
   // Costo da BD_INSUMOS col M — Valor por UPC
   const costo = limpiarNum(bdiRow?.['Valor por UPC']||bdiRow?.['Valor Unidad Neto']||'0');
@@ -1905,6 +1986,7 @@ function ocAgregarAlCarrito() {
   document.getElementById('oc-sel-info').style.display = 'none';
   document.getElementById('oc-search').value = '';
   document.getElementById('oc-cantidad').value = '';
+  const espC = document.getElementById('oc-espejo'); if (espC) espC.style.display = 'none';
   actualizarCarritoBar();
   renderOCCarrito();
   showToast('➕ ' + desc, 'success');
