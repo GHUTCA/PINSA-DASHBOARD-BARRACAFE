@@ -2885,6 +2885,22 @@ function solValorTotal() {
 }
 function fmtCLP(n) { return '$' + Math.round(n).toLocaleString('es-CL'); }
 
+// ¿El insumo es A Granel? (col D Tipo) → en Pedido BC se pide por peso, no por bulto.
+function solEsGranel(sku) {
+  const r = solGetInsumo(sku) || {};
+  const tipo = String(r['Tipo'] || r['Tipo Insumo'] || '').trim().toLowerCase();
+  return tipo.indexOf('granel') >= 0;
+}
+// gr (o cc) por 1 UO para granel. Si no hay factor → 1 (fail-safe, sin conversión).
+function solGranelFactor(sku) {
+  const f = cteoGetFactor(sku);
+  return f > 0 ? f : 1;
+}
+function solGranelUTM(sku) {
+  const r = solGetInsumo(sku) || {};
+  return String(r['UTM'] || 'gr').trim() || 'gr';
+}
+
 // Extrae la palabra-unidad del formato de compra (col H: "Pack de 6un" → "pack",
 // "Bolsa 1000 gr" → "bolsa", "Caja 100 un." → "caja", "Granel 1000 gr" → "granel").
 // Pluraliza según la cantidad. Fallback neutro "UO" si no se reconoce (nunca etiqueta falsa).
@@ -2913,20 +2929,33 @@ function solUnidadLabel(sku, qty) {
 // Stepper inline reutilizable (lista búsqueda + alertas + carrito).
 // Refleja el estado conf: ambar = sugerido sin confirmar, azul = confirmado.
 function solStepperInline(sku) {
-  const qty  = STATE.solicitudQtys[sku] || 0;
+  const qtyUO = STATE.solicitudQtys[sku] || 0;
   const conf = STATE.solicitudConf[sku] === true;
   const numClass = conf ? 'sol-num edited' : 'sol-num sugerido';
-  const uLbl = solUnidadLabel(sku, qty);
   const bordeCol = conf ? 'var(--blue)' : 'var(--amber)';
   const numCol   = conf ? 'var(--blue2)' : 'var(--amber)';
   const bg       = conf ? 'var(--bg3)' : 'rgba(212,134,10,0.06)';
+  const granel = solEsGranel(sku);
+  let valShown, sub, subCol;
+  if (granel) {
+    const fac = solGranelFactor(sku);
+    valShown = Math.round(qtyUO * fac * 100) / 100;
+    const uoTxt = Math.round(qtyUO * 100) / 100;
+    sub = uoTxt + ' UO'; subCol = 'var(--t3)';
+  } else {
+    valShown = qtyUO;
+    sub = solUnidadLabel(sku, qtyUO); subCol = 'var(--t3)';
+  }
+  const unitTag = granel ? ('<span style="color:var(--t3);font-size:12px;margin-left:3px">'+solGranelUTM(sku)+'</span>') : '';
   return `<div class="sol-row" onclick="event.stopPropagation()">
       <div class="sol-btn" onclick="event.stopPropagation();solStep('${sku}',-1)">−</div>
-      <div style="width:88px;height:54px;border:1px solid ${bordeCol};border-radius:6px;background:${bg};display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1">
-        <input class="${numClass}" id="sol-${sku}" type="number" inputmode="decimal" min="0" step="any"
-          style="border:none;background:transparent;height:auto;width:84px;font-size:21px;font-weight:700;text-align:center;color:${numCol};font-family:var(--mono);outline:none;padding:0"
-          value="${qty}" onchange="updateSolQty('${sku}',this.value)" onblur="updateSolQty('${sku}',this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();updateSolQty('${sku}',this.value);solVolverABuscar();}" onclick="event.stopPropagation();this.select()" onfocus="this.select()">
-        <div id="sol-unidad-${sku}" style="font-size:12px;color:var(--t3);margin-top:1px">${uLbl}</div>
+      <div style="width:96px;height:54px;border:1px solid ${bordeCol};border-radius:6px;background:${bg};display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1">
+        <div style="display:flex;align-items:baseline">
+          <input class="${numClass}" id="sol-${sku}" type="number" inputmode="decimal" min="0" step="any"
+            style="border:none;background:transparent;height:auto;width:${granel?'62px':'84px'};font-size:21px;font-weight:700;text-align:center;color:${numCol};font-family:var(--mono);outline:none;padding:0"
+            value="${valShown}" data-granel="${granel?'1':'0'}" onchange="updateSolQty('${sku}',this.value)" onblur="updateSolQty('${sku}',this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();updateSolQty('${sku}',this.value);solVolverABuscar();}" onclick="event.stopPropagation();this.select()" onfocus="this.select()">${unitTag}
+        </div>
+        <div id="sol-unidad-${sku}" style="font-size:12px;color:${subCol};margin-top:1px">${sub}</div>
       </div>
       <div class="sol-btn" onclick="event.stopPropagation();solStep('${sku}',1)">+</div>
     </div>`;
@@ -3234,13 +3263,26 @@ function solAlertaTap(sku) {
 // Stateless: lee la Q desde STATE, no del DOM (el input puede existir 2 veces:
 // en la búsqueda y en el carrito → getElementById tomaría sólo el primero).
 function solStep(sku, delta) {
+  // delta es en UO (un bulto/UO por click, también para granel). Escribe directo en STATE
+  // (que está en UO) sin pasar por la conversión gr→UO de updateSolQty.
   const cur  = parseFloat(STATE.solicitudQtys[sku]) || 0;
-  const next = Math.max(0, cur + delta);
-  updateSolQty(sku, next);
+  const next = Math.max(0, Math.round((cur + delta) * 1000) / 1000);
+  STATE.solicitudQtys[sku] = next;
+  STATE.solicitudConf[sku] = true;
+  if (next === 0) { delete STATE.solicitudQtys[sku]; delete STATE.solicitudConf[sku]; solOrdenRemove(sku); }
+  solUpdateCarritoBar();
+  renderSolicitud();
+  solRefreshBusqueda();
+  solFlashRow(sku);
 }
 
 function updateSolQty(sku, val) {
-  const qty = parseFloat(val) || 0;
+  let qty = parseFloat(val) || 0;
+  // Granel: el input está en gr (peso). STATE.solicitudQtys siempre en UO → convertir.
+  if (qty > 0 && solEsGranel(sku)) {
+    const fac = solGranelFactor(sku);
+    qty = Math.round((qty / fac) * 1000) / 1000;
+  }
   STATE.solicitudQtys[sku] = qty;
   STATE.solicitudConf[sku] = true; // el usuario tocó la Q → confirmada
   if (qty === 0) { delete STATE.solicitudQtys[sku]; delete STATE.solicitudConf[sku]; solOrdenRemove(sku); }
