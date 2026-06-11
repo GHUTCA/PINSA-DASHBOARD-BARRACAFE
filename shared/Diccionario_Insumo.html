@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scheda Insumo · Crear · DICCIONARIO_INSUMOS</title>
+<!--
+  ============================================================================
+  SCHEDA INSUMO · vía A · DICCIONARIO_INSUMOS · V1.0 · 11-JUN-2026
+  Cantiere: BD-INSUMOS-FRONTEND-001
+  ----------------------------------------------------------------------------
+  - Crea SOLO insumos COMPRADOS (las RECETAS 5xxx las escribe el VISOR, vía B).
+  - Lee el catálogo REAL: CONTROL_MAESTRO publicado · gid 514178276 (BD_INSUMOS).
+  - Columnas reales verificadas el 11-jun leyendo el CSV (N10):
+      H "UPC Formato Compra " (¡espacio final REAL en la hoja!)
+      I "Unidades por UPC"        ← factor UPC→UO
+      Q "UO Descripcion Principal " (¡espacio final REAL!)
+      T "Facor UO UTM"            ← factor UO→UTM
+      M "Valor por UPC" · N "Valor Unidad Neto"
+      AG "Activo No/Activo"
+  - GUARDAR: arma el payload y lo manda a la route GAS `insumo_crear`
+    (CFG.GAS_URL). Si la route no está configurada → FAIL LOUD: muestra el
+    payload completo, no escribe nada a ciegas. New Version, mai New Deployment.
+  - PATTO CONGELAMENTO: esta página escribe UNA fila libre nueva, jamás
+    modifica filas existentes. La igiene es otra fase.
+  - PENDIENTES marcados [TODO] en CFG: auth pinsita_auth.js · PARAMETROS para
+    secciones-por-empresa · hoja ALIAS_INSUMOS (ALIAS-INSUMOS-SHEET-001) ·
+    hoja DICC_EXTRA para campos modelo sin columna (empresa/destino/vendible).
+  ============================================================================
+-->
+<style>
+  :root{
+    --tc:#C4622D; --tc2:#E07A45;
+    --bg:#0F0F0F; --card:#1A1A1A; --card2:#202020;
+    --b:rgba(255,255,255,.06); --b2:rgba(255,255,255,.10);
+    --t1:#C8C2BC; --t2:#7A7570; --t3:#4A4540;
+    --green:#5A9E7A; --blue:#4A90D9; --cc:#9B6B9E; --go:#2D9B8E;
+    --indigo:#7B84E0; --amber:#D4860A; --red:#C0392B;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{background:#000;color:var(--t1);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+  .wrap{max-width:1180px;margin:0 auto;background:var(--bg);min-height:100vh;border-left:1px solid var(--b);border-right:1px solid var(--b)}
+
+  .top{position:sticky;top:0;z-index:30;background:rgba(15,15,15,.96);backdrop-filter:blur(8px);border-bottom:1px solid var(--b);padding:14px 24px}
+  .top .row{display:flex;align-items:center;gap:14px}
+  .back{color:var(--t2);font-size:14px;text-decoration:none}
+  .crumb{font-size:12px;color:var(--t3)}
+  .title{font-size:21px;font-weight:700;color:#fff;letter-spacing:.2px;flex:1}
+  .sku{font-size:13px;color:var(--t2);font-variant-numeric:tabular-nums}
+  .pill{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.6px;border:1px solid;padding:2px 8px;border-radius:99px}
+  .pill.mp{color:var(--green);border-color:var(--green)}
+  .activo{font-size:12px;color:var(--t2)}
+  .activo b{color:var(--amber);font-weight:600}
+
+  .banner{display:none;margin:0;padding:10px 24px;font-size:13px;line-height:1.5;border-bottom:1px solid}
+  .banner.err{display:block;color:#f0b8b0;background:rgba(192,57,43,.12);border-color:rgba(192,57,43,.4)}
+  .banner.okk{display:block;color:#bfe0cf;background:rgba(90,158,122,.10);border-color:rgba(90,158,122,.3)}
+
+  /* GATE */
+  #gate{padding:56px 24px 80px;max-width:680px;margin:0 auto}
+  #gate h1{font-size:26px;color:#fff;font-weight:700;margin-bottom:6px}
+  #gate .sub{font-size:14px;color:var(--t2);margin-bottom:26px;line-height:1.6}
+  .searchbox input{width:100%;background:var(--card);border:1px solid var(--b2);border-radius:14px;color:#fff;font-size:19px;padding:18px 20px;font-family:inherit}
+  .searchbox input:focus{outline:none;border-color:var(--tc)}
+  .hits{margin-top:14px;max-height:46vh;overflow-y:auto}
+  .hit{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--b);border-radius:12px;padding:13px 16px;margin-bottom:8px}
+  .hit .hsku{font-variant-numeric:tabular-nums;color:var(--t2);font-size:13px;width:48px}
+  .hit .hname{flex:1;color:#fff;font-size:15px;font-weight:600}
+  .hit .hmeta{font-size:12px;color:var(--t2)}
+  .hit .htag{font-size:9px;font-weight:700;letter-spacing:.5px;border:1px solid;border-radius:99px;padding:2px 7px;white-space:nowrap}
+  .hit .htag.ins{color:var(--green);border-color:var(--green)}
+  .hit .htag.rec{color:var(--cc);border-color:var(--cc)}
+  .hit .htag.dead{color:var(--t3);border-color:var(--t3)}
+  .gatewarn{display:none;margin-top:10px;font-size:13px;color:var(--amber);background:rgba(212,134,10,.08);border:1px solid rgba(212,134,10,.3);border-radius:10px;padding:11px 14px;line-height:1.55}
+  .createbar{display:none;margin-top:18px}
+  .createbar button{width:100%;background:var(--tc);border:none;color:#fff;font-size:16px;font-weight:600;padding:16px;border-radius:13px;font-family:inherit;cursor:pointer}
+  .createbar .micro{text-align:center;font-size:11px;color:var(--t3);margin-top:8px}
+
+  /* FORM */
+  #form{display:none;padding:22px 24px 60px}
+  .cols{display:grid;grid-template-columns:1fr 410px;gap:22px;align-items:start}
+  .sec{background:var(--card);border:1px solid var(--b);border-radius:14px;padding:18px 20px;margin-bottom:14px;transition:opacity .25s}
+  .sec.locked{opacity:.35;pointer-events:none}
+  .sec.locked h3 .lockmsg{display:inline}
+  .lockmsg{display:none;float:right;font-size:10px;color:var(--t3);letter-spacing:0;text-transform:none}
+  .sec h3{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--t2);margin-bottom:14px;font-weight:700}
+  .sec h3 .hint{float:right;font-size:10px;color:var(--t3);letter-spacing:0;text-transform:none}
+  .secnum{color:var(--tc);font-weight:800;margin-right:7px}
+  .done{color:var(--green);font-size:12px;margin-left:6px;display:none}
+  .sec.ok .done{display:inline}
+
+  label.fl{display:block;font-size:12px;color:var(--t2);margin:0 0 6px}
+  select,input[type=text],input[type=number]{background:var(--card2);color:#fff;border:1px solid var(--b2);border-radius:9px;padding:11px 12px;font-size:15px;width:100%;font-family:inherit}
+  select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--t2) 50%),linear-gradient(135deg,var(--t2) 50%,transparent 50%);background-position:calc(100% - 16px) 18px,calc(100% - 11px) 18px;background-size:5px 5px;background-repeat:no-repeat}
+  select.empty{color:var(--t2)}
+  input::placeholder{color:var(--t3)}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  .field{margin-bottom:14px}.field:last-child{margin-bottom:0}
+
+  .seg{display:flex;border:1px solid var(--b2);border-radius:10px;overflow:hidden}
+  .seg button{flex:1;background:transparent;border:none;color:var(--t2);padding:11px 6px;font-size:13px;font-family:inherit;border-right:1px solid var(--b);cursor:pointer}
+  .seg button:last-child{border-right:none}
+  .seg button.on{background:var(--green);color:#fff;font-weight:600}
+  .seg.blue button.on{background:var(--blue)}
+
+  .arch{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  .arch .a{background:var(--card2);border:1px solid var(--b2);border-radius:11px;padding:14px 10px;text-align:center;font-size:13px;color:var(--t1);cursor:pointer}
+  .arch .a .ic{font-size:22px;display:block;margin-bottom:4px}
+  .arch .a .lvl{display:block;font-size:10px;color:var(--t3);margin-top:3px}
+  .arch .a.on{border-color:var(--tc);background:rgba(196,98,45,.12);color:#fff}
+  .utmtag{align-self:center;color:var(--t2);font-size:14px;min-width:26px}
+  .lv{margin-top:14px}
+
+  .emp{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}
+  .emp .e{background:var(--card2);border:1px solid var(--b2);border-radius:11px;padding:13px 8px;text-align:center;font-size:14px;font-weight:600;color:var(--t1);cursor:pointer}
+  .emp .e.on{border-color:var(--tc);background:rgba(196,98,45,.12);color:#fff}
+  .emp .e small{display:block;font-size:10px;color:var(--t3);font-weight:400;margin-top:3px}
+
+  .alias{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{background:rgba(90,158,122,.15);border:1px solid var(--green);color:#bfe0cf;border-radius:99px;padding:5px 11px;font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer}
+  .chip b{color:var(--t2);font-weight:400}
+  .chip.prop{background:transparent;border:1px dashed var(--t3);color:var(--t2)}
+  .chip.prop:hover{border-color:var(--green);color:var(--t1)}
+  .chip.secc{background:var(--card2);border-color:var(--b2);color:var(--t2)}
+  .chip.secc.on{background:rgba(90,158,122,.15);border-color:var(--green);color:#bfe0cf}
+  .chip.secc.on.viol{background:rgba(155,107,158,.15);border-color:var(--cc);color:#d8c0da}
+  .addchip{background:transparent;border:1px dashed var(--b2);color:var(--t2);border-radius:99px;padding:5px 11px;font-size:12px;font-family:inherit;cursor:pointer}
+  .check{display:flex;align-items:center;gap:9px;font-size:14px;color:var(--t1);padding:7px 0}
+  .check input{width:18px;height:18px;accent-color:var(--green)}
+
+  .note{display:flex;gap:8px;font-size:12px;color:var(--amber);background:rgba(212,134,10,.08);border:1px solid rgba(212,134,10,.3);border-radius:10px;padding:10px 12px;margin-top:10px;line-height:1.5}
+  .note.q{color:var(--t2);background:var(--card2);border-color:var(--b)}
+  .dupline{display:none;margin-top:8px;font-size:12px;color:var(--amber)}
+
+  .desg{margin-top:14px;background:#0a0a0a;border:1px solid var(--b2);border-radius:11px;padding:12px 14px}
+  .desg table{width:100%;border-collapse:collapse;font-size:13px}
+  .desg td{padding:4px 2px;border-bottom:1px solid var(--b)}
+  .desg td.k{color:var(--t2)}
+  .desg td.v{text-align:right;color:#fff;font-variant-numeric:tabular-nums}
+  .desg tr.real td{color:var(--green);font-weight:700;border-bottom:none;padding-top:8px}
+  .desg tr.fact td{color:var(--blue);font-weight:700;border-bottom:none}
+
+  .contract{position:sticky;top:128px}
+  .espejo{background:linear-gradient(180deg,rgba(196,98,45,.10),rgba(196,98,45,.03));border:1px solid var(--tc);border-radius:14px;padding:16px;margin-bottom:12px}
+  .espejo .e-l{font-size:11px;letter-spacing:.6px;color:var(--tc2);font-weight:700;margin-bottom:8px}
+  .espejo .e-t{font-size:14px;color:#fff;line-height:1.65}
+  .espejo .e-t em{color:var(--tc2);font-style:normal;font-weight:600}
+  .espejo .e-t .pend{color:var(--t3)}
+
+  .prev{background:#0a0a0a;border:1px solid var(--b2);border-radius:12px;padding:14px;margin-bottom:12px}
+  .prev .ph{font-size:11px;letter-spacing:.6px;color:var(--t2);font-weight:700;margin-bottom:10px;display:flex;justify-content:space-between}
+  .prev table{width:100%;border-collapse:collapse;font-size:12px}
+  .prev td{padding:5px 4px;border-bottom:1px solid var(--b);vertical-align:top}
+  .prev td.c{color:var(--t3);font-variant-numeric:tabular-nums;width:28px}
+  .prev td.k{color:var(--t2);width:140px}
+  .prev td.v{color:#fff;font-weight:600}
+  .prev td.v.gen{color:var(--go)}
+  .prev td.v.warn{color:var(--amber)}
+  .legend{font-size:11px;color:var(--t3);line-height:1.6;margin-top:8px}
+  .legend b{color:var(--go);font-weight:600}
+
+  .actions{display:flex;gap:10px}
+  .btn{flex:1;border:none;border-radius:11px;padding:14px;font-size:15px;font-weight:600;font-family:inherit;cursor:pointer}
+  .btn.cancel{background:var(--card2);color:var(--t2)}
+  .btn.save{background:var(--tc);color:#fff}
+  .btn.save:disabled{background:var(--card2);color:var(--t3);cursor:not-allowed}
+  .savemicro{text-align:center;font-size:11px;color:var(--t3);margin-top:8px}
+
+  /* modal payload (fail loud quando route assente, conferma quando presente) */
+  .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;align-items:center;justify-content:center;padding:20px}
+  .modal.on{display:flex}
+  .mbox{background:var(--card);border:1px solid var(--b2);border-radius:16px;max-width:760px;width:100%;max-height:84vh;display:flex;flex-direction:column}
+  .mbox h2{font-size:15px;color:#fff;padding:16px 20px;border-bottom:1px solid var(--b)}
+  .mbox pre{flex:1;overflow:auto;font-size:11.5px;line-height:1.5;color:var(--t1);padding:16px 20px;font-family:ui-monospace,Menlo,monospace;white-space:pre-wrap}
+  .mbox .mrow{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--b)}
+
+  @media (max-width:960px){
+    .cols{grid-template-columns:1fr}
+    .contract{position:static}
+    .emp{grid-template-columns:1fr 1fr}
+    .three{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="row">
+      <a class="back" href="/portal.html">‹ Catálogo</a>
+      <span class="crumb">DICCIONARIO_INSUMOS · vía A · solo insumos comprados</span>
+      <span style="flex:1"></span>
+      <span class="sku" id="h-sku">SKU nuevo · …</span>
+    </div>
+    <div class="row" style="margin-top:4px">
+      <div class="title" id="t-name">Nuevo insumo</div>
+      <span class="pill mp">INSUMO · comprado</span>
+      <span class="activo">Activo: <b>se deducirá del stock (P5)</b></span>
+    </div>
+  </div>
+
+  <div class="banner" id="banner"></div>
+
+  <!-- GATE -->
+  <div id="gate">
+    <h1>¿Qué producto es?</h1>
+    <div class="sub">Buscá primero en el catálogo real (<span id="catcount">…</span> SKU). Si ya existe, no se crea dos veces.</div>
+    <div class="searchbox">
+      <input type="text" id="q" placeholder="ej. camembert, syrup, almendras…" oninput="gateSearch()" autocomplete="off" disabled>
+    </div>
+    <div class="hits" id="hits"></div>
+    <div class="gatewarn" id="gatewarn"></div>
+    <div class="createbar" id="createbar">
+      <button onclick="createNew()">Crear «<span id="qecho"></span>» como insumo nuevo</button>
+      <div class="micro">El nombre queda sembrado · las RECETAS (5xxx) no se crean acá: las escribe el VISOR (vía B)</div>
+    </div>
+  </div>
+
+  <!-- FORM -->
+  <div id="form">
+    <div class="cols">
+      <div>
+
+        <!-- 1 -->
+        <div class="sec" id="c1">
+          <h3><span class="secnum">1</span>¿Qué producto es?<span class="done">✓</span> <span class="hint">A · B · C · F · G</span></h3>
+          <div class="field">
+            <label class="fl">Nombre</label>
+            <input type="text" id="p-name" placeholder="Ingresá el nombre…" oninput="onName()" onblur="this.value=trimC(this.value);onName()">
+            <div class="dupline" id="dupline"></div>
+          </div>
+          <div class="two">
+            <div>
+              <label class="fl">Familia / categoría <span style="color:var(--t3)">— del catálogo real</span></label>
+              <select id="cat" class="empty" onchange="this.classList.remove('empty');update()"><option value="">Seleccioná…</option></select>
+            </div>
+            <div>
+              <label class="fl">Unidad base (UTM) <span style="color:var(--t3)">— elegila, no viene elegida</span></label>
+              <div class="seg blue" style="height:46px" id="seg-ub">
+                <button onclick="setUB(this,'Gr')">Gr</button>
+                <button onclick="setUB(this,'CC')">CC</button>
+                <button onclick="setUB(this,'UN')">UN</button>
+              </div>
+            </div>
+          </div>
+          <label class="fl" style="margin-top:14px">Alias <span style="color:var(--t3)">— el sistema propone, vos confirmás (hoja ALIAS_INSUMOS · pendiente: quedan en el payload)</span></label>
+          <div class="alias" id="aliasbox"></div>
+
+          <label class="fl" style="margin-top:16px">Naturaleza <span style="color:var(--t3)">— pueden ser ambas (ej. Coca-Cola)</span></label>
+          <label class="check"><input type="checkbox" id="bodega" onchange="update()"><span>🧺 Es <b style="color:#fff">ingrediente de bodega</b> (stock, movimientos)</span></label>
+          <label class="check"><input type="checkbox" id="vend" onchange="document.getElementById('tid').style.display=this.checked?'block':'none';update()"><span>🛒 Es <b style="color:#fff">vendible al cliente</b> (Toteat)</span></label>
+          <input type="text" id="tid" placeholder="Toteat ID (ej. PX130)" style="display:none;margin-top:8px" oninput="update()">
+          <div class="note" id="dobnote" style="display:none">⚠️ Vendible Y de bodega: comportamiento en movimientos <b>por definir</b> (VENDIBLE-DOPPIA-NATURA) — anotado, no se decide acá.</div>
+
+          <div class="field" style="margin-top:14px">
+            <label class="fl">Destino <span style="color:var(--t3)">— se come o se bebe (no se deduce, se declara)</span></label>
+            <div class="seg" style="height:46px" id="seg-dest">
+              <button onclick="setDest(this,'comer')">Comer 🍽</button>
+              <button onclick="setDest(this,'beber')">Beber 🥤</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2 -->
+        <div class="sec locked" id="c2">
+          <h3><span class="secnum">2</span>¿Para qué empresa(s)?<span class="done">✓</span><span class="lockmsg">completá la 1</span> <span class="hint">define las secciones</span></h3>
+          <div class="emp" id="empbox">
+            <div class="e" onclick="toggleEmp(this,'PINSA')">PINSA<small>comparte BD con EXO</small></div>
+            <div class="e" onclick="toggleEmp(this,'EXO')">EXO<small>comparte BD con PINSA</small></div>
+            <div class="e" onclick="toggleEmp(this,'BKS')">BKS<small>BD separada</small></div>
+            <div class="e" onclick="toggleTodos(this)">Todos<small>marca/desmarca</small></div>
+          </div>
+          <div class="note" id="bksnote" style="display:none">⚠️ BKS tiene BD_INSUMOS separada — marcarlo acá registra la intención. El JB de BKS lo confirma en su sistema.</div>
+          <div class="note q" style="margin-top:10px">[TODO] secciones-por-empresa desde PARAMETROS — hoy las secciones (card 3) salen del catálogo real (col C).</div>
+        </div>
+
+        <!-- 3 -->
+        <div class="sec locked" id="c3">
+          <h3><span class="secnum">3</span>¿Dónde se usa?<span class="done">✓</span><span class="lockmsg">completá la 2</span> <span class="hint">E · P2</span></h3>
+          <label class="fl">Secciones <span style="color:var(--t3)">— del catálogo real</span></label>
+          <div class="alias" id="seccbox" style="margin-top:0"></div>
+          <label class="check" style="margin-top:10px">
+            <input type="checkbox" id="multi" onchange="update()">
+            <span>MULTISECCIÓN — todas las secciones (P2)</span>
+          </label>
+          <div class="note" id="multi-note" style="display:none">✓ Aparece en <b>todas</b> las listas, no desaparece. (El fix del bug actual es parte del cantiere, no de esta página.)</div>
+        </div>
+
+        <!-- 4 -->
+        <div class="sec locked" id="c4">
+          <h3><span class="secnum">4</span>¿Quién lo vende?<span class="done">✓</span><span class="lockmsg">completá la 3</span> <span class="hint">lista del catálogo real</span></h3>
+          <div class="two">
+            <div>
+              <label class="fl">Proveedor principal</label>
+              <select id="prov" class="empty" onchange="this.classList.remove('empty');update()"><option value="">Seleccioná…</option></select>
+            </div>
+            <div>
+              <label class="fl">Proveedor alternativo</label>
+              <select id="prov2" onchange="update()"><option value="">— ninguno —</option></select>
+            </div>
+          </div>
+          <button class="addchip" style="margin-top:10px" onclick="nuevoProveedor()">+ crear proveedor nuevo</button>
+        </div>
+
+        <!-- 5 -->
+        <div class="sec locked" id="c5">
+          <h3><span class="secnum">5</span>¿Cómo viene del proveedor?<span class="done">✓</span><span class="lockmsg">completá la 4</span> <span class="hint">P4 · el archetipo define niveles, UO y conteo</span></h3>
+          <div class="arch" id="arch">
+            <div class="a" onclick="setArch(this,'granel')"><span class="ic">⚖️</span>Granel<span class="lvl">1 nivel · UPC=UO=UTM</span></div>
+            <div class="a" onclick="setArch(this,'sellado')"><span class="ic">📦</span>Envase sellado<span class="lvl">2 niveles · UO=UPC</span></div>
+            <div class="a" onclick="setArch(this,'pack')"><span class="ic">🧃</span>Pack de unidades<span class="lvl">3 niveles · UO=la unidad</span></div>
+          </div>
+
+          <div id="lv-granel" class="lv" style="display:none">
+            <div class="note q">⚖️ Granel: el stock vive directo en <b id="g-utm">—</b>. UPC = UO = UTM, factor 1.</div>
+          </div>
+
+          <div id="lv-sellado" class="lv" style="display:none">
+            <div class="two">
+              <div>
+                <label class="fl">Tipo de envase</label>
+                <select id="env-sel" onchange="update()">
+                  <option>Paquete</option><option>Botella</option><option>Tetrabrick</option>
+                  <option>Bolsa sellada</option><option>Bandeja</option><option>Frasco</option><option>Lata</option><option>Balde</option><option>Bidón</option>
+                </select>
+              </div>
+              <div>
+                <label class="fl">Contenido por envase</label>
+                <div style="display:flex;gap:6px">
+                  <input type="number" id="s-qty" placeholder="ej. 100" oninput="update()" style="flex:1">
+                  <span class="utmtag" id="s-utm">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="lv-pack" class="lv" style="display:none">
+            <div class="three">
+              <div>
+                <label class="fl">Tipo de pack <span style="color:var(--t3)">(UPC)</span></label>
+                <select id="pk-sel" onchange="update()"><option>Caja</option><option>Bolsa</option><option>Bandeja</option><option>Display</option></select>
+              </div>
+              <div>
+                <label class="fl">¿Qué unidades trae? <span style="color:var(--t3)">(UO)</span></label>
+                <select id="pk-uo" onchange="update()">
+                  <option>Tetrabrick</option><option>Botella</option><option>Paquete</option>
+                  <option>Frasco</option><option>Bandeja</option><option>Lata</option><option>Bolsa</option>
+                </select>
+              </div>
+              <div>
+                <label class="fl">¿Cuántas trae?</label>
+                <input type="number" id="pk-n" placeholder="ej. 12" oninput="update()">
+              </div>
+            </div>
+            <div class="field" style="margin-top:12px;max-width:50%">
+              <label class="fl">Contenido por unidad</label>
+              <div style="display:flex;gap:6px">
+                <input type="number" id="pk-qty" placeholder="ej. 1000" oninput="update()" style="flex:1">
+                <span class="utmtag" id="pk-utm">—</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="desg" id="uo-derived" style="display:none">
+            <table>
+              <tr><td class="k">UPC · como lo compro</td><td class="v" id="d-upc">—</td></tr>
+              <tr><td class="k">UO · la unidad que manejo</td><td class="v" id="d-uo">—</td></tr>
+              <tr><td class="k">UTM · donde vive el stock</td><td class="v" id="d-utm">—</td></tr>
+              <tr><td class="k">factor UPC→UO · UO→UTM</td><td class="v" id="d-fac">—</td></tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- 6 -->
+        <div class="sec locked" id="c6">
+          <h3><span class="secnum">6</span>¿Cuánto cuesta?<span class="done">✓</span><span class="lockmsg">completá la 5</span> <span class="hint">calculadora · reglas verificadas con facturas reales</span></h3>
+          <div class="three">
+            <div>
+              <label class="fl">Precio neto por UPC ($)</label>
+              <input type="number" id="cn" placeholder="ej. 4200" oninput="update()">
+            </div>
+            <div>
+              <label class="fl">Descuento (%)</label>
+              <input type="number" id="cd" placeholder="0" oninput="update()">
+            </div>
+            <div>
+              <label class="fl">Unidades por factura</label>
+              <input type="number" id="cu" placeholder="ej. 20" oninput="update()">
+            </div>
+          </div>
+
+          <div class="field" style="margin-top:14px">
+            <label class="fl">Flete (transporte)</label>
+            <div class="two">
+              <select id="fm" onchange="update()">
+                <option value="upc">$ por UPC</option>
+                <option value="tot">$ total factura (÷ unidades)</option>
+                <option value="pct">% sobre neto</option>
+              </select>
+              <input type="number" id="fv" placeholder="0" oninput="update()">
+            </div>
+          </div>
+
+          <div class="field" style="margin-top:14px">
+            <label class="fl">Impuesto adicional <span style="color:var(--t3)">— elegí el PRODUCTO, la tasa la sabe el sistema</span></label>
+            <select id="imp" onchange="update()">
+              <option value="0">Sin impuesto adicional — ej. queso, aceite, café en grano</option>
+              <option value="31.5">Destilados — ILA 31,5% · ej. pisco, whisky, ron, gin</option>
+              <option value="20.5">Vino, cerveza, sidra, espumante — ILA 20,5% · ej. vino copa, cerveza artesanal</option>
+              <option value="10ila">Bebida analcohólica sin azúcar — ILA 10% · ej. agua tónica zero, soda</option>
+              <option value="10iaba">Bebida azucarada &lt; 15g/240ml — IABA 10% · ej. Coca-Cola Zero, jugo light</option>
+              <option value="18">Bebida azucarada ≥ 15g/240ml — IABA 18% · ej. Coca-Cola normal, Fanta</option>
+              <option value="harina">Harina de trigo — IVA Anticipado 12% (recuperable F29) · ej. harina pinsa</option>
+            </select>
+          </div>
+
+          <div class="desg">
+            <table>
+              <tr><td class="k">Neto − descuento</td><td class="v" id="x-neto">—</td></tr>
+              <tr><td class="k">Flete</td><td class="v" id="x-flete">—</td></tr>
+              <tr><td class="k" id="x-adic-k">Impuesto adicional</td><td class="v" id="x-adic">—</td></tr>
+              <tr><td class="k">IVA 19% (crédito — no es costo)</td><td class="v" id="x-iva">—</td></tr>
+              <tr class="real"><td class="k">COSTO REAL por UPC → BD</td><td class="v" id="x-real">—</td></tr>
+              <tr class="fact"><td class="k">Total factura por UPC (lo que se paga)</td><td class="v" id="x-fact">—</td></tr>
+            </table>
+            <div class="legend" id="imp-obs">ILA/IABA: no recuperable, entra como costo (boleta a consumidor final). IVA 19% siempre crédito: nunca es costo. Base ILA/IABA = neto, flete excluido.</div>
+          </div>
+
+          <div class="note q" style="margin-top:14px">📊 <b>Stock mín/máx y BO no se definen acá</b>: son operativos, por local/sección. Se ajustan en operación (tab Uso / voz).</div>
+        </div>
+
+      </div>
+
+      <!-- CONTRATO -->
+      <div class="contract">
+        <div class="espejo">
+          <div class="e-l">🪞 ESPEJO · lo que entendí (crece con vos)</div>
+          <div class="e-t" id="espejo-text"></div>
+        </div>
+
+        <div class="prev">
+          <div class="ph"><span>VISTA PREVIA · fila nueva en BD_INSUMOS</span><span style="color:var(--go)" id="filalibre">fila …</span></div>
+          <table>
+            <tr><td class="c">A</td><td class="k">SKU</td><td class="v gen" id="pv-sku">—</td></tr>
+            <tr><td class="c">B</td><td class="k">Descripcion</td><td class="v warn" id="pv-desc">—</td></tr>
+            <tr><td class="c">C</td><td class="k">Seccion</td><td class="v warn" id="pv-secc">—</td></tr>
+            <tr><td class="c">D</td><td class="k">Tipo</td><td class="v warn" id="pv-tipo">—</td></tr>
+            <tr><td class="c">E</td><td class="k">Categoria</td><td class="v warn" id="pv-cat">—</td></tr>
+            <tr><td class="c">F</td><td class="k">Proveedor Principal</td><td class="v warn" id="pv-prov">—</td></tr>
+            <tr><td class="c">G</td><td class="k">Prov Alternativo</td><td class="v" id="pv-prov2">—</td></tr>
+            <tr><td class="c">H</td><td class="k">UPC Formato Compra</td><td class="v warn" id="pv-upc">—</td></tr>
+            <tr><td class="c">I</td><td class="k">Unidades por UPC <span style="color:var(--go)">= factor UPC→UO</span></td><td class="v warn" id="pv-f1">—</td></tr>
+            <tr><td class="c">K</td><td class="k">Unidad de medida UPC</td><td class="v warn" id="pv-k">—</td></tr>
+            <tr><td class="c">M</td><td class="k">Valor por UPC</td><td class="v warn" id="pv-costo">—</td></tr>
+            <tr><td class="c">P</td><td class="k">UTM</td><td class="v warn" id="pv-utm">—</td></tr>
+            <tr><td class="c">Q</td><td class="k">UO Descripcion Principal</td><td class="v warn" id="pv-uo">—</td></tr>
+            <tr><td class="c">R</td><td class="k">Metodo de conteo</td><td class="v warn" id="pv-conteo">—</td></tr>
+            <tr><td class="c">T</td><td class="k">Facor UO UTM</td><td class="v warn" id="pv-f2">—</td></tr>
+            <tr><td class="c">AG</td><td class="k">Activo No/Activo</td><td class="v warn">Si · luego lo deduce el stock (P5)</td></tr>
+          </table>
+          <div class="legend">En <b>verde</b>: derivado (P4). Columnas reales verificadas en la hoja el 11-jun (N10) — H y Q llevan
+          espacio final en el header real: el GAS escribe con el nombre EXACTO. Empresa/destino/vendible/alias no tienen columna
+          en la hoja congelada: viajan en <b style="color:var(--t2)">extras</b> del payload (hojas companion, pendientes).</div>
+        </div>
+
+        <div class="actions">
+          <button class="btn cancel" onclick="backToGate()">Cancelar</button>
+          <button class="btn save" id="savebtn" disabled onclick="guardar()">Guardar insumo</button>
+        </div>
+        <div class="savemicro" id="savemicro">Se habilita al completar las 6 cards · escribe UNA fila nueva · jamás pisa filas existentes</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- MODAL payload -->
+<div class="modal" id="modal">
+  <div class="mbox">
+    <h2 id="m-title">Payload</h2>
+    <pre id="m-pre"></pre>
+    <div class="mrow">
+      <button class="btn cancel" onclick="document.getElementById('modal').classList.remove('on')">Cerrar</button>
+      <button class="btn save" onclick="copiarPayload()">Copiar payload</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================================
+   CONFIG · puntos de ingreso REALES (N1) — verificados 11-jun
+   ========================================================================== */
+const CFG = {
+  // CONTROL_MAESTRO publicado · mismo token que usa el panel rsc para ventas Toteat
+  TOKEN_MAESTRO: '2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt',
+  GID_BD_INSUMOS: '514178276',
+
+  // [TODO · BLOCANTE PARA ESCRIBIR] route GAS `insumo_crear` — proyecto GAS de
+  // CONTROL_MAESTRO (¡patchar el proyecto CORRECTO! N1). New Version, mai New Deployment.
+  GAS_URL: '',
+
+  // Nombres EXACTOS de columna en la hoja real (¡con espacios finales reales!)
+  COL: {
+    SKU:'SKU', DESC:'Descripcion', SECC:'Seccion', TIPO:'Tipo', CAT:'Categoria',
+    PROV:'Proveedor Principal', PROV2:'Prov Alternativo',
+    UPC:'UPC Formato Compra ',          // ← espacio final REAL
+    F1:'Unidades por UPC',              // factor UPC→UO
+    QUPC:'Q UPC', KUPC:'Unidad de medida UPC',
+    VUPC:'Valor por UPC', VUO:'Valor Unidad Neto',
+    UTM:'UTM',
+    UO:'UO Descripcion Principal ',     // ← espacio final REAL
+    METODO:'Metodo de conteo',
+    F2:'Facor UO UTM',
+    ACTIVO:'Activo No/Activo'
+  },
+  SKU_RECETA_MIN: 5000   // 5xxx = recetas → vía B (VISOR)
+};
+
+/* ============================================================================
+   helpers
+   ========================================================================== */
+const trimC = s => String(s||'').replace(/\s+/g,' ').trim();                      // TRIM-GLOBAL
+const norm  = s => trimC(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+const numC  = s => parseFloat(String(s||'').replace(/[^\d.-]/g,''))||0;           // "4,000"/"$49,682" → number
+const clp   = n => '$'+Math.round(n).toLocaleString('es-CL');
+const $     = id => document.getElementById(id);
+
+function csvParse(text){          // parser con comillas (valores tipo "4,000")
+  const rows=[];let row=[],cur='',inQ=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(inQ){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else inQ=false; } else cur+=c; }
+    else if(c==='"')inQ=true;
+    else if(c===','){row.push(cur);cur='';}
+    else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n')i++; row.push(cur);cur=''; if(row.length>1||row[0]!=='')rows.push(row); row=[]; }
+    else cur+=c;
+  }
+  if(cur!==''||row.length){row.push(cur);rows.push(row);}
+  const head=rows[0];
+  return rows.slice(1).map(r=>{const o={};head.forEach((h,i)=>o[h]=r[i]??'');return o;});
+}
+
+/* ============================================================================
+   estado + catálogo real
+   ========================================================================== */
+const S={ub:null,dest:null,arch:null,emp:new Set(),secc:new Set(),alias:new Set(),catalog:[],filaLibre:null,skuNuevo:null};
+
+async function boot(){
+  const url=`https://docs.google.com/spreadsheets/d/e/${CFG.TOKEN_MAESTRO}/pub?gid=${CFG.GID_BD_INSUMOS}&single=true&output=csv&t=${Date.now()}`;
+  try{
+    const r=await fetch(url,{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const rows=csvParse(await r.text()).filter(x=>trimC(x[CFG.COL.SKU]));
+    S.catalog=rows;
+    S.filaLibre=rows.length+2;                       // header = fila 1
+    const skus=rows.map(x=>parseInt(x[CFG.COL.SKU])).filter(n=>n>0&&n<CFG.SKU_RECETA_MIN);
+    S.skuNuevo=skus.length?Math.max(...skus)+1:1001; // [propuesta — el GAS asigna el definitivo, N7]
+    $('catcount').textContent=rows.length;
+    $('h-sku').textContent='SKU nuevo · propuesto '+S.skuNuevo;
+    $('filalibre').textContent='fila libre '+S.filaLibre;
+    // dropdowns desde el dato real
+    fillSelect('cat',distinct(rows,CFG.COL.CAT));
+    fillSelect('prov',distinct(rows,CFG.COL.PROV));
+    fillSelect('prov2',distinct(rows,CFG.COL.PROV),true);
+    buildSecc(distinct(rows,CFG.COL.SECC).filter(s=>norm(s)!=='multiseccion'));
+    $('q').disabled=false;$('q').focus();
+    banner('okk','Catálogo real cargado: '+rows.length+' SKU desde CONTROL_MAESTRO · BD_INSUMOS.');
+  }catch(e){
+    banner('err','⚠️ No pude leer BD_INSUMOS desde CONTROL_MAESTRO ('+e.message+'). Sin catálogo no hay defensa anti-duplicado: la creación queda bloqueada. Reintentá o avisá.');
+  }
+}
+function banner(cls,msg){const b=$('banner');b.className='banner '+cls;b.textContent=msg;
+  if(cls==='okk')setTimeout(()=>{b.className='banner';},5000);}
+function distinct(rows,col){const s=new Set();rows.forEach(r=>{const v=trimC(r[col]);if(v)s.add(v);});return[...s].sort();}
+function fillSelect(id,vals,keepNone){const el=$(id);vals.forEach(v=>{const o=document.createElement('option');o.textContent=v;el.appendChild(o);});}
+let SECC_ALL=[];
+function buildSecc(list){SECC_ALL=list;renderSecc();}
+
+/* ============================================================================
+   GATE
+   ========================================================================== */
+function matchCatalog(q){
+  const words=norm(q).split(' ').filter(w=>w);
+  if(!words.length)return[];
+  return S.catalog.filter(p=>{const pn=norm(p[CFG.COL.DESC]);return words.every(w=>pn.includes(w));});
+}
+function hasStock(p){return numC(p['Stock BC'])+numC(p['Stock Bodega Local BL'])+numC(p['Stock Seccion Local'])>0;}
+function esReceta(p){return parseInt(p[CFG.COL.SKU])>=CFG.SKU_RECETA_MIN||trimC(p['ID_Receta_CC']);}
+
+function gateSearch(){
+  const q=$('q').value;
+  const hits=$('hits'),warn=$('gatewarn'),bar=$('createbar');
+  hits.innerHTML='';warn.style.display='none';bar.style.display='none';
+  if(norm(q).length<2)return;
+  const found=matchCatalog(q).slice(0,12);
+  found.forEach(p=>{
+    const rec=esReceta(p),stk=hasStock(p);
+    const tag=rec?'<span class="htag rec">RECETA · vía B</span>':(stk?'<span class="htag ins">INSUMO</span>':'<span class="htag dead">SIN STOCK</span>');
+    hits.innerHTML+=`<div class="hit"><span class="hsku">${trimC(p[CFG.COL.SKU])}</span><span class="hname">${trimC(p[CFG.COL.DESC])}</span><span class="hmeta">${trimC(p[CFG.COL.CAT])||''}</span>${tag}</div>`;
+  });
+  if(found.length>0){warn.style.display='block';
+    warn.innerHTML=`⚠️ Hay <b>${found.length}</b> producto(s) parecidos. Si es uno de estos, no lo crees de nuevo — así nacieron los 7 «Syrup Ant».`;}
+  bar.style.display='block';
+  $('qecho').textContent=trimC(q);
+}
+function createNew(){
+  if(!S.catalog.length)return;          // sin catálogo no se crea (fail loud, banner ya visible)
+  $('gate').style.display='none';$('form').style.display='block';
+  $('p-name').value=trimC($('q').value);
+  proposeAlias($('p-name').value);onName();window.scrollTo(0,0);
+}
+function backToGate(){$('form').style.display='none';$('gate').style.display='block';$('t-name').textContent='Nuevo insumo';}
+
+/* ============================================================================
+   alias propuestos
+   ========================================================================== */
+function proposeAlias(name){
+  S.alias.clear();
+  const box=$('aliasbox');box.innerHTML='';
+  const n=norm(name);if(!n){renderAlias();return;}
+  const words=n.split(' ');
+  const props=new Set();
+  if(words.length>1)props.add(words[words.length-1]);
+  const last=words[words.length-1];
+  props.add(last.endsWith('s')?last.slice(0,-1):last+'s');
+  [...props].filter(p=>p&&p!==n&&p.length>2&&!p.startsWith('de '))
+    .slice(0,3).forEach(p=>{box.innerHTML+=`<span class="chip prop" onclick="confirmAlias(this)">${p} <b>+</b></span>`;});
+  renderAlias();
+}
+function confirmAlias(el){S.alias.add(trimC(el.textContent.replace('+','')));el.remove();renderAlias();update();}
+function renderAlias(){
+  const box=$('aliasbox');
+  box.querySelectorAll('.chip:not(.prop)').forEach(c=>c.remove());
+  box.querySelector('.addchip')?.remove();
+  S.alias.forEach(a=>{
+    const c=document.createElement('span');c.className='chip';
+    c.innerHTML=a+' <b>×</b>';c.onclick=()=>{S.alias.delete(a);renderAlias();update();};
+    box.appendChild(c);});
+  const add=document.createElement('button');add.className='addchip';add.textContent='+ alias propio';
+  add.onclick=()=>{const a=prompt('Alias (puente real, ej. fresa→frutilla):');if(a){S.alias.add(norm(a));renderAlias();update();}};
+  box.appendChild(add);
+}
+
+/* ============================================================================
+   dedup vivo en el form
+   ========================================================================== */
+function onName(){
+  const v=$('p-name').value;
+  $('t-name').textContent=trimC(v)||'Nuevo insumo';
+  const el=$('dupline');
+  if(norm(v).length>=3){
+    const found=matchCatalog(v).slice(0,4);
+    if(found.length){el.style.display='block';
+      el.innerHTML='⚠️ parecido a: '+found.map(p=>`<b>${trimC(p[CFG.COL.SKU])} · ${trimC(p[CFG.COL.DESC])}</b>`).join(' · ');}
+    else el.style.display='none';
+  } else el.style.display='none';
+  proposeAlias(v);update();
+}
+
+/* ============================================================================
+   selecciones (nada pre-elegido)
+   ========================================================================== */
+function setUB(el,v){document.querySelectorAll('#seg-ub button').forEach(b=>b.classList.remove('on'));el.classList.add('on');S.ub=v;update();}
+function setDest(el,v){document.querySelectorAll('#seg-dest button').forEach(b=>b.classList.remove('on'));el.classList.add('on');S.dest=v;update();}
+function setArch(el,v){document.querySelectorAll('#arch .a').forEach(b=>b.classList.remove('on'));el.classList.add('on');S.arch=v;
+  ['granel','sellado','pack'].forEach(a=>$('lv-'+a).style.display=a===v?'block':'none');update();}
+function toggleEmp(el,e){el.classList.toggle('on');el.classList.contains('on')?S.emp.add(e):S.emp.delete(e);
+  $('bksnote').style.display=S.emp.has('BKS')?'flex':'none';update();}
+function toggleTodos(el){const on=!el.classList.contains('on');
+  document.querySelectorAll('#empbox .e').forEach(x=>x.classList.toggle('on',on));
+  S.emp.clear();if(on)['PINSA','EXO','BKS'].forEach(e=>S.emp.add(e));
+  $('bksnote').style.display=S.emp.has('BKS')?'flex':'none';update();}
+function renderSecc(){
+  const box=$('seccbox');box.innerHTML='';
+  SECC_ALL.forEach(s=>{
+    const c=document.createElement('span');
+    const viol=norm(s).includes('cocina');
+    c.className='chip secc'+(S.secc.has(s)?(' on'+(viol?' viol':'')):'');
+    c.textContent=s;
+    c.onclick=()=>{S.secc.has(s)?S.secc.delete(s):S.secc.add(s);renderSecc();update();};
+    box.appendChild(c);});
+}
+function nuevoProveedor(){
+  const p=trimC(prompt('Nombre del proveedor nuevo:')||'');if(!p)return;
+  ['prov','prov2'].forEach(id=>{const o=document.createElement('option');o.textContent=p;$(id).appendChild(o);});
+  $('prov').value=p;$('prov').classList.remove('empty');update();
+}
+
+/* ============================================================================
+   derivaciones P4
+   ========================================================================== */
+function conteo(){if(!S.arch||!S.ub)return null;
+  if(S.arch==='granel')return S.ub==='CC'?'Nivel':(S.ub==='UN'?'Sellado':'Peso');   // métodos reales col R: Peso/Nivel/Sellado
+  return 'Sellado';}
+function formato(){
+  if(!S.arch||!S.ub)return null;
+  if(S.arch==='granel')return{upc:'Granel',uo:'Granel ('+S.ub+')',f1:1,f2:1,human:'a granel, por '+S.ub};
+  if(S.arch==='sellado'){
+    const env=$('env-sel').value,q=+$('s-qty').value;
+    if(!(q>0))return null;
+    const d=env+' '+q+' '+S.ub.toLowerCase();
+    return{upc:d,uo:d,f1:1,f2:q,human:'en '+env+' de '+q+' '+S.ub+' (UO = el envase)'};}
+  const pk=$('pk-sel').value,uoT=$('pk-uo').value,n=+$('pk-n').value,q=+$('pk-qty').value;
+  if(!(n>0&&q>0))return null;
+  return{upc:pk+' de '+n+' '+uoT,uo:uoT+' '+q+' '+S.ub.toLowerCase(),f1:n,f2:q,
+    human:'en '+pk+' de '+n+' '+uoT+' de '+q+' '+S.ub+' (UO = el '+uoT+')'};
+}
+
+/* ============================================================================
+   calculadora costo (reglas 25-may · verificadas con facturas Imagen Santiago)
+   ========================================================================== */
+function costo(){
+  const neto=+$('cn').value;if(!(neto>0))return null;
+  const desc=+$('cd').value||0,und=+$('cu').value||0;
+  const nd=neto*(1-desc/100);
+  const fm=$('fm').value,fv=+$('fv').value||0;
+  let flete=0;
+  if(fm==='upc')flete=fv;if(fm==='tot')flete=und>0?fv/und:0;if(fm==='pct')flete=nd*fv/100;
+  const impv=$('imp').value;
+  let adic=0,adicK='Impuesto adicional',anticipado=0,harina=false;
+  if(impv==='harina'){anticipado=nd*0.12;adicK='IVA Anticipado 12% (recuperable)';harina=true;}
+  else if(impv!=='0'){const tasa=parseFloat(impv)/100;adic=nd*tasa;   // base = neto, flete EXCLUIDO
+    adicK=(impv.includes('iaba')?'IABA':'ILA')+' '+parseFloat(impv)+'%';}
+  const iva=(nd+flete)*0.19;
+  const real=nd+adic+flete;            // sin IVA (crédito) ni anticipado (recuperable F29)
+  const fact=nd+adic+flete+iva+anticipado;
+  return{nd,flete,adic,adicK,anticipado,iva,real,fact,harina};
+}
+
+/* ============================================================================
+   completezza · sblocco · render
+   ========================================================================== */
+function complete(){
+  const c1=trimC($('p-name').value).length>2&&$('cat').value&&S.ub&&S.dest&&($('bodega').checked||$('vend').checked);
+  const c2=S.emp.size>0;
+  const c3=$('multi').checked||S.secc.size>0;
+  const c4=!!$('prov').value;
+  const c5=!!formato();
+  const c6=!!costo();
+  return[c1,c2,c3,c4,c5,c6];
+}
+function update(){
+  const C=complete();
+  for(let i=1;i<6;i++)$('c'+(i+1)).classList.toggle('locked',!C[i-1]);
+  for(let i=0;i<6;i++)$('c'+(i+1)).classList.toggle('ok',C[i]);
+  $('dobnote').style.display=($('bodega').checked&&$('vend').checked)?'flex':'none';
+  $('multi-note').style.display=$('multi').checked?'flex':'none';
+  ['s-utm','pk-utm','g-utm'].forEach(id=>{const e=$(id);if(e)e.textContent=S.ub||'—';});
+
+  const f=formato();
+  $('uo-derived').style.display=f?'block':'none';
+  if(f){$('d-upc').textContent=f.upc;$('d-uo').textContent=f.uo;$('d-utm').textContent=S.ub;
+    $('d-fac').textContent=f.f1+' · '+f.f2+'  (UPC→UTM = '+(f.f1*f.f2)+')';}
+
+  const c=costo(),set=(id,v)=>$(id).textContent=v;
+  if(c){set('x-neto',clp(c.nd));set('x-flete',clp(c.flete));
+    $('x-adic-k').textContent=c.adicK;
+    set('x-adic',c.harina?clp(c.anticipado):clp(c.adic));
+    set('x-iva',clp(c.iva));set('x-real',clp(c.real));set('x-fact',clp(c.fact));
+    $('imp-obs').textContent=c.harina
+      ?'Harina: IVA Anticipado recuperable en F29 — NO entra en el costo real, sí en el total factura.'
+      :'ILA/IABA: no recuperable, entra como costo (boleta a consumidor final). IVA 19% siempre crédito: nunca es costo. Base ILA/IABA = neto, flete excluido.';
+  } else ['x-neto','x-flete','x-adic','x-iva','x-real','x-fact'].forEach(id=>set(id,'—'));
+
+  preview(C,f,c);espejo(C,f,c);
+  $('savebtn').disabled=!C.every(x=>x);
+  $('savemicro').textContent=C.every(x=>x)
+    ?(CFG.GAS_URL?'Listo · escribe UNA fila nueva':'Listo · GAS_URL sin configurar → Guardar muestra el payload (fail loud)')
+    :'Se habilita al completar las 6 cards';
+}
+function preview(C,f,c){
+  const P=(id,val,gen)=>{const e=$(id);e.textContent=val||'—';e.className='v '+(val?(gen?'gen':''):'warn');};
+  P('pv-sku',S.skuNuevo?S.skuNuevo+' · propuesto (lo asigna el GAS)':'',true);
+  P('pv-desc',trimC($('p-name').value));
+  P('pv-secc',$('multi').checked?'MULTISECCION (todas)':[...S.secc].join(', '));
+  P('pv-tipo',S.arch?(S.arch==='granel'?'A Granel':'Empacado'):'',true);
+  P('pv-cat',$('cat').value);
+  P('pv-prov',$('prov').value);
+  P('pv-prov2',$('prov2').value||'—');
+  P('pv-upc',f?f.upc:'',true);
+  P('pv-f1',f?f.f1+' · derivado':'',true);
+  P('pv-k',S.ub);P('pv-utm',S.ub);
+  P('pv-uo',f?f.uo:'',true);
+  P('pv-conteo',conteo()?conteo()+' · derivado':'',true);
+  P('pv-f2',f?f.f2+' · derivado':'',true);
+  P('pv-costo',c?clp(c.real)+' · calculado':'',true);
+}
+function espejo(C,f,c){
+  const name=trimC($('p-name').value);
+  const pend=t=>`<span class="pend">${t}</span>`;
+  let s='Voy a registrar '+(name?`<em>${name}</em>`:pend('(nombre…)'))+' como <em>INSUMO</em> (comprado)';
+  const nat=[];if($('bodega').checked)nat.push('de bodega');if($('vend').checked)nat.push('vendible');
+  s+=nat.length?', <em>'+nat.join(' y ')+'</em>':pend(', (naturaleza…)');
+  s+=S.dest?', se <em>'+(S.dest==='comer'?'come':'bebe')+'</em>':pend(', (¿comer o beber?)');
+  s+='. ';
+  if(C[1]){
+    s+='Para <em>'+[...S.emp].join('+')+'</em>';
+    if(C[2])s+=$('multi').checked?', en <em>todas las secciones</em>':', en <em>'+[...S.secc].join(', ')+'</em>';
+  } else s+=pend('Empresa y secciones pendientes');
+  s+='. ';
+  if(f)s+='Viene <em>'+f.human+'</em>, el stock vive en <em>'+S.ub+'</em>, método <em>'+conteo()+'</em>. ';
+  else s+=pend('Formato pendiente (card 5). ');
+  if(c)s+='Costo real <em>'+clp(c.real)+'</em> por UPC. ';
+  else s+=pend('Costo pendiente (card 6). ');
+  if(S.alias.size)s+='<span style="color:var(--t2)">Alias: '+[...S.alias].join(', ')+'.</span> ';
+  s+='<span style="color:var(--t2)">Activo se deducirá del stock.</span>';
+  $('espejo-text').innerHTML=s;
+}
+
+/* ============================================================================
+   GUARDAR · arma payload → route GAS `insumo_crear` (o fail loud)
+   ========================================================================== */
+function buildPayload(){
+  const f=formato(),c=costo(),col=CFG.COL,row={};
+  row[col.SKU]   = '';                                  // lo asigna el GAS (fuente autorevole, N7)
+  row[col.DESC]  = trimC($('p-name').value);
+  row[col.SECC]  = $('multi').checked?'MULTISECCION':[...S.secc].join(', ');
+  row[col.TIPO]  = S.arch==='granel'?'A Granel':'Empacado';
+  row[col.CAT]   = $('cat').value;
+  row[col.PROV]  = $('prov').value;
+  row[col.PROV2] = $('prov2').value||'';
+  row[col.UPC]   = f.upc;
+  row[col.F1]    = f.f1;
+  row[col.QUPC]  = f.f2;
+  row[col.KUPC]  = S.ub;
+  row[col.VUPC]  = Math.round(c.real);
+  row[col.VUO]   = Math.round(c.real/f.f1);
+  row[col.UTM]   = S.ub;
+  row[col.UO]    = f.uo;
+  row[col.METODO]= conteo();
+  row[col.F2]    = f.f2;
+  row[col.ACTIVO]= 'Si';                                // P5 (deducción del stock) llega con el motor; hoy 'Si' para que aparezca
+  return {
+    action:'insumo_crear',
+    sku_propuesto:S.skuNuevo,
+    row,                                                 // → fila nueva BD_INSUMOS (nombres de columna EXACTOS)
+    extras:{                                             // → hojas companion (ALIAS_INSUMOS + DICC_EXTRA, pendientes)
+      empresas:[...S.emp],
+      destino:S.dest,
+      es_bodega:$('bodega').checked,
+      es_vendible:$('vend').checked,
+      toteat_id:trimC($('tid').value),
+      alias:[...S.alias],
+      costo_desglose:{neto_desc:c.nd,flete:c.flete,impuesto:c.harina?0:c.adic,iva_anticipado:c.anticipado,impuesto_tipo:$('imp').selectedOptions[0].textContent.split('·')[0].trim(),total_factura:c.fact}
+    },
+    origen:'scheda_insumo_v1',
+    ts:new Date().toISOString()
+  };
+}
+async function guardar(){
+  const payload=buildPayload();
+  if(!CFG.GAS_URL){          // FAIL LOUD: nada de escrituras a ciegas
+    $('m-title').textContent='Route GAS sin configurar — esto es lo que escribiría (no escribí nada)';
+    $('m-pre').textContent=JSON.stringify(payload,null,2);
+    $('modal').classList.add('on');
+    return;
+  }
+  $('savebtn').disabled=true;$('savebtn').textContent='Guardando…';
+  try{
+    const r=await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
+    const j=await r.json();
+    if(j&&j.ok){
+      banner('okk','✓ Insumo creado · SKU '+(j.sku||S.skuNuevo)+' · fila '+(j.fila||S.filaLibre)+'.');
+      backToGate();$('q').value='';$('hits').innerHTML='';
+      boot();                                            // ricarica catalogo: il nuovo SKU deve apparire (N6)
+    } else throw new Error(j&&j.error?j.error:'respuesta inesperada del GAS');
+  }catch(e){
+    banner('err','⚠️ No se pudo guardar: '+e.message+'. No se escribió nada (o verificá la fila '+S.filaLibre+' antes de reintentar).');
+  }finally{
+    $('savebtn').textContent='Guardar insumo';update();
+  }
+}
+function copiarPayload(){
+  navigator.clipboard.writeText($('m-pre').textContent).then(()=>{$('m-title').textContent='Payload copiado ✓';});
+}
+
+boot();update();
+</script>
+</body>
+</html>
