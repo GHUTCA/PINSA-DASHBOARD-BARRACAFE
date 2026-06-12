@@ -23,9 +23,11 @@
     payload completo, no escribe nada a ciegas. New Version, mai New Deployment.
   - PATTO CONGELAMENTO: esta página escribe UNA fila libre nueva, jamás
     modifica filas existentes. La igiene es otra fase.
-  - PENDIENTES marcados [TODO] en CFG: auth pinsita_auth.js · PARAMETROS para
-    secciones-por-empresa · hoja ALIAS_INSUMOS (ALIAS-INSUMOS-SHEET-001) ·
+  - PENDIENTES marcados [TODO] en CFG: auth pinsita_auth.js ·
+    hoja ALIAS_INSUMOS (ALIAS-INSUMOS-SHEET-001) ·
     hoja DICC_EXTRA para campos modelo sin columna (empresa/destino/vendible).
+  - ✅ 12-jun ter · secciones-por-empresa: fuente = CTRL_OBJETIVOS hoja
+    secciones_empresa (publicada SOLA · usuarios jamás). Fallback: catálogo col C.
   ============================================================================
 -->
 <style>
@@ -276,13 +278,13 @@
             <div class="e" onclick="toggleTodos(this)">Todos<small>marca/desmarca</small></div>
           </div>
           <div class="note" id="bksnote" style="display:none">⚠️ BKS tiene BD_INSUMOS separada — marcarlo acá registra la intención. El JB de BKS lo confirma en su sistema.</div>
-          <div class="note q" style="margin-top:10px">[TODO] secciones-por-empresa desde PARAMETROS — hoy las secciones (card 3) salen del catálogo real (col C).</div>
+          <div class="note" style="margin-top:10px">✓ Las secciones (card 3) se filtran por empresa desde <b>CTRL_OBJETIVOS · secciones_empresa</b>. Si la hoja no responde, fallback declarado: catálogo (col C), sin filtro.</div>
         </div>
 
         <!-- 3 -->
         <div class="sec locked" id="c3">
           <h3><span class="secnum">3</span>¿Dónde se usa?<span class="done">✓</span><span class="lockmsg">completá la 2</span> <span class="hint">E · P2</span></h3>
-          <label class="fl">Secciones <span style="color:var(--t3)">— del catálogo real</span></label>
+          <label class="fl">Secciones <span style="color:var(--t3)" id="secc-src">— del catálogo real</span></label>
           <div class="alias" id="seccbox" style="margin-top:0"></div>
           <label class="check" style="margin-top:10px">
             <input type="checkbox" id="multi" onchange="update()">
@@ -506,6 +508,10 @@ const CFG = {
   GID_BD_INSUMOS: '514178276',
   TOKEN_BC: '2PACX-1vSHqqam0ulBIXIn_UNH50dEl2XX0RDAnMbI70phvGURduyKGoTpIkV8g-8k8p8pbIr42g6Nap3SE9tt',  // 🆕 CTRL_BC_2026 publicado
   GID_PROVEEDORES: '1453971067',   // 🆕 hoja Proveedores en CTRL_BC (fuente autorevole · N10)
+  // 🆕 12-jun ter · PARAMETROS-SECCIONES-001: hoja secciones_empresa en CTRL_OBJETIVOS
+  // ⚠️ publicación = SOLO esa hoja (usuarios/log_accesos NUNCA se publican como CSV)
+  TOKEN_OBJETIVOS: '2PACX-1vTlbFUjpe0FjZ5ZvREGI6tZv2eugyv5IJxl7VJZAtN9OmWcoB1WKhpHlcPwfmEaUznZe3OFSfG2uf66',
+  GID_SECCIONES_EMPRESA: '2106081440',
 
   // [TODO · BLOCANTE PARA ESCRIBIR] route GAS `insumo_crear` — proyecto GAS de
   // CONTROL_MAESTRO (¡patchar el proyecto CORRECTO! N1). New Version, mai New Deployment.
@@ -580,6 +586,7 @@ async function boot(){
     $('q').disabled=false;$('q').focus();
     banner('okk','Catálogo real cargado: '+rows.length+' SKU desde CONTROL_MAESTRO · BD_INSUMOS.');
     await cargarProveedores(rows);   // 🆕 12-jun · fuente = hoja Proveedores (CTRL_BC), no la col F fósil
+    await cargarSeccionesEmpresa();  // 🆕 12-jun ter · fuente = secciones_empresa (CTRL_OBJETIVOS) · fallback catálogo
   }catch(e){
     banner('err','⚠️ No pude leer BD_INSUMOS desde CONTROL_MAESTRO ('+e.message+'). Sin catálogo no hay defensa anti-duplicado: la creación queda bloqueada. Reintentá o avisá.');
   }
@@ -608,7 +615,36 @@ function banner(cls,msg){const b=$('banner');b.className='banner '+cls;b.textCon
 function distinct(rows,col){const s=new Set();rows.forEach(r=>{const v=trimC(r[col]);if(v)s.add(v);});return[...s].sort();}
 function fillSelect(id,vals,keepNone){const el=$(id);vals.forEach(v=>{const o=document.createElement('option');o.textContent=v;el.appendChild(o);});}
 let SECC_ALL=[];
+let SECC_EMP=null;   // 🆕 12-jun ter · map norm(empresa) → [secciones] desde CTRL_OBJETIVOS · null = fallback catálogo
 function buildSecc(list){SECC_ALL=list;renderSecc();}
+async function cargarSeccionesEmpresa(){
+  // 🆕 12-jun ter · PARAMETROS-SECCIONES-001: fuente autorevole = hoja secciones_empresa
+  // (CTRL_OBJETIVOS, publicada SOLA). Fallback declarado al catálogo: la scheda no muere nunca.
+  try{
+    const u=`https://docs.google.com/spreadsheets/d/e/${CFG.TOKEN_OBJETIVOS}/pub?gid=${CFG.GID_SECCIONES_EMPRESA}&single=true&output=csv&t=${Date.now()}`;
+    const r=await fetch(u,{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const rows=csvParse(await r.text())
+      .filter(x=>trimC(x.empresa)&&trimC(x.seccion)&&norm(x.activo)==='true')
+      .sort((a,b)=>(parseFloat(a.orden)||0)-(parseFloat(b.orden)||0));
+    if(!rows.length)throw new Error('hoja vacía');
+    const m={};
+    rows.forEach(x=>{const e=norm(x.empresa);(m[e]=m[e]||[]).push(trimC(x.seccion));});
+    SECC_EMP=m;
+    $('secc-src').textContent='— por empresa · CTRL_OBJETIVOS';
+    renderSecc();
+  }catch(e){
+    SECC_EMP=null;   // fallback declarado, fail loud (no silent)
+    banner('err','⚠️ secciones_empresa no disponible ('+e.message+') — uso secciones del catálogo (col C), sin filtro por empresa.');
+  }
+}
+function seccDisponibles(){
+  // 🆕 12-jun ter · unión ordenada de las secciones de las empresas elegidas (card 2)
+  if(!SECC_EMP)return SECC_ALL;                       // fallback: catálogo
+  const seen=new Set(),out=[];
+  [...S.emp].forEach(e=>{(SECC_EMP[norm(e)]||[]).forEach(s=>{if(!seen.has(s)){seen.add(s);out.push(s);}});});
+  return out;
+}
 
 /* ============================================================================
    GATE
@@ -731,14 +767,20 @@ function setDest(el,v){document.querySelectorAll('#seg-dest button').forEach(b=>
 function setArch(el,v){document.querySelectorAll('#arch .a').forEach(b=>b.classList.remove('on'));el.classList.add('on');S.arch=v;
   ['granel','sellado','pack'].forEach(a=>$('lv-'+a).style.display=a===v?'block':'none');update();}
 function toggleEmp(el,e){el.classList.toggle('on');el.classList.contains('on')?S.emp.add(e):S.emp.delete(e);
-  $('bksnote').style.display=S.emp.has('BKS')?'flex':'none';update();}
+  $('bksnote').style.display=S.emp.has('BKS')?'flex':'none';renderSecc();update();}   // 🆕 12-jun ter · empresa cambia → secciones cambian
 function toggleTodos(el){const on=!el.classList.contains('on');
   document.querySelectorAll('#empbox .e').forEach(x=>x.classList.toggle('on',on));
   S.emp.clear();if(on)['PINSA','EXO','BKS'].forEach(e=>S.emp.add(e));
-  $('bksnote').style.display=S.emp.has('BKS')?'flex':'none';update();}
+  $('bksnote').style.display=S.emp.has('BKS')?'flex':'none';renderSecc();update();}   // 🆕 12-jun ter
 function renderSecc(){
   const box=$('seccbox');box.innerHTML='';
-  SECC_ALL.forEach(s=>{
+  const list=seccDisponibles();                                            // 🆕 12-jun ter
+  [...S.secc].forEach(s=>{if(!list.includes(s))S.secc.delete(s);});        // 🆕 poda: sección ya no disponible al cambiar empresa
+  if(SECC_EMP&&!list.length){
+    box.innerHTML='<span style="color:var(--t3);font-size:13px">'+(S.emp.size?'Sin secciones declaradas para esta(s) empresa(s) en secciones_empresa.':'Elegí empresa(s) en la card 2 — definen las secciones.')+'</span>';
+    return;
+  }
+  list.forEach(s=>{
     const c=document.createElement('span');
     const viol=norm(s).includes('cocina');
     c.className='chip secc'+(S.secc.has(s)?(' on'+(viol?' viol':'')):'');
