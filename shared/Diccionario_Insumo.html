@@ -588,6 +588,8 @@ function buildSecc(list){SECC_ALL=list;renderSecc();}
 /* ============================================================================
    GATE
    ========================================================================== */
+function dupExact(name){const v=norm(name);if(!v)return null;            // 🆕 12-jun
+  return S.catalog.find(p=>norm(p[CFG.COL.DESC])===v)||null;}
 function matchCatalog(q){
   const words=norm(q).split(' ').filter(w=>w);
   if(!words.length)return[];
@@ -608,6 +610,10 @@ function gateSearch(){
     const tag=rec?'<span class="htag rec">RECETA · vía B</span>':(stk?'<span class="htag ins">INSUMO</span>':'<span class="htag dead">SIN STOCK</span>');
     hits.innerHTML+=`<div class="hit"><span class="hsku">${trimC(p[CFG.COL.SKU])}</span><span class="hname">${trimC(p[CFG.COL.DESC])}</span><span class="hmeta">${trimC(p[CFG.COL.CAT])||''}</span>${tag}</div>`;
   });
+  const exact=found.find(p=>norm(p[CFG.COL.DESC])===norm(q));   // 🆕 12-jun · duplicado exacto → se BLOQUEA acá, no al final
+  if(exact){warn.style.display='block';
+    warn.innerHTML=`⛔ <b>${trimC(exact[CFG.COL.SKU])} · ${trimC(exact[CFG.COL.DESC])}</b> ya existe. No se crea dos veces — la tab de consulta/edición llega después (SCHEDA-EDIT-001).`;
+    return;}                                                      // la barra «Crear» queda oculta
   if(found.length>0){warn.style.display='block';
     warn.innerHTML=`⚠️ Hay <b>${found.length}</b> producto(s) parecidos. Si es uno de estos, no lo crees de nuevo — así nacieron los 7 «Syrup Ant».`;}
   bar.style.display='block';
@@ -632,7 +638,7 @@ function createNew(){
   $('p-name').value=trimC($('q').value);
   proposeAlias($('p-name').value);onName();window.scrollTo(0,0);
 }
-function backToGate(){$('form').style.display='none';$('gate').style.display='block';$('t-name').textContent='Nuevo insumo';}
+function backToGate(){$('form').style.display='none';$('gate').style.display='block';$('t-name').textContent='Nuevo insumo';window.scrollTo(0,0);}   // 🆕 12-jun
 
 /* ============================================================================
    alias propuestos
@@ -673,10 +679,15 @@ function onName(){
   $('t-name').textContent=trimC(v)||'Nuevo insumo';
   const el=$('dupline');
   if(norm(v).length>=3){
+    const ex=dupExact(v);                                                 // 🆕 12-jun
+    if(ex){el.style.display='block';
+      el.innerHTML=`⛔ <b>${trimC(ex[CFG.COL.SKU])} · ${trimC(ex[CFG.COL.DESC])}</b> ya existe — Guardar bloqueado. Cambiá el nombre o abrí su scheda (cuando exista la tab).`;}
+    else{
     const found=matchCatalog(v).slice(0,4);
     if(found.length){el.style.display='block';
       el.innerHTML='⚠️ parecido a: '+found.map(p=>`<b>${trimC(p[CFG.COL.SKU])} · ${trimC(p[CFG.COL.DESC])}</b>`).join(' · ');}
     else el.style.display='none';
+    }
   } else el.style.display='none';
   proposeAlias(v);update();
 }
@@ -757,7 +768,7 @@ function costo(){
    completezza · sblocco · render
    ========================================================================== */
 function complete(){
-  const c1=trimC($('p-name').value).length>2&&$('cat').value&&S.ub&&S.dest&&($('bodega').checked||$('vend').checked);
+  const c1=trimC($('p-name').value).length>2&&!dupExact($('p-name').value)&&$('cat').value&&S.ub&&S.dest&&($('bodega').checked||$('vend').checked);   // 🆕 dup exacto bloquea
   const c2=S.emp.size>0;
   const c3=$('multi').checked||S.secc.size>0;
   const c4=!!$('prov').value;
@@ -766,6 +777,7 @@ function complete(){
   return[c1,c2,c3,c4,c5,c6];
 }
 function update(){
+  if($('prov2').value&&$('prov2').value===$('prov').value)$('prov2').selectedIndex=0;   // 🆕 12-jun · prov2 ≠ prov
   const C=complete();
   for(let i=1;i<6;i++)$('c'+(i+1)).classList.toggle('locked',!C[i-1]);
   for(let i=0;i<6;i++)$('c'+(i+1)).classList.toggle('ok',C[i]);
