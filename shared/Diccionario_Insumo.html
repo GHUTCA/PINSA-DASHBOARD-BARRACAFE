@@ -246,7 +246,10 @@
           </div>
           <label class="fl" style="margin-top:14px">Alias <span style="color:var(--t3)">— el sistema propone, vos confirmás (hoja ALIAS_INSUMOS · pendiente: quedan en el payload)</span></label>
           <div class="alias" id="aliasbox"></div>
-          <input id="alias-new" placeholder="+ alias propio · Enter para agregar" style="margin-top:6px;max-width:280px" onkeydown="aliasPropioKey(event)">
+          <div style="display:flex;gap:8px;margin-top:8px;max-width:340px">
+            <input type="text" id="alias-new" placeholder="+ alias propio" onkeydown="aliasPropioKey(event)">
+            <button class="addchip" style="flex-shrink:0" onclick="addAliasPropio()">Agregar</button>
+          </div>
 
           <label class="fl" style="margin-top:16px">Naturaleza <span style="color:var(--t3)">— pueden ser ambas (ej. Coca-Cola)</span></label>
           <label class="check"><input type="checkbox" id="bodega" onchange="update()"><span>🧺 Es <b style="color:#fff">ingrediente de bodega</b> (stock, movimientos)</span></label>
@@ -389,7 +392,7 @@
               <label class="fl">Descuento (%)</label>
               <input type="number" id="cd" placeholder="0" oninput="update()">
             </div>
-            <div>
+            <div id="cu-wrap">
               <label class="fl">UPC por factura <span style="color:var(--t3)">— cuántas UPC trae</span></label>
               <input type="number" id="cu" placeholder="ej. 20" oninput="update()">
             </div>
@@ -687,11 +690,14 @@ function renderAlias(){
     c.innerHTML=a+' <b>×</b>';c.onclick=()=>{S.alias.delete(a);renderAlias();update();};
     box.appendChild(c);});
 }
-function aliasPropioKey(ev){   // 🆕 12-jun · input fijo: el botón regenerado se comía los click
-  if(ev.key!=='Enter')return;
-  ev.preventDefault();
+function addAliasPropio(){     // 🆕 12-jun bis · funziona sia con Enter sia col bottone
   const inp=$('alias-new');const a=norm(inp.value);if(!a)return;
   S.alias.add(a);inp.value='';renderAlias();update();
+}
+function aliasPropioKey(ev){
+  if(ev.key!=='Enter')return;
+  ev.preventDefault();
+  addAliasPropio();
 }
 
 /* ============================================================================
@@ -820,6 +826,7 @@ function update(){
   $('dobnote').style.display=($('bodega').checked&&$('vend').checked)?'flex':'none';
   $('multi-note').style.display=$('multi').checked?'flex':'none';
   ['s-utm','pk-utm','g-utm','g-utm2'].forEach(id=>{const e=$(id);if(e)e.textContent=S.ub||'—';});
+  const cw=$('cu-wrap');if(cw){const esGranel=S.arch==='granel';cw.style.display=esGranel?'none':'block';if(esGranel)$('cu').value='';}   // 🆕 granel: niente "UPC por factura"
 
   const f=formato();
   $('uo-derived').style.display=f?'block':'none';
@@ -923,6 +930,17 @@ function buildPayload(){
     ts:new Date().toISOString()
   };
 }
+function spinner(on){    // 🆕 12-jun · clessidra durante la scrittura
+  let sp=$('savespin');
+  if(!sp){sp=document.createElement('div');sp.id='savespin';
+    sp.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:9999';
+    sp.innerHTML='<div style="background:var(--card,#1a1a1a);border:1px solid var(--b2,#333);border-radius:16px;padding:28px 36px;text-align:center;color:#fff;font-family:inherit">'+
+      '<div style="width:38px;height:38px;border:4px solid rgba(255,255,255,0.15);border-top-color:#E07A3F;border-radius:50%;margin:0 auto 12px;animation:paSpin 0.8s linear infinite"></div>'+
+      '<div style="font-size:14px;font-weight:600">Guardando en CONTROL_MAESTRO…</div></div>'+
+      '<style>@keyframes paSpin{to{transform:rotate(360deg)}}</style>';
+    document.body.appendChild(sp);}
+  sp.style.display=on?'flex':'none';
+}
 async function guardar(){
   const payload=buildPayload();
   if(!CFG.GAS_URL){          // FAIL LOUD: nada de escrituras a ciegas
@@ -931,7 +949,7 @@ async function guardar(){
     $('modal').classList.add('on');
     return;
   }
-  $('savebtn').disabled=true;$('savebtn').textContent='Guardando…';
+  $('savebtn').disabled=true;$('savebtn').textContent='Guardando…';spinner(true);
   try{
     const r=await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
     const j=await r.json();
@@ -952,6 +970,7 @@ async function guardar(){
   }catch(e){
     banner('err','⚠️ No se pudo guardar: '+e.message+'. No se escribió nada (o verificá la fila '+S.filaLibre+' antes de reintentar).');
   }finally{
+    spinner(false);
     $('savebtn').textContent='Guardar insumo';update();
   }
 }
