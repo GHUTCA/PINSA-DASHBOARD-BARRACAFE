@@ -246,6 +246,7 @@
           </div>
           <label class="fl" style="margin-top:14px">Alias <span style="color:var(--t3)">— el sistema propone, vos confirmás (hoja ALIAS_INSUMOS · pendiente: quedan en el payload)</span></label>
           <div class="alias" id="aliasbox"></div>
+          <input id="alias-new" placeholder="+ alias propio · Enter para agregar" style="margin-top:6px;max-width:280px" onkeydown="aliasPropioKey(event)">
 
           <label class="fl" style="margin-top:16px">Naturaleza <span style="color:var(--t3)">— pueden ser ambas (ej. Coca-Cola)</span></label>
           <label class="check"><input type="checkbox" id="bodega" onchange="update()"><span>🧺 Es <b style="color:#fff">ingrediente de bodega</b> (stock, movimientos)</span></label>
@@ -499,6 +500,8 @@ const CFG = {
   // CONTROL_MAESTRO publicado · mismo token que usa el panel rsc para ventas Toteat
   TOKEN_MAESTRO: '2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt',
   GID_BD_INSUMOS: '514178276',
+  TOKEN_BC: '2PACX-1vSHqqam0ulBIXIn_UNH50dEl2XX0RDAnMbI70phvGURduyKGoTpIkV8g-8k8p8pbIr42g6Nap3SE9tt',  // 🆕 CTRL_BC_2026 publicado
+  GID_PROVEEDORES: '1453971067',   // 🆕 hoja Proveedores en CTRL_BC (fuente autorevole · N10)
 
   // [TODO · BLOCANTE PARA ESCRIBIR] route GAS `insumo_crear` — proyecto GAS de
   // CONTROL_MAESTRO (¡patchar el proyecto CORRECTO! N1). New Version, mai New Deployment.
@@ -565,8 +568,6 @@ async function boot(){
     $('filalibre').textContent='fila libre '+S.filaLibre;
     // dropdowns desde el dato real
     fillSelect('cat',distinct(rows,CFG.COL.CAT));
-    fillSelect('prov',distinct(rows,CFG.COL.PROV));
-    fillSelect('prov2',distinct(rows,CFG.COL.PROV),true);
     // Secciones ATOMICHE: la col C contiene liste "A, B, C" → split+trim+dedupe.
     // [TODO] fonte autorevole definitiva = PARAMETROS (secciones per empresa); oggi derivano dal catalogo.
     const secSet=new Set();
@@ -574,9 +575,29 @@ async function boot(){
     buildSecc([...secSet].sort());
     $('q').disabled=false;$('q').focus();
     banner('okk','Catálogo real cargado: '+rows.length+' SKU desde CONTROL_MAESTRO · BD_INSUMOS.');
+    await cargarProveedores(rows);   // 🆕 12-jun · fuente = hoja Proveedores (CTRL_BC), no la col F fósil
   }catch(e){
     banner('err','⚠️ No pude leer BD_INSUMOS desde CONTROL_MAESTRO ('+e.message+'). Sin catálogo no hay defensa anti-duplicado: la creación queda bloqueada. Reintentá o avisá.');
   }
+}
+async function cargarProveedores(rowsCat){
+  // 🆕 12-jun · la col F del catálogo es fósil sucio (categorías como ABARROTES,
+  // duplicados Miguel/MIGUEL, PINSA…). Fuente autorevole = hoja Proveedores de CTRL_BC (N10).
+  let lista=null;
+  try{
+    const u=`https://docs.google.com/spreadsheets/d/e/${CFG.TOKEN_BC}/pub?gid=${CFG.GID_PROVEEDORES}&single=true&output=csv&t=${Date.now()}`;
+    const r=await fetch(u,{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const provs=csvParse(await r.text());
+    const s=new Set();
+    provs.forEach(pr=>{const v=trimC(pr['Nickname'])||trimC(pr['Nombre Proveedor']);if(v)s.add(v);});
+    if(s.size)lista=[...s].sort((a,b)=>a.localeCompare(b));
+  }catch(e){/* fallback sotto, dichiarato */}
+  if(!lista){
+    lista=distinct(rowsCat,CFG.COL.PROV);
+    banner('err','⚠️ Hoja Proveedores no disponible — uso la col F del catálogo (sucia, temporal). Reintentá recargando.');
+  }
+  fillSelect('prov',lista);fillSelect('prov2',lista,true);
 }
 function banner(cls,msg){const b=$('banner');b.className='banner '+cls;b.textContent=msg;
   if(cls==='okk')setTimeout(()=>{b.className='banner';},5000);}
@@ -665,9 +686,12 @@ function renderAlias(){
     const c=document.createElement('span');c.className='chip';
     c.innerHTML=a+' <b>×</b>';c.onclick=()=>{S.alias.delete(a);renderAlias();update();};
     box.appendChild(c);});
-  const add=document.createElement('button');add.className='addchip';add.textContent='+ alias propio';
-  add.onclick=()=>{const a=prompt('Alias (puente real, ej. fresa→frutilla):');if(a){S.alias.add(norm(a));renderAlias();update();}};
-  box.appendChild(add);
+}
+function aliasPropioKey(ev){   // 🆕 12-jun · input fijo: el botón regenerado se comía los click
+  if(ev.key!=='Enter')return;
+  ev.preventDefault();
+  const inp=$('alias-new');const a=norm(inp.value);if(!a)return;
+  S.alias.add(a);inp.value='';renderAlias();update();
 }
 
 /* ============================================================================
@@ -715,10 +739,22 @@ function renderSecc(){
     c.onclick=()=>{S.secc.has(s)?S.secc.delete(s):S.secc.add(s);renderSecc();update();};
     box.appendChild(c);});
 }
-function nuevoProveedor(){
+async function nuevoProveedor(){
+  // 🆕 12-jun · PROVEEDORES-FONTE-001: escribe en la hoja Proveedores vía route
+  // guardarProveedor (la misma del panel BC). Antes era solo client-side (ghost).
   const p=trimC(prompt('Nombre del proveedor nuevo:')||'');if(!p)return;
-  ['prov','prov2'].forEach(id=>{const o=document.createElement('option');o.textContent=p;$(id).appendChild(o);});
-  $('prov').value=p;$('prov').classList.remove('empty');update();
+  if(!CFG.GAS_URL){banner('err','Route GAS sin configurar — proveedor NO guardado.');return;}
+  banner('okk','Guardando proveedor «'+p+'»…');
+  try{
+    const r=await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'guardarProveedor',nombre:p,nick:p,contacto:'',email:'',tel:'',rut:'',pago:'',notas:'Creado desde Scheda vía A',operador:'scheda_insumo_v1'})});
+    const j=await r.json();
+    if(!(j&&j.ok))throw new Error(j&&j.error?j.error:'respuesta inesperada del GAS');
+    ['prov','prov2'].forEach(id=>{const o=document.createElement('option');o.textContent=p;$(id).appendChild(o);});
+    $('prov').value=p;$('prov').classList.remove('empty');
+    banner('okk','✓ Proveedor «'+p+'» guardado en hoja Proveedores ('+(j.accion||'creado')+'). Completá su ficha (email, RUT, pago) en el panel BC.');
+    update();
+  }catch(e){banner('err','⚠️ Proveedor NO guardado: '+e.message+' — no lo agrego al dropdown (nada de fantasmas).');}
 }
 
 /* ============================================================================
