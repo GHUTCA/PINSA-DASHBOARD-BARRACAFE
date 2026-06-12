@@ -313,7 +313,11 @@
           </div>
 
           <div id="lv-granel" class="lv" style="display:none">
-            <div class="note q">⚖️ Granel: el stock vive directo en <b id="g-utm">—</b>. UPC = UO = UTM, factor 1.</div>
+            <div class="note q">⚖️ Granel: el stock vive directo en <b id="g-utm">—</b>. El precio se refiere al formato de compra de abajo (convención del catálogo: «Granel 1000 gr»).</div>
+            <div style="max-width:300px;margin-top:10px">
+              <label class="fl">¿Por cuántos <span id="g-utm2">—</span> viene el precio?</label>
+              <input id="g-qty" type="number" min="1" step="any" value="1000" oninput="update()">
+            </div>
           </div>
 
           <div id="lv-sellado" class="lv" style="display:none">
@@ -593,6 +597,7 @@ function hasStock(p){return numC(p['Stock BC'])+numC(p['Stock Bodega Local BL'])
 function esReceta(p){return parseInt(p[CFG.COL.SKU])>=CFG.SKU_RECETA_MIN||trimC(p['ID_Receta_CC']);}
 
 function gateSearch(){
+  const _b=$('banner');if(_b.classList.contains('err'))_b.className='banner';   // 🆕 12-jun · el error no se queda pegado
   const q=$('q').value;
   const hits=$('hits'),warn=$('gatewarn'),bar=$('createbar');
   hits.innerHTML='';warn.style.display='none';bar.style.display='none';
@@ -608,9 +613,22 @@ function gateSearch(){
   bar.style.display='block';
   $('qecho').textContent=trimC(q);
 }
+function resetForm(){   // 🆕 12-jun · sin esto el form arrastra el producto anterior entre creaciones
+  S.ub=null;S.dest=null;S.arch=null;S.emp.clear();S.secc.clear();S.alias.clear();
+  document.querySelectorAll('#seg-ub button,#seg-dest button,#arch .a,#empbox .e').forEach(b=>b.classList.remove('on'));
+  ['granel','sellado','pack'].forEach(a=>$('lv-'+a).style.display='none');
+  ['s-qty','pk-n','pk-qty','cn','cd','cu','fv','tid'].forEach(id=>{const e=$(id);if(e)e.value='';});
+  const g=$('g-qty');if(g)g.value=1000;
+  ['env-sel','pk-sel','pk-uo','fm','imp'].forEach(id=>{const e=$(id);if(e)e.selectedIndex=0;});
+  ['cat','prov','prov2'].forEach(id=>{const e=$(id);if(e){e.selectedIndex=0;e.classList.add('empty');}});
+  $('bodega').checked=false;$('vend').checked=false;if($('multi'))$('multi').checked=false;
+  $('bksnote').style.display='none';$('dupline').style.display='none';
+  renderSecc();
+}
 function createNew(){
   if(!S.catalog.length)return;          // sin catálogo no se crea (fail loud, banner ya visible)
   $('gate').style.display='none';$('form').style.display='block';
+  resetForm();                          // 🆕 12-jun · cada creación arranca limpia
   $('p-name').value=trimC($('q').value);
   proposeAlias($('p-name').value);onName();window.scrollTo(0,0);
 }
@@ -650,6 +668,7 @@ function renderAlias(){
    dedup vivo en el form
    ========================================================================== */
 function onName(){
+  const _b=$('banner');if(_b.classList.contains('err'))_b.className='banner';   // 🆕 12-jun
   const v=$('p-name').value;
   $('t-name').textContent=trimC(v)||'Nuevo insumo';
   const el=$('dupline');
@@ -699,7 +718,9 @@ function conteo(){if(!S.arch||!S.ub)return null;
   return 'Sellado';}
 function formato(){
   if(!S.arch||!S.ub)return null;
-  if(S.arch==='granel')return{upc:'Granel',uo:'Granel ('+S.ub+')',f1:1,f2:1,human:'a granel, por '+S.ub};
+  if(S.arch==='granel'){const gq=+$('g-qty').value;if(!(gq>0))return null;          // 🆕 12-jun · convención real: H/Q llevan la cantidad
+    const gd='Granel '+gq+' '+S.ub.toLowerCase();
+    return{upc:gd,uo:gd,f1:1,f2:gq,human:'a granel, en formato «'+gd+'» (el precio es por ese formato)'};}
   if(S.arch==='sellado'){
     const env=$('env-sel').value,q=+$('s-qty').value;
     if(!(q>0))return null;
@@ -750,7 +771,7 @@ function update(){
   for(let i=0;i<6;i++)$('c'+(i+1)).classList.toggle('ok',C[i]);
   $('dobnote').style.display=($('bodega').checked&&$('vend').checked)?'flex':'none';
   $('multi-note').style.display=$('multi').checked?'flex':'none';
-  ['s-utm','pk-utm','g-utm'].forEach(id=>{const e=$(id);if(e)e.textContent=S.ub||'—';});
+  ['s-utm','pk-utm','g-utm','g-utm2'].forEach(id=>{const e=$(id);if(e)e.textContent=S.ub||'—';});
 
   const f=formato();
   $('uo-derived').style.display=f?'block':'none';
@@ -834,6 +855,8 @@ function buildPayload(){
   row[col.UO]    = f.uo;
   row[col.METODO]= conteo();
   row[col.F2]    = f.f2;
+  row['Unidades Permitidas'] = 'UTM UPC UO';                          // 🆕 col L · convención dominante del catálogo (84/97 granel)
+  row['Niveles Permitiidos'] = S.arch==='granel'?conteo():'Unidad';   // 🆕 col S · (sic: doble i en el header REAL) · granel→Peso
   row[col.ACTIVO]= 'Si';                                // P5 (deducción del stock) llega con el motor; hoy 'Si' para que aparezca
   return {
     action:'insumo_crear',
@@ -865,9 +888,18 @@ async function guardar(){
     const r=await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
     const j=await r.json();
     if(j&&j.ok){
-      banner('okk','✓ Insumo creado · SKU '+(j.sku||S.skuNuevo)+' · fila '+(j.fila||S.filaLibre)+'.');
-      backToGate();$('q').value='';$('hits').innerHTML='';
-      boot();                                            // ricarica catalogo: il nuovo SKU deve apparire (N6)
+      // 🆕 12-jun · el CSV publicado tarda minutos en propagarse: empujamos la fila nueva
+      // al catálogo EN MEMORIA. NO se llama boot(): pisaría S.catalog con el CSV viejo
+      // y el gate volvería a "no ver" el SKU recién creado (lección del test ZZZ).
+      const nu={};nu[CFG.COL.SKU]=String(j.sku||S.skuNuevo);nu[CFG.COL.DESC]=trimC($('p-name').value);nu[CFG.COL.CAT]=$('cat').value;
+      S.catalog.push(nu);
+      S.filaLibre=(j.fila||S.filaLibre)+1;
+      S.skuNuevo=(j.sku||S.skuNuevo)+1;
+      $('catcount').textContent=S.catalog.length;
+      $('h-sku').textContent='SKU nuevo · propuesto '+S.skuNuevo;
+      $('filalibre').textContent='fila libre '+S.filaLibre;
+      banner('okk','✓ Insumo creado · SKU '+(j.sku||'?')+' · fila '+(j.fila||'?')+' en CONTROL_MAESTRO.');
+      resetForm();backToGate();$('q').value='';$('hits').innerHTML='';$('gatewarn').style.display='none';$('createbar').style.display='none';
     } else throw new Error(j&&j.error?j.error:'respuesta inesperada del GAS');
   }catch(e){
     banner('err','⚠️ No se pudo guardar: '+e.message+'. No se escribió nada (o verificá la fila '+S.filaLibre+' antes de reintentar).');
