@@ -109,6 +109,12 @@
   select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--t2) 50%),linear-gradient(135deg,var(--t2) 50%,transparent 50%);background-position:calc(100% - 16px) 18px,calc(100% - 11px) 18px;background-size:5px 5px;background-repeat:no-repeat}
   select.empty{color:var(--t2)}
   input::placeholder{color:var(--t3)}
+  /* 🆕 14-jun · Fix1 · el autofill del browser pintaba email/tel de blanco — forzamos el look del sistema */
+  input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus{
+    -webkit-text-fill-color:#fff;
+    -webkit-box-shadow:0 0 0 1000px var(--card2) inset;
+    caret-color:#fff;transition:background-color 9999s ease-in-out 0s}
+  input[type=email],input[type=tel]{background:var(--card2);color:#fff;border:1px solid var(--b2);border-radius:9px;padding:11px 12px;font-size:15px;width:100%;font-family:inherit}
   .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
   .field{margin-bottom:14px}.field:last-child{margin-bottom:0}
@@ -665,6 +671,25 @@ const numC  = s => parseFloat(String(s||'').replace(/[^\d.-]/g,''))||0;         
 const clp   = n => '$'+Math.round(n).toLocaleString('es-CL');
 const $     = id => document.getElementById(id);
 
+// 🆕 14-jun · Fix2 · validación RUT chileno (módulo 11). Acepta con/sin puntos y guión.
+function validaRut(rutRaw){
+  const limpio=String(rutRaw||'').replace(/[.\-\s]/g,'').toUpperCase();
+  if(limpio.length<2)return false;
+  const cuerpo=limpio.slice(0,-1), dv=limpio.slice(-1);
+  if(!/^\d+$/.test(cuerpo))return false;
+  let suma=0,mul=2;
+  for(let i=cuerpo.length-1;i>=0;i--){suma+=parseInt(cuerpo[i],10)*mul;mul=mul===7?2:mul+1;}
+  const res=11-(suma%11);
+  const dvCalc=res===11?'0':res===10?'K':String(res);
+  return dv===dvCalc;
+}
+function formatRut(rutRaw){   // 12.345.678-9 para guardar prolijo
+  const limpio=String(rutRaw||'').replace(/[.\-\s]/g,'').toUpperCase();
+  if(limpio.length<2)return rutRaw;
+  const cuerpo=limpio.slice(0,-1), dv=limpio.slice(-1);
+  return cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g,'.')+'-'+dv;
+}
+
 function csvParse(text){          // parser con comillas (valores tipo "4,000")
   const rows=[];let row=[],cur='',inQ=false;
   for(let i=0;i<text.length;i++){
@@ -968,6 +993,16 @@ function pmDupCheck(){   // 🆕 14-jun · aviso en vivo si el nombre ya existe 
 async function provGuardar(){
   const nombre=trimC($('pm-nombre').value);
   if(nombre.length<2){banner('err','El nombre del proveedor es obligatorio.');return;}
+  // 🆕 14-jun · Fix2 · si hay RUT, debe validar (dígito verificador). Vacío = permitido.
+  let rut=trimC($('pm-rut').value);
+  if(rut){
+    if(!validaRut(rut)){
+      $('pm-dup').style.display='block';$('pm-dup').style.color='var(--red)';
+      $('pm-dup').innerHTML='⛔ RUT invalido (digito verificador no calza). Revisalo — no se registra asi.';
+      $('pm-rut').focus();return;
+    }
+    rut=formatRut(rut);   // guarda prolijo: 12.345.678-9
+  }
   const np=norm(nombre);
   const exacto=PROV_LIST.find(x=>norm(x)===np);
   if(exacto){   // bloqueo duro sobre el exacto (el parcial ya está avisado en vivo, no bloquea)
@@ -980,7 +1015,7 @@ async function provGuardar(){
   const payload={action:'guardarProveedor',
     nombre, nick:trimC($('pm-nick').value)||nombre,
     contacto:trimC($('pm-contacto').value), email:trimC($('pm-email').value),
-    tel:trimC($('pm-tel').value), rut:trimC($('pm-rut').value),
+    tel:trimC($('pm-tel').value), rut:rut,
     pago:$('pm-pago').value, notas:trimC($('pm-notas').value)||'Creado desde Scheda via A',
     operador:(typeof OPERADOR!=='undefined'&&OPERADOR?OPERADOR:'scheda_insumo_v1')};
   $('pm-save').disabled=true;$('pm-save').textContent='Guardando…';
