@@ -920,6 +920,20 @@ async function nuevoProveedor(){
   // 🆕 12-jun · PROVEEDORES-FONTE-001: escribe en la hoja Proveedores vía route
   // guardarProveedor (la misma del panel BC). Antes era solo client-side (ghost).
   const p=trimC(prompt('Nombre del proveedor nuevo:')||'');if(!p)return;
+  // 🆕 14-jun · ANTI-DUPLICADO (lección Jose Celsi: se creó un gemelo de "Jose Celsi Mazieres SpA").
+  // Antes de crear, busca en PROV_LIST (fuente CTRL_BC) match exacto o parcial.
+  const np=norm(p);
+  const exacto=PROV_LIST.find(x=>norm(x)===np);
+  const parcial=PROV_LIST.filter(x=>{const nx=norm(x);return nx!==np&&(nx.includes(np)||np.includes(nx));});
+  if(exacto){
+    banner('err','⛔ «'+exacto+'» ya existe en el maestro. No se crea de nuevo — lo selecciono por vos.');
+    ['prov','prov2'].forEach(id=>{const sel=$(id);[...sel.options].forEach(o=>{if(o.textContent===exacto&&id==='prov'){sel.value=exacto;sel.classList.remove('empty');}});});
+    update();return;
+  }
+  if(parcial.length){
+    const ok=confirm('⚠️ Ya existe(n) parecido(s):\n\n  '+parcial.join('\n  ')+'\n\n¿Es uno de estos? (Aceptar = NO crear, reviso a mano · Cancelar = crear igual «'+p+'»)');
+    if(ok){banner('err','No se creó. Seleccioná el proveedor correcto de la lista (evitamos el duplicado).');return;}
+  }
   if(!CFG.GAS_URL){banner('err','Route GAS sin configurar — proveedor NO guardado.');return;}
   banner('okk','Guardando proveedor «'+p+'»…');
   try{
@@ -927,6 +941,7 @@ async function nuevoProveedor(){
       body:JSON.stringify({action:'guardarProveedor',nombre:p,nick:p,contacto:'',email:'',tel:'',rut:'',pago:'',notas:'Creado desde Scheda vía A',operador:(typeof OPERADOR!=='undefined'&&OPERADOR?OPERADOR:'scheda_insumo_v1')})});
     const j=await r.json();
     if(!(j&&j.ok))throw new Error(j&&j.error?j.error:'respuesta inesperada del GAS');
+    PROV_LIST.push(p);PROV_LIST.sort((a,b)=>a.localeCompare(b));   // 🆕 14-jun · mantené la lista viva (evita doble alta en la misma sesión)
     ['prov','prov2'].forEach(id=>{const o=document.createElement('option');o.textContent=p;$(id).appendChild(o);});
     $('prov').value=p;$('prov').classList.remove('empty');
     banner('okk','✓ Proveedor «'+p+'» guardado en hoja Proveedores ('+(j.accion||'creado')+'). Completá su ficha (email, RUT, pago) en el panel BC.');
