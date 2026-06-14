@@ -593,6 +593,36 @@
   </div>
 </div>
 
+<!-- 🆕 14-jun · PROV-1 · alta proveedor completa (mismos campos que el panel BC) -->
+<div class="modal" id="provmodal">
+  <div class="mbox">
+    <h2 style="margin-bottom:4px">Nuevo proveedor</h2>
+    <div style="font-size:12px;color:var(--t2);margin-bottom:14px">Se guarda en el maestro de Bodega Central (misma hoja que el panel BC).</div>
+    <div id="pm-dup" style="display:none;font-size:12px;color:var(--amber);background:rgba(212,134,10,.1);border:1px solid rgba(212,134,10,.3);border-radius:8px;padding:8px 10px;margin-bottom:12px"></div>
+    <div class="field"><label class="fl">Nombre proveedor *</label><input type="text" id="pm-nombre" placeholder="Nombre completo" oninput="pmDupCheck()"></div>
+    <div class="field"><label class="fl">Nickname / Abrev.</label><input type="text" id="pm-nick" placeholder="ej. NatEnergy"></div>
+    <div class="two">
+      <div class="field"><label class="fl">Contacto</label><input type="text" id="pm-contacto" placeholder="Nombre contacto"></div>
+      <div class="field"><label class="fl">Telefono</label><input type="tel" id="pm-tel" placeholder="+56 9..."></div>
+    </div>
+    <div class="field"><label class="fl">Email</label><input type="email" id="pm-email" placeholder="proveedor@email.com"></div>
+    <div class="two">
+      <div class="field"><label class="fl">RUT</label><input type="text" id="pm-rut" placeholder="12.345.678-9"></div>
+      <div class="field"><label class="fl">Condicion pago</label>
+        <select id="pm-pago">
+          <option value="">— Seleccionar —</option>
+          <option>Contado</option><option>30 dias</option><option>60 dias</option><option>Credito</option>
+        </select>
+      </div>
+    </div>
+    <div class="field"><label class="fl">Notas</label><input type="text" id="pm-notas" placeholder="Despacho, plazos..."></div>
+    <div class="mrow">
+      <button class="btn cancel" onclick="document.getElementById('provmodal').classList.remove('on')">Cancelar</button>
+      <button class="btn save" id="pm-save" onclick="provGuardar()">Guardar proveedor</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ============================================================================
    CONFIG · puntos de ingreso REALES (N1) — verificados 11-jun
@@ -916,37 +946,57 @@ function renderSecc(){
     c.onclick=()=>{S.secc.has(s)?S.secc.delete(s):S.secc.add(s);renderSecc();update();};
     box.appendChild(c);});
 }
-async function nuevoProveedor(){
-  // 🆕 12-jun · PROVEEDORES-FONTE-001: escribe en la hoja Proveedores vía route
-  // guardarProveedor (la misma del panel BC). Antes era solo client-side (ghost).
-  const p=trimC(prompt('Nombre del proveedor nuevo:')||'');if(!p)return;
-  // 🆕 14-jun · ANTI-DUPLICADO (lección Jose Celsi: se creó un gemelo de "Jose Celsi Mazieres SpA").
-  // Antes de crear, busca en PROV_LIST (fuente CTRL_BC) match exacto o parcial.
-  const np=norm(p);
+function nuevoProveedor(){
+  // 🆕 14-jun · PROV-1 · abre modal con form completo (antes era prompt solo-nombre → proveedores mancos)
+  ['pm-nombre','pm-nick','pm-contacto','pm-tel','pm-email','pm-rut','pm-notas'].forEach(id=>{const e=$(id);if(e)e.value='';});
+  {const e=$('pm-pago');if(e)e.selectedIndex=0;}
+  $('pm-dup').style.display='none';
+  $('provmodal').classList.add('on');
+  setTimeout(()=>$('pm-nombre').focus(),50);
+}
+function pmDupCheck(){   // 🆕 14-jun · aviso en vivo si el nombre ya existe (exacto o parcial) en PROV_LIST
+  const p=trimC($('pm-nombre').value), np=norm(p), box=$('pm-dup');
+  if(np.length<3){box.style.display='none';return;}
   const exacto=PROV_LIST.find(x=>norm(x)===np);
   const parcial=PROV_LIST.filter(x=>{const nx=norm(x);return nx!==np&&(nx.includes(np)||np.includes(nx));});
-  if(exacto){
-    banner('err','⛔ «'+exacto+'» ya existe en el maestro. No se crea de nuevo — lo selecciono por vos.');
-    ['prov','prov2'].forEach(id=>{const sel=$(id);[...sel.options].forEach(o=>{if(o.textContent===exacto&&id==='prov'){sel.value=exacto;sel.classList.remove('empty');}});});
+  if(exacto){box.style.display='block';box.style.color='var(--red)';
+    box.innerHTML='⛔ <b>'+exacto+'</b> ya existe. No lo crees de nuevo — cerrá y seleccionalo de la lista.';}
+  else if(parcial.length){box.style.display='block';box.style.color='var(--amber)';
+    box.innerHTML='⚠️ Parecido(s) ya en el maestro: <b>'+parcial.join('</b> · <b>')+'</b>. Si es uno de estos, cancelá y seleccionalo.';}
+  else box.style.display='none';
+}
+async function provGuardar(){
+  const nombre=trimC($('pm-nombre').value);
+  if(nombre.length<2){banner('err','El nombre del proveedor es obligatorio.');return;}
+  const np=norm(nombre);
+  const exacto=PROV_LIST.find(x=>norm(x)===np);
+  if(exacto){   // bloqueo duro sobre el exacto (el parcial ya está avisado en vivo, no bloquea)
+    $('provmodal').classList.remove('on');
+    banner('err','⛔ «'+exacto+'» ya existe — lo selecciono por vos, no creo duplicado.');
+    const sel=$('prov');[...sel.options].forEach(o=>{if(o.textContent===exacto){sel.value=exacto;sel.classList.remove('empty');}});
     update();return;
   }
-  if(parcial.length){
-    const ok=confirm('⚠️ Ya existe(n) parecido(s):\n\n  '+parcial.join('\n  ')+'\n\n¿Es uno de estos? (Aceptar = NO crear, reviso a mano · Cancelar = crear igual «'+p+'»)');
-    if(ok){banner('err','No se creó. Seleccioná el proveedor correcto de la lista (evitamos el duplicado).');return;}
-  }
   if(!CFG.GAS_URL){banner('err','Route GAS sin configurar — proveedor NO guardado.');return;}
-  banner('okk','Guardando proveedor «'+p+'»…');
+  const payload={action:'guardarProveedor',
+    nombre, nick:trimC($('pm-nick').value)||nombre,
+    contacto:trimC($('pm-contacto').value), email:trimC($('pm-email').value),
+    tel:trimC($('pm-tel').value), rut:trimC($('pm-rut').value),
+    pago:$('pm-pago').value, notas:trimC($('pm-notas').value)||'Creado desde Scheda via A',
+    operador:(typeof OPERADOR!=='undefined'&&OPERADOR?OPERADOR:'scheda_insumo_v1')};
+  $('pm-save').disabled=true;$('pm-save').textContent='Guardando…';
+  banner('okk','Guardando proveedor «'+nombre+'»…');
   try{
-    const r=await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'guardarProveedor',nombre:p,nick:p,contacto:'',email:'',tel:'',rut:'',pago:'',notas:'Creado desde Scheda vía A',operador:(typeof OPERADOR!=='undefined'&&OPERADOR?OPERADOR:'scheda_insumo_v1')})});
+    const r=await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
     const j=await r.json();
     if(!(j&&j.ok))throw new Error(j&&j.error?j.error:'respuesta inesperada del GAS');
-    PROV_LIST.push(p);PROV_LIST.sort((a,b)=>a.localeCompare(b));   // 🆕 14-jun · mantené la lista viva (evita doble alta en la misma sesión)
-    ['prov','prov2'].forEach(id=>{const o=document.createElement('option');o.textContent=p;$(id).appendChild(o);});
-    $('prov').value=p;$('prov').classList.remove('empty');
-    banner('okk','✓ Proveedor «'+p+'» guardado en hoja Proveedores ('+(j.accion||'creado')+'). Completá su ficha (email, RUT, pago) en el panel BC.');
+    PROV_LIST.push(nombre);PROV_LIST.sort((a,b)=>a.localeCompare(b));   // lista viva (evita doble alta en la sesión)
+    ['prov','prov2'].forEach(id=>{const o=document.createElement('option');o.textContent=nombre;$(id).appendChild(o);});
+    $('prov').value=nombre;$('prov').classList.remove('empty');
+    $('provmodal').classList.remove('on');
+    banner('okk','✓ Proveedor «'+nombre+'» guardado en el maestro BC ('+(j.accion||'creado')+').');
     update();
   }catch(e){banner('err','⚠️ Proveedor NO guardado: '+e.message+' — no lo agrego al dropdown (nada de fantasmas).');}
+  finally{$('pm-save').disabled=false;$('pm-save').textContent='Guardar proveedor';}
 }
 
 /* ============================================================================
