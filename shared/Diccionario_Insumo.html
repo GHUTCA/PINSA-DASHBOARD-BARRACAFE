@@ -295,7 +295,7 @@
             <div class="e" onclick="toggleTodos(this)">Todos<small>marca/desmarca</small></div>
           </div>
           <div class="note" id="bksnote" style="display:none">⚠️ BKS tiene BD_INSUMOS separada — marcarlo acá registra la intención. El JB de BKS lo confirma en su sistema.</div>
-          <div class="note q" style="margin-top:10px">[TODO] secciones-por-empresa desde PARAMETROS — hoy las secciones (card 3) salen del catálogo real (col C).</div>
+          <div class="note q" style="margin-top:10px">Las secciones dependen de la empresa elegida arriba (fuente: CTRL_OBJETIVOS · secciones_empresa).</div>
         </div>
 
         <!-- 3 -->
@@ -641,6 +641,13 @@ const CFG = {
   TOKEN_BC: '2PACX-1vSHqqam0ulBIXIn_UNH50dEl2XX0RDAnMbI70phvGURduyKGoTpIkV8g-8k8p8pbIr42g6Nap3SE9tt',  // 🆕 CTRL_BC_2026 publicado
   GID_PROVEEDORES: '1453971067',   // 🆕 hoja Proveedores en CTRL_BC (fuente autorevole · N10)
 
+  // 🆕 14-jun · SECCIONES-POR-EMPRESA · fuente autorevole = CTRL_OBJETIVOS hoja secciones_empresa
+  // (PARAMETROS-SECCIONES-001, 12-ter · si era perso pasando de versión · N9).
+  // ⚠️ TOKEN INCOMPLETO — pegá el token completo de publicación de CTRL_OBJETIVOS.
+  //    (empieza con 2PACX-1vTlbFUjpe0FjZ5Zv… · publicar SOLO la hoja secciones_empresa)
+  TOKEN_OBJETIVOS: '2PACX-1vTlbFUjpe0FjZ5Zv___PEGAR_TOKEN_COMPLETO___',
+  GID_SECCIONES_EMPRESA: '2106081440',   // hoja secciones_empresa · empresa|seccion|orden|activo
+
   // [TODO · BLOCANTE PARA ESCRIBIR] route GAS `insumo_crear` — proyecto GAS de
   // CONTROL_MAESTRO (¡patchar el proyecto CORRECTO! N1). New Version, mai New Deployment.
   GAS_URL: 'https://script.google.com/macros/s/AKfycbwxe2CuDez2akLgB8dinyacRUjoLlGNJkRBs3luRXvRpKd_jxsyJFXU-I36JYAWTftD/exec',
@@ -708,7 +715,7 @@ function csvParse(text){          // parser con comillas (valores tipo "4,000")
 /* ============================================================================
    estado + catálogo real
    ========================================================================== */
-const S={ub:null,dest:null,arch:null,emp:new Set(),secc:new Set(),alias:new Set(),catalog:[],pesos:{},filaLibre:null,skuNuevo:null};
+const S={ub:null,dest:null,arch:null,emp:new Set(),secc:new Set(),alias:new Set(),catalog:[],pesos:{},seccEmp:null,filaLibre:null,skuNuevo:null};
 
 async function boot(){
   const url=`https://docs.google.com/spreadsheets/d/e/${CFG.TOKEN_MAESTRO}/pub?gid=${CFG.GID_BD_INSUMOS}&single=true&output=csv&t=${Date.now()}`;
@@ -725,15 +732,16 @@ async function boot(){
     $('filalibre').textContent='fila libre '+S.filaLibre;
     // dropdowns desde el dato real
     fillSelect('cat',distinct(rows,CFG.COL.CAT));
-    // Secciones ATOMICHE: la col C contiene liste "A, B, C" → split+trim+dedupe.
-    // [TODO] fonte autorevole definitiva = PARAMETROS (secciones per empresa); oggi derivano dal catalogo.
+    // Secciones del catálogo (col C) = FALLBACK. Fuente autorevole = secciones_empresa (abajo).
     const secSet=new Set();
     rows.forEach(r=>{String(r[CFG.COL.SECC]||'').split(',').forEach(s=>{s=trimC(s);if(s&&norm(s)!=='multiseccion')secSet.add(s);});});
-    buildSecc([...secSet].sort());
+    S.seccFallback=[...secSet].sort();   // 🆕 14-jun · catálogo = red de seguridad
+    buildSecc(S.seccFallback);           // arranca con el fallback; cargarSeccionesEmpresa lo reemplaza si carga
     $('q').disabled=false;$('q').focus();
     banner('okk','Catálogo real cargado: '+rows.length+' SKU desde CONTROL_MAESTRO · BD_INSUMOS.');
     await cargarProveedores(rows);   // 🆕 12-jun · fuente = hoja Proveedores (CTRL_BC), no la col F fósil
     await cargarPesos();             // 🆕 14-jun · PESOS_MEDIOS para granel-por-unidad (no bloqueante)
+    await cargarSeccionesEmpresa();  // 🆕 14-jun · fuente autorevole secciones (CTRL_OBJETIVOS · N7/N11)
   }catch(e){
     banner('err','⚠️ No pude leer BD_INSUMOS desde CONTROL_MAESTRO ('+e.message+'). Sin catálogo no hay defensa anti-duplicado: la creación queda bloqueada. Reintentá o avisá.');
   }
@@ -759,6 +767,45 @@ async function cargarPesos(){
   }catch(e){
     S.pesos={byClave:{},catProm:{},n:0};   // silencioso: el campo peso quedará editable y vacío
   }
+}
+async function cargarSeccionesEmpresa(){
+  // 🆕 14-jun · SECCIONES-POR-EMPRESA · fuente autorevole CTRL_OBJETIVOS hoja secciones_empresa.
+  // Estructura: empresa | seccion | orden | activo (TRUE/FALSE). Una fila por par.
+  // No bloqueante: si falla (token incompleto, hoja no publicada) → queda el fallback del catálogo.
+  if(!CFG.TOKEN_OBJETIVOS||CFG.TOKEN_OBJETIVOS.indexOf('PEGAR_TOKEN')>=0){
+    banner('err','⚠️ Secciones-por-empresa: TOKEN_OBJETIVOS sin configurar — uso el catálogo (fallback). Pegá el token de CTRL_OBJETIVOS en CFG.');
+    return;
+  }
+  try{
+    const u=`https://docs.google.com/spreadsheets/d/e/${CFG.TOKEN_OBJETIVOS}/pub?gid=${CFG.GID_SECCIONES_EMPRESA}&single=true&output=csv&t=${Date.now()}`;
+    const r=await fetch(u,{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const rows=csvParse(await r.text());
+    const map={};   // empresaNorm → [{seccion, orden}]
+    rows.forEach(x=>{
+      const emp=norm(x.empresa), sec=trimC(x.seccion), act=String(x.activo||'').trim().toUpperCase();
+      const ord=numC(x.orden)||999;
+      if(!emp||!sec)return;
+      if(act&&act!=='TRUE'&&act!=='SI'&&act!=='1')return;   // solo activas
+      (map[emp]=map[emp]||[]).push({sec,ord});
+    });
+    Object.keys(map).forEach(k=>{map[k].sort((a,b)=>a.ord-b.ord);map[k]=map[k].map(o=>o.sec);});
+    if(Object.keys(map).length){
+      S.seccEmp=map;
+      renderSecc();   // re-render con la fuente autorevole + empresa actual
+    }
+  }catch(e){
+    banner('err','⚠️ No pude leer secciones_empresa ('+e.message+') — uso el catálogo (fallback).');
+  }
+}
+function seccionesVisibles(){
+  // Si hay fuente autorevole y empresas seleccionadas → unión de sus secciones (orden de la hoja).
+  // Sin empresa seleccionada aún, o sin fuente → fallback del catálogo.
+  if(!S.seccEmp) return S.seccFallback||[];
+  if(!S.emp.size) return S.seccFallback||[];   // todavía no eligió empresa: mostrá algo, no vacío
+  const vistas=[];
+  S.emp.forEach(e=>{(S.seccEmp[norm(e)]||[]).forEach(s=>{if(vistas.indexOf(s)<0)vistas.push(s);});});
+  return vistas.length?vistas:(S.seccFallback||[]);
 }
 async function cargarProveedores(rowsCat){
   // 🆕 12-jun · la col F del catálogo es fósil sucio (categorías como ABARROTES,
@@ -956,14 +1003,17 @@ function onPeso1(){                 // el usuario tocó el peso → deja de ser 
   const badge=$('g-peso-badge');if(badge){badge.textContent='· ingresado a mano';badge.style.color='var(--green)';}
   update();}
 function toggleEmp(el,e){el.classList.toggle('on');el.classList.contains('on')?S.emp.add(e):S.emp.delete(e);
-  $('bksnote').style.display=S.emp.has('BKS')?'flex':'none';update();}
+  $('bksnote').style.display=S.emp.has('BKS')?'flex':'none';renderSecc();update();}
 function toggleTodos(el){const on=!el.classList.contains('on');
   document.querySelectorAll('#empbox .e').forEach(x=>x.classList.toggle('on',on));
   S.emp.clear();if(on)['PINSA','EXO','BKS'].forEach(e=>S.emp.add(e));
-  $('bksnote').style.display=S.emp.has('BKS')?'flex':'none';update();}
+  $('bksnote').style.display=S.emp.has('BKS')?'flex':'none';renderSecc();update();}
 function renderSecc(){
   const box=$('seccbox');box.innerHTML='';
-  SECC_ALL.forEach(s=>{
+  const vis=seccionesVisibles();
+  // poda: quita de la selección las secciones que ya no son válidas para la empresa actual
+  [...S.secc].forEach(s=>{if(vis.indexOf(s)<0)S.secc.delete(s);});
+  vis.forEach(s=>{
     const c=document.createElement('span');
     const viol=norm(s).includes('cocina');
     c.className='chip secc'+(S.secc.has(s)?(' on'+(viol?' viol':'')):'');
