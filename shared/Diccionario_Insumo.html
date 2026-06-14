@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scheda Insumo · Crear · DICCIONARIO_INSUMOS</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%237B84E0'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-weight='bold' font-size='18' fill='white'>P</text></svg>">
 <!--
   ============================================================================
   SCHEDA INSUMO · vía A · DICCIONARIO_INSUMOS · V1.0 · 11-JUN-2026
@@ -330,10 +330,27 @@
           </div>
 
           <div id="lv-granel" class="lv" style="display:none">
-            <div class="note q">⚖️ Granel: el stock vive directo en <b id="g-utm">—</b>. El precio se refiere al formato de compra de abajo (convención del catálogo: «Granel 1000 gr»).</div>
-            <div style="max-width:300px;margin-top:10px">
-              <label class="fl">¿Por cuántos <span id="g-utm2">—</span> viene el precio?</label>
+            <div class="note q">⚖️ Granel: el stock vive directo en <b id="g-utm">—</b>. ¿Como compro este insumo?</div>
+            <div id="g-modo" class="seg" style="margin-top:10px;max-width:360px">
+              <button type="button" class="on" onclick="setGranelModo(this,'peso')">A peso <span class="lvl">harina, azucar (suelto en Kg/Gr)</span></button>
+              <button type="button" onclick="setGranelModo(this,'unidad')">Por pieza <span class="lvl">pimenton, palta (1 pieza = X gr)</span></button>
+            </div>
+            <div id="g-peso-wrap" style="max-width:300px;margin-top:12px">
+              <label class="fl">¿Por cuantos <span id="g-utm2">—</span> viene el precio?</label>
               <input id="g-qty" type="number" min="1" step="any" value="1000" oninput="update()">
+            </div>
+            <div id="g-unidad-wrap" style="display:none;margin-top:12px">
+              <div class="two">
+                <div>
+                  <label class="fl">Compro de a <span style="color:var(--t3)">(piezas por UPC)</span></label>
+                  <input id="g-uxupc" type="number" min="1" step="1" value="1" oninput="update()">
+                </div>
+                <div>
+                  <label class="fl">Peso medio por pieza (gr) <span id="g-peso-badge" style="color:var(--t3)"></span></label>
+                  <input id="g-peso1" type="number" min="1" step="any" placeholder="ej. 180" oninput="onPeso1()">
+                </div>
+              </div>
+              <div class="note" id="g-peso-hint" style="margin-top:8px;font-size:11px;color:var(--t2)">El peso convierte el precio por pieza en precio por gramo (lo que consume la receta). Viene de PESOS_MEDIOS y es editable.</div>
             </div>
           </div>
 
@@ -584,6 +601,7 @@ const CFG = {
   // CONTROL_MAESTRO publicado · mismo token que usa el panel rsc para ventas Toteat
   TOKEN_MAESTRO: '2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt',
   GID_BD_INSUMOS: '514178276',
+  GID_PESOS_MEDIOS: '60421340',   // 🆕 14-jun · hoja PESOS_MEDIOS en CONTROL_MAESTRO (mismo token) · peso medio por pieza para granel-por-unidad
   TOKEN_BC: '2PACX-1vSHqqam0ulBIXIn_UNH50dEl2XX0RDAnMbI70phvGURduyKGoTpIkV8g-8k8p8pbIr42g6Nap3SE9tt',  // 🆕 CTRL_BC_2026 publicado
   GID_PROVEEDORES: '1453971067',   // 🆕 hoja Proveedores en CTRL_BC (fuente autorevole · N10)
 
@@ -635,7 +653,7 @@ function csvParse(text){          // parser con comillas (valores tipo "4,000")
 /* ============================================================================
    estado + catálogo real
    ========================================================================== */
-const S={ub:null,dest:null,arch:null,emp:new Set(),secc:new Set(),alias:new Set(),catalog:[],filaLibre:null,skuNuevo:null};
+const S={ub:null,dest:null,arch:null,emp:new Set(),secc:new Set(),alias:new Set(),catalog:[],pesos:{},filaLibre:null,skuNuevo:null};
 
 async function boot(){
   const url=`https://docs.google.com/spreadsheets/d/e/${CFG.TOKEN_MAESTRO}/pub?gid=${CFG.GID_BD_INSUMOS}&single=true&output=csv&t=${Date.now()}`;
@@ -660,8 +678,31 @@ async function boot(){
     $('q').disabled=false;$('q').focus();
     banner('okk','Catálogo real cargado: '+rows.length+' SKU desde CONTROL_MAESTRO · BD_INSUMOS.');
     await cargarProveedores(rows);   // 🆕 12-jun · fuente = hoja Proveedores (CTRL_BC), no la col F fósil
+    await cargarPesos();             // 🆕 14-jun · PESOS_MEDIOS para granel-por-unidad (no bloqueante)
   }catch(e){
     banner('err','⚠️ No pude leer BD_INSUMOS desde CONTROL_MAESTRO ('+e.message+'). Sin catálogo no hay defensa anti-duplicado: la creación queda bloqueada. Reintentá o avisá.');
+  }
+}
+async function cargarPesos(){
+  // 🆕 14-jun · peso medio por pieza, fuente curada PESOS_MEDIOS (CONTROL_MAESTRO).
+  // No bloqueante: si falla, granel-por-unidad pide el peso a mano (campo vacío).
+  // Match por `clave` normalizada (norm: minúsculas + sin acentos), igual al nombre del insumo.
+  try{
+    const u=`https://docs.google.com/spreadsheets/d/e/${CFG.TOKEN_MAESTRO}/pub?gid=${CFG.GID_PESOS_MEDIOS}&single=true&output=csv&t=${Date.now()}`;
+    const r=await fetch(u,{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const rows=csvParse(await r.text());
+    const byClave={},byCat={};
+    rows.forEach(x=>{
+      const clave=norm(x.clave||x.nombre), peso=numC(x.peso_gr), cat=trimC(x.categoria);
+      if(clave&&peso>0)byClave[clave]={peso,nombre:trimC(x.nombre),cat};
+      if(cat&&peso>0){(byCat[norm(cat)]=byCat[norm(cat)]||[]).push(peso);}
+    });
+    // promedio por categoría = fallback para piezas no listadas (ej. un nabo nuevo en Frutas y Verduras)
+    const catProm={};Object.keys(byCat).forEach(k=>{const a=byCat[k];catProm[k]=Math.round(a.reduce((s,n)=>s+n,0)/a.length);});
+    S.pesos={byClave,catProm,n:Object.keys(byClave).length};
+  }catch(e){
+    S.pesos={byClave:{},catProm:{},n:0};   // silencioso: el campo peso quedará editable y vacío
   }
 }
 async function cargarProveedores(rowsCat){
@@ -737,6 +778,13 @@ function gateSearch(){
 }
 function resetForm(){   // 🆕 12-jun · sin esto el form arrastra el producto anterior entre creaciones
   S.ub=null;S.dest=null;S.arch=null;S.emp.clear();S.secc.clear();S.alias.clear();
+  S.granelModo='peso';S.pesoEditado=false;   // 🆕 14-jun
+  ['g-uxupc'].forEach(id=>{const e=$(id);if(e)e.value='1';});
+  {const e=$('g-peso1');if(e)e.value='';}
+  {const w=$('g-peso-wrap');if(w)w.style.display='block';}
+  {const w=$('g-unidad-wrap');if(w)w.style.display='none';}
+  {const b=$('g-peso-badge');if(b)b.textContent='';}
+  {const gm=$('g-modo');if(gm)gm.querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',i===0));}
   document.querySelectorAll('#seg-ub button,#seg-dest button,#arch .a,#empbox .e').forEach(b=>b.classList.remove('on'));
   ['granel','sellado','pack'].forEach(a=>$('lv-'+a).style.display='none');
   ['s-qty','pk-n','pk-qty','cn','cd','cu','fv','alias-new'].forEach(id=>{const e=$(id);if(e)e.value='';});   // 🆕 12-jun bis · alias-new incluido (arrastraba el texto del producto anterior)
@@ -811,7 +859,9 @@ function onName(){
     else el.style.display='none';
     }
   } else el.style.display='none';
-  proposeAlias(v);update();
+  proposeAlias(v);
+  if(S.arch==='granel'&&S.granelModo==='unidad')autoPeso();   // 🆕 14-jun · re-propone peso al cambiar nombre
+  update();
 }
 
 /* ============================================================================
@@ -820,7 +870,36 @@ function onName(){
 function setUB(el,v){document.querySelectorAll('#seg-ub button').forEach(b=>b.classList.remove('on'));el.classList.add('on');S.ub=v;update();}
 function setDest(el,v){document.querySelectorAll('#seg-dest button').forEach(b=>b.classList.remove('on'));el.classList.add('on');S.dest=v;update();}
 function setArch(el,v){document.querySelectorAll('#arch .a').forEach(b=>b.classList.remove('on'));el.classList.add('on');S.arch=v;
-  ['granel','sellado','pack'].forEach(a=>$('lv-'+a).style.display=a===v?'block':'none');update();}
+  ['granel','sellado','pack'].forEach(a=>$('lv-'+a).style.display=a===v?'block':'none');
+  if(v==='granel'&&!S.granelModo)S.granelModo='peso';
+  update();}
+function setGranelModo(el,modo){   // 🆕 14-jun · peso (suelto) vs unidad (por pieza, peso medio)
+  el.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on'));el.classList.add('on');
+  S.granelModo=modo;
+  $('g-peso-wrap').style.display=modo==='peso'?'block':'none';
+  $('g-unidad-wrap').style.display=modo==='unidad'?'block':'none';
+  if(modo==='unidad')autoPeso();   // intenta autocompletar el peso desde PESOS_MEDIOS
+  update();}
+function lookupPeso(nombre){       // 🆕 14-jun · match por clave normalizada, fallback por categoría
+  const k=norm(nombre);if(!k)return null;
+  const bc=(S.pesos&&S.pesos.byClave)||{};
+  if(bc[k])return{peso:bc[k].peso,fuente:'clave'};                    // match exacto de pieza
+  for(const clave in bc){if(k.includes(clave)||clave.includes(k))return{peso:bc[clave].peso,fuente:'clave'};}  // match parcial (ej. "pimenton rojo")
+  const cat=norm($('cat').value), cp=(S.pesos&&S.pesos.catProm)||{};  // fallback: promedio de la categoría
+  if(cat&&cp[cat])return{peso:cp[cat],fuente:'categoria'};
+  return null;}
+function autoPeso(){               // rellena g-peso1 SOLO si el usuario no lo editó a mano
+  if(S.pesoEditado)return;
+  const hit=lookupPeso($('p-name').value);
+  const inp=$('g-peso1'),badge=$('g-peso-badge');
+  if(hit){inp.value=hit.peso;
+    badge.textContent=hit.fuente==='clave'?'· estimado (PESOS_MEDIOS)':'· estimado (promedio '+trimC($('cat').value)+')';
+    badge.style.color='var(--amber)';}
+  else{inp.value='';badge.textContent='· sin dato — ingresá el peso';badge.style.color='var(--t3)';}}
+function onPeso1(){                 // el usuario tocó el peso → deja de ser "estimado", no se vuelve a autocompletar
+  S.pesoEditado=true;
+  const badge=$('g-peso-badge');if(badge){badge.textContent='· ingresado a mano';badge.style.color='var(--green)';}
+  update();}
 function toggleEmp(el,e){el.classList.toggle('on');el.classList.contains('on')?S.emp.add(e):S.emp.delete(e);
   $('bksnote').style.display=S.emp.has('BKS')?'flex':'none';update();}
 function toggleTodos(el){const on=!el.classList.contains('on');
@@ -863,9 +942,17 @@ function conteo(){if(!S.arch||!S.ub)return null;
   return 'Sellado';}
 function formato(){
   if(!S.arch||!S.ub)return null;
-  if(S.arch==='granel'){const gq=+$('g-qty').value;if(!(gq>0))return null;          // 🆕 12-jun · convención real: H/Q llevan la cantidad
+  if(S.arch==='granel'){
+    if(S.granelModo==='unidad'){          // 🆕 14-jun · granel comprado por pieza, usado en gr (pimenton, palta)
+      const ux=+$('g-uxupc').value||0, p1=+$('g-peso1').value||0;   // piezas por UPC · peso(gr) por pieza
+      if(!(ux>0&&p1>0))return null;
+      const upc=ux+' unidad'+(ux>1?'es':'');
+      return{upc,uo:upc,f1:ux,f2:p1,kupc:'unidad',
+        human:'por pieza, '+ux+' unidad'+(ux>1?'es':'')+' de ~'+p1+' '+S.ub.toLowerCase()+' c/u (precio→'+S.ub.toLowerCase()+' via peso medio)'};
+    }
+    const gq=+$('g-qty').value;if(!(gq>0))return null;          // 🆕 12-jun · convención real: H/Q llevan la cantidad
     const gd='Granel '+gq+' '+S.ub.toLowerCase();
-    return{upc:gd,uo:gd,f1:1,f2:gq,human:'a granel, en formato «'+gd+'» (el precio es por ese formato)'};}
+    return{upc:gd,uo:gd,f1:1,f2:gq,kupc:S.ub,human:'a granel, en formato «'+gd+'» (el precio es por ese formato)'};}
   if(S.arch==='sellado'){
     const env=$('env-sel').value,q=+$('s-qty').value;
     if(!(q>0))return null;
@@ -1005,7 +1092,7 @@ function buildPayload(){
   row[col.UPC]   = f.upc;
   row[col.F1]    = f.f1;
   row[col.QUPC]  = f.f1*f.f2;   // Q UPC = contenido TOTAL del UPC en UTM (= I×T · verificado en hoja: 1033 Caja 12×1000 → 12.000)
-  row[col.KUPC]  = S.ub;
+  row[col.KUPC]  = f.kupc||S.ub;   // 🆕 14-jun · granel-por-pieza → "unidad"; resto → UTM
   row[col.VUPC]  = Math.round(c.real);
   row[col.VUO]   = Math.round(c.real/f.f1);
   row[col.UTM]   = S.ub;
@@ -1065,7 +1152,7 @@ async function guardar(){
       $('h-sku').textContent='SKU nuevo · propuesto '+S.skuNuevo;
       $('filalibre').textContent='fila libre '+S.filaLibre;
       banner('okk','✓ Insumo creado · SKU '+(j.sku||'?')+' · fila '+(j.fila||'?')+' en CONTROL_MAESTRO.');
-      resetForm();backToGate();$('q').value='';$('hits').innerHTML='';$('gatewarn').style.display='none';$('createbar').style.display='none';
+      $('p-name').value='';resetForm();backToGate();$('q').value='';$('hits').innerHTML='';$('gatewarn').style.display='none';$('createbar').style.display='none';   // 🆕 14-jun · p-name arrastraba el nombre recién creado al volver al gate
     } else throw new Error(j&&j.error?j.error:'respuesta inesperada del GAS');
   }catch(e){
     banner('err','⚠️ No se pudo guardar: '+e.message+'. No se escribió nada (o verificá la fila '+S.filaLibre+' antes de reintentar).');
