@@ -149,6 +149,12 @@
   .s1-mic:active{transform:scale(.93)}
   .s1-mic.rec{background:var(--bad);animation:p 1.1s infinite}
   .s1-hand{font-size:11px;color:var(--acc);border:none;background:none;text-decoration:underline}
+  /* dettato iOS dentro Scheda 1 */
+  .s1-ios{display:none;padding:10px 16px 4px;border-top:1px solid var(--line);background:var(--panel)}
+  .s1-ios textarea{width:100%;background:var(--panel2);border:1px solid var(--acc);color:var(--t1);
+    border-radius:12px;padding:12px 14px;font-size:16px;min-height:58px;resize:none;line-height:1.4}
+  .s1-ios .h{color:var(--t3);font-size:12px;margin:7px 2px 0;line-height:1.4}
+  .s1-ios .h b{color:var(--acc)}
 
   /* ===== SCHEDA 2 · VALIDA ===== */
   .s2{display:none;position:fixed;inset:0;max-width:560px;margin:0 auto;
@@ -230,9 +236,14 @@
       <span id="s1AudioTxt">escuchando · cierra en 3s</span>
       <span class="s1-bars"><span></span><span></span><span></span><span></span></span>
     </div>
+    <div class="s1-ios" id="s1Ios">
+      <textarea id="s1IosText" rows="2" placeholder="Toca aquí, después el 🎤 del teclado, y dicta toda tu lista de corrido"></textarea>
+      <div class="h">En iPhone: toca el campo, después el <b>🎤 del teclado</b> y dicta todo seguido. Al terminar, toca <b>Agregar</b>.</div>
+    </div>
     <div class="s1-foot" id="s1Foot">
       <button class="s1-rev" id="s1Rev">Revisar (0)</button>
       <button class="s1-mic" id="s1Mic" aria-label="Grabar">🎤</button>
+      <button class="s1-mic" id="s1IosGo" aria-label="Agregar" style="display:none;font-size:13px;font-weight:600">Agregar</button>
     </div>
     <div style="text-align:center;padding:0 0 10px">
       <button class="s1-hand" id="s1HandToggle">cambiar a zurdo ↔</button>
@@ -475,8 +486,8 @@ function setOperador(n){
   n=(n||'').trim(); if(!n)return;
   OPERADOR=n; localStorage.setItem('pinsita_operador',n);
   opChip.textContent=n; gate.style.display='none'; initModo();
-  // Android: entra directo a la captura de lista (Pantalla 1, el producto). iOS: queda el dictado por teclado.
-  if(!IS_IOS && SR && window.openSchedaHabla){ window.openSchedaHabla(); }
+  // entra directo a la captura de lista (Pantalla 1, el producto) en ambos: Android voz, iPhone dictado teclado
+  if(window.openSchedaHabla){ window.openSchedaHabla(); }
 }
 NOMBRES.forEach(function(n){
   var b=document.createElement('button'); b.textContent=n;
@@ -633,14 +644,23 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
       s1Empty=document.getElementById('s1Empty'), s1Rev=document.getElementById('s1Rev'),
       s1Audio=document.getElementById('s1Audio'), s1AudioTxt=document.getElementById('s1AudioTxt'),
       s1Op=document.getElementById('s1Op'), s1Foot=document.getElementById('s1Foot'),
-      s1HandToggle=document.getElementById('s1HandToggle');
+      s1HandToggle=document.getElementById('s1HandToggle'),
+      s1Ios=document.getElementById('s1Ios'), s1IosText=document.getElementById('s1IosText'),
+      s1IosGo=document.getElementById('s1IosGo'), s1MicBtn=document.getElementById('s1Mic');
   var ITEMS=[];
   var s1rec=null, s1on=false, silenceTimer=null, lastResultAt=0;
   var SILENCE_MS=3000;
 
   function openScheda(){
     if(!OPERADOR){ alert('Elige operador primero'); return; }
-    s1Op.textContent=OPERADOR; applyHand(); s1.classList.add('on');
+    s1Op.textContent=OPERADOR; applyHand();
+    if(IS_IOS){  // iPhone: dictado por teclado (Apple no expone voz live al navegador)
+      s1Ios.style.display='block'; s1MicBtn.style.display='none'; s1IosGo.style.display='inline-flex';
+      s1Empty.innerHTML='Toca el campo de abajo, usa el 🎤 del teclado<br>y dicta toda tu lista. Luego "Agregar".';
+    } else {
+      s1Ios.style.display='none'; s1MicBtn.style.display='inline-flex'; s1IosGo.style.display='none';
+    }
+    s1.classList.add('on');
   }
   function closeScheda(){ stopRec(); s1.classList.remove('on'); }
   openS1.addEventListener('click',openScheda);
@@ -703,36 +723,63 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 
   function armSilence(){ clearTimeout(silenceTimer);
     silenceTimer=setTimeout(function(){ stopRec(); }, SILENCE_MS); }
+  var sttBuffer='';   // frase consolidada (varios segmentos)
+  var sttLast='';     // último segmento final, para detectar crecimientos de Android
+  function flushBuffer(){
+    var t=(sttBuffer+' '+sttLast).trim().replace(/\s+/g,' '); sttBuffer=''; sttLast='';
+    if(t) ingest(t);
+  }
   function startRec(){
     if(s1on) return;
     if(!SR){ alert('En este teléfono dicta con el teclado desde la pantalla principal por ahora.'); return; }
     s1rec=new SR(); s1rec.lang='es-CL'; s1rec.continuous=true; s1rec.interimResults=true; s1rec.maxAlternatives=1;
+    sttBuffer='';
     s1rec.onstart=function(){ s1on=true; s1Mic.classList.add('rec'); s1Mic.textContent='⏺';
       s1Audio.style.display='flex'; s1AudioTxt.textContent='escuchando…'; armSilence(); };
     s1rec.onresult=function(e){
       var interim='';
+      // recorre TODOS los resultados; toma el texto final del bloque actual sin re-acumular crecimientos
       for(var i=e.resultIndex;i<e.results.length;i++){
         var r=e.results[i];
-        if(r.isFinal){ ingest(r[0].transcript); }
-        else interim+=r[0].transcript;
+        if(r.isFinal){
+          var seg=r[0].transcript.trim();
+          if(seg){
+            var a=seg.toLowerCase(), b=sttLast.toLowerCase();
+            if(a===b){ /* mismo: ignora */ }
+            else if(a.indexOf(b)===0){ sttLast=seg; }       // crece: "un" -> "un kilo de cafe": reemplaza
+            else if(b.indexOf(a)===0 && b){ /* más corto: conserva el largo */ }
+            else { // frase nueva: consolida la anterior y empieza otra
+              sttBuffer=(sttBuffer+' '+sttLast).trim(); sttLast=seg;
+            }
+          }
+        }
+        else interim += r[0].transcript;
       }
       lastResultAt=Date.now();
-      s1AudioTxt.textContent = interim ? ('… '+interim.slice(-40)) : 'escuchando · cierra en 3s';
+      var preview=(sttBuffer+' '+sttLast+' '+interim).trim().replace(/\s+/g,' ');
+      s1AudioTxt.textContent = preview ? ('… '+preview.slice(-46)) : 'escuchando · cierra en 3s';
       armSilence();
     };
     s1rec.onerror=function(e){ if(e.error==='no-speech'){ armSilence(); return; }
       s1AudioTxt.textContent='error: '+(e.error||'?'); };
     s1rec.onend=function(){
+      // reinicio del continuous SIN procesar nada aquí: el buffer se procesa solo al silencio real
       if(s1on && Date.now()-lastResultAt < SILENCE_MS-200){ try{s1rec.start();return;}catch(ex){} }
       s1on=false; s1Mic.classList.remove('rec'); s1Mic.textContent='🎤';
       s1Audio.style.display='none'; clearTimeout(silenceTimer);
+      flushBuffer();   // procesa UNA vez, la frase completa
     };
     lastResultAt=Date.now();
     try{ s1rec.start(); }catch(ex){}
   }
   function stopRec(){ if(s1rec&&s1on){ s1on=false; try{s1rec.stop();}catch(ex){} }
-    clearTimeout(silenceTimer); s1Mic.classList.remove('rec'); s1Mic.textContent='🎤'; s1Audio.style.display='none'; }
+    clearTimeout(silenceTimer); s1Mic.classList.remove('rec'); s1Mic.textContent='🎤'; s1Audio.style.display='none';
+    flushBuffer(); }
   s1Mic.addEventListener('click',function(){ s1on?stopRec():startRec(); });
+  s1IosGo.addEventListener('click',function(){
+    var t=(s1IosText.value||'').trim(); if(!t){ s1IosText.focus(); return; }
+    ingest(t); s1IosText.value=''; s1IosText.focus();
+  });
 
   s1Rev.addEventListener('click',function(){
     if(!ITEMS.length){ return; }
@@ -841,8 +888,8 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 })();
 renderLog();
 if(OPERADOR){ initModo(); }
-// arranque directo a Pantalla 1 si ya hay operador y el device tiene voz (Android)
-if(OPERADOR && !IS_IOS && SR && window.openSchedaHabla){ window.openSchedaHabla(); }
+// arranque directo a Pantalla 1 si ya hay operador (Android voz / iPhone dictado)
+if(OPERADOR && window.openSchedaHabla){ window.openSchedaHabla(); }
 </script>
 </body>
 </html>
