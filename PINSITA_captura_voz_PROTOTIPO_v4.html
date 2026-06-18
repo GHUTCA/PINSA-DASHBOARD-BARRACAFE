@@ -792,6 +792,7 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
       else { estado='ok'; sub=(top.v.secs&&top.v.secs.length?top.v.secs[0]:''); }
       ITEMS.push({pos:ITEMS.length+1, said:r.said, qty:r.qty, unidad:r.unidad,
         sku:top?top.v.sku:null, nombre:top?top.v.nombre:null, sub:sub, estado:estado,
+        secs:top?(top.v.secs||[]):[],
         cands:r.cands.map(function(b){return {sku:b.v.sku,nombre:b.v.nombre,sc:b.sc};})});
     });
     render();
@@ -878,7 +879,7 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
     if(!c) return;
     // si el said no coincidía con el top, es una corrección -> cola de candidatos alias (log, no fuente)
     if(it.sku!==sku){ pushAliasCandidato(it.said, sku, c.nombre); }
-    it.sku=sku; it.nombre=c.nombre; it.estado='ok'; it.sub=skuSecs(sku);
+    it.sku=sku; it.nombre=c.nombre; it.estado='ok'; it.sub=skuSecs(sku); it.secs=skuSecsArr(sku);
     renderS2();
   }
   function quitar(idx){ ITEMS.splice(idx,1); ITEMS.forEach(function(x,i){x.pos=i+1;}); renderS2(); }
@@ -889,12 +890,14 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
     var top=rows.length&&rows[0].cands.length?rows[0].cands[0]:null;
     var it=ITEMS[idx];
     if(top){ pushAliasCandidato(it.said, top.v.sku, top.v.nombre);
-      it.sku=top.v.sku; it.nombre=top.v.nombre; it.estado='ok'; it.sub=skuSecs(top.v.sku);
+      it.sku=top.v.sku; it.nombre=top.v.nombre; it.estado='ok'; it.sub=skuSecs(top.v.sku); it.secs=skuSecsArr(top.v.sku);
     } else { alert('No encontré "'+q+'". Prueba otra forma o quítalo.'); }
     renderS2();
   }
   function skuSecs(sku){ var v=VOCAB.filter(function(x){return x.sku===sku;})[0];
     return v&&v.secs&&v.secs.length?v.secs[0]:''; }
+  function skuSecsArr(sku){ var v=VOCAB.filter(function(x){return x.sku===sku;})[0];
+    return v&&v.secs?v.secs:[]; }
   // cola de candidatos alias: localStorage, curatela humana después (N11/N22) — NUNCA escribe fuente
   function pushAliasCandidato(said,sku,nombre){
     try{ var k='pinsita_alias_cola';
@@ -962,15 +965,27 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
     if(s2Confirm.disabled) return;
     s2Confirm.disabled=true; s2Confirm.textContent='Enviando…';
     var tipo=s1Tipo.value;
-    var itemsGAS=ITEMS.map(function(x){
-      return { sku:x.sku, desc:x.nombre, unidad:'UO', uoDesc:'', cantidad:x.qty, obs:'voz · '+(x.said||'') };
-    });
     var payload, res;
     if(tipo==='Entrega Secc'){
-      payload={ action:'registrarEntregaBatch', local:'Riesco', destino:(window.__s1Destino||'Barra Jugos'),
-        responsable:OPERADOR, items:itemsGAS };
-      res=await callGAS(payload);
+      // N16: el destino se deduce de la sección del producto (Col C de BD), no de un selector.
+      function capSec(s){ return (s||'').split(' ').map(function(w){return w?w.charAt(0).toUpperCase()+w.slice(1):w;}).join(' '); }
+      var grupos={};
+      ITEMS.forEach(function(x){
+        var sec = (x.secs&&x.secs.length)? x.secs[0] : 'cocina central';
+        var dest = capSec(sec);
+        (grupos[dest]=grupos[dest]||[]).push({ sku:x.sku, desc:x.nombre, unidad:'UO', uoDesc:'', cantidad:x.qty, obs:'voz · '+(x.said||'') });
+      });
+      res={ok:true, scritti:0, secciones:[]};
+      for(var dest in grupos){
+        var r1=await callGAS({ action:'registrarEntregaBatch', local:'Riesco', destino:dest,
+          responsable:OPERADOR, items:grupos[dest] });
+        if(r1&&r1.ok){ res.scritti+=(r1.scritti||grupos[dest].length); res.secciones.push(dest); }
+        else { res.ok=false; res.error=(r1&&r1.error)||('fallo sección '+dest); break; }
+      }
     } else {
+      var itemsGAS=ITEMS.map(function(x){
+        return { sku:x.sku, desc:x.nombre, unidad:'UO', uoDesc:'', cantidad:x.qty, obs:'voz · '+(x.said||'') };
+      });
       // otros tipos: un registrarMovimiento por item (origen derivado del tipo, como el jefe_local)
       var origen = (tipo==='Ingreso BLoc')?'Bodega Central':(tipo==='Ingreso Proveedor')?'Proveedor':'Bodega Local';
       res={ok:true, scritti:0};
