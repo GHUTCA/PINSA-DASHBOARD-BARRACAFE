@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>PINSITA · Captura (v10 · Puerta D)</title>
+<title>PINSITA · Captura (v10.1 · 4 puertas + UO)</title>
 <style>
   :root{
     --bg:#1F2329; --panel:#2A2F36; --panel2:#323840; --line:#3D444D;
@@ -226,6 +226,27 @@
   .v2mini button{background:transparent;border:none;font-size:16px;padding:4px;color:var(--t2);opacity:.75}
   .v2mini button:active{opacity:1}
   .v2row .nme{cursor:default}
+
+  /* ===== SELECTOR DE PUERTA · 4 modalidades (una sola boca, cuatro puertas) ===== */
+  .modos{display:none;margin:14px 0 8px}
+  .modos.on{display:block}
+  .modos h2{font-size:16px;font-weight:600;margin:0 0 4px}
+  .modos .mh{color:var(--t3);font-size:12px;margin:0 0 14px}
+  .modo-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .modo{position:relative;border:1px solid var(--line);border-radius:16px;background:var(--panel);
+    padding:18px 14px;text-align:center;color:var(--t1);min-height:104px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+  .modo:active{transform:scale(.97)}
+  .modo .ic{font-size:30px;line-height:1}
+  .modo .lb{font-size:15px;font-weight:600}
+  .modo .ds{font-size:11px;color:var(--t3)}
+  .modo.ready{border-color:var(--acc);background:var(--panel2)}
+  .modo.ready .ic{filter:none}
+  .modo.soon{opacity:.62}
+  .modo.soon .ic{filter:grayscale(.5)}
+  .modo .tag{position:absolute;top:8px;right:10px;font-size:9px;letter-spacing:.5px;
+    text-transform:uppercase;color:var(--t3);border:1px solid var(--line);border-radius:8px;padding:1px 6px}
+  .modo.ready .tag{color:var(--ok);border-color:var(--ok)}
 </style>
 </head>
 <body>
@@ -237,9 +258,24 @@
     <button class="ios-go" id="otherGo" style="margin-top:10px">Empezar</button>
   </div>
 
-  <h1>PINSITA · captura por voz <span class="opchip" id="opChip"></span></h1>
-  <p class="sub">Prototipo v10 (BD viva · Puerta D) — habla o escribe, corrige y confirma. Todo se guarda en este teléfono.
-    <a class="help-link" id="openS1" style="margin-top:6px">▶ Probar captura de lista (Pantalla 1)</a></p>
+  <h1>PINSITA · captura <span class="opchip" id="opChip"></span></h1>
+  <p class="sub">Prototipo v10 (BD viva · Puerta D) — elige cómo capturar. Todo se guarda en este teléfono.</p>
+
+  <!-- ===== SELECTOR DE PUERTA · 4 modalidades ===== -->
+  <div class="modos" id="modos">
+    <h2>¿Cómo querés capturar?</h2>
+    <p class="mh">Elegí tú. PINSITA ya sabe quién sos y dónde estás.</p>
+    <div class="modo-grid">
+      <button class="modo ready" id="modoVoz"><span class="tag">listo</span>
+        <span class="ic">🎤</span><span class="lb">Voz</span><span class="ds">dictá tu lista</span></button>
+      <button class="modo ready" id="modoTeclado"><span class="tag">listo</span>
+        <span class="ic">⌨️</span><span class="lb">Teclado</span><span class="ds">escribí y elegí</span></button>
+      <button class="modo soon" id="modoFoto"><span class="tag">pronto</span>
+        <span class="ic">📷</span><span class="lb">Foto</span><span class="ds">sacá y seguí</span></button>
+      <button class="modo soon" id="modoQR"><span class="tag">pronto</span>
+        <span class="ic">▦</span><span class="lb">Código / QR</span><span class="ds">escaneá</span></button>
+    </div>
+  </div>
 
   <!-- ===== SCHEDA 1 · HABLA ===== -->
   <div class="s1" id="s1">
@@ -436,7 +472,8 @@ async function cargarVocabDesdeBD(){
         secs:secs.length?secs:['cocina central'],
         alias:aliasMap[sku]||[],
         metodo:String(r['Metodo de conteo']||'').trim(),
-        factor:String(r['Facor UO UTM']||'').trim()
+        factor:String(r['Facor UO UTM']||'').trim(),
+        uo:String(r['UO Descripcion Principal ']||r['UO Descripcion Principal']||'').trim()  // lo que el OP confirma
       });
     });
     if(nuevo.length<100) throw new Error('BD insuficiente ('+nuevo.length+')');
@@ -615,9 +652,18 @@ function setOperador(n){
   n=(n||'').trim(); if(!n)return;
   OPERADOR=n; localStorage.setItem('pinsita_operador',n);
   opChip.textContent=n; gate.style.display='none'; initModo();
-  // entra directo a la captura de lista (Pantalla 1, el producto) en ambos: Android voz, iPhone dictado teclado
-  if(window.openSchedaHabla){ window.openSchedaHabla(); }
+  // ya NO entra directo: muestra el selector de puerta. El OP elige cómo capturar.
+  mostrarModos();
 }
+function mostrarModos(){
+  var m=document.getElementById('modos'); if(m) m.classList.add('on');
+  // precarga el catálogo en segundo plano para que cualquier puerta lo tenga listo
+  if(!window.__vocabCargado && !window.__vocabCargando){
+    window.__vocabCargando=true;
+    cargarVocabDesdeBD().then(function(res){ window.__vocabCargado=res.ok; window.__vocabCargando=false; window.__vocabRes=res; });
+  }
+}
+function ocultarModos(){ var m=document.getElementById('modos'); if(m) m.classList.remove('on'); }
 NOMBRES.forEach(function(n){
   var b=document.createElement('button'); b.textContent=n;
   b.onclick=function(){setOperador(n);}; whoList.appendChild(b);
@@ -767,7 +813,7 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 })();
 /* ===== SCHEDA 1 · HABLA — lógica ===== */
 (function(){
-  var s1=document.getElementById('s1'), openS1=document.getElementById('openS1'),
+  var s1=document.getElementById('s1'),
       s1Close=document.getElementById('s1Close'), s1Mic=document.getElementById('s1Mic'),
       s1Tipo=document.getElementById('s1Tipo'), s1List=document.getElementById('s1List'),
       s1Empty=document.getElementById('s1Empty'), s1Rev=document.getElementById('s1Rev'),
@@ -800,10 +846,29 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
       });
     }
   }
-  function closeScheda(){ stopRec(); s1.classList.remove('on'); }
-  openS1.addEventListener('click',openScheda);
+  function closeScheda(){ stopRec(); s1.classList.remove('on'); if(typeof mostrarModos==='function') mostrarModos(); }
   s1Close.addEventListener('click',closeScheda);
   window.openSchedaHabla=openScheda;
+
+  // ===== SELECTOR DE PUERTA · cablear las 4 modalidades =====
+  // VOZ: abre la captura en modo voz (o dictado-teclado en iOS, según device).
+  // TECLADO: abre directo la pantalla de validación con el picker listo (flujo PC/pulgar).
+  // FOTO / QR: honestas — todavía no, sin fingir. (Cantiere sospeso / campo codigo_barras.)
+  function modoGoVoz(){ if(typeof ocultarModos==='function') ocultarModos(); openScheda(); }
+  function modoGoTeclado(){
+    if(typeof ocultarModos==='function') ocultarModos();
+    openScheda();            // prepara scope + carga catálogo
+    openS2();                // entra directo a validar (lista vacía) -> "+ Agregar a mano"
+    setTimeout(function(){ var add=document.getElementById('addBtn'); if(add) add.click(); }, 60);
+  }
+  var bVoz=document.getElementById('modoVoz'), bTec=document.getElementById('modoTeclado'),
+      bFoto=document.getElementById('modoFoto'), bQR=document.getElementById('modoQR');
+  if(bVoz) bVoz.addEventListener('click', modoGoVoz);
+  if(bTec) bTec.addEventListener('click', modoGoTeclado);
+  function soon(name){ return function(){
+    alert(name+': todavía no está habilitado.\n\nViene en el próximo paso del cantiere captura.\nPor ahora usá Voz o Teclado.'); }; }
+  if(bFoto) bFoto.addEventListener('click', soon('📷 Foto'));
+  if(bQR) bQR.addEventListener('click', soon('▦ Código / QR'));
 
   function handKey(){ return 'pinsita_hand_'+(OPERADOR||'x'); }
   function applyHand(){
@@ -983,9 +1048,10 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
       if(!inEl.value.trim()){ listEl.innerHTML='<div class="pk-empty">Escribe para buscar entre los '+VOCAB.length+' productos.</div>'; return; }
       if(!res.length){ listEl.innerHTML='<div class="pk-empty">Nada parecido a "'+esc(inEl.value)+'". Prueba otra forma.</div>'; return; }
       listEl.innerHTML=res.map(function(v){
-        var sec=(v.secs&&v.secs.length)?v.secs[0]:'';
+        var uo=(v.uo||'').trim();
+        var sub=uo ? ('en '+uo) : ((v.secs&&v.secs.length)?v.secs[0]:'');
         return '<button class="pk-opt" data-sku="'+v.sku+'">'+
-          '<span class="pk-nm">'+esc(v.nombre)+(sec?'<div class="pk-sec">'+esc(sec)+'</div>':'')+'</span>'+
+          '<span class="pk-nm">'+esc(v.nombre)+(sub?'<div class="pk-sec">'+esc(sub)+'</div>':'')+'</span>'+
           '<span class="pk-badge">'+esc(v.sku)+'</span></button>';
       }).join('');
       listEl.querySelectorAll('.pk-opt').forEach(function(b){
@@ -1020,6 +1086,12 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
   }
   function skuSecs(sku){ var v=VOCAB.filter(function(x){return x.sku===sku;})[0];
     return v&&v.secs&&v.secs.length?v.secs[0]:''; }
+  // UO que el local confirma (col 'UO Descripcion Principal'). Si no hay dato -> '' (no inventamos).
+  function skuUO(sku){ var v=VOCAB.filter(function(x){return x.sku===sku;})[0];
+    return (v&&v.uo)?v.uo:''; }
+  // ¿el método admite decimales? Nivel (medio bidón) y Peso (1,5 kg) sí; Sellado/unidad no.
+  function skuDecimal(sku){ var v=VOCAB.filter(function(x){return x.sku===sku;})[0];
+    var m=(v&&v.metodo||'').toLowerCase(); return m.indexOf('nivel')>=0 || m.indexOf('peso')>=0; }
   // cola de candidatos alias: localStorage, curatela humana después (N11/N22) — NUNCA escribe fuente
   function pushAliasCandidato(said,sku,nombre){
     try{ var k='pinsita_alias_cola';
@@ -1043,10 +1115,12 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
     ITEMS.forEach(function(it,idx){
       var q=(it.qty!=null?it.qty:'?')+(it.unidad?(' '+it.unidad):'');
       if(it.estado==='ok'){
+        var uo=skuUO(it.sku);
+        var qShow=(it.qty!=null?it.qty:'?');
         html+='<div class="v2row" id="row-'+idx+'"><span class="v2dot"></span>'+
           '<div class="nme"><div class="pn">'+esc(it.nombre||'')+'</div>'+
-          (it.sub?'<div class="sub2">'+esc(it.sub)+'</div>':'')+'</div>'+
-          '<span class="q">'+esc(q)+'</span>'+
+          '<div class="sub2">'+(uo?('en <b>'+esc(uo)+'</b>'):(it.sub?esc(it.sub):''))+'</div></div>'+
+          '<span class="q">'+esc(qShow)+(uo?'':'') +'</span>'+
           '<span class="v2mini">'+
             '<button data-eqty="'+idx+'" aria-label="cantidad" title="cantidad">#</button>'+
             '<button data-edit="'+idx+'" aria-label="cambiar" title="cambiar producto">✎</button>'+
@@ -1152,8 +1226,8 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 })();
 renderLog();
 if(OPERADOR){ initModo(); }
-// arranque directo a Pantalla 1 si ya hay operador (Android voz / iPhone dictado)
-if(OPERADOR && window.openSchedaHabla){ window.openSchedaHabla(); }
+// si ya hay operador: muestra el selector de puerta (no entra directo a una modalidad)
+if(OPERADOR && typeof mostrarModos==='function'){ mostrarModos(); }
 </script>
 </body>
 </html>
