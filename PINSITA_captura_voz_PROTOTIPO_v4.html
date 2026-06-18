@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>PINSITA · Captura por voz (prototipo)</title>
+<title>PINSITA · Captura (v10 · Puerta D)</title>
 <style>
   :root{
     --bg:#1F2329; --panel:#2A2F36; --panel2:#323840; --line:#3D444D;
@@ -195,6 +195,37 @@
   .v2confirm{background:var(--acc);border:none;color:#fff;border-radius:12px;padding:14px 22px;font-size:15px;font-weight:600}
   .v2confirm:disabled{opacity:.45}
   .v2done{text-align:center;padding:40px 20px;color:var(--ok);font-size:16px}
+
+  /* ===== PUERTA D · picker live (escritura + autocomplete estilo WhatsApp) ===== */
+  .v2add{margin:6px 0 2px;padding:12px;border:1px dashed var(--line);border-radius:12px;background:var(--panel)}
+  .v2add.tap{border-style:solid;border-color:var(--acc);background:var(--panel2)}
+  .v2add-btn{width:100%;border:none;background:transparent;color:var(--acc);font-size:14px;
+    font-weight:600;padding:4px 0;display:flex;align-items:center;justify-content:center;gap:8px}
+  .pk{margin-top:4px}
+  .pk-row{display:flex;gap:8px;align-items:center}
+  .pk-q{width:64px;flex:0 0 64px;background:var(--bg);border:1px solid var(--line);color:var(--t1);
+    border-radius:10px;padding:11px 8px;font-size:16px;text-align:center}
+  .pk-in{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);color:var(--t1);
+    border-radius:10px;padding:11px 13px;font-size:16px}
+  .pk-in:focus,.pk-q:focus{outline:none;border-color:var(--acc)}
+  .pk-list{margin-top:8px;max-height:240px;overflow-y:auto;border-radius:10px}
+  .pk-opt{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    background:var(--panel2);border:1px solid var(--line);border-bottom:none;color:var(--t1);
+    padding:11px 13px;font-size:15px}
+  .pk-opt:first-child{border-top-left-radius:10px;border-top-right-radius:10px}
+  .pk-opt:last-child{border-bottom:1px solid var(--line);border-bottom-left-radius:10px;border-bottom-right-radius:10px}
+  .pk-opt:active{background:var(--acc);border-color:var(--acc)}
+  .pk-opt .pk-nm{flex:1;min-width:0}
+  .pk-opt .pk-sec{font-size:11px;color:var(--t3);margin-top:2px}
+  .pk-opt .pk-badge{font-size:10px;color:var(--t3);border:1px solid var(--line);
+    border-radius:8px;padding:2px 6px;white-space:nowrap}
+  .pk-empty{padding:14px;color:var(--t3);font-size:13px;text-align:center}
+  .pk-x{flex:0 0 auto;background:transparent;border:none;color:var(--t2);font-size:20px;padding:0 4px}
+  /* mini-acciones en cada fila ok (fix #2: editar/borrar en TODAS las filas) */
+  .v2mini{display:flex;gap:6px;flex:0 0 auto;margin-left:8px}
+  .v2mini button{background:transparent;border:none;font-size:16px;padding:4px;color:var(--t2);opacity:.75}
+  .v2mini button:active{opacity:1}
+  .v2row .nme{cursor:default}
 </style>
 </head>
 <body>
@@ -207,7 +238,7 @@
   </div>
 
   <h1>PINSITA · captura por voz <span class="opchip" id="opChip"></span></h1>
-  <p class="sub">Prototipo v9 (BD viva) — di un movimiento y confírmalo. Todo se guarda en este teléfono.
+  <p class="sub">Prototipo v10 (BD viva · Puerta D) — habla o escribe, corrige y confirma. Todo se guarda en este teléfono.
     <a class="help-link" id="openS1" style="margin-top:6px">▶ Probar captura de lista (Pantalla 1)</a></p>
 
   <!-- ===== SCHEDA 1 · HABLA ===== -->
@@ -529,6 +560,37 @@ function interpretLista(frase, tipo){
   });
 }
 
+/* ===== PUERTA D · búsqueda al teclado (superficie WhatsApp, motor nuestro) =====
+   Híbrido (decisión 18-jun): primero los que EMPIEZAN por lo escrito (lo que el pulgar
+   espera), después los fonéticamente cercanos por diceScore (rescata "tomatte"->Tomate).
+   Reusa NAME_IDX + diceScore + cleanName: NO es un cerebro nuevo, es el mismo de la voz.
+   Devuelve VOCAB-items únicos (no claves de índice), tope configurable. */
+function searchProductos(q, limit){
+  limit = limit || 8;
+  var nq = norm(q);
+  if(!nq) return [];
+  var byPrefix=[], byContains=[], byFuzzy=[], seen={};
+  NAME_IDX.forEach(function(ni){
+    var sku = ni.v.sku;
+    if(seen[sku]) return;            // un producto una vez (su mejor entrada gana)
+    var key = ni.key;
+    if(key.indexOf(nq)===0){ seen[sku]=1; byPrefix.push(ni.v); }       // empieza por: cima
+    else if(key.indexOf(nq)>=0){ seen[sku]=1; byContains.push(ni.v); } // contiene: medio
+    else {
+      var sc = diceScore(nq, key);
+      if(sc>=58){ seen[sku]=1; byFuzzy.push({v:ni.v, sc:sc}); }        // parecido fonético: abajo
+    }
+  });
+  byFuzzy.sort(function(a,b){return b.sc-a.sc;});
+  // orden de relevancia: prefijo (alfabético por nombre), contiene, fuzzy
+  byPrefix.sort(function(a,b){return cleanName(a.nombre).localeCompare(cleanName(b.nombre));});
+  byContains.sort(function(a,b){return cleanName(a.nombre).localeCompare(cleanName(b.nombre));});
+  return byPrefix
+    .concat(byContains)
+    .concat(byFuzzy.map(function(x){return x.v;}))
+    .slice(0, limit);
+}
+
 /* ===== VOZ (reusa el spike es-CL) ===== */
 var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 var mic=document.getElementById('mic'),hint=document.getElementById('hint'),
@@ -792,7 +854,6 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
       else { estado='ok'; sub=(top.v.secs&&top.v.secs.length?top.v.secs[0]:''); }
       ITEMS.push({pos:ITEMS.length+1, said:r.said, qty:r.qty, unidad:r.unidad,
         sku:top?top.v.sku:null, nombre:top?top.v.nombre:null, sub:sub, estado:estado,
-        secs:top?(top.v.secs||[]):[],
         cands:r.cands.map(function(b){return {sku:b.v.sku,nombre:b.v.nombre,sc:b.sc};})});
     });
     render();
@@ -859,8 +920,7 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
   });
 
   s1Rev.addEventListener('click',function(){
-    if(!ITEMS.length){ return; }
-    openS2();
+    openS2();  // se abre aunque esté vacía: permite agregar a mano (caso PC / teclado)
   });
 
   /* ===== SCHEDA 2 · VALIDA — lógica (mismo scope: ve ITEMS) ===== */
@@ -879,25 +939,87 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
     if(!c) return;
     // si el said no coincidía con el top, es una corrección -> cola de candidatos alias (log, no fuente)
     if(it.sku!==sku){ pushAliasCandidato(it.said, sku, c.nombre); }
-    it.sku=sku; it.nombre=c.nombre; it.estado='ok'; it.sub=skuSecs(sku); it.secs=skuSecsArr(sku);
+    it.sku=sku; it.nombre=c.nombre; it.estado='ok'; it.sub=skuSecs(sku);
     renderS2();
   }
   function quitar(idx){ ITEMS.splice(idx,1); ITEMS.forEach(function(x,i){x.pos=i+1;}); renderS2(); }
-  function buscar(idx){
-    var q=prompt('¿Cuál era el producto? (escribe el nombre)');
-    if(!q||!q.trim()) return;
-    var rows=interpretLista(q.trim(), s1Tipo.value); // reusa el cerebro para buscar
-    var top=rows.length&&rows[0].cands.length?rows[0].cands[0]:null;
+
+  // ===== PUERTA D · picker live reutilizable =====
+  // modo 'fix'  : corrige la fila idx (cambia producto, conserva qty/said)
+  // modo 'add'  : agrega una fila nueva escrita a mano (pide qty + producto)
+  // Sustituye el prompt() nativo: ahora se ve lo que se escribe y se elige con un tap.
+  var pickerHost=null;
+  function closePicker(){ if(pickerHost){ pickerHost.remove(); pickerHost=null; } }
+  function openPicker(mode, idx){
+    closePicker();
+    var host=document.createElement('div'); host.className='v2add tap'; pickerHost=host;
+    var qInit = (mode==='fix' && ITEMS[idx]) ? (ITEMS[idx].qty!=null?ITEMS[idx].qty:'') : '';
+    host.innerHTML =
+      '<div class="pk-row">'+
+        '<input class="pk-q" inputmode="decimal" placeholder="cant." value="'+esc(String(qInit))+'">'+
+        '<input class="pk-in" placeholder="escribe el producto…" autocomplete="off" autocapitalize="off" spellcheck="false">'+
+        '<button class="pk-x" aria-label="cerrar">✕</button>'+
+      '</div>'+
+      '<div class="pk-list" id="pkList"></div>';
+    var qEl=host.querySelector('.pk-q'), inEl=host.querySelector('.pk-in'),
+        xEl=host.querySelector('.pk-x'), listEl=host.querySelector('#pkList');
+
+    function commit(v){ // v = item de VOCAB elegido
+      var qty = qEl.value.trim()==='' ? null : parseFloat(qEl.value.replace(',','.'));
+      if(mode==='fix'){
+        var it=ITEMS[idx];
+        if(it.sku!==v.sku) pushAliasCandidato(it.said, v.sku, v.nombre); // corrección -> cola N22
+        it.sku=v.sku; it.nombre=v.nombre; it.estado='ok'; it.sub=skuSecs(v.sku);
+        if(qty!=null) it.qty=qty;
+      } else { // add
+        ITEMS.push({pos:ITEMS.length+1, said:'(a mano) '+v.nombre, qty:qty, unidad:null,
+          sku:v.sku, nombre:v.nombre, sub:skuSecs(v.sku), estado:'ok',
+          cands:[{sku:v.sku,nombre:v.nombre,sc:100}]});
+      }
+      closePicker(); renderS2();
+    }
+    function paint(){
+      var res=searchProductos(inEl.value, 8);
+      if(!inEl.value.trim()){ listEl.innerHTML='<div class="pk-empty">Escribe para buscar entre los '+VOCAB.length+' productos.</div>'; return; }
+      if(!res.length){ listEl.innerHTML='<div class="pk-empty">Nada parecido a "'+esc(inEl.value)+'". Prueba otra forma.</div>'; return; }
+      listEl.innerHTML=res.map(function(v){
+        var sec=(v.secs&&v.secs.length)?v.secs[0]:'';
+        return '<button class="pk-opt" data-sku="'+v.sku+'">'+
+          '<span class="pk-nm">'+esc(v.nombre)+(sec?'<div class="pk-sec">'+esc(sec)+'</div>':'')+'</span>'+
+          '<span class="pk-badge">'+esc(v.sku)+'</span></button>';
+      }).join('');
+      listEl.querySelectorAll('.pk-opt').forEach(function(b){
+        b.addEventListener('click',function(){
+          var v=VOCAB.filter(function(x){return x.sku===b.dataset.sku;})[0]; if(v) commit(v);
+        });
+      });
+    }
+    inEl.addEventListener('input', paint);
+    inEl.addEventListener('keydown',function(e){
+      if(e.key==='Enter'){ var first=listEl.querySelector('.pk-opt'); if(first) first.click(); }
+      if(e.key==='Escape'){ closePicker(); }
+    });
+    xEl.addEventListener('click', closePicker);
+    return host; // el caller decide dónde montarlo
+  }
+
+  // editar solo la cantidad de una fila, sin reabrir el picker entero
+  function editarQty(idx){
     var it=ITEMS[idx];
-    if(top){ pushAliasCandidato(it.said, top.v.sku, top.v.nombre);
-      it.sku=top.v.sku; it.nombre=top.v.nombre; it.estado='ok'; it.sub=skuSecs(top.v.sku); it.secs=skuSecsArr(top.v.sku);
-    } else { alert('No encontré "'+q+'". Prueba otra forma o quítalo.'); }
+    var v=prompt('Cantidad para "'+(it.nombre||it.said)+'":', it.qty!=null?it.qty:'');
+    if(v===null) return;
+    v=v.trim(); it.qty = v==='' ? null : parseFloat(v.replace(',','.'));
     renderS2();
+  }
+  function buscar(idx){ // ahora abre el picker live in-place sobre la fila
+    var anchor=document.getElementById('row-'+idx);
+    var host=openPicker('fix', idx);
+    if(anchor && anchor.parentNode){ anchor.parentNode.insertBefore(host, anchor.nextSibling); }
+    else { s2Body.appendChild(host); }
+    var inEl=host.querySelector('.pk-in'); if(inEl) inEl.focus();
   }
   function skuSecs(sku){ var v=VOCAB.filter(function(x){return x.sku===sku;})[0];
     return v&&v.secs&&v.secs.length?v.secs[0]:''; }
-  function skuSecsArr(sku){ var v=VOCAB.filter(function(x){return x.sku===sku;})[0];
-    return v&&v.secs?v.secs:[]; }
   // cola de candidatos alias: localStorage, curatela humana después (N11/N22) — NUNCA escribe fuente
   function pushAliasCandidato(said,sku,nombre){
     try{ var k='pinsita_alias_cola';
@@ -908,32 +1030,48 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
   }
 
   function renderS2(){
-    if(!ITEMS.length){ s2Body.innerHTML='<div class="v2done">Lista vacía.</div>'; closeS2(); openScheda(); return; }
+    closePicker();
+    if(!ITEMS.length){
+      // ya no cerramos de golpe: ofrecemos agregar a mano aunque la lista esté vacía
+      s2Body.innerHTML='<div class="v2done" style="padding:24px 20px;color:var(--t2)">Lista vacía.</div>'+
+        '<div class="v2add" id="addHost"><button class="v2add-btn" id="addBtn">＋ Agregar producto a mano</button></div>';
+      document.getElementById('addBtn').addEventListener('click', mountAdd);
+      s2Stat.innerHTML=''; s2Confirm.disabled=true; s2Confirm.textContent='Confirmar';
+      return;
+    }
     var html='';
     ITEMS.forEach(function(it,idx){
       var q=(it.qty!=null?it.qty:'?')+(it.unidad?(' '+it.unidad):'');
       if(it.estado==='ok'){
-        html+='<div class="v2row"><span class="v2dot"></span>'+
+        html+='<div class="v2row" id="row-'+idx+'"><span class="v2dot"></span>'+
           '<div class="nme"><div class="pn">'+esc(it.nombre||'')+'</div>'+
           (it.sub?'<div class="sub2">'+esc(it.sub)+'</div>':'')+'</div>'+
-          '<span class="q">'+esc(q)+'</span></div>';
+          '<span class="q">'+esc(q)+'</span>'+
+          '<span class="v2mini">'+
+            '<button data-eqty="'+idx+'" aria-label="cantidad" title="cantidad">#</button>'+
+            '<button data-edit="'+idx+'" aria-label="cambiar" title="cambiar producto">✎</button>'+
+            '<button data-quitar="'+idx+'" aria-label="quitar" title="quitar">🗑</button>'+
+          '</span></div>';
       } else if(it.estado==='warn'){
         var pills=(it.cands||[]).slice(0,3).map(function(c){
           return '<button class="v2pill'+(c.sku===it.sku?' on':'')+'" data-pick="'+idx+'" data-sku="'+c.sku+'">'+esc(c.nombre)+' <span style="opacity:.6">'+c.sc+'</span></button>';
         }).join('');
-        html+='<div class="v2warn"><div class="v2head"><span style="color:var(--warn)">⚠</span>'+
+        html+='<div class="v2warn" id="row-'+idx+'"><div class="v2head"><span style="color:var(--warn)">⚠</span>'+
           '<div class="nme"><div class="pn">'+esc(it.nombre||'')+'</div>'+
           '<div class="sub2">'+esc(it.sub||'')+'</div></div><span class="q">'+esc(q)+'</span></div>'+
-          '<div class="v2acts">'+pills+'<button class="v2pill ghost" data-buscar="'+idx+'">otra…</button></div></div>';
+          '<div class="v2acts">'+pills+'<button class="v2pill ghost" data-buscar="'+idx+'">escribir…</button>'+
+          '<button class="v2pill ghost" data-quitar="'+idx+'">quitar</button></div></div>';
       } else { // bad / nomatch
-        html+='<div class="v2bad"><div class="v2head"><span class="v2num">'+it.pos+'</span>'+
+        html+='<div class="v2bad" id="row-'+idx+'"><div class="v2head"><span class="v2num">'+it.pos+'</span>'+
           '<div class="nme"><div class="pn bad">Sin coincidencia</div>'+
           '<div class="sub2">oíste: <b>"'+esc(it.said)+'"</b></div></div>'+
           '<span class="q">'+esc(q)+'</span></div>'+
-          '<div class="v2acts"><button class="v2btn" data-buscar="'+idx+'">🔍 Buscar</button>'+
+          '<div class="v2acts"><button class="v2btn" data-buscar="'+idx+'">⌨ Escribir</button>'+
           '<button class="v2btn x" data-quitar="'+idx+'">🗑</button></div></div>';
       }
     });
+    // bloque agregar a mano (Puerta D) — siempre disponible al final
+    html+='<div class="v2add" id="addHost"><button class="v2add-btn" id="addBtn">＋ Agregar producto a mano</button></div>';
     s2Body.innerHTML=html;
     // engancha acciones
     s2Body.querySelectorAll('[data-pick]').forEach(function(b){
@@ -942,13 +1080,27 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
     s2Body.querySelectorAll('[data-buscar]').forEach(function(b){
       b.addEventListener('click',function(){ buscar(+b.dataset.buscar); });
     });
+    s2Body.querySelectorAll('[data-edit]').forEach(function(b){
+      b.addEventListener('click',function(){ buscar(+b.dataset.edit); });
+    });
+    s2Body.querySelectorAll('[data-eqty]').forEach(function(b){
+      b.addEventListener('click',function(){ editarQty(+b.dataset.eqty); });
+    });
     s2Body.querySelectorAll('[data-quitar]').forEach(function(b){
       b.addEventListener('click',function(){ quitar(+b.dataset.quitar); });
     });
+    document.getElementById('addBtn').addEventListener('click', mountAdd);
     var ok=ITEMS.filter(function(x){return x.estado==='ok';}).length, n=ITEMS.length, pend=n-ok;
     s2Stat.innerHTML='<b>'+ok+' de '+n+'</b> listos'+(pend?' · '+pend+' por revisar':'');
     s2Confirm.disabled=pend>0;
     s2Confirm.textContent=pend>0?('Faltan '+pend):'Confirmar';
+  }
+  // monta el picker de alta a mano dentro del bloque addHost
+  function mountAdd(){
+    var hostWrap=document.getElementById('addHost'); if(!hostWrap) return;
+    var host=openPicker('add', null);
+    hostWrap.innerHTML=''; hostWrap.appendChild(host); hostWrap.classList.add('tap');
+    var inEl=host.querySelector('.pk-in'); if(inEl) inEl.focus();
   }
 
   // ===== GRADINO 2 · escribir en el GAS vivo (Riesco bound control) =====
@@ -965,27 +1117,15 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
     if(s2Confirm.disabled) return;
     s2Confirm.disabled=true; s2Confirm.textContent='Enviando…';
     var tipo=s1Tipo.value;
+    var itemsGAS=ITEMS.map(function(x){
+      return { sku:x.sku, desc:x.nombre, unidad:'UO', uoDesc:'', cantidad:x.qty, obs:'voz · '+(x.said||'') };
+    });
     var payload, res;
     if(tipo==='Entrega Secc'){
-      // N16: el destino se deduce de la sección del producto (Col C de BD), no de un selector.
-      function capSec(s){ return (s||'').split(' ').map(function(w){return w?w.charAt(0).toUpperCase()+w.slice(1):w;}).join(' '); }
-      var grupos={};
-      ITEMS.forEach(function(x){
-        var sec = (x.secs&&x.secs.length)? x.secs[0] : 'cocina central';
-        var dest = capSec(sec);
-        (grupos[dest]=grupos[dest]||[]).push({ sku:x.sku, desc:x.nombre, unidad:'UO', uoDesc:'', cantidad:x.qty, obs:'voz · '+(x.said||'') });
-      });
-      res={ok:true, scritti:0, secciones:[]};
-      for(var dest in grupos){
-        var r1=await callGAS({ action:'registrarEntregaBatch', local:'Riesco', destino:dest,
-          responsable:OPERADOR, items:grupos[dest] });
-        if(r1&&r1.ok){ res.scritti+=(r1.scritti||grupos[dest].length); res.secciones.push(dest); }
-        else { res.ok=false; res.error=(r1&&r1.error)||('fallo sección '+dest); break; }
-      }
+      payload={ action:'registrarEntregaBatch', local:'Riesco', destino:(window.__s1Destino||'Barra Jugos'),
+        responsable:OPERADOR, items:itemsGAS };
+      res=await callGAS(payload);
     } else {
-      var itemsGAS=ITEMS.map(function(x){
-        return { sku:x.sku, desc:x.nombre, unidad:'UO', uoDesc:'', cantidad:x.qty, obs:'voz · '+(x.said||'') };
-      });
       // otros tipos: un registrarMovimiento por item (origen derivado del tipo, como el jefe_local)
       var origen = (tipo==='Ingreso BLoc')?'Bodega Central':(tipo==='Ingreso Proveedor')?'Proveedor':'Bodega Local';
       res={ok:true, scritti:0};
