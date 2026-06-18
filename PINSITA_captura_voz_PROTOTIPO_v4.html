@@ -92,6 +92,10 @@
   .pk-sub{font-size:11px;color:var(--t3);margin-top:2px}
   .pk-badge{font-size:10px;color:var(--t3);border:1px solid var(--line);border-radius:8px;padding:2px 6px;white-space:nowrap}
   .pk-empty{padding:14px;color:var(--t3);font-size:13px;text-align:center}
+  .pk-ok{width:100%;margin-top:10px;background:var(--panel2);border:1px solid var(--ok);color:var(--ok);
+    border-radius:11px;padding:13px;font-size:15px;font-weight:600}
+  .pk-ok.ready{background:var(--ok);color:#fff;border-color:var(--ok)}
+  .pk-ok:active{transform:scale(.98)}
 
   /* ===== PORTE (barra inferior, siempre presente en COMPONI) ===== */
   .audio{display:none;align-items:center;gap:8px;justify-content:center;padding:8px;color:var(--t2);font-size:13px}
@@ -100,8 +104,10 @@
   .bars span{width:3px;background:var(--acc);border-radius:2px;animation:b .8s infinite}
   .bars span:nth-child(2){animation-delay:.15s}.bars span:nth-child(3){animation-delay:.3s}.bars span:nth-child(4){animation-delay:.45s}
   @keyframes b{0%,100%{height:4px}50%{height:16px}}
-  .portes{border-top:1px solid var(--line);background:var(--bg);padding:10px 14px;display:flex;gap:8px;
-    position:sticky;bottom:0}
+  .portes{border-top:1px solid var(--line);background:var(--bg);padding:10px 14px;display:flex;gap:8px}
+  /* bloque inferior sticky: foto + porte juntas, ancladas abajo (fix 4) */
+  .bottombar{position:sticky;bottom:0;background:var(--bg);z-index:15}
+  .bottombar .foto-imbocco{border-top:1px solid var(--line)}
   .porta{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--t1);border-radius:13px;
     padding:13px 6px;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:12px;font-weight:600}
   .porta .ic{font-size:22px;line-height:1}
@@ -155,23 +161,24 @@
 
   <!-- LISTA (crece) -->
   <div class="list" id="list">
-    <div class="empty" id="empty">Elige una acción arriba.<br>Después usá una puerta abajo para sumar productos.<br>La lista crece acá.</div>
+    <div class="empty" id="empty">Elige una acción arriba.<br>Luego usa una puerta abajo para sumar productos.<br>La lista crece aquí.</div>
   </div>
 
   <!-- AUDIO feedback -->
   <div class="audio" id="audio"><span id="audioTxt">escuchando…</span>
     <span class="bars"><span></span><span></span><span></span><span></span></span></div>
 
-  <!-- foto al imbocco -->
-  <div class="foto-imbocco" id="fotoImbocco" style="display:none">
-    <button id="btnFoto">📷 Sacar foto y seguir después (sospeso)</button>
-  </div>
-
-  <!-- PORTE (modo COMPONI) -->
-  <div class="portes" id="portes">
-    <button class="porta" id="pVoz"><span class="ic">🎤</span>Voz<span class="tag">dictá</span></button>
-    <button class="porta" id="pTeclado"><span class="ic">⌨️</span>Teclado<span class="tag">escribí</span></button>
-    <button class="porta soon" id="pQR"><span class="ic">▦</span>QR<span class="tag">pronto</span></button>
+  <!-- BLOQUE INFERIOR STICKY: foto (imbocco) + porte. La foto NO se va con el scroll (fix 4) -->
+  <div class="bottombar" id="bottombar">
+    <div class="foto-imbocco" id="fotoImbocco">
+      <button id="btnFoto">📷 Sacar foto y seguir después (sospeso)</button>
+    </div>
+    <!-- PORTE · orden: QR · Teclado · Voz (fix 3) -->
+    <div class="portes" id="portes">
+      <button class="porta soon" id="pQR"><span class="ic">▦</span>QR<span class="tag">pronto</span></button>
+      <button class="porta" id="pTeclado"><span class="ic">⌨️</span>Teclado<span class="tag">escribe</span></button>
+      <button class="porta" id="pVoz"><span class="ic">🎤</span>Voz<span class="tag">dicta</span></button>
+    </div>
   </div>
 
   <!-- ACTION BAR (revisar / confirmar) -->
@@ -456,15 +463,12 @@ var pickerEl = null;
 // El VERBO es un DATO, no layout. Cada verbo declara su NATURALEZA (registrar/interrogar/comandar).
 // Hoy sólo vive 'registrar' (6 tipos del GAS). El telaio ya prevé los otros.
 var VERBOS = [
-  {id:'Entrega Secc',      label:'→ Entrega a sección',        nat:'registrar', qReq:true},
-  {id:'Devolucion Secc',   label:'← Devolución de sección',    nat:'registrar', qReq:true},
-  {id:'Ajuste + mas',      label:'+ Ajuste (más)',             nat:'registrar', qReq:true},
-  {id:'Ajuste - menos',    label:'− Ajuste / merma (menos)',   nat:'registrar', qReq:true},
-  {id:'Ingreso BLoc',      label:'↓ Ingreso a Bodega Local',   nat:'registrar', qReq:true},
-  {id:'Ingreso Proveedor', label:'↓ Ingreso de Proveedor',     nat:'registrar', qReq:true}
-  // futuro: {id:'Consultar stock', nat:'interrogar', qReq:false}  -> no pide Q, sólo lee
-  // futuro: {id:'Emitir OC',       nat:'comandar',   qReq:true}   -> prepara, humano ejecuta
+  {id:'Entrega Secc',   label:'→ Entrega a sección',          nat:'registrar', qReq:true},
+  {id:'Ajuste - menos', label:'− Ajuste / Merma (menos)',     nat:'registrar', qReq:true},
+  {id:'Ingreso BLoc',   label:'↓ Ingreso a Bodega Local',     nat:'registrar', qReq:true},
+  {id:'Conteo Fisico',  label:'☑ Conteo Físico BLocal',       nat:'conteo',    qReq:true, link:true}
 ];
+var URL_CONTEO = 'https://sistema.pinsita.cl/rsc/jefe_local_operaciones.html#conteo';
 function verboActual(){ var id=document.getElementById('verbo').value;
   return VERBOS.filter(function(v){return v.id===id;})[0] || VERBOS[0]; }
 
@@ -497,14 +501,28 @@ $('btnOp').onclick=function(){ localStorage.removeItem('pinsita_operador'); OPER
 
 // ---------- verbo dropdown (desde DATO) ----------
 verboSel.innerHTML = VERBOS.map(function(v){return '<option value="'+v.id+'">'+v.label+'</option>';}).join('');
-verboSel.addEventListener('change', function(){ render(); });
+verboSel.addEventListener('change', function(){
+  var v=verboActual();
+  if(v.link){ // Conteo Físico: NO se compone aquí, vive en su vista propia (ya existe)
+    if(ITEMS.length && !confirm('Tenés '+ITEMS.length+' producto(s) en la lista. ¿Salir al Conteo Físico? (se pierde la lista actual)')){
+      verboSel.value=VERBOS[0].id; return;
+    }
+    if(confirm('El Conteo Físico es una pantalla aparte:\nte muestra TODOS los productos con su stock teórico, y tú anotas lo que tienes. El sistema corrige con ajuste +/−.\n\n¿Abrir el Conteo Físico de Riesco?')){
+      window.location.href = URL_CONTEO;
+    } else {
+      verboSel.value=VERBOS[0].id;
+    }
+    return;
+  }
+  render();
+});
 
 // ---------- ARRANQUE ----------
 function arrancar(){
   opChip.textContent=OPERADOR||'—';
   if(!window.__vocabCargado && !window.__vocabCargando){
     window.__vocabCargando=true;
-    emptyEl.innerHTML='⏳ Cargando catálogo desde BD…';
+    setEmptyMsg('cargando');
     cargarVocabDesdeBD().then(function(res){
       window.__vocabCargado=res.ok; window.__vocabCargando=false; window.__vocabRes=res;
       render();
@@ -512,16 +530,25 @@ function arrancar(){
   }
   setEstado('componi'); render();
 }
+// Fix 2: el empty refleja SIEMPRE el estado real (no se queda la clessidra colgada)
+function setEmptyMsg(state){
+  if(state==='cargando'){ emptyEl.innerHTML='⏳ Cargando catálogo desde BD…'; return; }
+  var src = window.__vocabRes && window.__vocabRes.ok ? ('✓ '+window.__vocabRes.n+' productos (BD viva)')
+          : (window.__vocabCargando ? '' : (window.__vocabRes ? ('⚠ '+window.__vocabRes.fuente) : ''));
+  emptyEl.innerHTML='Elige una acción arriba.<br>Luego usa una puerta abajo para sumar productos.<br>La lista crece aquí.'+
+    (src?'<div style="margin-top:10px;color:'+(window.__vocabRes&&window.__vocabRes.ok?'var(--ok)':'var(--warn)')+';font-size:11px">'+src+'</div>':'');
+}
 
 // ---------- MÁQUINA DE ESTADOS ----------
 function setEstado(e){
   ESTADO=e;
+  var bb=$('bottombar');
   if(e==='componi'){
-    portes.style.display='flex'; fotoImbocco.style.display=ITEMS.length?'none':'block';
+    if(bb) bb.style.display='block';
     actionbar.style.display='none';
     revbar.style.display = ITEMS.length ? 'flex' : 'none';
   } else { // rivedi
-    portes.style.display='none'; fotoImbocco.style.display='none';
+    if(bb) bb.style.display='none';
     revbar.style.display='none'; actionbar.style.display='flex';
     $('btnVolver').style.display='inline-block';
   }
@@ -532,8 +559,9 @@ function render(){
   closePicker();
   // empty
   if(!ITEMS.length){
+    if(!window.__vocabCargando) setEmptyMsg('ready');
     emptyEl.style.display='block';
-    listEl.querySelectorAll('.rowwrap,.row').forEach(function(n){n.remove();});
+    listEl.querySelectorAll('.rowwrap,.row,.picker').forEach(function(n){n.remove();});
     setEstado('componi');
     actualizarStats();
     return;
@@ -686,7 +714,7 @@ $('pVoz').onclick=function(){ son?stopVoz():startVoz(); };
 
 // ---------- PUERTA TECLADO (Puerta D) ----------
 $('pTeclado').onclick=function(){ abrirPickerAdd(false); };
-$('pQR').onclick=function(){ alert('▦ QR: todavía no.\nViene cuando exista el campo codigo_barras.\nPor ahora usá Voz o Teclado.'); };
+$('pQR').onclick=function(){ alert('▦ QR: todavía no.\nViene cuando exista el campo codigo_barras.\nPor ahora usa Voz o Teclado.'); };
 
 // ---------- PICKER (alta a mano y corrección) ----------
 function closePicker(){ if(pickerEl){ pickerEl.remove(); pickerEl=null; } }
@@ -697,18 +725,28 @@ function buildPicker(mode, idx){
   host.innerHTML=
     '<div class="pk-row">'+
       '<input class="pk-q" inputmode="decimal" placeholder="cant." value="'+esc(String(qInit))+'">'+
-      '<input class="pk-in" placeholder="escribí el producto…" autocomplete="off" autocapitalize="off" spellcheck="false">'+
+      '<input class="pk-in" placeholder="escribe el producto…" autocomplete="off" autocapitalize="off" spellcheck="false">'+
       '<button class="pk-x">✕</button></div>'+
     '<div class="pk-hint" id="pkHint">La cantidad es obligatoria.</div>'+
-    '<div class="pk-list" id="pkList"></div>';
+    '<div class="pk-list" id="pkList"></div>'+
+    '<button class="pk-ok" id="pkOk" style="display:none">✓ Agregar</button>';
   var qEl=host.querySelector('.pk-q'), inEl=host.querySelector('.pk-in'),
-      xEl=host.querySelector('.pk-x'), listE=host.querySelector('#pkList'), hintE=host.querySelector('#pkHint');
+      xEl=host.querySelector('.pk-x'), listE=host.querySelector('#pkList'),
+      hintE=host.querySelector('#pkHint'), okBtn=host.querySelector('#pkOk');
   var chosen=null;
+  function refreshOk(){
+    if(chosen){ var uo=skuUO(chosen.sku); var q=qEl.value.trim();
+      okBtn.style.display='block';
+      okBtn.textContent = '✓ Agregar '+chosen.nombre + (q?(' · '+q+(uo?(' '+uo):'')):' · falta cantidad');
+      okBtn.classList.toggle('ready', q!=='');
+    } else { okBtn.style.display='none'; }
+  }
   function refreshHint(){
     if(chosen){ var uo=skuUO(chosen.sku);
       hintE.innerHTML = '<b style="color:var(--t1)">'+esc(chosen.nombre)+'</b>'+(uo?(' · en <b style="color:var(--t2)">'+esc(uo)+'</b>'):'')+
-        ' · '+esc(capSec(skuSec(chosen.sku)))+' — escribí la cantidad';
-    } else hintE.textContent='La cantidad es obligatoria.';
+        ' · '+esc(capSec(skuSec(chosen.sku)))+' — escribe la cantidad y confirma con ✓';
+    } else hintE.textContent='Busca el producto, pon la cantidad, y confirma con ✓.';
+    refreshOk();
   }
   function commit(){
     if(!chosen){ inEl.focus(); return; }
@@ -727,7 +765,7 @@ function buildPicker(mode, idx){
   }
   function paint(){
     var res=searchProductos(inEl.value, 8);
-    if(!inEl.value.trim()){ listE.innerHTML='<div class="pk-empty">Escribí para buscar entre los '+VOCAB.length+' productos.</div>'; return; }
+    if(!inEl.value.trim()){ listE.innerHTML='<div class="pk-empty">Escribe para buscar entre los '+VOCAB.length+' productos.</div>'; return; }
     if(!res.length){ listE.innerHTML='<div class="pk-empty">Nada parecido a "'+esc(inEl.value)+'".</div>'; return; }
     listE.innerHTML=res.map(function(v){ var uo=(v.uo||'').trim(); var sec=capSec((v.secs&&v.secs[0])||'');
       var sub=(uo?('en '+uo):'')+(uo&&sec?' · ':'')+(sec||'');
@@ -735,15 +773,24 @@ function buildPicker(mode, idx){
         (sub?'<div class="pk-sub">'+esc(sub)+'</div>':'')+'</span><span class="pk-badge">'+esc(v.sku)+'</span></button>';
     }).join('');
     listE.querySelectorAll('.pk-opt').forEach(function(b){ b.onclick=function(){
+      // FIX 1: elegir NO agrega solo — fija la elección y muestra ✓ Agregar (no se pierde)
       chosen=skuItem(b.dataset.sku); inEl.value=chosen.nombre; listE.innerHTML=''; refreshHint();
-      if(qEl.value.trim()===''){ qEl.focus(); } else { commit(); }
+      if(qEl.value.trim()===''){ qEl.focus(); } // espera la Q + confirmación ✓
     };});
   }
   inEl.addEventListener('input', function(){ chosen=null; paint(); refreshHint(); });
-  inEl.addEventListener('keydown', function(e){ if(e.key==='Enter'){ var f=listE.querySelector('.pk-opt'); if(f){ f.click(); } else commit(); }
+  inEl.addEventListener('keydown', function(e){ if(e.key==='Enter'){ var f=listE.querySelector('.pk-opt'); if(f){ f.click(); } else if(chosen) commit(); }
     if(e.key==='Escape') closePicker(); });
+  qEl.addEventListener('input', refreshOk);
   qEl.addEventListener('keydown', function(e){ if(e.key==='Enter') commit(); });
-  xEl.onclick=closePicker;
+  okBtn.onclick=commit;
+  xEl.onclick=function(){
+    // FIX 1: si hay algo elegido/escrito sin confirmar, avisa antes de descartar
+    if(chosen || qEl.value.trim() || inEl.value.trim()){
+      if(!confirm('Hay un producto sin confirmar. ¿Descartarlo?')) return;
+    }
+    closePicker();
+  };
   return host;
 }
 function abrirPickerAdd(focusFromVoice){
@@ -763,7 +810,7 @@ function abrirPickerFix(idx){
 
 // ---------- foto (sospeso) — botón aparte al imbocco ----------
 $('btnFoto').onclick=function(){
-  alert('📷 Foto / sospeso: todavía no está cableado.\n\nAcá vivirá el "saco foto y sigo después":\nla foto sube al foglio, queda un pendiente, y lo completás luego (incluso desde el PC).\nEs el próximo cantiere.');
+  alert('📷 Foto / sospeso: todavía no está cableado.\n\nAquí vivirá el "saco foto y sigo después":\nla foto sube a la planilla, queda un pendiente, y lo completas después (incluso desde el PC).\nEs el próximo cantiere.');
 };
 
 // ---------- NAVEGACIÓN componi <-> rivedi ----------
