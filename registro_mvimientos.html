@@ -3,7 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>PINSITA · V1</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PINSITA">
+<meta name="theme-color" content="#1F2329">
+<link rel="manifest" href="manifest.json">
+<title>PINSITA · Registro de movimientos</title>
 <style>
   :root{
     --bg:#1F2329; --panel:#2A2F36; --panel2:#323840; --line:#3D444D;
@@ -135,6 +140,11 @@
   .done{text-align:center;padding:50px 20px;color:var(--ok);font-size:17px}
   .done span{display:block;color:var(--t2);font-size:13px;margin-top:8px}
   .hand{background:transparent;border:none;color:var(--t3);font-size:12px;text-decoration:underline}
+  /* badge sync offline */
+  .syncbadge{display:none;align-items:center;gap:5px;font-size:11px;font-weight:600;
+    padding:4px 10px;border-radius:20px;margin-top:6px}
+  .syncbadge.wait{background:rgba(217,146,63,.15);color:var(--warn);border:1px solid var(--warn)}
+  .syncbadge.bad{background:rgba(196,90,74,.15);color:var(--bad);border:1px solid var(--bad)}
 </style>
 </head>
 <body>
@@ -157,6 +167,7 @@
       <label>acción</label>
       <select class="verbo" id="verbo"></select>
     </div>
+    <span class="syncbadge" id="syncBadge" style="display:none"></span>
   </div>
 
   <!-- LISTA (crece) -->
@@ -834,49 +845,105 @@ async function callGAS(payload){ try{
   var r=await fetch(GAS_RIESCO,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
   var t=await r.text(); try{return JSON.parse(t);}catch(e){return {ok:true};} }catch(e){ return {ok:false,error:e.toString()}; } }
 
+// ============================================================================
+// COLA OFFLINE (Strato 3) — los movimientos se guardan local y se sincronizan
+// solos cuando vuelve la red. Idempotente vía loteId (el GAS no reescribe).
+// Estado por lote: pending → ok | fail. Badge arriba muestra pendientes/fallidos.
+// ============================================================================
+var COLA_KEY='pinsita_cola_lotes';
+function colaLeer(){ try{ return JSON.parse(localStorage.getItem(COLA_KEY)||'[]'); }catch(e){ return []; } }
+function colaGuardar(c){ try{ localStorage.setItem(COLA_KEY, JSON.stringify(c)); }catch(e){} }
+function nuevoLoteId(){
+  var tel=(localStorage.getItem('pinsita_devid')||'');
+  if(!tel){ tel='dev'+Math.random().toString(36).slice(2,7); localStorage.setItem('pinsita_devid',tel); }
+  return 'LOTE-'+tel+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,6);
+}
+function colaEncolar(payload, resumen){
+  var c=colaLeer();
+  c.push({ loteId:payload.loteId, payload:payload, resumen:resumen,
+           estado:'pending', ts:new Date().toISOString(), intentos:0 });
+  colaGuardar(c); pintarBadge();
+}
+var flushing=false;
+async function flushCola(){
+  if(flushing) return; flushing=true;
+  try{
+    var c=colaLeer();
+    for(var i=0;i<c.length;i++){
+      if(c[i].estado==='ok') continue;
+      c[i].intentos=(c[i].intentos||0)+1;
+      var r=await callGAS(c[i].payload);
+      if(r&&r.ok){ c[i].estado='ok'; c[i].okTs=new Date().toISOString(); }
+      else { c[i].estado='fail'; c[i].error=(r&&r.error)||'sin red'; }
+      colaGuardar(c); pintarBadge();
+    }
+    // limpia los 'ok' viejos (deja historial corto de la jornada)
+    c=colaLeer().filter(function(x){ return x.estado!=='ok'; });
+    colaGuardar(c); pintarBadge();
+  } finally { flushing=false; }
+}
+function colaPend(){ return colaLeer().filter(function(x){return x.estado==='pending';}).length; }
+function colaFail(){ return colaLeer().filter(function(x){return x.estado==='fail';}).length; }
+function pintarBadge(){
+  var el=document.getElementById('syncBadge'); if(!el) return;
+  var p=colaPend(), f=colaFail();
+  if(p===0 && f===0){ el.style.display='none'; return; }
+  el.style.display='inline-flex';
+  if(f>0){ el.className='syncbadge bad'; el.textContent='⚠ '+f+' sin enviar'+(p?(' · ⏳'+p):''); }
+  else   { el.className='syncbadge wait'; el.textContent='⏳ '+p+' enviando…'; }
+}
+window.addEventListener('online', function(){ flushCola(); });
+setInterval(function(){ if(navigator.onLine && (colaPend()||colaFail())) flushCola(); }, 20000);
+
 $('btnConfirm').onclick=async function(){
   if($('btnConfirm').disabled) return;
   var v=verboActual();
-  // confirmación explícita (fix #3)
+  // confirmación explícita
   if(!confirm('Vas a generar un movimiento:\n\n'+v.label+'\n'+ITEMS.length+' producto(s) · '+OPERADOR+'\n\n¿Confirmar?')) return;
-  $('btnConfirm').disabled=true; $('btnConfirm').textContent='Enviando…';
+  $('btnConfirm').disabled=true; $('btnConfirm').textContent='Guardando…';
   var tipo=v.id;
-  var res;
-  // fix velocidad (Strada 2): TODO en UNA sola llamada batch — 1 round-trip, 1 flush.
-  // destino/origen/tipo van POR ITEM, así Entrega (destino=sección, N16) y los
-  // demás movimientos (Ingreso/Ajuste/Merma) viajan en el mismo batch.
+  // batch único — destino/origen/tipo por item (Entrega: destino=sección, N16)
   var movItems=ITEMS.map(function(it){
     var origen, destino;
-    if(tipo==='Entrega Secc'){
-      origen='Bodega Local';
-      destino=capSec(skuSec(it.sku)||'Cocina Central'); // N16: sección del producto
-    } else {
-      origen=(tipo==='Ingreso BLoc')?'Bodega Central':(tipo==='Ingreso Proveedor')?'Proveedor':'Bodega Local';
-      destino='Bodega Local';
-    }
+    if(tipo==='Entrega Secc'){ origen='Bodega Local'; destino=capSec(skuSec(it.sku)||'Cocina Central'); }
+    else { origen=(tipo==='Ingreso BLoc')?'Bodega Central':(tipo==='Ingreso Proveedor')?'Proveedor':'Bodega Local'; destino='Bodega Local'; }
     return { tipo:tipo, origen:origen, destino:destino,
       sku:it.sku, desc:it.nombre, unidad:'UO', uoDesc:skuUO(it.sku)||'',
       cantidad:it.qty, obs:'pinsita · '+(it.said||'') };
   });
-  var rB=await callGAS({ action:'registrarMovimientoBatch', responsable:OPERADOR, items:movItems });
-  if(rB&&rB.ok) res={ok:true, scritti:(rB.scritti||movItems.length)};
-  else res={ok:false, error:(rB&&rB.error)||'fallo batch movimiento'};
-  if(res&&res.ok){
-    var n=res.scritti||ITEMS.length;
-    listEl.querySelectorAll('.rowwrap,.row').forEach(function(x){x.remove();});
-    emptyEl.style.display='none';
-    var d=document.createElement('div'); d.className='done';
-    d.innerHTML='✓ Registrado en el sistema<span>'+n+' productos · '+OPERADOR+' · '+v.label+'</span>';
-    listEl.appendChild(d);
-    actionbar.style.display='none'; revbar.style.display='none';
-    ITEMS.length=0;
-    // fix #3: vuelve solo a la HOME lista (porte visibles, dropdown verbo arriba).
-    // No tocamos portes a mano: setEstado('componi') las restituye via bottombar.
-    setTimeout(function(){ d.remove(); setEstado('componi'); render(); }, 1900);
-  } else {
-    $('btnConfirm').disabled=false; $('btnConfirm').textContent='Reintentar';
-    alert('No se pudo registrar: '+((res&&res.error)||'error')+'\nLa lista NO se perdió.');
+  var loteId=nuevoLoteId();
+  var payload={ action:'registrarMovimientoBatch', loteId:loteId, responsable:OPERADOR, items:movItems };
+  var resumen=ITEMS.length+' prod · '+v.label;
+
+  // 1) SIEMPRE encola primero (el movimiento NUNCA se pierde, ni sin red)
+  colaEncolar(payload, resumen);
+  var n=ITEMS.length;
+
+  // 2) intenta enviar ya
+  var enviado=false;
+  if(navigator.onLine){
+    var r=await callGAS(payload);
+    if(r&&r.ok){
+      enviado=true;
+      // marca este lote como ok en la cola
+      var c=colaLeer().map(function(x){ if(x.loteId===loteId){ x.estado='ok'; x.okTs=new Date().toISOString(); } return x; });
+      colaGuardar(c.filter(function(x){return x.estado!=='ok';})); pintarBadge();
+    }
   }
+
+  // 3) feedback honesto: enviado vs guardado-para-enviar
+  listEl.querySelectorAll('.rowwrap,.row').forEach(function(x){x.remove();});
+  emptyEl.style.display='none';
+  var d=document.createElement('div'); d.className='done';
+  if(enviado){
+    d.innerHTML='✓ Registrado en el sistema<span>'+n+' productos · '+OPERADOR+' · '+v.label+'</span>';
+  } else {
+    d.innerHTML='✓ Guardado en el teléfono<span>'+n+' productos · se enviará solo al volver la señal</span>';
+  }
+  listEl.appendChild(d);
+  actionbar.style.display='none'; revbar.style.display='none';
+  ITEMS.length=0;
+  setTimeout(function(){ d.remove(); setEstado('componi'); render(); }, 1900);
 };
 
 // ---------- mano (zurdo/diestro) ----------
@@ -888,6 +955,13 @@ $('btnHand').onclick=function(){
 };
 
 // ---------- init ----------
+// Service Worker (apertura offline) — sw.js debe estar en el repo junto al HTML
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(function(e){ /* sin SW: igual funciona online */ });
+}
+// arranca la sincronización de lo que quedó pendiente de jornadas/sesiones previas
+try{ pintarBadge(); if(navigator.onLine) flushCola(); }catch(e){}
+
 if(OPERADOR){ gate.style.display='none'; arrancar(); }
 
 </script>
