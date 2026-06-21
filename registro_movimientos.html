@@ -170,6 +170,7 @@
       <select class="verbo" id="verbo"></select>
     </div>
     <span class="syncbadge" id="syncBadge" style="display:none"></span>
+    <span class="syncbadge wait" id="pendBadge" style="display:none;cursor:pointer"></span>
   </div>
 
   <!-- LISTA (crece) -->
@@ -184,8 +185,13 @@
 
   <!-- BLOQUE INFERIOR STICKY: foto (imbocco) + porte. La foto NO se va con el scroll (fix 4) -->
   <div class="bottombar" id="bottombar">
+    <div id="pendActivoBanner" style="display:none;align-items:center;gap:8px;background:rgba(74,144,217,.15);border:1px solid var(--acc);border-radius:10px;padding:8px 12px;margin:0 0 8px;font-size:13px;color:var(--acc)">
+      <span style="flex:1">Completando pendiente</span>
+      <button id="pendCancel" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:8px;padding:5px 10px;font-size:12px">Cancelar</button>
+    </div>
     <div class="foto-imbocco" id="fotoImbocco">
-      <button id="btnFoto">📷 Sacar foto y seguir después (sospeso)</button>
+      <button id="btnFoto">📷 Sacar foto y registrar después</button>
+      <button id="btnPendientes" style="display:none">📋 Ver pendientes</button>
     </div>
     <!-- PORTE · orden: QR · Teclado · Voz (fix 3) -->
     <div class="portes" id="portes">
@@ -699,10 +705,53 @@ function pickCand(idx, sku){
 }
 
 // ---------- cola alias (N22, nunca fuente) ----------
+// La correzione del campo (said→sku) NON muore più nel telefono:
+//  1) se guarda local (historial, no se pierde nunca, ni offline)
+//  2) se envía al GAS → foglio 'Alias_Cola_Candidatos' in CONTROL_MAESTRO
+//     (coda di candidati; AAG la cura e promuove i buoni in ALIAS_INSUMOS).
+// Dedup local sulla coppia said|sku: la stessa correzione non rispamma il GAS.
+// said uguale su sku diversi resta legittimo (es. "mafin"→1275 e "mafin"→1282).
+var ALIAS_COLA_GAS_KEY='pinsita_alias_cola_gas';   // pendientes de enviar al GAS
+function _aliasKey(said,sku){ return (norm(said||'')+'|'+String(sku||'').trim()); }
 function pushAlias(said,sku,nombre){
+  said=norm(said||''); if(!said||!sku) return;
+  // 1) historial local (como antes, ahora con clave normalizada)
   try{ var k='pinsita_alias_cola'; var cola=JSON.parse(localStorage.getItem(k)||'[]');
     cola.push({ts:new Date().toISOString(),operador:OPERADOR,said:said,sku:sku,nombre:nombre});
     localStorage.setItem(k,JSON.stringify(cola)); }catch(e){}
+  // 2) cola de envío al GAS, dedup por said|sku (no reenvía lo ya aceptado/pendiente)
+  try{
+    var key=_aliasKey(said,sku);
+    var enviados=JSON.parse(localStorage.getItem('pinsita_alias_enviados')||'{}');
+    if(enviados[key]) return;                         // ya aceptado por el GAS antes
+    var pend=JSON.parse(localStorage.getItem(ALIAS_COLA_GAS_KEY)||'[]');
+    if(pend.some(function(x){return _aliasKey(x.said,x.sku)===key;})) return; // ya en cola
+    pend.push({said:said,sku:sku,nombre:nombre,operador:OPERADOR,ts:new Date().toISOString()});
+    localStorage.setItem(ALIAS_COLA_GAS_KEY,JSON.stringify(pend));
+  }catch(e){}
+  if(navigator.onLine) flushAliasCola();
+}
+// Envía las candidatas pendientes al GAS. Idempotente del lado servidor (said|sku).
+var _flushingAlias=false;
+async function flushAliasCola(){
+  if(_flushingAlias) return; _flushingAlias=true;
+  try{
+    var pend=[]; try{ pend=JSON.parse(localStorage.getItem(ALIAS_COLA_GAS_KEY)||'[]'); }catch(e){ pend=[]; }
+    if(!pend.length) return;
+    var enviados={}; try{ enviados=JSON.parse(localStorage.getItem('pinsita_alias_enviados')||'{}'); }catch(e){ enviados={}; }
+    var quedan=[];
+    for(var i=0;i<pend.length;i++){
+      var it=pend[i];
+      var r=await callGAS({ action:'pushAliasCandidato', said:it.said, sku:it.sku,
+                            nombre:it.nombre||'', operador:it.operador||OPERADOR||'' });
+      if(r&&r.ok){ enviados[_aliasKey(it.said,it.sku)]=it.ts||true; }  // aceptada (o dedup) → no reintentar
+      else { quedan.push(it); }                                        // sin red → reintenta luego
+    }
+    localStorage.setItem(ALIAS_COLA_GAS_KEY,JSON.stringify(quedan));
+    localStorage.setItem('pinsita_alias_enviados',JSON.stringify(enviados));
+  } finally { _flushingAlias=false; }
+  // si quedaron pendientes (p.ej. un flush concurrente saltado), reintenta ya
+  try{ if(navigator.onLine && JSON.parse(localStorage.getItem(ALIAS_COLA_GAS_KEY)||'[]').length) setTimeout(flushAliasCola,300); }catch(e){}
 }
 
 // ===================== PORTE: ingest común =====================
@@ -889,10 +938,168 @@ function abrirPickerFix(idx){
   var inEl=host.querySelector('.pk-in'); if(inEl) inEl.focus();
 }
 
-// ---------- foto (sospeso) — botón aparte al imbocco ----------
+// ============================================================================
+// FOTO = MOVIMIENTO DIFERIDO ("saco foto y registro después", incl. desde PC)
+// Ciclo completo: scatto → foto en IndexedDB (aguanta MB) + pendiente en cola
+// → sync al GAS (foto a Drive + fila ABIERTO) → pantalla Pendientes para
+// completarlo (agregar productos+Q → escribe movimiento → cierra pendiente).
+// Mismo motor offline/idempotente que los movimientos (pendienteId único).
+// ============================================================================
+
+// ---------- IndexedDB para fotos (localStorage no aguanta MB) ----------
+var _IDB=null;
+function idbOpen(){
+  return new Promise(function(res,rej){
+    if(_IDB) return res(_IDB);
+    var rq=indexedDB.open('pinsita_fotos',1);
+    rq.onupgradeneeded=function(e){ var db=e.target.result;
+      if(!db.objectStoreNames.contains('fotos')) db.createObjectStore('fotos',{keyPath:'id'}); };
+    rq.onsuccess=function(e){ _IDB=e.target.result; res(_IDB); };
+    rq.onerror=function(e){ rej(e.target.error); };
+  });
+}
+function idbPut(id,dataUrl,mime){
+  return idbOpen().then(function(db){ return new Promise(function(res,rej){
+    var tx=db.transaction('fotos','readwrite'); tx.objectStore('fotos').put({id:id,dataUrl:dataUrl,mime:mime});
+    tx.oncomplete=function(){res(true);}; tx.onerror=function(e){rej(e.target.error);}; }); });
+}
+function idbGet(id){
+  return idbOpen().then(function(db){ return new Promise(function(res,rej){
+    var tx=db.transaction('fotos','readonly'); var r=tx.objectStore('fotos').get(id);
+    r.onsuccess=function(){res(r.result||null);}; r.onerror=function(e){rej(e.target.error);}; }); });
+}
+function idbDel(id){
+  return idbOpen().then(function(db){ return new Promise(function(res){
+    var tx=db.transaction('fotos','readwrite'); tx.objectStore('fotos').delete(id);
+    tx.oncomplete=function(){res(true);}; tx.onerror=function(){res(false);}; }); });
+}
+
+// ---------- cola pendientes (mismo patrón offline que los movimientos) ----------
+var PEND_KEY='pinsita_pend_cola';
+function pendLeer(){ try{ return JSON.parse(localStorage.getItem(PEND_KEY)||'[]'); }catch(e){ return []; } }
+function pendGuardar(c){ try{ localStorage.setItem(PEND_KEY,JSON.stringify(c)); }catch(e){} }
+function nuevoPendId(){
+  var tel=(localStorage.getItem('pinsita_devid')||'');
+  if(!tel){ tel='dev'+Math.random().toString(36).slice(2,7); localStorage.setItem('pinsita_devid',tel); }
+  return 'PEND-'+tel+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,6);
+}
+
+// input file oculto (cámara)
+var _fotoInput=document.createElement('input');
+_fotoInput.type='file'; _fotoInput.accept='image/*'; _fotoInput.capture='environment';
+_fotoInput.style.display='none'; document.body.appendChild(_fotoInput);
+
 $('btnFoto').onclick=function(){
-  alert('📷 Foto / sospeso: todavía no está cableado.\n\nAquí vivirá el "saco foto y sigo después":\nla foto sube a la planilla, queda un pendiente, y lo completas después (incluso desde el PC).\nEs el próximo cantiere.');
+  if(!OPERADOR){ alert('Primero dime quién eres (arriba).'); return; }
+  _fotoInput.value=''; _fotoInput.click();
 };
+_fotoInput.onchange=function(){
+  var f=_fotoInput.files&&_fotoInput.files[0]; if(!f) return;
+  var rd=new FileReader();
+  rd.onload=function(){
+    var dataUrl=rd.result;
+    var nota=prompt('Nota rápida (opcional): ¿qué es esta foto?\nEj: "entrega proveedor caja verduras"','')||'';
+    var v=verboActual();
+    var pid=nuevoPendId();
+    idbPut(pid,dataUrl,f.type||'image/jpeg').then(function(){
+      var c=pendLeer();
+      c.push({ pendienteId:pid, verbo:(v&&v.label)||'', operador:OPERADOR,
+               nota:nota, ts:new Date().toISOString(), estado:'pending', enviadoFoto:false });
+      pendGuardar(c); pintarBadgePend();
+      if(navigator.onLine) flushPendCola();
+      alert('📷 Foto guardada como pendiente.\n\nLa completas después (incluso desde el PC) en "Pendientes".');
+    }).catch(function(){ alert('No pude guardar la foto en el teléfono. Reintenta.'); });
+  };
+  rd.readAsDataURL(f);
+};
+
+// envía pendientes al GAS (foto a Drive + fila ABIERTO). Idempotente por pendienteId.
+var _flushingPend=false;
+async function flushPendCola(){
+  if(_flushingPend) return; _flushingPend=true;
+  try{
+    var c=pendLeer();
+    for(var i=0;i<c.length;i++){
+      if(c[i].estado!=='pending') continue;
+      var foto=null; try{ foto=await idbGet(c[i].pendienteId); }catch(e){}
+      var payload={ action:'guardarPendienteFoto', pendienteId:c[i].pendienteId,
+        operador:c[i].operador||OPERADOR||'', verbo:c[i].verbo||'', nota:c[i].nota||'',
+        local:'Riesco', fotoBase64:(foto?foto.dataUrl:''), mime:(foto?foto.mime:'image/jpeg') };
+      var r=await callGAS(payload);
+      if(r&&r.ok){ c[i].estado='enviado'; c[i].fotoUrl=r.fotoUrl||''; c[i].enviadoFoto=true; }
+      else { c[i].estado='pending'; c[i].error=(r&&r.error)||'sin red'; }
+      pendGuardar(c); pintarBadgePend();
+    }
+  } finally { _flushingPend=false; }
+  try{ if(navigator.onLine && pendLeer().some(function(x){return x.estado==='pending';})) setTimeout(flushPendCola,400); }catch(e){}
+}
+function pendAbiertosLocal(){ return pendLeer().filter(function(x){return x.estado!=='cerrado';}).length; }
+function pintarBadgePend(){
+  var el=document.getElementById('pendBadge'); if(!el) return;
+  var n=pendAbiertosLocal();
+  if(n===0){ el.style.display='none'; return; }
+  el.style.display='inline-flex'; el.textContent='📷 '+n+' por completar';
+}
+
+// ---------- PANTALLA PENDIENTES (completar un movimiento diferido) ----------
+// Overlay propio. Lee los ABIERTO desde el GAS (verdad compartida, también desde PC).
+// Al elegir uno: precarga el verbo, muestra la foto, dejas agregar productos+Q,
+// confirmas → escribe el movimiento (registrarMovimientoBatch) y cierra el pendiente.
+var _pendActivo=null;  // {pendienteId, verbo, fotoUrl, nota}
+function abrirPendientes(){
+  var ov=document.getElementById('pendOverlay');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='pendOverlay';
+    ov.style.cssText='position:fixed;inset:0;background:var(--bg);z-index:60;display:flex;flex-direction:column;max-width:560px;margin:0 auto';
+    ov.innerHTML=''+
+      '<div style="padding:14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between">'+
+        '<strong>📋 Pendientes por completar</strong>'+
+        '<button id="pendClose" style="background:var(--panel2);border:1px solid var(--line);color:var(--t1);border-radius:10px;padding:8px 12px">Cerrar</button>'+
+      '</div>'+
+      '<div id="pendList" style="flex:1;overflow:auto;padding:12px"></div>';
+    document.body.appendChild(ov);
+    ov.querySelector('#pendClose').onclick=function(){ ov.style.display='none'; };
+  }
+  ov.style.display='flex';
+  var list=ov.querySelector('#pendList');
+  list.innerHTML='<div style="color:var(--t3);padding:20px;text-align:center">⏳ Cargando pendientes…</div>';
+  callGAS({action:'listarPendientesFoto'}).then(function(r){
+    var arr=(r&&r.ok&&r.pendientes)?r.pendientes:[];
+    if(!arr.length){ list.innerHTML='<div style="color:var(--t3);padding:20px;text-align:center">No hay pendientes abiertos. 🎉</div>'; return; }
+    list.innerHTML=arr.map(function(p){
+      var img=p.fotoUrl?('<a href="'+esc(p.fotoUrl)+'" target="_blank" style="color:var(--acc);font-size:12px">📷 ver foto</a>'):'<span style="color:var(--t3);font-size:12px">sin foto</span>';
+      return '<div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'+
+          '<div><strong>'+esc(p.verbo||'(sin verbo)')+'</strong>'+
+          '<div style="color:var(--t3);font-size:12px">'+esc(p.ts||'')+' · '+esc(p.operador||'')+'</div>'+
+          (p.nota?'<div style="color:var(--t2);font-size:12px;margin-top:3px">'+esc(p.nota)+'</div>':'')+'</div>'+
+          img+
+        '</div>'+
+        '<button class="pend-go" data-id="'+esc(p.pendienteId)+'" data-verbo="'+esc(p.verbo||'')+'" data-foto="'+esc(p.fotoUrl||'')+'" data-nota="'+esc(p.nota||'')+'" '+
+          'style="width:100%;margin-top:10px;background:var(--acc);border:none;color:#fff;border-radius:10px;padding:11px;font-weight:600">Completar este →</button>'+
+      '</div>';
+    }).join('');
+    list.querySelectorAll('.pend-go').forEach(function(b){ b.onclick=function(){
+      _pendActivo={ pendienteId:b.dataset.id, verbo:b.dataset.verbo, fotoUrl:b.dataset.foto, nota:b.dataset.nota };
+      // precarga el verbo en la cabecera (si coincide con una opción)
+      var sel=document.getElementById('verbo');
+      if(sel){ for(var i=0;i<sel.options.length;i++){ if(sel.options[i].text===_pendActivo.verbo){ sel.selectedIndex=i; break; } } }
+      ov.style.display='none';
+      ITEMS=[]; setEstado('componi'); render();
+      var banner=document.getElementById('pendActivoBanner');
+      if(banner){ banner.style.display='flex'; banner.querySelector('span').textContent='Completando pendiente · '+(_pendActivo.verbo||''); }
+    };});
+  });
+}
+document.getElementById('pendBadge').onclick=abrirPendientes;
+document.getElementById('btnPendientes').onclick=abrirPendientes;
+(function(){ var c=document.getElementById('pendCancel'); if(c) c.onclick=function(){
+  _pendActivo=null; var bn=document.getElementById('pendActivoBanner'); if(bn) bn.style.display='none';
+};})();
+// 'Ver pendientes' visible solo si hay alguno (local o por sincronizar)
+var _origPintarPend=pintarBadgePend;
+pintarBadgePend=function(){ _origPintarPend();
+  var bp=document.getElementById('btnPendientes'); if(bp) bp.style.display=(pendAbiertosLocal()>0?'block':'none'); };
 
 // ---------- NAVEGACIÓN componi <-> rivedi ----------
 $('btnRevisar').onclick=function(){ if(!ITEMS.length) return; closePicker(); setEstado('rivedi'); render2(); };
@@ -962,8 +1169,10 @@ function pintarBadge(){
   if(f>0){ el.className='syncbadge bad'; el.textContent='⚠ '+f+' sin enviar'+(p?(' · ⏳'+p):''); }
   else   { el.className='syncbadge wait'; el.textContent='⏳ '+p+' enviando…'; }
 }
-window.addEventListener('online', function(){ flushCola(); });
+window.addEventListener('online', function(){ flushCola(); flushAliasCola(); flushPendCola(); });
 setInterval(function(){ if(navigator.onLine && (colaPend()||colaFail())) flushCola(); }, 20000);
+setInterval(function(){ try{ if(navigator.onLine && JSON.parse(localStorage.getItem(ALIAS_COLA_GAS_KEY)||'[]').length) flushAliasCola(); }catch(e){} }, 30000);
+setInterval(function(){ if(navigator.onLine && pendLeer().some(function(x){return x.estado==='pending';})) flushPendCola(); }, 30000);
 
 $('btnConfirm').onclick=async function(){
   if($('btnConfirm').disabled) return;
@@ -998,6 +1207,17 @@ $('btnConfirm').onclick=async function(){
       // marca este lote como ok en la cola
       var c=colaLeer().map(function(x){ if(x.loteId===loteId){ x.estado='ok'; x.okTs=new Date().toISOString(); } return x; });
       colaGuardar(c.filter(function(x){return x.estado!=='ok';})); pintarBadge();
+      // si estábamos completando un PENDIENTE → ciérralo y limpia su foto
+      if(_pendActivo){
+        var pid=_pendActivo.pendienteId;
+        try{ await callGAS({action:'cerrarPendienteFoto', pendienteId:pid, idMov:(r.primerIdMov||'')}); }catch(e){}
+        var pc=pendLeer().map(function(x){ if(x.pendienteId===pid) x.estado='cerrado'; return x; });
+        pendGuardar(pc.filter(function(x){return x.estado!=='cerrado';}));
+        try{ idbDel(pid); }catch(e){}
+        _pendActivo=null;
+        var bn=document.getElementById('pendActivoBanner'); if(bn) bn.style.display='none';
+        pintarBadgePend();
+      }
     }
   }
 
@@ -1030,7 +1250,7 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js').catch(function(e){ /* sin SW: igual funciona online */ });
 }
 // arranca la sincronización de lo que quedó pendiente de jornadas/sesiones previas
-try{ pintarBadge(); if(navigator.onLine) flushCola(); }catch(e){}
+try{ pintarBadge(); pintarBadgePend(); if(navigator.onLine){ flushCola(); flushAliasCola(); flushPendCola(); } }catch(e){}
 
 if(OPERADOR){ gate.style.display='none'; arrancar(); }
 
