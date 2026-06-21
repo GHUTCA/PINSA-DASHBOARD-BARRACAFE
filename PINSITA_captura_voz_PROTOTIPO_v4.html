@@ -842,33 +842,25 @@ $('btnConfirm').onclick=async function(){
   $('btnConfirm').disabled=true; $('btnConfirm').textContent='Enviando…';
   var tipo=v.id;
   var res;
-  if(tipo==='Entrega Secc'){
-    // N16: agrupar por sección del producto, un batch por sección
-    var grupos={};
-    ITEMS.forEach(function(it){ var sec=capSec(skuSec(it.sku)||'Cocina Central');
-      (grupos[sec]=grupos[sec]||[]).push(it); });
-    res={ok:true, scritti:0};
-    var secs=Object.keys(grupos);
-    for(var s=0;s<secs.length;s++){
-      var sec=secs[s], items=grupos[sec].map(function(x){
-        return { sku:x.sku, desc:x.nombre, unidad:'UO', uoDesc:skuUO(x.sku)||'', cantidad:x.qty, obs:'pinsita · '+(x.said||'') }; });
-      var r1=await callGAS({ action:'registrarEntregaBatch', local:'Riesco', destino:sec,
-        responsable:OPERADOR, items:items });
-      if(r1&&r1.ok) res.scritti+=items.length; else { res.ok=false; res.error=(r1&&r1.error)||'fallo sección '+sec; break; }
+  // fix velocidad (Strada 2): TODO en UNA sola llamada batch — 1 round-trip, 1 flush.
+  // destino/origen/tipo van POR ITEM, así Entrega (destino=sección, N16) y los
+  // demás movimientos (Ingreso/Ajuste/Merma) viajan en el mismo batch.
+  var movItems=ITEMS.map(function(it){
+    var origen, destino;
+    if(tipo==='Entrega Secc'){
+      origen='Bodega Local';
+      destino=capSec(skuSec(it.sku)||'Cocina Central'); // N16: sección del producto
+    } else {
+      origen=(tipo==='Ingreso BLoc')?'Bodega Central':(tipo==='Ingreso Proveedor')?'Proveedor':'Bodega Local';
+      destino='Bodega Local';
     }
-  } else {
-    // fix velocidad: UN solo round-trip — registrarMovimientoBatch (1 flush en el GAS)
-    // en vez de N× registrarMovimiento en fila. tipo/origen/destino por item.
-    var origen=(tipo==='Ingreso BLoc')?'Bodega Central':(tipo==='Ingreso Proveedor')?'Proveedor':'Bodega Local';
-    var movItems=ITEMS.map(function(it){
-      return { tipo:tipo, origen:origen, destino:'Bodega Local',
-        sku:it.sku, desc:it.nombre, unidad:'UO', uoDesc:skuUO(it.sku)||'',
-        cantidad:it.qty, obs:'pinsita · '+(it.said||'') };
-    });
-    var rB=await callGAS({ action:'registrarMovimientoBatch', responsable:OPERADOR, items:movItems });
-    if(rB&&rB.ok) res={ok:true, scritti:(rB.scritti||movItems.length)};
-    else res={ok:false, error:(rB&&rB.error)||'fallo batch movimiento'};
-  }
+    return { tipo:tipo, origen:origen, destino:destino,
+      sku:it.sku, desc:it.nombre, unidad:'UO', uoDesc:skuUO(it.sku)||'',
+      cantidad:it.qty, obs:'pinsita · '+(it.said||'') };
+  });
+  var rB=await callGAS({ action:'registrarMovimientoBatch', responsable:OPERADOR, items:movItems });
+  if(rB&&rB.ok) res={ok:true, scritti:(rB.scritti||movItems.length)};
+  else res={ok:false, error:(rB&&rB.error)||'fallo batch movimiento'};
   if(res&&res.ok){
     var n=res.scritti||ITEMS.length;
     listEl.querySelectorAll('.rowwrap,.row').forEach(function(x){x.remove();});
