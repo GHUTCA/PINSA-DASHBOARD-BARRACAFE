@@ -62,6 +62,8 @@
   .row .pn.bad{color:var(--bad)}
   .row .uo{font-size:11px;color:var(--t3);margin-top:2px}
   .row .uo b{color:var(--t2);font-weight:600}
+  /* #6 — equivalente UTM, color acento bien visible */
+  .row .utmline{font-size:12px;color:var(--acc);font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
   .row .q{font-size:15px;color:var(--t1);white-space:nowrap;font-variant-numeric:tabular-nums}
   .row .q.miss{color:var(--bad);font-weight:600}
   .mini{display:flex;gap:4px;flex-shrink:0}
@@ -177,7 +179,8 @@
 
   <!-- AUDIO feedback -->
   <div class="audio" id="audio"><span id="audioTxt">escuchando…</span>
-    <span class="bars"><span></span><span></span><span></span><span></span></span></div>
+    <span class="bars"><span></span><span></span><span></span><span></span></span>
+    <span id="vozDesc" style="display:none;color:var(--t3);font-size:11px;margin-left:8px"></span></div>
 
   <!-- BLOQUE INFERIOR STICKY: foto (imbocco) + porte. La foto NO se va con el scroll (fix 4) -->
   <div class="bottombar" id="bottombar">
@@ -488,8 +491,25 @@ function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,
 function skuItem(sku){ return VOCAB.filter(function(x){return x.sku===sku;})[0]; }
 function skuUO(sku){ var v=skuItem(sku); return (v&&v.uo)?v.uo:''; }
 function skuSec(sku){ var v=skuItem(sku); return (v&&v.secs&&v.secs.length)?v.secs[0]:''; }
-function skuDecimal(sku){ var v=skuItem(sku); var m=(v&&v.metodo||'').toLowerCase();
+function skuDecimal(sku){ var v=skuItem(sku);
+  // norma Unidades v2 inv.#3: decimales SOLO en métodos parciales (Nivel/Peso).
+  // robusto a acentos/mayúsculas/variantes de escritura del campo "Metodo de conteo".
+  var m=(v&&v.metodo||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   return m.indexOf('nivel')>=0 || m.indexOf('peso')>=0; }
+// #6 — factor UO→UTM y unidad UTM (para mostrar "qué estoy registrando de verdad")
+function skuFactor(sku){ var v=skuItem(sku); if(!v||!v.factor) return null;
+  var f=parseFloat(String(v.factor).replace(',','.')); return isNaN(f)?null:f; }
+function skuUTM(sku){ var v=skuItem(sku); return (v&&v.utm)?v.utm:''; }
+// devuelve string "= 96 unidad" o null si no se puede calcular con certeza
+function utmEquiv(sku, qty){
+  if(qty==null) return null;
+  var f=skuFactor(sku), u=skuUTM(sku);
+  if(f==null || f<=0) return null;
+  var tot=qty*f;
+  // redondeo prolijo: enteros sin decimales, si no 1 decimal
+  var totStr=(Math.abs(tot-Math.round(tot))<0.001)?String(Math.round(tot)):tot.toFixed(1);
+  return '= '+totStr+(u?(' '+u):'');
+}
 function capSec(s){ return (s||'').split(' ').map(function(w){return w?w.charAt(0).toUpperCase()+w.slice(1):w;}).join(' '); }
 
 // ---------- elementos ----------
@@ -585,11 +605,14 @@ function render(){
     var sub = (uo? ('en <b>'+esc(uo)+'</b>'):'') + (uo&&sec?' · ':'') + (sec?esc(capSec(sec)):'');
     var qMiss = (it.qty==null);
     var qHtml = qMiss ? '<span class="q miss">falta Q</span>' : '<span class="q">'+esc(String(it.qty))+'</span>';
+    // #6 — equivalente UTM bien visible: "qué estoy registrando de verdad"
+    var utmStr = qMiss ? null : utmEquiv(it.sku, it.qty);
+    var utmHtml = utmStr ? '<div class="utmline">'+esc(utmStr)+'</div>' : '';
     if(it.estado==='ok'){
       var row=document.createElement('div'); row.className='row'; row.id='row-'+idx;
       row.innerHTML='<span class="dot ok"></span>'+
         '<div class="nme"><div class="pn">'+esc(it.nombre||'')+'</div>'+
-        (sub?'<div class="uo">'+sub+'</div>':'')+'</div>'+ qHtml +
+        (sub?'<div class="uo">'+sub+'</div>':'')+ utmHtml +'</div>'+ qHtml +
         '<span class="mini">'+
           '<button data-eq="'+idx+'" title="cantidad">#</button>'+
           '<button data-ed="'+idx+'" title="cambiar">✎</button>'+
@@ -647,8 +670,16 @@ function editarQ(idx){
   var v=prompt('Cantidad'+(skuUO(it.sku)?(' en '+skuUO(it.sku)):'')+' para "'+(it.nombre||it.said)+'":', it.qty!=null?it.qty:'');
   if(v===null) return;
   v=String(v).trim().replace(',','.');
-  if(v===''){ it.qty=null; }
-  else { var num=parseFloat(v); if(!isNaN(num)){ it.qty = dec?num:Math.round(num); } }
+  if(v===''){ it.qty=null; render(); return; }
+  var num=parseFloat(v); if(isNaN(num)){ render(); return; }
+  if(!dec && Math.abs(num-Math.round(num))>0.001){
+    // decimal en producto que se cuenta por unidades enteras → avisa, no redondea callado
+    var r=Math.round(num);
+    if(!confirm('"'+(it.nombre||it.said)+'" se cuenta por unidades enteras.\n\n'+num+' se va a registrar como '+r+'.\n\n¿Está bien?')) return;
+    it.qty=r;
+  } else {
+    it.qty = dec?num:Math.round(num);
+  }
   render();
 }
 function pickCand(idx, sku){
@@ -667,9 +698,13 @@ function pushAlias(said,sku,nombre){
 
 // ===================== PORTE: ingest común =====================
 // Toda puerta vierte en la MISMA lista vía ingest(). La Q es obligatoria a la nacita (natura registrar).
+// #2 — desde VOZ aplicamos filtros anti-ruido: una fila nace SOLO si tiene sustancia
+// (un match decente O un número explícito). Lo descartado se cuenta y se avisa (no en silencio).
+var vozDescartados=0;
 function ingestFrase(text, fromVoice){
   if(!text||!text.trim()) return;
   var rows=interpretLista(text, verboSel.value);
+  var creadas=0;
   rows.forEach(function(r){
     var top=r.cands.length?r.cands[0]:null;
     var gap=r.cands.length>1?(r.cands[0].sc-r.cands[1].sc):99;
@@ -677,15 +712,32 @@ function ingestFrase(text, fromVoice){
     if(!top) estado='bad';
     else if(top.sc<82||gap<15) estado='warn';
     else estado='ok';
+
+    // ── FILTRO ANTI-RUIDO (solo voz) ──────────────────────────────────
+    if(fromVoice){
+      var tieneNum = (r.qty!=null);
+      var matchDecente = top && top.sc>=70;   // candidato plausible
+      // basura: ni número ni match decente → era ruido/silencio, NO nace fila
+      if(!tieneNum && !matchDecente){ vozDescartados++; return; }
+      // sin coincidencia total desde voz → descarta (no ensucia con rojas)
+      if(estado==='bad'){ vozDescartados++; return; }
+    }
+
     ITEMS.push({ said:r.said, qty:(r.qty!=null?r.qty:null),
       sku:top?top.v.sku:null, nombre:top?top.v.nombre:null,
       sub:top?skuSec(top.v.sku):'', estado:estado,
       cands:r.cands.map(function(b){return {sku:b.v.sku,nombre:b.v.nombre,sc:b.sc};}) });
+    creadas++;
   });
   render();
-  // si quedó alguna fila sin Q y el verbo la exige, avisamos abriendo edición de Q en la primera sin Q
-  if(verboActual().qReq){ var i=ITEMS.findIndex(function(x){return x.qty==null;});
-    if(i>=0 && fromVoice){ /* en voz la Q suele venir; si falta, queda marcada 'falta Q' visible */ } }
+  pintarDescartados();
+  return creadas;
+}
+// avisa discreto cuántos fragmentos se ignoraron (no fila, solo info bajo el audio)
+function pintarDescartados(){
+  var el=document.getElementById('vozDesc'); if(!el) return;
+  if(vozDescartados>0){ el.style.display='inline'; el.textContent='· ignoré '+vozDescartados+' poco claro'+(vozDescartados>1?'s':''); }
+  else { el.style.display='none'; }
 }
 
 // ---------- PUERTA VOZ ----------
@@ -702,25 +754,26 @@ function startVoz(){
     abrirPickerAdd(true); return; }
   srec=new SR(); srec.lang='es-CL'; srec.continuous=true; srec.interimResults=true; srec.maxAlternatives=1;
   sttBuffer='';sttLast='';
+  vozDescartados=0; pintarDescartados();
   srec.onstart=function(){ son=true; $('pVoz').classList.add('rec'); audio.classList.add('on');
-    audioTxt.textContent='escuchando…'; armSilence(); };
+    audioTxt.textContent='escuchando… (la lista crece mientras hablas)'; armSilence(); };
   srec.onresult=function(e){ var interim='';
     for(var i=e.resultIndex;i<e.results.length;i++){ var r=e.results[i];
-      if(r.isFinal){ var seg=r[0].transcript.trim(); if(seg){
-        var a=seg.toLowerCase(), b=sttLast.toLowerCase();
-        if(a===b){} else if(a.indexOf(b)===0){ sttLast=seg; }
-        else if(b.indexOf(a)===0 && b){} else { sttBuffer=(sttBuffer+' '+sttLast).trim(); sttLast=seg; }
-      }} else interim+=r[0].transcript; }
+      if(r.isFinal){ var seg=r[0].transcript.trim();
+        // #2 LIVE: cada segmento final se vuelve fila AL INSTANTE (append puro).
+        // Los filtros anti-ruido en ingestFrase deciden si nace o se descarta.
+        if(seg){ ingestFrase(seg, true); }
+      } else interim+=r[0].transcript; }
     lastAt=Date.now();
-    var prev=(sttBuffer+' '+sttLast+' '+interim).trim().replace(/\s+/g,' ');
-    audioTxt.textContent = prev?('… '+prev.slice(-46)):'escuchando…'; armSilence(); };
+    audioTxt.textContent = interim?('… '+interim.slice(-46)):'escuchando… (la lista crece mientras hablas)';
+    armSilence(); };
   srec.onerror=function(e){ if(e.error==='no-speech'){ armSilence(); return; } audioTxt.textContent='error: '+(e.error||'?'); };
   srec.onend=function(){ if(son && Date.now()-lastAt < SILENCE_MS-200){ try{srec.start();return;}catch(ex){} }
-    son=false; $('pVoz').classList.remove('rec'); audio.classList.remove('on'); clearTimeout(silenceTimer); flushVoz(); };
+    son=false; $('pVoz').classList.remove('rec'); audio.classList.remove('on'); clearTimeout(silenceTimer); };
   lastAt=Date.now(); try{ srec.start(); }catch(ex){}
 }
 function stopVoz(){ if(srec&&son){ son=false; try{srec.stop();}catch(ex){} }
-  clearTimeout(silenceTimer); $('pVoz').classList.remove('rec'); audio.classList.remove('on'); flushVoz(); }
+  clearTimeout(silenceTimer); $('pVoz').classList.remove('rec'); audio.classList.remove('on'); }
 $('pVoz').onclick=function(){ son?stopVoz():startVoz(); };
 
 // ---------- PUERTA TECLADO (Puerta D) ----------
@@ -748,7 +801,8 @@ function buildPicker(mode, idx){
   function refreshOk(){
     if(chosen){ var uo=skuUO(chosen.sku); var q=qEl.value.trim();
       okBtn.style.display='block';
-      okBtn.textContent = '✓ Agregar '+chosen.nombre + (q?(' · '+q+(uo?(' '+uo):'')):' · falta cantidad');
+      var eq=q?utmEquiv(chosen.sku, parseFloat(q.replace(',','.'))):null;
+      okBtn.textContent = '✓ Agregar '+chosen.nombre + (q?(' · '+q+(uo?(' '+uo):'')+(eq?('  ('+eq+')'):'')):' · falta cantidad');
       okBtn.classList.toggle('ready', q!=='');
     } else { okBtn.style.display='none'; }
   }
@@ -764,7 +818,14 @@ function buildPicker(mode, idx){
     var raw=qEl.value.trim().replace(',','.');
     if(raw===''){ qEl.focus(); qEl.style.borderColor='var(--bad)'; hintE.innerHTML='<span style="color:var(--bad)">Falta la cantidad — no se puede agregar sin Q.</span>'; return; }
     var num=parseFloat(raw); if(isNaN(num)){ qEl.focus(); return; }
-    var qty = skuDecimal(chosen.sku)?num:Math.round(num);
+    var qty;
+    if(!skuDecimal(chosen.sku) && Math.abs(num-Math.round(num))>0.001){
+      var r=Math.round(num);
+      if(!confirm('"'+chosen.nombre+'" se cuenta por unidades enteras.\n\n'+num+' se va a registrar como '+r+'.\n\n¿Está bien?')){ qEl.focus(); qEl.select&&qEl.select(); return; }
+      qty=r;
+    } else {
+      qty = skuDecimal(chosen.sku)?num:Math.round(num);
+    }
     if(mode==='fix'){ var it=ITEMS[idx];
       if(it.sku!==chosen.sku) pushAlias(it.said, chosen.sku, chosen.nombre);
       it.sku=chosen.sku; it.nombre=chosen.nombre; it.estado='ok'; it.sub=skuSec(chosen.sku); it.qty=qty;
