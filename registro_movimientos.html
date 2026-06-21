@@ -311,7 +311,10 @@ async function cargarVocabDesdeBD(){
         alias:aliasMap[sku]||[],
         metodo:String(r['Metodo de conteo']||'').trim(),
         factor:String(r['Facor UO UTM']||'').trim(),
-        uo:String(r['UO Descripcion Principal ']||r['UO Descripcion Principal']||'').trim()  // lo que el OP confirma
+        uo:String(r['UO Descripcion Principal ']||r['UO Descripcion Principal']||'').trim(),  // entra a BLocal
+        boActivo:String(r['BO Activo']||'').trim().toLowerCase()==='si',                       // ¿se mueve en BO a sección?
+        boDesc:String(r['Descripcion BO']||'').trim(),                                         // unidad que entra a sección
+        uxupc:parseFloat(String(r['Unidades por UPC']||'').replace(',','.'))||null             // cuántos BO dentro 1 UO
       });
     });
     if(nuevo.length<100) throw new Error('BD insuficiente ('+nuevo.length+')');
@@ -496,19 +499,24 @@ function skuDecimal(sku){ var v=skuItem(sku);
   // robusto a acentos/mayúsculas/variantes de escritura del campo "Metodo de conteo".
   var m=(v&&v.metodo||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   return m.indexOf('nivel')>=0 || m.indexOf('peso')>=0; }
-// #6 — factor UO→UTM y unidad UTM (para mostrar "qué estoy registrando de verdad")
-function skuFactor(sku){ var v=skuItem(sku); if(!v||!v.factor) return null;
-  var f=parseFloat(String(v.factor).replace(',','.')); return isNaN(f)?null:f; }
+// #6 (rev) — "¿qué estoy moviendo de verdad?" — NO conversión UTM abstracta,
+// sino la UNIDAD FÍSICA: a sección entra el BO (si activo), si no la UO.
+// PINSA: 2 cajas → "24 · Pinsa 230 gr".  Cafe: 2 → "2 · Bolsa 1000 gr".
 function skuUTM(sku){ var v=skuItem(sku); return (v&&v.utm)?v.utm:''; }
-// devuelve string "= 96 unidad" o null si no se puede calcular con certeza
-function utmEquiv(sku, qty){
+function nInt(n){ return (Math.abs(n-Math.round(n))<0.001)?String(Math.round(n)):(''+(Math.round(n*10)/10)); }
+function queMuevo(sku, qty){
   if(qty==null) return null;
-  var f=skuFactor(sku), u=skuUTM(sku);
-  if(f==null || f<=0) return null;
-  var tot=qty*f;
-  // redondeo prolijo: enteros sin decimales, si no 1 decimal
-  var totStr=(Math.abs(tot-Math.round(tot))<0.001)?String(Math.round(tot)):tot.toFixed(1);
-  return '= '+totStr+(u?(' '+u):'');
+  var v=skuItem(sku); if(!v) return null;
+  if(v.boActivo && v.boDesc){
+    // a sección entran BO: cantidad = Q × (BO dentro de 1 UO)
+    var por=v.uxupc; 
+    if(por && por>0){ return nInt(qty*por)+' · '+v.boDesc; }
+    // BO activo pero sin factor de cuántos por UO: muestra al menos la unidad BO
+    return v.boDesc;
+  }
+  // sin BO: la unidad que se mueve es la UO
+  if(v.uo){ return (qty>1?(nInt(qty)+' · '):'')+v.uo; }
+  return null;
 }
 function capSec(s){ return (s||'').split(' ').map(function(w){return w?w.charAt(0).toUpperCase()+w.slice(1):w;}).join(' '); }
 
@@ -606,8 +614,8 @@ function render(){
     var qMiss = (it.qty==null);
     var qHtml = qMiss ? '<span class="q miss">falta Q</span>' : '<span class="q">'+esc(String(it.qty))+'</span>';
     // #6 — equivalente UTM bien visible: "qué estoy registrando de verdad"
-    var utmStr = qMiss ? null : utmEquiv(it.sku, it.qty);
-    var utmHtml = utmStr ? '<div class="utmline">'+esc(utmStr)+'</div>' : '';
+    var utmStr = qMiss ? null : queMuevo(it.sku, it.qty);
+    var utmHtml = utmStr ? '<div class="utmline">↦ '+esc(utmStr)+'</div>' : '';
     if(it.estado==='ok'){
       var row=document.createElement('div'); row.className='row'; row.id='row-'+idx;
       row.innerHTML='<span class="dot ok"></span>'+
@@ -801,7 +809,7 @@ function buildPicker(mode, idx){
   function refreshOk(){
     if(chosen){ var uo=skuUO(chosen.sku); var q=qEl.value.trim();
       okBtn.style.display='block';
-      var eq=q?utmEquiv(chosen.sku, parseFloat(q.replace(',','.'))):null;
+      var eq=q?queMuevo(chosen.sku, parseFloat(q.replace(',','.'))):null;
       okBtn.textContent = '✓ Agregar '+chosen.nombre + (q?(' · '+q+(uo?(' '+uo):'')+(eq?('  ('+eq+')'):'')):' · falta cantidad');
       okBtn.classList.toggle('ready', q!=='');
     } else { okBtn.style.display='none'; }
