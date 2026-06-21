@@ -857,13 +857,17 @@ $('btnConfirm').onclick=async function(){
       if(r1&&r1.ok) res.scritti+=items.length; else { res.ok=false; res.error=(r1&&r1.error)||'fallo sección '+sec; break; }
     }
   } else {
+    // fix velocidad: UN solo round-trip — registrarMovimientoBatch (1 flush en el GAS)
+    // en vez de N× registrarMovimiento en fila. tipo/origen/destino por item.
     var origen=(tipo==='Ingreso BLoc')?'Bodega Central':(tipo==='Ingreso Proveedor')?'Proveedor':'Bodega Local';
-    res={ok:true,scritti:0};
-    for(var i=0;i<ITEMS.length;i++){ var it=ITEMS[i];
-      var r2=await callGAS({ action:'registrarMovimiento', tipo:tipo, origen:origen, destino:'Bodega Local',
-        sku:it.sku, desc:it.nombre, unidad:'UO', cantidad:it.qty, responsable:OPERADOR, obs:'pinsita · '+(it.said||'') });
-      if(r2&&r2.ok) res.scritti++; else { res.ok=false; res.error=(r2&&r2.error)||'fallo item '+(i+1); break; }
-    }
+    var movItems=ITEMS.map(function(it){
+      return { tipo:tipo, origen:origen, destino:'Bodega Local',
+        sku:it.sku, desc:it.nombre, unidad:'UO', uoDesc:skuUO(it.sku)||'',
+        cantidad:it.qty, obs:'pinsita · '+(it.said||'') };
+    });
+    var rB=await callGAS({ action:'registrarMovimientoBatch', responsable:OPERADOR, items:movItems });
+    if(rB&&rB.ok) res={ok:true, scritti:(rB.scritti||movItems.length)};
+    else res={ok:false, error:(rB&&rB.error)||'fallo batch movimiento'};
   }
   if(res&&res.ok){
     var n=res.scritti||ITEMS.length;
