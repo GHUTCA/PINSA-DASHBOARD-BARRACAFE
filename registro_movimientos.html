@@ -386,10 +386,13 @@ function interpret(frase){
 function isQtyTok(t){ return /^\d+([.,]\d+)?$/.test(t) || NUMWORD[t]!=null; }
 function splitItems(frase){
   var s=(frase||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  s=s.replace(/(\d),(\d)/g,'$1\u00b7$2');   // protege decimal "1,5" (· temporal) antes de tratar la coma
+  // FIX 24-jun: protege el decimal escrito con COMA *o* PUNTO ("2,5" y "2.5")
+  // antes de tratar separadores. Sin esto, "2.5" se partía en dos qty-token
+  // (2 y 5) → dos items fantasma → dos movimientos (bug Aceite 3 + 0,5).
+  s=s.replace(/(\d)[.,](\d)/g,'$1\u00b7$2');  // 2,5 / 2.5 -> 2·5 (decimal blindado)
   s=s.replace(/[\n;]+/g,' , ').replace(/,/g,' , ');  // saltos y comas = separador explícito
   s=s.replace(/(\d)([a-z]+)/g,'$1 $2');     // "1kg" -> "1 kg" (número pegado a unidad)
-  s=s.replace(/\u00b7/g,',');                // restaura el decimal: 1·5 -> 1,5
+  s=s.replace(/\u00b7/g,'.');                // restaura el decimal SIEMPRE como punto: 2·5 -> 2.5
   var rawToks=s.replace(/[^a-z0-9,. ]/g,' ').replace(/\s+/g,' ').trim().split(' ').filter(Boolean);
   var items=[], cur=[];
   function push(){ var s=cur.join(' ').trim(); if(s) items.push(s); cur=[]; }
@@ -1178,17 +1181,26 @@ $('btnConfirm').onclick=async function(){
   var payload, resumen;
 
   if(v.nat==='conteo'){
-    // ── CONTEO FÍSICO BLocal ──────────────────────────────────────────
+    // ── INVENTARIO BLocal ─────────────────────────────────────────────
     // No escribe el movimiento tal cual: manda la Q CONTADA (qUO) y el GAS
     // calcula el ajuste teórico−contado contra Inventario_BLocal, escribe
     // el movimiento de ajuste +/− y genera el PDF. items:[{sku,desc,qUO}].
     // loteId va igual → la cola offline sigue siendo idempotente.
-    var itemsConteo=ITEMS.map(function(it){
-      return { sku:it.sku, desc:it.nombre, qUO:it.qty, qBO:null };
+    //
+    // RED DE SEGURIDAD (24-jun): en un INVENTARIO un SKU se cuenta UNA vez.
+    // Si por cualquier motivo aparece dos veces en la lista, NO mandamos dos
+    // ajustes: consolidamos a una sola línea. Inventario = conteo ABSOLUTO,
+    // no suma → gana la ÚLTIMA Q tecleada para ese SKU (la corrección manda).
+    var _mapInv={}, _ordenInv=[];
+    ITEMS.forEach(function(it){
+      if(it.sku==null) return;
+      if(_mapInv[it.sku]===undefined) _ordenInv.push(it.sku);
+      _mapInv[it.sku]={ sku:it.sku, desc:it.nombre, qUO:it.qty, qBO:null };
     });
+    var itemsConteo=_ordenInv.map(function(sku){ return _mapInv[sku]; });
     payload={ action:'registrarAjustesCandelaria', loteId:loteId,
               responsable:OPERADOR, items:itemsConteo };
-    resumen=ITEMS.length+' contados · '+v.label;
+    resumen=itemsConteo.length+' contados · '+v.label;
   } else {
     // ── REGISTRAR (Entrega / Ajuste / Ingreso) — sin cambios ──────────
     // batch único — destino/origen/tipo por item (Entrega: destino=sección, N16)
