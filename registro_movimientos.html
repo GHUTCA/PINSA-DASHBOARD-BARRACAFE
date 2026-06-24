@@ -489,9 +489,14 @@ var VERBOS = [
   {id:'Entrega Secc',   label:'→ Entrega a sección',          nat:'registrar', qReq:true},
   {id:'Ajuste - menos', label:'− Ajuste / Merma (menos)',     nat:'registrar', qReq:true},
   {id:'Ingreso BLoc',   label:'↓ Ingreso a Bodega Local',     nat:'registrar', qReq:true},
-  {id:'Conteo Fisico',  label:'☑ Conteo Físico BLocal',       nat:'conteo',    qReq:true, link:true}
+  {id:'Conteo Fisico',  label:'☑ Inventario BLocal',          nat:'conteo',    qReq:true}
 ];
-var URL_CONTEO = 'https://sistema.pinsita.cl/rsc/jefe_local_operaciones.html#conteo';
+// NB: el id interno sigue siendo 'Conteo Fisico' (lo lee verboActual y el
+// branch v.nat==='conteo'); cambia SÓLO la etiqueta visible → "Inventario
+// BLocal", que es como el JL lo vive. No es link a otra pantalla: se compone
+// aquí (nombre+Q) y al confirmar manda 'registrarAjustesCandelaria' (qUO =
+// la Q contada); el GAS calcula el ajuste teórico−contado contra
+// Inventario_BLocal, escribe el movimiento +/− y genera el PDF.
 function verboActual(){ var id=document.getElementById('verbo').value;
   return VERBOS.filter(function(v){return v.id===id;})[0] || VERBOS[0]; }
 
@@ -548,18 +553,6 @@ $('btnOp').onclick=function(){ localStorage.removeItem('pinsita_operador'); OPER
 // ---------- verbo dropdown (desde DATO) ----------
 verboSel.innerHTML = VERBOS.map(function(v){return '<option value="'+v.id+'">'+v.label+'</option>';}).join('');
 verboSel.addEventListener('change', function(){
-  var v=verboActual();
-  if(v.link){ // Conteo Físico: NO se compone aquí, vive en su vista propia (ya existe)
-    if(ITEMS.length && !confirm('Tenés '+ITEMS.length+' producto(s) en la lista. ¿Salir al Conteo Físico? (se pierde la lista actual)')){
-      verboSel.value=VERBOS[0].id; return;
-    }
-    if(confirm('El Conteo Físico es una pantalla aparte:\nte muestra TODOS los productos con su stock teórico, y tú anotas lo que tienes. El sistema corrige con ajuste +/−.\n\n¿Abrir el Conteo Físico de Riesco?')){
-      window.location.href = URL_CONTEO;
-    } else {
-      verboSel.value=VERBOS[0].id;
-    }
-    return;
-  }
   render();
 });
 
@@ -1181,18 +1174,35 @@ $('btnConfirm').onclick=async function(){
   if(!confirm('Vas a generar un movimiento:\n\n'+v.label+'\n'+ITEMS.length+' producto(s) · '+OPERADOR+'\n\n¿Confirmar?')) return;
   $('btnConfirm').disabled=true; $('btnConfirm').textContent='Guardando…';
   var tipo=v.id;
-  // batch único — destino/origen/tipo por item (Entrega: destino=sección, N16)
-  var movItems=ITEMS.map(function(it){
-    var origen, destino;
-    if(tipo==='Entrega Secc'){ origen='Bodega Local'; destino=capSec(skuSec(it.sku)||'Cocina Central'); }
-    else { origen=(tipo==='Ingreso BLoc')?'Bodega Central':(tipo==='Ingreso Proveedor')?'Proveedor':'Bodega Local'; destino='Bodega Local'; }
-    return { tipo:tipo, origen:origen, destino:destino,
-      sku:it.sku, desc:it.nombre, unidad:'UO', uoDesc:skuUO(it.sku)||'',
-      cantidad:it.qty, obs:'pinsita · '+(it.said||'') };
-  });
   var loteId=nuevoLoteId();
-  var payload={ action:'registrarMovimientoBatch', loteId:loteId, responsable:OPERADOR, items:movItems };
-  var resumen=ITEMS.length+' prod · '+v.label;
+  var payload, resumen;
+
+  if(v.nat==='conteo'){
+    // ── CONTEO FÍSICO BLocal ──────────────────────────────────────────
+    // No escribe el movimiento tal cual: manda la Q CONTADA (qUO) y el GAS
+    // calcula el ajuste teórico−contado contra Inventario_BLocal, escribe
+    // el movimiento de ajuste +/− y genera el PDF. items:[{sku,desc,qUO}].
+    // loteId va igual → la cola offline sigue siendo idempotente.
+    var itemsConteo=ITEMS.map(function(it){
+      return { sku:it.sku, desc:it.nombre, qUO:it.qty, qBO:null };
+    });
+    payload={ action:'registrarAjustesCandelaria', loteId:loteId,
+              responsable:OPERADOR, items:itemsConteo };
+    resumen=ITEMS.length+' contados · '+v.label;
+  } else {
+    // ── REGISTRAR (Entrega / Ajuste / Ingreso) — sin cambios ──────────
+    // batch único — destino/origen/tipo por item (Entrega: destino=sección, N16)
+    var movItems=ITEMS.map(function(it){
+      var origen, destino;
+      if(tipo==='Entrega Secc'){ origen='Bodega Local'; destino=capSec(skuSec(it.sku)||'Cocina Central'); }
+      else { origen=(tipo==='Ingreso BLoc')?'Bodega Central':(tipo==='Ingreso Proveedor')?'Proveedor':'Bodega Local'; destino='Bodega Local'; }
+      return { tipo:tipo, origen:origen, destino:destino,
+        sku:it.sku, desc:it.nombre, unidad:'UO', uoDesc:skuUO(it.sku)||'',
+        cantidad:it.qty, obs:'pinsita · '+(it.said||'') };
+    });
+    payload={ action:'registrarMovimientoBatch', loteId:loteId, responsable:OPERADOR, items:movItems };
+    resumen=ITEMS.length+' prod · '+v.label;
+  }
 
   // 1) SIEMPRE encola primero (el movimiento NUNCA se pierde, ni sin red)
   colaEncolar(payload, resumen);
