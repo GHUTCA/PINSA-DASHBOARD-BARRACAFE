@@ -115,6 +115,27 @@
     border-radius:11px;padding:13px;font-size:15px;font-weight:600}
   .pk-ok.ready{background:var(--ok);color:#fff;border-color:var(--ok)}
   .pk-ok:active{transform:scale(.98)}
+
+  /* ===== PICKER A SCHERMO PIENO (modo 'add' a tastiera) =====
+     Risolve: la tastiera copriva prodotto scelto + conferma.
+     Il pannello riempie il viewport visibile; la tastiera prende lo spazio
+     sotto e il pannello (100dvh) si accorcia con essa. Q+nome in cima fissi,
+     candidati scrollabili in mezzo, ✓ Agregar FISSO in fondo sopra la tastiera.
+     Niente inseguimento di pixel (visualViewport) → uguale su iPhone e Android. */
+  .picker.full{position:fixed;left:0;right:0;top:0;bottom:0;z-index:60;
+    margin:0;border:none;border-radius:0;background:var(--bg);
+    max-width:560px;margin-left:auto;margin-right:auto;
+    display:flex;flex-direction:column;padding:0;height:100dvh}
+  @supports not (height: 100dvh){ .picker.full{height:auto;top:0;bottom:0} }
+  .picker.full .pk-top{flex:0 0 auto;padding:14px 14px 10px;
+    border-bottom:1px solid var(--line);background:var(--bg)}
+  .picker.full .pk-row{margin:0}
+  .picker.full .pk-hint{margin:8px 0 0}
+  .picker.full .pk-list{flex:1 1 auto;min-height:0;overflow-y:auto;
+    margin:0;max-height:none;padding:10px 14px}
+  .picker.full .pk-foot{flex:0 0 auto;padding:10px 14px calc(10px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line);background:var(--bg)}
+  .picker.full .pk-ok{margin:0}
   /* FIX #2 — switch unidad base (UTM) ⇄ UO */
   .pk-unit{display:flex;gap:7px;margin:9px 0 2px}
   .pk-u{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--t2);
@@ -204,7 +225,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><span class="nm">PINSITA</span><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v4 · 24jun</span></div>
+      <div class="brand"><span class="nm">PINSITA</span><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v5 · 24jun</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -681,7 +702,7 @@ function arrancar(){
     cargarVocabDesdeBD().then(function(res){
       window.__vocabCargado=res.ok; window.__vocabCargando=false; window.__vocabRes=res;
       var ve=document.getElementById('ver');
-      if(ve){ ve.textContent='v4 · 24jun · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
+      if(ve){ ve.textContent='v5 · 24jun · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
               ve.style.color=res.ok?'var(--ok)':'var(--warn)'; }
       render();
     });
@@ -954,23 +975,27 @@ $('pTeclado').onclick=function(){ abrirPickerAdd(false); };
 $('pQR').onclick=function(){ alert('▦ QR: todavía no.\nViene cuando exista el campo codigo_barras.\nPor ahora usa Voz o Teclado.'); };
 
 // ---------- PICKER (alta a mano y corrección) ----------
-function closePicker(){ if(pickerEl){ pickerEl.remove(); pickerEl=null; } }
+function closePicker(){ document.body.style.overflow=''; if(pickerEl){ pickerEl.remove(); pickerEl=null; } }
 function buildPicker(mode, idx){
   closePicker();
   var host=document.createElement('div'); host.className='picker'; pickerEl=host;
   var qInit=(mode==='fix'&&ITEMS[idx]&&ITEMS[idx].qty!=null)?ITEMS[idx].qty:'';
   host.innerHTML=
-    '<div class="pk-row">'+
-      '<input class="pk-q" inputmode="decimal" placeholder="cant." value="'+esc(String(qInit))+'">'+
-      '<input class="pk-in" placeholder="escribe el producto…" autocomplete="off" autocapitalize="off" spellcheck="false">'+
-      '<button class="pk-x">✕</button></div>'+
-    '<div class="pk-unit" id="pkUnit" style="display:none">'+    /* FIX #2: switch unidad base (UTM) ⇄ UO */
-      '<button class="pk-u pk-u-base ready" id="pkUbase" data-u="base">unidad suelta</button>'+
-      '<button class="pk-u pk-u-uo" id="pkUuo" data-u="uo">por paquete</button>'+
+    '<div class="pk-top">'+
+      '<div class="pk-row">'+
+        '<input class="pk-q" inputmode="decimal" placeholder="cant." value="'+esc(String(qInit))+'">'+
+        '<input class="pk-in" placeholder="escribe el producto…" autocomplete="off" autocapitalize="off" spellcheck="false">'+
+        '<button class="pk-x">✕</button></div>'+
+      '<div class="pk-unit" id="pkUnit" style="display:none">'+    /* FIX #2: switch unidad base (UTM) ⇄ UO */
+        '<button class="pk-u pk-u-base ready" id="pkUbase" data-u="base">unidad suelta</button>'+
+        '<button class="pk-u pk-u-uo" id="pkUuo" data-u="uo">por paquete</button>'+
+      '</div>'+
+      '<div class="pk-hint" id="pkHint">La cantidad es obligatoria.</div>'+
     '</div>'+
-    '<div class="pk-hint" id="pkHint">La cantidad es obligatoria.</div>'+
     '<div class="pk-list" id="pkList"></div>'+
-    '<button class="pk-ok" id="pkOk" style="display:none">✓ Agregar</button>';
+    '<div class="pk-foot">'+
+      '<button class="pk-ok" id="pkOk" style="display:none">✓ Agregar</button>'+
+    '</div>';
   var qEl=host.querySelector('.pk-q'), inEl=host.querySelector('.pk-in'),
       xEl=host.querySelector('.pk-x'), listE=host.querySelector('#pkList'),
       hintE=host.querySelector('#pkHint'), okBtn=host.querySelector('#pkOk');
@@ -1074,11 +1099,15 @@ function buildPicker(mode, idx){
   return host;
 }
 function abrirPickerAdd(focusFromVoice){
-  // en COMPONI agregamos al final de la lista
+  // COMPONI a tastiera: pannello a SCHERMO PIENO (vedi CSS .picker.full).
+  // La picker NON entra nella lista (lì la tastiera la copriva): vive a tutto
+  // schermo, conferma sempre visibile sopra la tastiera. Uguale iPhone/Android.
   var host=buildPicker('add', null);
-  listEl.appendChild(host); emptyEl.style.display='none';
+  host.classList.add('full');
+  document.body.appendChild(host);
+  document.body.style.overflow='hidden';
+  emptyEl.style.display='none';
   var inEl=host.querySelector('.pk-in'); if(inEl) inEl.focus();
-  listEl.scrollTop=listEl.scrollHeight;
 }
 function abrirPickerFix(idx){
   var host=buildPicker('fix', idx);
