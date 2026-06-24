@@ -49,6 +49,18 @@
   .verbo-wrap label{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px}
   .verbo{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--t1);
     border-radius:12px;padding:11px 13px;font-size:15px;font-weight:600;-webkit-appearance:none;appearance:none}
+  /* ===== VERBO BOTONES (a prueba de error, 24-jun) ===== */
+  .verbo-wrap{flex-direction:column;align-items:stretch}
+  .verbo-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+  .vbtn{display:flex;align-items:center;justify-content:center;text-align:center;
+    background:var(--panel2);border:1.5px solid var(--line);color:var(--t2);
+    border-radius:12px;padding:13px 8px;font-size:14px;font-weight:700;line-height:1.2;
+    cursor:pointer;transition:all .12s;min-height:50px}
+  .vbtn:active{transform:scale(.97)}
+  /* activo: encendido con el color de su NATURALEZA */
+  .vbtn.on.nat-conteo  {background:rgba(74,144,217,.18);border-color:var(--acc);color:#cfe4f7}
+  .vbtn.on.nat-ingreso {background:rgba(63,166,106,.18);border-color:var(--ok);color:#cdeed9}
+  .vbtn.on.nat-salida  {background:rgba(217,146,63,.18);border-color:var(--warn);color:#f3ddc0}
 
   /* ===== LISTA (crece) ===== */
   .list{flex:1;overflow-y:auto;padding:10px 14px 4px}
@@ -191,7 +203,8 @@
     </div>
     <div class="verbo-wrap">
       <label>acción</label>
-      <select class="verbo" id="verbo"></select>
+      <div class="verbo-btns" id="verboBtns"></div>
+      <select class="verbo" id="verbo" style="display:none"></select>
     </div>
     <span class="syncbadge" id="syncBadge" style="display:none"></span>
     <span class="syncbadge wait" id="pendBadge" style="display:none;cursor:pointer"></span>
@@ -527,7 +540,7 @@ var VERBOS = [
 // la Q contada); el GAS calcula el ajuste teórico−contado contra
 // Inventario_BLocal, escribe el movimiento +/− y genera el PDF.
 function verboActual(){ var id=document.getElementById('verbo').value;
-  return VERBOS.filter(function(v){return v.id===id;})[0] || VERBOS[0]; }
+  return VERBOS.filter(function(v){return v.id===id;})[0] || null; }  // null = sin elegir (NO cae a Entrega)
 
 // ---------- helpers de producto ----------
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -614,11 +627,32 @@ otherGo.onclick=function(){ setOperador(otherName.value); };
 $('btnOp').onclick=function(){ localStorage.removeItem('pinsita_operador'); OPERADOR=null;
   gate.style.display='flex'; };
 
-// ---------- verbo dropdown (desde DATO) ----------
+// ---------- verbo BOTONES (a prueba de error) ----------
+// El <select id="verbo"> sigue siendo el ESTADO (lo leen todos los flujos
+// existentes). Los botones sólo lo pilotan. SIN default peligroso: al inicio
+// no hay verbo activo → el OP DEBE elegir uno (una acción no se hace por inercia).
 verboSel.innerHTML = VERBOS.map(function(v){return '<option value="'+v.id+'">'+v.label+'</option>';}).join('');
-verboSel.addEventListener('change', function(){
-  render();
-});
+verboSel.value='';  // ningún verbo preseleccionado
+function _natClase(v){
+  if(v.nat==='conteo') return 'nat-conteo';
+  if(v.id==='Ingreso BLoc') return 'nat-ingreso';
+  return 'nat-salida';  // Entrega / Ajuste-Merma: mueven stock fuera → naranja
+}
+function pintarVerboBtns(){
+  var cont=document.getElementById('verboBtns'); if(!cont) return;
+  cont.innerHTML = VERBOS.map(function(v){
+    var on = (verboSel.value===v.id) ? ' on '+_natClase(v) : '';
+    return '<button class="vbtn'+on+'" data-vid="'+v.id+'">'+esc(v.label)+'</button>';
+  }).join('');
+  cont.querySelectorAll('.vbtn').forEach(function(b){
+    b.onclick=function(){
+      verboSel.value=b.dataset.vid;
+      pintarVerboBtns();
+      render();
+    };
+  });
+}
+pintarVerboBtns();
 
 // ---------- ARRANQUE ----------
 function arrancar(){
@@ -1146,6 +1180,7 @@ function abrirPendientes(){
       // precarga el verbo en la cabecera (si coincide con una opción)
       var sel=document.getElementById('verbo');
       if(sel){ for(var i=0;i<sel.options.length;i++){ if(sel.options[i].text===_pendActivo.verbo){ sel.selectedIndex=i; break; } } }
+      if(typeof pintarVerboBtns==='function') pintarVerboBtns();  // refleja en los botones
       ov.style.display='none';
       ITEMS=[]; setEstado('componi'); render();
       var banner=document.getElementById('pendActivoBanner');
@@ -1274,6 +1309,7 @@ function confirmarModal(v){
 $('btnConfirm').onclick=async function(){
   if($('btnConfirm').disabled) return;
   var v=verboActual();
+  if(!v){ alert('Elige primero una acción arriba\n(Inventario, Entrega, Ingreso o Ajuste).'); return; }
   // confirmación explícita CON LISTA REAL (no confirm nativo): el OP ve
   // exactamente QUÉ se va a registrar — cantidad real UO/BO, no "1 movimiento".
   var okGo=await confirmarModal(v);
