@@ -82,33 +82,28 @@
   /* ===== PICKER live (Puerta D) ===== */
   .picker{background:var(--panel);border:1px solid var(--acc);border-radius:14px;padding:12px;margin-bottom:8px}
 
-  /* velo che oscura la lista quando si compone a tastiera (focus totale sulla picker) */
-  .pk-veil{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:40}
-  .pk-veil.on{display:block}
-
-  /* PICKER ANCORATA (modo 'add' a tastiera): guscio fisso sopra la tastiera.
-     visualViewport tiene il bottom incollato al bordo superiore del teclado.
-     I candidati stanno SOPRA la barra input e crescono verso l'alto (stile WhatsApp):
-     prodotto scelto + conferma sempre visibili appena sopra la tastiera. */
-  .picker.docked{
-    position:fixed;left:0;right:0;bottom:0;z-index:41;
-    margin:0;border-radius:16px 16px 0 0;border-bottom:none;
+  /* PICKER A SCHERMO PIENO (modo 'add' a tastiera).
+     Niente inseguimento della tastiera (fragile su iOS e su ogni marca Android):
+     il pannello riempie il viewport visibile, la tastiera prende lo spazio che vuole
+     SOTTO. In cima: Q + nome (sempre visibili). In mezzo: candidati scrollabili.
+     In fondo: ✓ Agregar FISSO, sopra la tastiera, sempre raggiungibile.
+     Identico su iPhone e Android perché non dipende dalle misure del teclado. */
+  .picker.full{
+    position:fixed;left:0;right:0;top:0;bottom:0;z-index:41;
+    margin:0;border:none;border-radius:0;background:var(--bg);
     max-width:560px;margin-left:auto;margin-right:auto;
-    display:flex;flex-direction:column;
-    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
-    box-shadow:0 -12px 30px rgba(0,0,0,.45)}
-  .picker.docked .pk-list{order:1;margin:0 0 8px;max-height:42vh}
-  .picker.docked .pk-ok{order:2;margin:0 0 8px}
-  .picker.docked .pk-hint{order:3;margin:0 0 8px}
-  .picker.docked .pk-row{order:4;margin:0}
-  /* candidati: il primo in alto è il più lontano dal pollice → li mostriamo
-     in colonna invertita così il "miglior match" resta vicino all'input/pollice */
-  .picker.docked .pk-list{display:flex;flex-direction:column-reverse}
-  .picker.docked .pk-opt:first-child{border-radius:0 0 10px 10px;border-top:none;border-bottom:1px solid var(--line)}
-  .picker.docked .pk-opt:last-child{border-radius:10px 10px 0 0;border-top:1px solid var(--line)}
+    display:flex;flex-direction:column;padding:0;
+    height:100dvh}                 /* dvh = viewport reale, si accorcia con la tastiera */
+  .picker.full .pk-top{flex:0 0 auto;padding:14px 14px 10px;
+    border-bottom:1px solid var(--line);background:var(--bg)}
+  .picker.full .pk-row{margin:0}
+  .picker.full .pk-hint{margin:8px 0 0}
+  .picker.full .pk-list{flex:1 1 auto;min-height:0;overflow-y:auto;
+    margin:0;max-height:none;padding:10px 14px}
+  .picker.full .pk-foot{flex:0 0 auto;padding:10px 14px calc(10px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line);background:var(--bg)}
+  .picker.full .pk-ok{margin:0}
   .picker .pk-handle{display:none}
-  .picker.docked .pk-handle{display:block;order:0;width:38px;height:4px;border-radius:2px;background:var(--line);
-    margin:0 auto 10px;flex:0 0 auto}
   .pk-row{display:flex;gap:8px;align-items:center}
   .pk-q{width:62px;flex:0 0 62px;background:var(--bg);border:1px solid var(--line);color:var(--t1);
     border-radius:10px;padding:11px 6px;font-size:16px;text-align:center}
@@ -178,7 +173,6 @@
 </style>
 </head>
 <body>
-  <div class="pk-veil" id="pkVeil"></div>
   <!-- GATE -->
   <div class="gate" id="gate">
     <h2>¿Quién está capturando?</h2>
@@ -820,12 +814,6 @@ $('pQR').onclick=function(){ alert('▦ QR: todavía no.\nViene cuando exista el
 
 // ---------- PICKER (alta a mano y corrección) ----------
 function closePicker(){
-  if(window.__vvHandler && window.visualViewport){
-    window.visualViewport.removeEventListener('resize', window.__vvHandler);
-    window.visualViewport.removeEventListener('scroll', window.__vvHandler);
-    window.__vvHandler=null;
-  }
-  var veil=$('pkVeil'); if(veil) veil.classList.remove('on');
   document.body.style.overflow='';
   if(pickerEl){ pickerEl.remove(); pickerEl=null; }
 }
@@ -835,13 +823,17 @@ function buildPicker(mode, idx){
   var qInit=(mode==='fix'&&ITEMS[idx]&&ITEMS[idx].qty!=null)?ITEMS[idx].qty:'';
   host.innerHTML=
     '<div class="pk-handle"></div>'+
-    '<div class="pk-row">'+
-      '<input class="pk-q" inputmode="decimal" placeholder="cant." value="'+esc(String(qInit))+'">'+
-      '<input class="pk-in" placeholder="escribe el producto…" autocomplete="off" autocapitalize="off" spellcheck="false">'+
-      '<button class="pk-x">✕</button></div>'+
-    '<div class="pk-hint" id="pkHint">La cantidad es obligatoria.</div>'+
+    '<div class="pk-top">'+
+      '<div class="pk-row">'+
+        '<input class="pk-q" inputmode="decimal" placeholder="cant." value="'+esc(String(qInit))+'">'+
+        '<input class="pk-in" placeholder="escribe el producto…" autocomplete="off" autocapitalize="off" spellcheck="false">'+
+        '<button class="pk-x">✕</button></div>'+
+      '<div class="pk-hint" id="pkHint">La cantidad es obligatoria.</div>'+
+    '</div>'+
     '<div class="pk-list" id="pkList"></div>'+
-    '<button class="pk-ok" id="pkOk" style="display:none">✓ Agregar</button>';
+    '<div class="pk-foot">'+
+      '<button class="pk-ok" id="pkOk" style="display:none">✓ Agregar</button>'+
+    '</div>';
   var qEl=host.querySelector('.pk-q'), inEl=host.querySelector('.pk-in'),
       xEl=host.querySelector('.pk-x'), listE=host.querySelector('#pkList'),
       hintE=host.querySelector('#pkHint'), okBtn=host.querySelector('#pkOk');
@@ -914,35 +906,17 @@ function buildPicker(mode, idx){
   return host;
 }
 function abrirPickerAdd(focusFromVoice){
-  // COMPONI a tastiera: la picker NON entra nella lista (verrebbe coperta dal teclado).
-  // Diventa un guscio ancorato in basso, sopra la tastiera, con velo sulla lista.
+  // COMPONI a tastiera: pannello a SCHERMO PIENO. La tastiera prende lo spazio
+  // sotto; il pannello (height:100dvh) si accorcia con essa. Q+nome in cima fissi,
+  // candidati scrollabili in mezzo, ✓ Agregar fisso in fondo sopra la tastiera.
+  // Niente inseguimento di pixel → identico su iPhone e Android.
   var host=buildPicker('add', null);
-  host.classList.add('docked');
+  host.classList.add('full');
   document.body.appendChild(host);
-  var veil=$('pkVeil'); if(veil){ veil.classList.add('on'); veil.onclick=function(){ host.querySelector('.pk-x').onclick(); }; }
   document.body.style.overflow='hidden';
   emptyEl.style.display='none';
-
-  // Ancoraggio dinamico al bordo superiore della tastiera (Android/iOS).
-  // visualViewport.height si accorcia quando il teclado sale: spostiamo il guscio
-  // su di un offset pari a (layout - visual - offsetTop) così resta incollato sopra.
-  function reposition(){
-    if(!window.visualViewport){ host.style.bottom='0px'; return; }
-    var vv=window.visualViewport;
-    var kb=Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    host.style.bottom=kb+'px';
-  }
-  if(window.visualViewport){
-    window.__vvHandler=reposition;
-    window.visualViewport.addEventListener('resize', reposition);
-    window.visualViewport.addEventListener('scroll', reposition);
-  }
-  reposition();
-
   var inEl=host.querySelector('.pk-in');
   if(inEl){ inEl.focus(); }
-  // la tastiera sale ~dopo il focus: ricolloca un paio di volte per sicurezza
-  setTimeout(reposition, 150); setTimeout(reposition, 400);
 }
 function abrirPickerFix(idx){
   var host=buildPicker('fix', idx);
