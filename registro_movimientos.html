@@ -132,8 +132,12 @@
   .picker.full .pk-row{margin:0}
   .picker.full .pk-hint{margin:8px 0 0}
   .picker.full .pk-list{flex:1 1 auto;min-height:0;overflow-y:auto;
-    margin:0;max-height:none;padding:10px 14px}
-  .picker.full .pk-foot{flex:0 0 auto;padding:10px 14px calc(10px + env(safe-area-inset-bottom));
+    margin:0;max-height:none;padding:10px 14px 92px}   /* 92px: spazio per il foot fisso */
+  /* foot ANCORATO al bordo superiore della tastiera: position:fixed + JS (visualViewport).
+     Non dipende da dvh (che su Samsung non si accorcia con la tastiera numerica). */
+  .picker.full .pk-foot{position:fixed;left:0;right:0;bottom:0;z-index:61;
+    max-width:560px;margin:0 auto;
+    padding:10px 14px calc(10px + env(safe-area-inset-bottom));
     border-top:1px solid var(--line);background:var(--bg)}
   .picker.full .pk-ok{margin:0}
   /* FIX #2 — switch unidad base (UTM) ⇄ UO */
@@ -225,7 +229,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><span class="nm">PINSITA</span><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v5 · 24jun</span></div>
+      <div class="brand"><span class="nm">PINSITA</span><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v6 · 24jun</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -702,7 +706,7 @@ function arrancar(){
     cargarVocabDesdeBD().then(function(res){
       window.__vocabCargado=res.ok; window.__vocabCargando=false; window.__vocabRes=res;
       var ve=document.getElementById('ver');
-      if(ve){ ve.textContent='v5 · 24jun · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
+      if(ve){ ve.textContent='v6 · 24jun · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
               ve.style.color=res.ok?'var(--ok)':'var(--warn)'; }
       render();
     });
@@ -975,7 +979,15 @@ $('pTeclado').onclick=function(){ abrirPickerAdd(false); };
 $('pQR').onclick=function(){ alert('▦ QR: todavía no.\nViene cuando exista el campo codigo_barras.\nPor ahora usa Voz o Teclado.'); };
 
 // ---------- PICKER (alta a mano y corrección) ----------
-function closePicker(){ document.body.style.overflow=''; if(pickerEl){ pickerEl.remove(); pickerEl=null; } }
+function closePicker(){
+  if(window.__pkFootAnchor && window.visualViewport){
+    window.visualViewport.removeEventListener('resize', window.__pkFootAnchor);
+    window.visualViewport.removeEventListener('scroll', window.__pkFootAnchor);
+    window.__pkFootAnchor=null;
+  }
+  document.body.style.overflow='';
+  if(pickerEl){ pickerEl.remove(); pickerEl=null; }
+}
 function buildPicker(mode, idx){
   closePicker();
   var host=document.createElement('div'); host.className='picker'; pickerEl=host;
@@ -1100,14 +1112,30 @@ function buildPicker(mode, idx){
 }
 function abrirPickerAdd(focusFromVoice){
   // COMPONI a tastiera: pannello a SCHERMO PIENO (vedi CSS .picker.full).
-  // La picker NON entra nella lista (lì la tastiera la copriva): vive a tutto
-  // schermo, conferma sempre visibile sopra la tastiera. Uguale iPhone/Android.
+  // Il ✓ Agregar (pk-foot) è fixed e lo teniamo ancorato sopra la tastiera con
+  // visualViewport — funziona anche quando dvh non si accorcia (tastiera numerica Samsung).
   var host=buildPicker('add', null);
   host.classList.add('full');
   document.body.appendChild(host);
   document.body.style.overflow='hidden';
   emptyEl.style.display='none';
+  var foot=host.querySelector('.pk-foot');
+  function anchorFoot(){
+    if(!foot) return;
+    if(window.visualViewport){
+      var vv=window.visualViewport;
+      var kb=Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      foot.style.bottom=kb+'px';
+    } else { foot.style.bottom='0px'; }
+  }
+  if(window.visualViewport){
+    window.__pkFootAnchor=anchorFoot;
+    window.visualViewport.addEventListener('resize', anchorFoot);
+    window.visualViewport.addEventListener('scroll', anchorFoot);
+  }
+  anchorFoot();
   var inEl=host.querySelector('.pk-in'); if(inEl) inEl.focus();
+  setTimeout(anchorFoot,150); setTimeout(anchorFoot,400);
 }
 function abrirPickerFix(idx){
   var host=buildPicker('fix', idx);
