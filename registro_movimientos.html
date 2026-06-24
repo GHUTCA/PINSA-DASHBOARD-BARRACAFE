@@ -115,6 +115,12 @@
     border-radius:11px;padding:13px;font-size:15px;font-weight:600}
   .pk-ok.ready{background:var(--ok);color:#fff;border-color:var(--ok)}
   .pk-ok:active{transform:scale(.98)}
+  /* FIX #2 — switch unidad base (UTM) ⇄ UO */
+  .pk-unit{display:flex;gap:7px;margin:9px 0 2px}
+  .pk-u{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--t2);
+    border-radius:10px;padding:9px 6px;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+  .pk-u.ready{background:var(--acc);border-color:var(--acc);color:#fff}
+  .pk-u:active{transform:scale(.98)}
 
   /* ===== PORTE (barra inferior, siempre presente en COMPONI) ===== */
   .audio{display:none;align-items:center;gap:8px;justify-content:center;padding:8px;color:var(--t2);font-size:13px}
@@ -199,7 +205,7 @@
   <div class="top">
     <div class="top-row">
       <div class="brand"><span class="nm">PINSITA</span><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v4 · 24jun</span></div>
-      <span class="ubic" id="ubic">Riesco · BLocal</span>
+      <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
       <label>acción</label>
@@ -521,7 +527,13 @@ function searchProductos(q, limit){
 /* ===== UI · MÁQUINA DE ESTADOS · componi → rivedi → firma ===== */
 // ---------- estado global ----------
 var OPERADOR = localStorage.getItem('pinsita_operador') || null;
-var ITEMS = [];           // la lista que crece: {said,qty,sku,nombre,estado,sub,cands[]}
+// ---------- PERSISTENCIA de la lista (FIX: la lista NUNCA se pierde) ----------
+// La lista vive en localStorage por operador. Cierran/recargan/swipe → al volver está.
+var ITEMS_KEY = 'pinsita_items_'+(OPERADOR||'x');
+function persistItems(){ try{ localStorage.setItem(ITEMS_KEY, JSON.stringify(ITEMS)); }catch(e){} }
+function cargarItems(){ try{ var a=JSON.parse(localStorage.getItem(ITEMS_KEY)||'[]'); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
+function descartarItems(){ try{ localStorage.removeItem(ITEMS_KEY); }catch(e){} }
+var ITEMS = cargarItems();   // la lista que crece: {said,qty,sku,nombre,estado,sub,cands[]} — RESTAURADA al abrir
 var ESTADO = 'componi';   // componi | rivedi
 var pickerEl = null;
 
@@ -552,6 +564,10 @@ function skuDecimal(sku){ var v=skuItem(sku);
   // robusto a acentos/mayúsculas/variantes de escritura del campo "Metodo de conteo".
   var m=(v&&v.metodo||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   return m.indexOf('nivel')>=0 || m.indexOf('peso')>=0; }
+// FIX #2 — factor UO→UTM (cuántas unidades base dentro de 1 UO). Mismo parseo que totalUTM:
+// formato chileno, coma = separador de miles ("6,000"=6000). Para el switch UO ⇄ UTM.
+function skuFactor(sku){ var v=skuItem(sku); if(!v) return 1;
+  var f=parseFloat(String(v.factor||'').replace(/,/g,'')); return (f&&f>0)?f:1; }
 // #6 (rev2) — "¿qué estoy moviendo de verdad?" depende del VERBO/nivel:
 //   · Entrega a sección  → se mueve el BO (unidad de sección): "48 · Tetrabrick 1000 cc"
 //   · Ingreso/Ajuste/Conteo (nivel BLocal) → se mueve la UO: "4 · Pack 12 un. 1000cc"
@@ -620,6 +636,8 @@ var gate=$('gate'), whoList=$('whoList'), otherName=$('otherName'), otherGo=$('o
 var NOMBRES=['DC','NEA','AAG','Matías','Nea'];
 function setOperador(n){ n=(n||'').trim(); if(!n) return;
   OPERADOR=n; localStorage.setItem('pinsita_operador',n);
+  ITEMS_KEY='pinsita_items_'+n;                 // FIX: clave por operador, coherente al entrar
+  var rec=cargarItems(); ITEMS.length=0; Array.prototype.push.apply(ITEMS, rec);  // restaura su lista
   opChip.textContent=n; gate.style.display='none'; arrancar(); }
 ['DC','NEA','AAG'].forEach(function(n){ var b=document.createElement('button');
   b.textContent=n; b.onclick=function(){setOperador(n);}; whoList.appendChild(b); });
@@ -696,6 +714,7 @@ function setEstado(e){
 
 // ---------- RENDER de la lista ----------
 function render(){
+  persistItems();   // FIX: cada cambio de la lista se guarda (render se llama tras toda modificación)
   closePicker();
   // empty
   if(!ITEMS.length){
@@ -945,22 +964,52 @@ function buildPicker(mode, idx){
       '<input class="pk-q" inputmode="decimal" placeholder="cant." value="'+esc(String(qInit))+'">'+
       '<input class="pk-in" placeholder="escribe el producto…" autocomplete="off" autocapitalize="off" spellcheck="false">'+
       '<button class="pk-x">✕</button></div>'+
+    '<div class="pk-unit" id="pkUnit" style="display:none">'+    /* FIX #2: switch unidad base (UTM) ⇄ UO */
+      '<button class="pk-u pk-u-base ready" id="pkUbase" data-u="base">unidad suelta</button>'+
+      '<button class="pk-u pk-u-uo" id="pkUuo" data-u="uo">por paquete</button>'+
+    '</div>'+
     '<div class="pk-hint" id="pkHint">La cantidad es obligatoria.</div>'+
     '<div class="pk-list" id="pkList"></div>'+
     '<button class="pk-ok" id="pkOk" style="display:none">✓ Agregar</button>';
   var qEl=host.querySelector('.pk-q'), inEl=host.querySelector('.pk-in'),
       xEl=host.querySelector('.pk-x'), listE=host.querySelector('#pkList'),
       hintE=host.querySelector('#pkHint'), okBtn=host.querySelector('#pkOk');
+  var unitWrap=host.querySelector('#pkUnit'), uBaseBtn=host.querySelector('#pkUbase'), uUoBtn=host.querySelector('#pkUuo');
   var chosen=null;
+  var unidad='base';   // FIX #2: 'base' (UTM, suelta) por defecto · 'uo' (paquete) opcional
+  function syncUnitSwitch(){
+    if(chosen && skuFactor(chosen.sku)>1){
+      unitWrap.style.display='flex';
+      var uo=skuUO(chosen.sku), utm=skuUTM(chosen.sku), f=skuFactor(chosen.sku);
+      uBaseBtn.textContent = utm? (utm+' suelta') : 'unidad suelta';
+      uUoBtn.textContent   = uo ? (uo+' (×'+f+')') : 'por paquete';
+    } else { unitWrap.style.display='none'; unidad='base'; }
+    uBaseBtn.classList.toggle('ready', unidad==='base');
+    uUoBtn.classList.toggle('ready', unidad==='uo');
+  }
+  uBaseBtn.onclick=function(){ unidad='base'; syncUnitSwitch(); refreshOk(); };
+  uUoBtn.onclick  =function(){ unidad='uo';   syncUnitSwitch(); refreshOk(); };
   function refreshOk(){
-    if(chosen){ var uo=skuUO(chosen.sku); var q=qEl.value.trim();
+    if(chosen){ var uo=skuUO(chosen.sku), utm=skuUTM(chosen.sku), f=skuFactor(chosen.sku);
+      var q=qEl.value.trim();
       okBtn.style.display='block';
-      var eq=q?queMuevo(chosen.sku, parseFloat(q.replace(',','.')), verboSel.value):null;
-      okBtn.textContent = '✓ Agregar '+chosen.nombre + (q?(' · '+q+(uo?(' '+uo):'')+(eq?('  ('+eq+')'):'')):' · falta cantidad');
+      var qn=q?parseFloat(q.replace(',','.')):null;
+      var etiqueta='', equiv='';
+      if(qn!=null && !isNaN(qn)){
+        if(unidad==='base' && f>1){
+          // digitó en suelta: muestra cuántas unidades base y, abajo, la UO que se guarda
+          etiqueta=q+' '+(utm||'u'); equiv=nInt(qn/f)+' '+(uo||'UO');
+        } else {
+          // digitó en UO: muestra la UO y el total en base (red de seguridad totalUTM)
+          etiqueta=q+' '+(uo||utm||''); equiv=totalUTM(chosen.sku, qn);
+        }
+      }
+      okBtn.textContent = '✓ Agregar '+chosen.nombre + (q?(' · '+etiqueta+(equiv?('  → '+equiv):'')):' · falta cantidad');
       okBtn.classList.toggle('ready', q!=='');
     } else { okBtn.style.display='none'; }
   }
   function refreshHint(){
+    syncUnitSwitch();   // FIX #2: muestra/oculta el switch según el producto
     if(chosen){ var uo=skuUO(chosen.sku);
       hintE.innerHTML = '<b style="color:var(--t1)">'+esc(chosen.nombre)+'</b>'+(uo?(' · en <b style="color:var(--t2)">'+esc(uo)+'</b>'):'')+
         ' · '+esc(capSec(skuSec(chosen.sku)))+' — escribe la cantidad y confirma con ✓';
@@ -972,13 +1021,18 @@ function buildPicker(mode, idx){
     var raw=qEl.value.trim().replace(',','.');
     if(raw===''){ qEl.focus(); qEl.style.borderColor='var(--bad)'; hintE.innerHTML='<span style="color:var(--bad)">Falta la cantidad — no se puede agregar sin Q.</span>'; return; }
     var num=parseFloat(raw); if(isNaN(num)){ qEl.focus(); return; }
+    // FIX #2: qty SIEMPRE se guarda en UO (la planilla convierte UO→UTM con el factor).
+    // Si el OP digitó en unidad suelta (base), convertimos base→UO dividiendo por el factor.
+    var f=skuFactor(chosen.sku);
+    var enteroEnUO = (unidad==='uo' || f<=1);   // FIX #2: control 'enteros' solo si se digitó EN UO
+    if(unidad==='base' && f>1){ num = num/f; }   // base→UO: la UO resultante puede ser fraccionaria (legítima)
     var qty;
-    if(!skuDecimal(chosen.sku) && Math.abs(num-Math.round(num))>0.001){
+    if(enteroEnUO && !skuDecimal(chosen.sku) && Math.abs(num-Math.round(num))>0.001){
       var r=Math.round(num);
       if(!confirm('"'+chosen.nombre+'" se cuenta por unidades enteras.\n\n'+num+' se va a registrar como '+r+'.\n\n¿Está bien?')){ qEl.focus(); qEl.select&&qEl.select(); return; }
       qty=r;
     } else {
-      qty = skuDecimal(chosen.sku)?num:Math.round(num);
+      qty = (enteroEnUO && !skuDecimal(chosen.sku)) ? Math.round(num) : num;
     }
     if(mode==='fix'){ var it=ITEMS[idx];
       if(it.sku!==chosen.sku) pushAlias(it.said, chosen.sku, chosen.nombre);
@@ -1394,6 +1448,7 @@ $('btnConfirm').onclick=async function(){
   listEl.appendChild(d);
   actionbar.style.display='none'; revbar.style.display='none';
   ITEMS.length=0;
+  descartarItems();   // FIX: lista enviada → se borra del teléfono (no reaparece al reabrir)
   setTimeout(function(){ d.remove(); setEstado('componi'); render(); }, 1900);
 };
 
