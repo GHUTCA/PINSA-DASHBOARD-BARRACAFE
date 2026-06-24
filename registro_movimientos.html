@@ -147,6 +147,29 @@
     padding:4px 10px;border-radius:20px;margin-top:6px}
   .syncbadge.wait{background:rgba(217,146,63,.15);color:var(--warn);border:1px solid var(--warn)}
   .syncbadge.bad{background:rgba(196,90,74,.15);color:var(--bad);border:1px solid var(--bad)}
+  /* ===== MODAL CONFERMA (lista reale, no confirm nativo) — 24-jun ===== */
+  .cmodal{position:fixed;inset:0;z-index:60;display:none;align-items:flex-end;justify-content:center;
+    background:rgba(0,0,0,.55);backdrop-filter:blur(2px)}
+  .cmodal.on{display:flex}
+  .cmsheet{width:100%;max-width:520px;background:var(--panel);border:1px solid var(--line);
+    border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));
+    max-height:86vh;display:flex;flex-direction:column;box-shadow:0 -8px 40px rgba(0,0,0,.4)}
+  .cm-h{font-size:13px;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin:2px 0 4px}
+  .cm-v{font-size:18px;font-weight:700;color:var(--t1);margin-bottom:12px}
+  .cm-list{overflow-y:auto;flex:1;margin:0 -4px}
+  .cm-row{display:flex;align-items:baseline;gap:10px;padding:11px 8px;border-bottom:1px solid var(--line)}
+  .cm-row:last-child{border-bottom:none}
+  .cm-q{flex:0 0 auto;font-size:22px;font-weight:800;color:var(--t1);font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
+  .cm-nm{flex:1;min-width:0}
+  .cm-pn{font-size:15px;color:var(--t1);font-weight:600;line-height:1.25}
+  /* la riga blu: COSA registro davvero (UO/BO esplicito) */
+  .cm-real{font-size:13px;color:var(--acc);font-weight:700;margin-top:3px;display:flex;align-items:center;gap:5px}
+  .cm-real .arr{opacity:.7}
+  .cm-warnq{color:var(--warn)}  /* evidenzia quando la Q reale ≠ Q digitata (pack!) */
+  .cm-foot{display:flex;gap:10px;margin-top:14px}
+  .cm-foot button{flex:1;border-radius:12px;padding:14px;font-size:16px;font-weight:700;border:1px solid var(--line);cursor:pointer}
+  .cm-cancel{background:var(--panel2);color:var(--t2)}
+  .cm-ok{background:var(--acc);color:#fff;border-color:var(--acc)}
 </style>
 </head>
 <body>
@@ -1170,11 +1193,54 @@ setInterval(function(){ if(navigator.onLine && (colaPend()||colaFail())) flushCo
 setInterval(function(){ try{ if(navigator.onLine && JSON.parse(localStorage.getItem(ALIAS_COLA_GAS_KEY)||'[]').length) flushAliasCola(); }catch(e){} }, 30000);
 setInterval(function(){ if(navigator.onLine && pendLeer().some(function(x){return x.estado==='pending';})) flushPendCola(); }, 30000);
 
+// ── MODAL CONFERMA · lista reale (UO/BO esplicito) ──────────────────────
+// Sostituisce il confirm() nativo. Mostra riga per riga COSA si registra:
+//  · Q digitata (grande)  · nome  · riga blu "↦ cosa entra davvero"
+// Se la Q reale ≠ Q digitata (pack: digiti 10 mechada → 100 unità) la riga
+// blu diventa warning, perché è LÌ che si perde stock se non si vede.
+// Ritorna una Promise<bool>: true = Confirmar, false = Volver.
+function confirmarModal(v){
+  return new Promise(function(resolve){
+    var modal=$('cmodal'), listEl=$('cmList');
+    $('cmVerbo').textContent=v.label;
+    var html='';
+    ITEMS.forEach(function(it){
+      if(it.sku==null && it.qty==null) return;
+      var qShown = (it.qty!=null) ? nInt(it.qty) : '—';
+      var real = (it.qty!=null) ? queMuevo(it.sku, it.qty, v.id) : null;
+      // ¿la cantidad real difiere de la digitada? (pack/BO) → avisa fuerte
+      var diff=false;
+      if(real){
+        var m=String(real).match(/^([\d.]+)/);
+        if(m && parseFloat(m[1])!==Number(it.qty)) diff=true;
+      }
+      var realHtml = real
+        ? '<div class="cm-real'+(diff?' cm-warnq':'')+'"><span class="arr">↦</span>'+esc(real)+'</div>'
+        : '';
+      html+='<div class="cm-row">'+
+        '<div class="cm-q">'+esc(qShown)+'</div>'+
+        '<div class="cm-nm"><div class="cm-pn">'+esc(it.nombre||it.said||'(sin nombre)')+'</div>'+
+        realHtml+'</div></div>';
+    });
+    listEl.innerHTML = html || '<div class="cm-row"><div class="cm-nm">Lista vacía</div></div>';
+    modal.classList.add('on');
+    function cleanup(val){
+      modal.classList.remove('on');
+      $('cmOk').onclick=null; $('cmCancel').onclick=null;
+      resolve(val);
+    }
+    $('cmOk').onclick=function(){ cleanup(true); };
+    $('cmCancel').onclick=function(){ cleanup(false); };
+  });
+}
+
 $('btnConfirm').onclick=async function(){
   if($('btnConfirm').disabled) return;
   var v=verboActual();
-  // confirmación explícita
-  if(!confirm('Vas a generar un movimiento:\n\n'+v.label+'\n'+ITEMS.length+' producto(s) · '+OPERADOR+'\n\n¿Confirmar?')) return;
+  // confirmación explícita CON LISTA REAL (no confirm nativo): el OP ve
+  // exactamente QUÉ se va a registrar — cantidad real UO/BO, no "1 movimiento".
+  var okGo=await confirmarModal(v);
+  if(!okGo) return;
   $('btnConfirm').disabled=true; $('btnConfirm').textContent='Guardando…';
   var tipo=v.id;
   var loteId=nuevoLoteId();
@@ -1277,5 +1343,16 @@ try{ pintarBadge(); pintarBadgePend(); if(navigator.onLine){ flushCola(); flushA
 if(OPERADOR){ gate.style.display='none'; arrancar(); }
 
 </script>
+<div class="cmodal" id="cmodal">
+  <div class="cmsheet">
+    <div class="cm-h">Vas a registrar</div>
+    <div class="cm-v" id="cmVerbo">—</div>
+    <div class="cm-list" id="cmList"></div>
+    <div class="cm-foot">
+      <button class="cm-cancel" id="cmCancel">Volver</button>
+      <button class="cm-ok" id="cmOk">Confirmar</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
