@@ -157,15 +157,15 @@
   .cm-h{font-size:13px;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin:2px 0 4px}
   .cm-v{font-size:18px;font-weight:700;color:var(--t1);margin-bottom:12px}
   .cm-list{overflow-y:auto;flex:1;margin:0 -4px}
-  .cm-row{display:flex;align-items:baseline;gap:10px;padding:11px 8px;border-bottom:1px solid var(--line)}
+  .cm-row{display:flex;align-items:flex-start;gap:10px;padding:11px 8px;border-bottom:1px solid var(--line)}
   .cm-row:last-child{border-bottom:none}
-  .cm-q{flex:0 0 auto;font-size:22px;font-weight:800;color:var(--t1);font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
+  .cm-q{flex:0 0 auto;font-size:22px;font-weight:800;color:var(--t1);font-variant-numeric:tabular-nums;min-width:38px;text-align:right;margin-left:auto}
   .cm-nm{flex:1;min-width:0}
   .cm-pn{font-size:15px;color:var(--t1);font-weight:600;line-height:1.25}
-  /* la riga blu: COSA registro davvero (UO/BO esplicito) */
-  .cm-real{font-size:13px;color:var(--acc);font-weight:700;margin-top:3px;display:flex;align-items:center;gap:5px}
-  .cm-real .arr{opacity:.7}
-  .cm-warnq{color:var(--warn)}  /* evidenzia quando la Q reale ≠ Q digitata (pack!) */
+  .cm-real{font-size:12px;color:var(--t2);margin-top:3px}
+  .cm-tot{color:var(--acc);font-weight:700;font-size:13px}
+  .cm-tot .arr{opacity:.85;font-weight:700}
+  .cm-warnq{color:var(--warn)}
   .cm-foot{display:flex;gap:10px;margin-top:14px}
   .cm-foot button{flex:1;border-radius:12px;padding:14px;font-size:16px;font-weight:700;border:1px solid var(--line);cursor:pointer}
   .cm-cancel{background:var(--panel2);color:var(--t2)}
@@ -542,6 +542,38 @@ function skuDecimal(sku){ var v=skuItem(sku);
 // Nunca conversión UTM abstracta; siempre la unidad física, sin inventar números.
 function skuUTM(sku){ var v=skuItem(sku); return (v&&v.utm)?v.utm:''; }
 function nInt(n){ return (Math.abs(n-Math.round(n))<0.001)?String(Math.round(n)):(''+(Math.round(n*10)/10)); }
+
+// ── TOTAL en UTM, legible — REGLA ÚNICA (24-jun) ────────────────────────
+// "Total: Q × Factor(col T BD_INSUMOS)" traducido a la unidad que el OP
+// entiende. Es la red de seguridad: el OP cuenta el FORMATO (10 bolsas) y
+// abajo ve CUÁNTO ES de verdad (100 unidades). Si pone 100 por error, ve
+// "1000 unidades" y se frena. Estándar UTM siempre, sin descripciones BO.
+//   · Gr  ≥1000 → Kg   · CC ≥1000 → litros   · unidad/cc/gr chico → tal cual
+// Si falta el factor (1 de 353) → devuelve null y la línea no se muestra
+// (mejor nada que un número falso).
+function totalUTM(sku, qty){
+  if(qty==null) return null;
+  var v=skuItem(sku); if(!v) return null;
+  var f=parseFloat(String(v.factor||'').replace(',','.'));
+  if(!f || f<=0) return null;                 // sin factor fiable → no inventamos
+  var tot=qty*f;
+  var u=String(v.utm||'').trim().toLowerCase();
+  if(u==='gr' || u==='g'){
+    return tot>=1000 ? nInt(tot/1000)+' Kg' : nInt(tot)+' Gr';
+  }
+  if(u==='cc' || u==='ml'){
+    return tot>=1000 ? nInt(tot/1000)+' litros' : nInt(tot)+' cc';
+  }
+  if(u==='unidad' || u==='unidades' || u==='un'){
+    return nInt(tot)+' unidades';
+  }
+  if(u==='porcion' || u==='porciones'){
+    return nInt(tot)+' porciones';
+  }
+  // unidad desconocida → muestra el número con su UTM cruda, sin traducir
+  return nInt(tot)+(v.utm?(' '+v.utm):'');
+}
+
 function queMuevo(sku, qty, tipo){
   if(qty==null) return null;
   var v=skuItem(sku); if(!v) return null;
@@ -636,17 +668,19 @@ function render(){
   listEl.querySelectorAll('.rowwrap,.row').forEach(function(n){n.remove();});
   ITEMS.forEach(function(it,idx){
     var uo=skuUO(it.sku), sec=it.sub||skuSec(it.sku);
-    var sub = (uo? ('en <b>'+esc(uo)+'</b>'):'') + (uo&&sec?' · ':'') + (sec?esc(capSec(sec)):'');
     var qMiss = (it.qty==null);
     var qHtml = qMiss ? '<span class="q miss">falta Q</span>' : '<span class="q">'+esc(String(it.qty))+'</span>';
-    // #6 — equivalente UTM bien visible: "qué estoy registrando de verdad"
-    var utmStr = qMiss ? null : queMuevo(it.sku, it.qty, verboSel.value);
-    var utmHtml = utmStr ? '<div class="utmline">↦ '+esc(utmStr)+'</div>' : '';
+    // CARD 3 RIGHE (24-jun): formato UO (qué cuentas) + Total UTM (cuánto es)
+    // El sub = el formato físico que el OP tiene en la mano ("Bolsa de 10 un").
+    var fmtHtml = uo ? '<div class="uo">'+esc(uo)+'</div>' : '';
+    // Total UTM legible — la red de seguridad contra el error de Q.
+    var totStr = qMiss ? null : totalUTM(it.sku, it.qty);
+    var utmHtml = totStr ? '<div class="utmline">Total: '+esc(totStr)+'</div>' : '';
     if(it.estado==='ok'){
       var row=document.createElement('div'); row.className='row'; row.id='row-'+idx;
       row.innerHTML='<span class="dot ok"></span>'+
         '<div class="nme"><div class="pn">'+esc(it.nombre||'')+'</div>'+
-        (sub?'<div class="uo">'+sub+'</div>':'')+ utmHtml +'</div>'+ qHtml +
+        fmtHtml + utmHtml +'</div>'+ qHtml +
         '<span class="mini">'+
           '<button data-eq="'+idx+'" title="cantidad">#</button>'+
           '<button data-ed="'+idx+'" title="cambiar">✎</button>'+
@@ -1207,20 +1241,14 @@ function confirmarModal(v){
     ITEMS.forEach(function(it){
       if(it.sku==null && it.qty==null) return;
       var qShown = (it.qty!=null) ? nInt(it.qty) : '—';
-      var real = (it.qty!=null) ? queMuevo(it.sku, it.qty, v.id) : null;
-      // ¿la cantidad real difiere de la digitada? (pack/BO) → avisa fuerte
-      var diff=false;
-      if(real){
-        var m=String(real).match(/^([\d.]+)/);
-        if(m && parseFloat(m[1])!==Number(it.qty)) diff=true;
-      }
-      var realHtml = real
-        ? '<div class="cm-real'+(diff?' cm-warnq':'')+'"><span class="arr">↦</span>'+esc(real)+'</div>'
-        : '';
+      var uo = skuUO(it.sku);
+      var totStr = (it.qty!=null) ? totalUTM(it.sku, it.qty) : null;
+      var fmtHtml = uo ? '<div class="cm-real">'+esc(uo)+'</div>' : '';
+      var totHtml = totStr ? '<div class="cm-real cm-tot"><span class="arr">Total:</span> '+esc(totStr)+'</div>' : '';
       html+='<div class="cm-row">'+
-        '<div class="cm-q">'+esc(qShown)+'</div>'+
         '<div class="cm-nm"><div class="cm-pn">'+esc(it.nombre||it.said||'(sin nombre)')+'</div>'+
-        realHtml+'</div></div>';
+        fmtHtml+totHtml+'</div>'+
+        '<div class="cm-q">'+esc(qShown)+'</div></div>';
     });
     listEl.innerHTML = html || '<div class="cm-row"><div class="cm-nm">Lista vacía</div></div>';
     modal.classList.add('on');
