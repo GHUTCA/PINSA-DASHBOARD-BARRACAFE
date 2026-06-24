@@ -147,6 +147,7 @@
     padding:4px 10px;border-radius:20px;margin-top:6px}
   .syncbadge.wait{background:rgba(217,146,63,.15);color:var(--warn);border:1px solid var(--warn)}
   .syncbadge.bad{background:rgba(196,90,74,.15);color:var(--bad);border:1px solid var(--bad)}
+  .ver{font-size:10px;color:var(--t3);margin-left:8px;opacity:.8;letter-spacing:.3px;align-self:center}
   /* ===== MODAL CONFERMA (lista reale, no confirm nativo) — 24-jun ===== */
   .cmodal{position:fixed;inset:0;z-index:60;display:none;align-items:flex-end;justify-content:center;
     background:rgba(0,0,0,.55);backdrop-filter:blur(2px)}
@@ -185,7 +186,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><span class="nm">PINSITA</span><span class="opchip" id="opChip">—</span></div>
+      <div class="brand"><span class="nm">PINSITA</span><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v4 · 24jun</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal</span>
     </div>
     <div class="verbo-wrap">
@@ -316,7 +317,9 @@ async function cargarVocabDesdeBD(){
     var rBD=await fetch(_csvMaestro(GID_BD),{cache:'no-store'});
     if(!rBD.ok) throw new Error('BD '+rBD.status);
     var bd=_parseCSV(await rBD.text());
-    if(!bd.length || bd[0].SKU===undefined) throw new Error('BD vacía o sin header SKU');
+    // La columna SKU en el CSV publicado se llama 'f' (no 'SKU'). Aceptamos
+    // ambos para robustez: si falta 'f' Y 'SKU' → CSV inválido, cae a fallback.
+    if(!bd.length || (bd[0].f===undefined && bd[0].SKU===undefined)) throw new Error('BD vacía o sin columna SKU/f');
     // alias (puede fallar sin romper el VOCAB base)
     var aliasMap={};
     try{
@@ -328,7 +331,7 @@ async function cargarVocabDesdeBD(){
     }catch(e){}
     var nuevo=[];
     bd.forEach(function(r){
-      var sku=String(r.SKU||'').trim(); if(!sku) return;
+      var sku=String(r.f||r.SKU||'').trim(); if(!sku) return;
       var activo=String(r['Activo No/Activo']||'').trim().toLowerCase();
       if(activo==='no') return;  // inactivos no entran al cerebro
       var secsRaw=String(r.Seccion||'').toLowerCase();
@@ -554,7 +557,10 @@ function nInt(n){ return (Math.abs(n-Math.round(n))<0.001)?String(Math.round(n))
 function totalUTM(sku, qty){
   if(qty==null) return null;
   var v=skuItem(sku); if(!v) return null;
-  var f=parseFloat(String(v.factor||'').replace(',','.'));
+  // OJO formato cileno: el factor usa COMA como separador de MILES ("6,000"=6000).
+  // NO convertir coma→punto (daría 6). Quitamos comas de miles. El punto, si
+  // existiera como decimal, se respeta.
+  var f=parseFloat(String(v.factor||'').replace(/,/g,''));
   if(!f || f<=0) return null;                 // sin factor fiable → no inventamos
   var tot=qty*f;
   var u=String(v.utm||'').trim().toLowerCase();
@@ -622,6 +628,9 @@ function arrancar(){
     setEmptyMsg('cargando');
     cargarVocabDesdeBD().then(function(res){
       window.__vocabCargado=res.ok; window.__vocabCargando=false; window.__vocabRes=res;
+      var ve=document.getElementById('ver');
+      if(ve){ ve.textContent='v4 · 24jun · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
+              ve.style.color=res.ok?'var(--ok)':'var(--warn)'; }
       render();
     });
   }
