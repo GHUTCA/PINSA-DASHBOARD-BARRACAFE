@@ -273,7 +273,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><span class="nm">PINSITA</span><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v8 · 24jun</span></div>
+      <div class="brand"><span class="nm">PINSITA</span><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v9 · 25jun</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -384,6 +384,14 @@ rebuildNameIdx();
 var MAESTRO_TOKEN='2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt';
 var GID_BD='514178276', GID_ALIAS='745250989', GID_STOCK='1858984855';
 var LOCAL_ACTUAL='Riesco';  // local del operador (coincide con el payload, ~línea 1247)
+// ── GANCIO BC · 25-jun ───────────────────────────────────────────────────
+// Ingreso BLoc hace BAJAR también el stock de BCentral (Ajuste - menos lado BC).
+// Hoy APAGADO: el locale ya cuadra solo (origen='Bodega Local'); BC se enciende
+// cuando el backend esté listo. El payload ya lleva los datos BC preparados
+// (ver ~línea 1540), sólo falta girar este flag a true. idEntrega queda vacío
+// hoy (ingreso LIBRE); en el futuro se llenará con la confirmación de la
+// solicitud de BCentral, sin tocar este frontend.
+var BC_WRITE_ENABLED=false;
 function _csvMaestro(gid){
   return 'https://docs.google.com/spreadsheets/d/e/'+MAESTRO_TOKEN+'/pub?gid='+gid+'&single=true&output=csv&t='+Date.now();
 }
@@ -763,7 +771,7 @@ function arrancar(){
     cargarVocabDesdeBD().then(function(res){
       window.__vocabCargado=res.ok; window.__vocabCargando=false; window.__vocabRes=res;
       var ve=document.getElementById('ver');
-      if(ve){ ve.textContent='v8 · 24jun · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
+      if(ve){ ve.textContent='v9 · 25jun · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
               ve.style.color=res.ok?'var(--ok)':'var(--warn)'; }
       render();
     });
@@ -1537,10 +1545,25 @@ $('btnConfirm').onclick=async function(){
     var movItems=ITEMS.map(function(it){
       var origen, destino;
       if(tipo==='Entrega Secc'){ origen='Bodega Local'; destino=capSec(skuSec(it.sku)||'Cocina Central'); }
-      else { origen=(tipo==='Ingreso BLoc')?'Bodega Central':(tipo==='Ingreso Proveedor')?'Proveedor':'Bodega Local'; destino='Bodega Local'; }
-      return { tipo:tipo, origen:origen, destino:destino,
+      // FIX 25-jun (bug Bastoncino 1032): Ingreso BLoc origen='Bodega Local'.
+      // STOCK_POR_NIVEL alimenta BLocal por la clave Origen; con 'Bodega Central'
+      // el ingreso NO sumaba en BLocal (stock no cuadraba). Proveedor sigue siendo
+      // ingreso externo (compra supermercado/MLibre), no toca BC.
+      else { origen=(tipo==='Ingreso Proveedor')?'Proveedor':'Bodega Local'; destino='Bodega Local'; }
+      var item={ tipo:tipo, origen:origen, destino:destino,
         sku:it.sku, desc:it.nombre, unidad:'UO', uoDesc:skuUO(it.sku)||'',
         cantidad:it.qty, obs:'pinsita · '+(it.said||'') };
+      // ── GANCIO BC (apagado) · Ingreso BLoc baja también BCentral ──────────
+      // El locale ya cuadra con el fix de arriba. Esto es la PIERNA BC: cuando
+      // BC_WRITE_ENABLED pase a true, el GAS escribirá un 'Ajuste - menos' en
+      // Movimientos_BC (L negativo → Inventario_BC baja) por estos datos.
+      // idEntrega vacío = ingreso LIBRE (hoy); futuro: id de la solicitud BC.
+      if(tipo==='Ingreso BLoc'){
+        item.bc={ enabled:BC_WRITE_ENABLED, accion:'Ajuste - menos',
+                  localOrigen:'Bodega Central', sku:it.sku, desc:it.nombre,
+                  cantidadUO:it.qty, idEntrega:'' };
+      }
+      return item;
     });
     payload={ action:'registrarMovimientoBatch', loteId:loteId, responsable:OPERADOR, items:movItems };
     resumen=ITEMS.length+' prod · '+v.label;
