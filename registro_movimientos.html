@@ -48,6 +48,8 @@
   .ubic{font-size:12px;color:var(--t3)}
   .verbo-wrap{margin-top:8px;display:flex;align-items:center;gap:8px}
   .verbo-wrap label{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px}
+  .verbo-wrap.flash{animation:verboFlash .5s ease-out 2}
+  @keyframes verboFlash{0%,100%{background:transparent}35%{background:rgba(217,146,63,.22);border-radius:10px}}
   .verbo{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--t1);
     border-radius:12px;padding:11px 13px;font-size:15px;font-weight:600;-webkit-appearance:none;appearance:none}
   /* ===== VERBO BOTONES (a prueba de error, 24-jun) ===== */
@@ -733,7 +735,18 @@ function pintarVerboBtns(){
   }).join('');
   cont.querySelectorAll('.vbtn').forEach(function(b){
     b.onclick=function(){
-      verboSel.value=b.dataset.vid;
+      var nuevo=b.dataset.vid, viejo=verboSel.value;
+      // Cambiar de verbo reescribe la DIRECCIÓN de TODA la lista (el verbo es
+      // uno solo para todos los ítems). Si ya hay productos, confirmar antes:
+      // tocar "ingreso" por error no debe voltear 6 salidas en silencio.
+      if(viejo && nuevo!==viejo && ITEMS.length){
+        var lblV=(VERBOS.filter(function(v){return v.id===viejo;})[0]||{}).label||viejo;
+        var lblN=(VERBOS.filter(function(v){return v.id===nuevo;})[0]||{}).label||nuevo;
+        var ok=confirm('Tienes '+ITEMS.length+' producto'+(ITEMS.length>1?'s':'')+
+          ' como «'+lblV+'».\n\n¿Cambiar todo a «'+lblN+'»?');
+        if(!ok){ pintarVerboBtns(); return; }  // repinta: el botón viejo sigue activo
+      }
+      verboSel.value=nuevo;
       pintarVerboBtns();
       render();
     };
@@ -750,7 +763,7 @@ function arrancar(){
     cargarVocabDesdeBD().then(function(res){
       window.__vocabCargado=res.ok; window.__vocabCargando=false; window.__vocabRes=res;
       var ve=document.getElementById('ver');
-      if(ve){ ve.textContent='v7 · 24jun · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
+      if(ve){ ve.textContent='v8 · 24jun · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
               ve.style.color=res.ok?'var(--ok)':'var(--warn)'; }
       render();
     });
@@ -1029,10 +1042,20 @@ function startVoz(){
 }
 function stopVoz(){ if(srec&&son){ son=false; try{srec.stop();}catch(ex){} }
   clearTimeout(silenceTimer); $('pVoz').classList.remove('rec'); audio.classList.remove('on'); }
-$('pVoz').onclick=function(){ son?stopVoz():startVoz(); };
+// ---------- GUARD: sin verbo no se abre puerta (#fix 24-jun) ----------
+// Un movimiento sin verbo es un dato corrupto: el mismo "Coca 24" es ingreso
+// o salida según el verbo. La puerta no se abre hasta elegir acción; el
+// selector de verbos parpadea para señalar dónde mirar.
+function _verboElegido(){
+  if(document.getElementById('verbo').value) return true;
+  var w=document.querySelector('.verbo-wrap');
+  if(w){ w.classList.remove('flash'); void w.offsetWidth; w.classList.add('flash'); }
+  return false;
+}
+$('pVoz').onclick=function(){ if(son){stopVoz();return;} if(!_verboElegido())return; startVoz(); };
 
 // ---------- PUERTA TECLADO (Puerta D) ----------
-$('pTeclado').onclick=function(){ abrirPickerAdd(false); };
+$('pTeclado').onclick=function(){ if(!_verboElegido())return; abrirPickerAdd(false); };
 $('pQR').onclick=function(){ alert('▦ QR: todavía no.\nViene cuando exista el campo codigo_barras.\nPor ahora usa Voz o Teclado.'); };
 
 // ---------- PICKER (alta a mano y corrección) ----------
