@@ -264,6 +264,33 @@
   .inv-foot{margin-top:12px}
   .inv-foot button{width:100%;border-radius:12px;padding:14px;font-size:16px;font-weight:700;
     border:1px solid var(--line);background:var(--panel2);color:var(--t2);cursor:pointer}
+  .card.frase{background:var(--panel2);border:1px solid var(--line);border-radius:12px;
+  padding:13px 14px;margin-bottom:8px}
+.card.frase.warn{border-color:var(--warn)}
+.card.frase.bad{border-color:var(--bad)}
+.fline{display:flex;align-items:flex-start;gap:10px}
+.fline .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:6px}
+.fline .dot.ok{background:var(--ok)} .fline .dot.warn{background:var(--warn)} .fline .dot.bad{background:var(--bad)}
+.ftext{flex:1;min-width:0;font-size:15px;line-height:1.5;color:var(--t1)}
+.fmid{color:var(--t2)}
+.fname{font-weight:600}
+.fname.bad{color:var(--bad)}
+.fsaid{font-style:italic;color:var(--t3)}
+.fsub{font-size:12px;color:var(--t3);margin-top:4px}
+.qfrase{display:inline-block;font-weight:700;font-size:18px;color:var(--t1);
+  background:none;border:none;border-bottom:1.5px dashed var(--t3);padding:0 2px;
+  cursor:pointer;font-variant-numeric:tabular-nums}
+.qfrase.miss{font-size:13px;font-weight:600;color:var(--warn);background:rgba(217,146,63,.15);
+  border:none;border-radius:8px;padding:2px 10px}
+.facts{display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.fact{flex:1;font-size:13px;padding:7px;border-radius:8px;background:var(--panel2);
+  border:1px solid var(--line);color:var(--t2);cursor:pointer}
+.fact.icon{flex:0 0 44px}
+.cands{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.pill{font-size:13px;padding:6px 12px;border-radius:20px;background:var(--panel2);
+  border:1px solid var(--line);color:var(--t1);cursor:pointer}
+.pill.on{border-color:var(--acc);color:#cfe4f7}
+.pill.ghost{color:var(--t2)}
 </style>
 </head>
 <body>
@@ -279,7 +306,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><span class="nm">PINSITA</span><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v12 · 26jun</span></div>
+      <div class="brand"><span class="nm">PINSITA</span><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v13 · 26jun</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -658,6 +685,27 @@ function skuFactor(sku){ var v=skuItem(sku); if(!v) return 1;
 //   · Ingreso/Ajuste/Conteo (nivel BLocal) → se mueve la UO: "4 · Pack 12 un. 1000cc"
 // Nunca conversión UTM abstracta; siempre la unidad física, sin inventar números.
 function skuUTM(sku){ var v=skuItem(sku); return (v&&v.utm)?v.utm:''; }
+function sustantivo(sku, qty){
+  var v = skuItem(sku);
+  // pesabile (metodo Peso/Nivel) → conta nell'unità di misura, non a pezzi
+  if (skuDecimal(sku)) {
+    var u = String((v&&v.utm)||'').trim().toLowerCase();
+    if (u==='gr'||u==='g')  return 'gramos';
+    if (u==='cc'||u==='ml') return 'cc';
+    if (u==='kg')           return 'kilos';
+    return u || 'unidades';
+  }
+  // numerabile → prima parola della UO Descripcion, al plurale
+  var uo = skuUO(sku);
+  if (uo) {
+    var w = uo.trim().split(/\s+/)[0].toLowerCase(); // "Tetrabrick 1000cc" → "tetrabrick"
+    if (!w) return 'unidades';
+    // plurale leggero spagnolo: vocale → +s, consonante → +es
+    if (/[aeiouáéíóú]$/.test(w)) return w+'s';
+    return w+'es';
+  }
+  return 'unidades'; // fallback onesto
+}
 function nInt(n){ return (Math.abs(n-Math.round(n))<0.001)?String(Math.round(n)):(''+(Math.round(n*10)/10)); }
 // fmtQ — Q visible en la card: entero queda entero (12, no 12.00); fracción a
 // máx 2 decimales sin ceros muertos (0.333… → 0.33, 4.50 → 4.5). NO toca it.qty:
@@ -843,47 +891,71 @@ function render(){
   // limpia filas previas (deja el empty)
   listEl.querySelectorAll('.rowwrap,.row').forEach(function(n){n.remove();});
   ITEMS.forEach(function(it,idx){
-    var uo=skuUO(it.sku), sec=it.sub||skuSec(it.sku);
     var qMiss = (it.qty==null);
-    var qHtml = qMiss ? '<span class="q miss">falta Q</span>' : '<span class="q">'+esc(fmtQ(it.qty))+'</span>';
-    // CARD 3 RIGHE (24-jun): formato UO (qué cuentas) + Total UTM (cuánto es)
-    // El sub = el formato físico que el OP tiene en la mano ("Bolsa de 10 un").
-    var fmtHtml = uo ? '<div class="uo">'+esc(uo)+'</div>' : '';
-    // Total UTM legible — la red de seguridad contra el error de Q.
-    var totStr = qMiss ? null : totalUTM(it.sku, it.qty);
-    var utmHtml = totStr ? '<div class="utmline">Total: '+esc(totStr)+'</div>' : '';
+    var sust  = sustantivo(it.sku, it.qty);
+    var totStr= qMiss ? null : totalUTM(it.sku, it.qty);
+ 
+    // il "numero" come tap-target (data-eq apre editarQ). Se manca → pill "¿cuántas?"
+    var qBtn = qMiss
+      ? '<button class="qfrase miss" data-eq="'+idx+'">¿cuántas?</button>'
+      : '<button class="qfrase" data-eq="'+idx+'">'+esc(fmtQ(it.qty))+'</button>';
+ 
     if(it.estado==='ok'){
-      var row=document.createElement('div'); row.className='row'; row.id='row-'+idx;
-      row.innerHTML='<span class="dot ok"></span>'+
-        '<div class="nme"><div class="pn">'+esc(it.nombre||'')+'</div>'+
-        fmtHtml + utmHtml +'</div>'+ qHtml +
-        '<span class="mini">'+
-          '<button data-eq="'+idx+'" title="cantidad">#</button>'+
-          '<button data-ed="'+idx+'" title="cambiar">✎</button>'+
-          '<button data-rm="'+idx+'" title="quitar">🗑</button></span>';
+      var row=document.createElement('div'); row.className='card frase'; row.id='row-'+idx;
+      var sub = totStr ? ('entran '+esc(totStr)+(skuDecimal(it.sku)?' · se pesa':'')) : 'toca el número para la cantidad';
+      row.innerHTML=
+        '<div class="fline">'+
+          '<span class="dot ok"></span>'+
+          '<div class="ftext">'+
+            qBtn+' <span class="fmid">'+esc(sust)+' de </span>'+
+            '<span class="fname">'+esc(it.nombre||'')+'</span>'+
+            '<div class="fsub">'+sub+'</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="facts">'+
+          '<button class="fact" data-ed="'+idx+'">✎ cambiar producto</button>'+
+          '<button class="fact icon" data-rm="'+idx+'" title="quitar">🗑</button>'+
+        '</div>';
       listEl.appendChild(row);
+ 
     } else if(it.estado==='warn'){
-      var w=document.createElement('div'); w.className='rowwrap warn'; w.id='row-'+idx;
+      var w=document.createElement('div'); w.className='card frase warn'; w.id='row-'+idx;
       var pills=(it.cands||[]).slice(0,3).map(function(c){
-        return '<button class="pill'+(c.sku===it.sku?' on':'')+'" data-pick="'+idx+'" data-sku="'+c.sku+'">'+esc(c.nombre)+' <span style="opacity:.6">'+c.sc+'</span></button>';
+        return '<button class="pill'+(c.sku===it.sku?' on':'')+'" data-pick="'+idx+'" data-sku="'+c.sku+'">'+esc(c.nombre)+'</button>';
       }).join('');
-      w.innerHTML='<div class="row"><span class="dot warn"></span>'+
-        '<div class="nme"><div class="pn">'+esc(it.nombre||'')+'</div>'+
-        '<div class="uo">dijiste: "'+esc(it.said||'')+'"</div></div>'+qHtml+'</div>'+
-        '<div class="cands">'+pills+'<button class="pill ghost" data-ed="'+idx+'">escribir…</button>'+
-        '<button class="pill ghost" data-rm="'+idx+'">quitar</button></div>';
+      w.innerHTML=
+        '<div class="fline">'+
+          '<span class="dot warn"></span>'+
+          '<div class="ftext">'+
+            qBtn+' <span class="fmid">de… </span>'+
+            '<span class="fsaid">dijiste “'+esc(it.said||'')+'”</span>'+
+            '<div class="fsub">¿cuál era?</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="cands">'+pills+
+          '<button class="pill ghost" data-ed="'+idx+'">escribir…</button>'+
+          '<button class="pill ghost" data-rm="'+idx+'">quitar</button>'+
+        '</div>';
       listEl.appendChild(w);
+ 
     } else { // bad
-      var b=document.createElement('div'); b.className='rowwrap bad'; b.id='row-'+idx;
-      b.innerHTML='<div class="row"><span class="dot bad"></span>'+
-        '<div class="nme"><div class="pn bad">Sin coincidencia</div>'+
-        '<div class="uo">oíste: "'+esc(it.said||'')+'"</div></div>'+qHtml+'</div>'+
-        '<div class="cands"><button class="pill ghost" data-ed="'+idx+'">⌨ escribir</button>'+
-        '<button class="pill ghost" data-rm="'+idx+'">quitar</button></div>';
+      var b=document.createElement('div'); b.className='card frase bad'; b.id='row-'+idx;
+      b.innerHTML=
+        '<div class="fline">'+
+          '<span class="dot bad"></span>'+
+          '<div class="ftext">'+
+            '<span class="fname bad">Sin coincidencia</span>'+
+            '<div class="fsaid">oíste “'+esc(it.said||'')+'”</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="cands">'+
+          '<button class="pill ghost" data-ed="'+idx+'">⌨ escribir</button>'+
+          '<button class="pill ghost" data-rm="'+idx+'">quitar</button>'+
+        '</div>';
       listEl.appendChild(b);
     }
   });
-  // engancha
+// engancha
   listEl.querySelectorAll('[data-pick]').forEach(function(b){ b.onclick=function(){ pickCand(+b.dataset.pick,b.dataset.sku); }; });
   listEl.querySelectorAll('[data-ed]').forEach(function(b){ b.onclick=function(){ abrirPickerFix(+b.dataset.ed); }; });
   listEl.querySelectorAll('[data-eq]').forEach(function(b){ b.onclick=function(){ editarQ(+b.dataset.eq); }; });
@@ -892,7 +964,7 @@ function render(){
   if(ESTADO==='componi') setEstado('componi');
   actualizarStats();
 }
-
+  
 function actualizarStats(){
   var n=ITEMS.length;
   var listos=ITEMS.filter(function(x){return x.estado==='ok' && x.qty!=null;}).length;
