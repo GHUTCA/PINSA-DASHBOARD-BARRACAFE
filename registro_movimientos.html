@@ -2162,6 +2162,22 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
     if(isNaN(v)) return '—';
     return (Math.round(v)===v) ? String(v) : v.toFixed(1).replace(/\.0$/,'');
   }
+  // ── MOSTRAR UO + UTM (27-jun · cierra la maldición) ────────────────────
+  // El stock vive en UTM (gramos). Pero en BLocal el nombre manda: dividimos
+  // por el factor para mostrar la UO (paquetes), y dejamos el gramo de red.
+  // Si factor=1 (granel, unidad) UO y UTM coinciden → mostramos uno solo.
+  // Devuelve { uo:'3,13', uoLbl:'paquetes', utm:'313', utmLbl:'gr', mismo:false }
+  function unidadesStock(stockUTM, sku){
+    var f=skuFactor(sku);                       // del VOCAB (cerebro BD)
+    var v=skuItem(sku);
+    var utmLbl=(v&&v.utm)||'';                   // gr / cc / unidad
+    var uoNombre=(v&&v.uo)?v.uo.trim().split(/\s+/)[0].toLowerCase():''; // 'paquete'→'paquetes'
+    var uoLbl = uoNombre ? (/[aeiouáéíóú]$/.test(uoNombre)?uoNombre+'s':uoNombre+'es') : 'UO';
+    if(!f || f<=1){                              // sin contenedor: una sola unidad
+      return { mismo:true, valor:fmt(stockUTM), lbl:utmLbl };
+    }
+    return { mismo:false, uo:fmt(stockUTM/f), uoLbl:uoLbl, utm:fmt(stockUTM), utmLbl:utmLbl };
+  }
 
   var STOCK=null;        // {sku: {nombre, utm, total, secciones:[{sec,stock,utm}]}}
   var SECCIONES=[];      // lista de secciones presentes (para el selector)
@@ -2257,17 +2273,24 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
       var rowsHtml=filas.map(function(s){
         var bl = s.sec==='Bodega Local';
         var cls = s.stock<0 ? 'neg' : (s.stock===0 ? 'zero' : '');
+        var u=unidadesStock(s.stock, p.sku);
+        var valHtml = u.mismo
+          ? fmt(s.stock)+'<span class="u">'+(u.lbl||'')+'</span>'
+          : '<b>'+u.uo+'</b><span class="u">'+u.uoLbl+'</span><span class="u" style="opacity:.7"> · '+u.utm+' '+u.utmLbl+'</span>';
         return '<div class="inv-sec">'+
           '<span class="nm'+(bl?' bl':'')+'">'+s.sec+(bl?'<span class="tag">reserva</span>':'')+'</span>'+
-          '<span class="v '+cls+'">'+fmt(s.stock)+'<span class="u">'+(s.utm||'')+'</span></span>'+
+          '<span class="v '+cls+'">'+valHtml+'</span>'+
         '</div>';
       }).join('');
-      var totLabel = (filtro==='todo') ? 'total '+fmt(p.total) : fmt(totVis);
+      var ut=unidadesStock((filtro==='todo')?p.total:totVis, p.sku);
+      var totLabel = ut.mismo
+        ? ((filtro==='todo'?'total ':'')+fmt((filtro==='todo')?p.total:totVis)+' '+(ut.lbl||''))
+        : ((filtro==='todo'?'total ':'')+ut.uo+' '+ut.uoLbl+' · '+ut.utm+' '+ut.utmLbl);
       return '<div class="inv-prod">'+
         '<div class="inv-phd">'+
           '<span class="inv-pn">'+p.nombre+'</span>'+
           '<span class="inv-sku">#'+p.sku+'</span>'+
-          '<span class="inv-tot">'+totLabel+' '+(p.utm||'')+'</span>'+
+          '<span class="inv-tot">'+totLabel+'</span>'+
         '</div>'+ rowsHtml +'</div>';
     }).join('');
 
