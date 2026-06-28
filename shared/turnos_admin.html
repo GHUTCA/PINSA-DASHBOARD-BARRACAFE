@@ -1339,6 +1339,38 @@
 
 </div><!-- fin appMain -->
 
+<!-- ── MODAL: BORRADOR (resultado del motor, editable + confirmar) ── -->
+<div class="modal-overlay" id="modalBorrador" onclick="if(event.target===this)cerrarBorrador()">
+  <div class="modal" style="max-width:980px;width:96%;max-height:92vh;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div class="modal-titulo" style="margin:0">Borrador de turnos</div>
+      <span id="brdPeriodo" style="font-size:12px;color:var(--gris4)"></span>
+      <button class="btn" onclick="cerrarBorrador()" style="margin-left:auto;padding:6px 12px">✕ Cerrar</button>
+    </div>
+
+    <!-- Resumen de alertas -->
+    <div id="brdAlertas" style="margin-bottom:10px"></div>
+
+    <!-- Grilla editable -->
+    <div style="overflow:auto;flex:1;border:1px solid var(--gris3);border-radius:var(--radius)">
+      <table id="brdTabla" style="border-collapse:collapse;width:100%;font-size:12px"></table>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px">
+      <div style="font-size:11px;color:var(--gris4)">
+        ⚓ ancla (no se toca) · <span style="color:var(--rojo)">rojo</span> = hueco/alerta · tocá una celda para cambiarla
+      </div>
+      <button class="btn-nuevo" id="brdConfirmar" onclick="confirmarBorrador()"
+        style="margin-left:auto;background:var(--oficial);color:#0a0a0a;border:none;padding:12px 22px">
+        ✓ Confirmar y guardar
+      </button>
+    </div>
+    <div style="text-align:center;font-size:11px;color:var(--gris4);margin-top:8px" id="brdFooter">
+      Nada se guarda hasta que confirmes. Podés cerrar y se descarta.
+    </div>
+  </div>
+</div>
+
 <!-- ══════════════════════════════════════
      MODAL TURNO
 ══════════════════════════════════════ -->
@@ -3806,39 +3838,6 @@ function quitarExcepcion(idx) {
   renderGenExcep();
 }
 
-// Guarda las reglas en el MAESTRO y (por ahora) avisa que el motor llega después.
-async function generarBorrador() {
-  genReglas.domingos = parseInt(document.getElementById('genDomingos').value) || 2;
-  if (genReglas.dias_libres.length === 0) {
-    mostrarToast('Elegí al menos un día donde puedan caer los libres', 'err');
-    return;
-  }
-  const periodo = document.getElementById('genPeriodo').value;
-
-  const btn = document.getElementById('btnGenerar');
-  if (btn) { btn.disabled = true; btn.textContent = 'Guardando reglas…'; }
-
-  const payload = {
-    local: LOCAL, accion: 'guardarReglas',
-    reglas: { dias_libres: genReglas.dias_libres, domingos: genReglas.domingos },
-    excepciones: genExcep
-  };
-  try {
-    const res  = await fetch(GAS_MAESTRO_URL, { method:'POST', body: JSON.stringify(payload) });
-    const data = await res.json();
-    if (data && data.ok) {
-      mostrarToast('Reglas guardadas ✓', 'ok');
-      document.getElementById('genFooter').textContent =
-        'Reglas listas. El motor de generación se conecta en el próximo paso.';
-    } else {
-      mostrarToast((data && data.error) || 'Error al guardar', 'err');
-    }
-  } catch(e) {
-    mostrarToast('Error de conexión', 'err');
-  }
-  if (btn) { btn.disabled = false; btn.textContent = '✦ Generar borrador'; }
-}
-
 // ══════════════════════════════════════
 // NAVEGACIÓN
 // ══════════════════════════════════════
@@ -3947,6 +3946,703 @@ function mostrarToast(msg, tipo='ok') {
 // ARRANQUE
 // PINSITA AUTH primero: login PIN → al confirmar entra a la app.
 // ══════════════════════════════════════
+
+// ====== MOTOR GENERADOR (inyectado V30) ======
+// ============================================================
+// MOTOR GENERADOR DE TURNOS — PINSA · TURNOS-ENGINE
+// JS puro, corre en el navegador. No toca el DOM ni la red.
+// Lee inputs (ya en memoria) y produce un BORRADOR + ALERTAS.
+// No guarda nada: el humano confirma en la pantalla Borrador.
+//
+// Principio ATALAYA: el sistema propone, el humano dispone.
+//   - Anclas (turnos/libres ya puestos a mano) son INTOCABLES.
+//   - El motor construye alrededor de ellas.
+//   - Si no puede cubrir una franja: deja el hueco + ALERTA roja.
+// ============================================================
+
+// ---------- Constantes legales (fallback si faltan en params) ----------
+const MOTOR_DEFAULTS = {
+  HORAS_MAX_SEMANA:     42,   // FT (Ley 21.561)
+  HORAS_MAX_SEMANA_PT:  30,   // PT
+  COLACION_MIN:         30,   // no computa
+  MAX_DIAS_SEGUIDOS:    6,    // nunca 7
+  DOMINGOS_LIBRES_MES:  2,
+  LIBRES_INFRA_MES:     4
+};
+
+const DIAS_COD = ['DO','LU','MA','MI','JU','VI','SA']; // index = getDay()
+const MESES_LARGO = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+// ---------- Helpers de fecha (espejo de los del HTML) ----------
+function _fmt(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+function _getLunes(fecha) {
+  const d = new Date(fecha);
+  const dia = d.getDay();
+  d.setDate(d.getDate() - (dia === 0 ? 6 : dia - 1));
+  d.setHours(0,0,0,0);
+  return d;
+}
+function _diaCod(fechaStr) {
+  const d = new Date(fechaStr + 'T12:00:00');
+  return DIAS_COD[d.getDay()];
+}
+function _minutos(hhmm) {
+  if (!hhmm) return null;
+  const [h,m] = String(hhmm).slice(0,5).split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h*60 + m;
+}
+function _horasTurno(entrada, salida, colacionMin) {
+  const e = _minutos(entrada), s = _minutos(salida);
+  if (e == null || s == null) return 0;
+  let bruto = Math.max(0, s - e);            // minutos de presencia
+  const col = (bruto >= 5*60) ? (colacionMin || 0) : 0; // colación solo si turno >= 5h
+  return Math.max(0, (bruto - col) / 60);    // horas trabajadas efectivas
+}
+
+// ============================================================
+// PASO 0 — Construir lista de fechas del período
+// periodo: { tipo:'mes', anio, mes }  ó  { tipo:'sem', inicio:'YYYY-MM-DD' }
+// ============================================================
+function construirCalendario(periodo) {
+  const fechas = [];
+  if (periodo.tipo === 'sem') {
+    const lunes = _getLunes(new Date(periodo.inicio + 'T12:00:00'));
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(lunes); d.setDate(lunes.getDate() + i);
+      fechas.push(_fmt(d));
+    }
+  } else {
+    const y = periodo.anio, m = periodo.mes; // m = 1-12
+    const dias = new Date(y, m, 0).getDate();
+    for (let i = 1; i <= dias; i++) {
+      fechas.push(_fmt(new Date(y, m-1, i)));
+    }
+  }
+  return fechas;
+}
+
+// Particiona fechas en semanas (claves lunes) para validar 42h por semana
+function semanasDe(fechas) {
+  const map = {};
+  fechas.forEach(f => {
+    const lunes = _fmt(_getLunes(new Date(f + 'T12:00:00')));
+    (map[lunes] = map[lunes] || []).push(f);
+  });
+  return map;
+}
+
+// ============================================================
+// NORMALIZACIÓN DE INPUTS
+// ============================================================
+function normalizarPersonal(personal) {
+  return (personal || [])
+    .filter(p => p.ACTIVO === true || p.ACTIVO === 'TRUE' || p._activo === true || p.ACTIVO === undefined)
+    .map(p => {
+      const tc = String(p.TIPO_CONTRATO || 'FT').toUpperCase();
+      const esPT = tc.includes('PT') || tc.includes('PARCIAL') || tc.includes('PART');
+      return {
+        id:       p.ID_PERSONAL,
+        nombre:   p.NOMBRE,
+        alias:    p.ALIAS || p.NOMBRE,
+        rol:      String(p.ROL || '').toUpperCase(),
+        pt:       esPT,
+        seccion:  p.SECCION_DEFAULT || '',
+        // DISPONIBILIDAD PT: "SAB:apertura,DOM:cierre" -> { SA:['APERTURA'], DO:['CIERRE'] }
+        disp:     parseDisponibilidad(p.DISPONIBILIDAD),
+        maxHoras: esPT ? (Number(p.HORAS_SEMANALES) || MOTOR_DEFAULTS.HORAS_MAX_SEMANA_PT)
+                       : (Number(p.HORAS_SEMANALES) || MOTOR_DEFAULTS.HORAS_MAX_SEMANA)
+      };
+    });
+}
+
+function parseDisponibilidad(str) {
+  const out = {};
+  if (!str) return out;
+  String(str).split(',').forEach(par => {
+    const [dia, franja] = par.split(':').map(s => (s||'').trim().toUpperCase());
+    if (!dia) return;
+    const codDia = dia.slice(0,2); // SAB->SA, DOM->DO
+    (out[codDia] = out[codDia] || []).push(franja);
+  });
+  return out;
+}
+
+// ============================================================
+// MOTOR PRINCIPAL
+// inputs = { periodo, personal, turnosDef, skVocab, skMatriz,
+//            cobData, reglas, excepciones, params, anclas, localConfig }
+// anclas = { 'ID_PERSONAL': { 'YYYY-MM-DD': {turno:'APERTURA'|'LIBRE', ...} } }
+//          (turnos/libres ya puestos a mano: INTOCABLES)
+// ============================================================
+function generarTurnos(inputs) {
+  const P = Object.assign({}, MOTOR_DEFAULTS, numerizar(inputs.params));
+  const colacion = P.COLACION_MIN;
+
+  const personas  = normalizarPersonal(inputs.personal);
+  const turnosDef = inputs.turnosDef || [];
+  const cob       = inputs.cobData || {};
+  const skMatriz  = inputs.skMatriz || {};
+  const reglas    = inputs.reglas || { dias_libres:['LU','MA','MI'], domingos:2 };
+  const excep     = inputs.excepciones || [];
+  const anclas    = inputs.anclas || {};
+
+  const fechas   = construirCalendario(inputs.periodo);
+  const semanas  = semanasDe(fechas);
+
+  // Índices de excepciones por persona
+  const noDia = {};      // { id: Set(['LU',...]) }  no trabaja ese día
+  const soloFranja = {}; // { id: Set(['APERTURA']) } solo esa franja
+  excep.forEach(e => {
+    if (e.tipo === 'NO_DIA') {
+      (noDia[e.id_personal] = noDia[e.id_personal] || new Set()).add(String(e.valor).toUpperCase());
+    } else if (e.tipo === 'SOLO_FRANJA') {
+      (soloFranja[e.id_personal] = soloFranja[e.id_personal] || new Set()).add(String(e.valor).toUpperCase());
+    }
+  });
+
+  // Resultado: matriz asignacion[id][fecha] = { turno, hora_entrada, hora_salida, seccion, _ancla, _libre }
+  const asign = {};
+  personas.forEach(p => { asign[p.id] = {}; });
+  const alertas = [];
+
+  // ---- 1. Sembrar ANCLAS (intocables) ----
+  personas.forEach(p => {
+    const a = anclas[p.id] || {};
+    Object.keys(a).forEach(fecha => {
+      if (!fechas.includes(fecha)) return;
+      const cell = a[fecha];
+      const esLibre = !cell.turno || String(cell.turno).toUpperCase() === 'LIBRE';
+      if (esLibre) {
+        asign[p.id][fecha] = { turno:'LIBRE', hora_entrada:'', hora_salida:'', seccion:p.seccion, _ancla:true, _libre:true };
+      } else {
+        const def = turnosDef.find(t => t.codigo === String(cell.turno).toUpperCase());
+        asign[p.id][fecha] = {
+          turno: String(cell.turno).toUpperCase(),
+          hora_entrada: cell.hora_entrada || (def?def.entrada:''),
+          hora_salida:  cell.hora_salida  || (def?def.salida:''),
+          seccion: cell.seccion || p.seccion,
+          _ancla: true
+        };
+      }
+    });
+  });
+
+  // ---- 2. LIBRES: completar los que falten (híbrido) ----
+  // Por cada semana, cada persona FT necesita libres que cumplan reglas.
+  // Respeta libres-ancla ya puestos. Aplica NO_DIA como libre forzado.
+  Object.entries(semanas).forEach(([lunesSem, fechasSem]) => {
+    personas.forEach(p => {
+      // NO_DIA -> libre forzado (si la fecha cae en la semana y no hay ancla de turno)
+      fechasSem.forEach(f => {
+        const cod = _diaCod(f);
+        if (noDia[p.id] && noDia[p.id].has(cod)) {
+          if (!asign[p.id][f] || (!asign[p.id][f]._ancla)) {
+            asign[p.id][f] = { turno:'LIBRE', hora_entrada:'', hora_salida:'', seccion:p.seccion, _libre:true, _forzado:true };
+          }
+        }
+      });
+
+      // ¿Cuántos libres ya tiene esta semana (ancla o forzado)?
+      const yaLibres = fechasSem.filter(f => asign[p.id][f] && asign[p.id][f]._libre).length;
+      // Días candidatos a libre: los marcados en reglas.dias_libres, aún sin asignar
+      const objetivoLibres = p.pt ? 2 : 1; // FT ~1/semana base; el cierre de 42h ajusta duración
+      let faltan = Math.max(0, objetivoLibres - yaLibres);
+
+      const candidatos = fechasSem
+        .filter(f => !asign[p.id][f]) // libre solo donde no hay nada
+        .filter(f => reglas.dias_libres.includes(_diaCod(f)));
+
+      for (let i = 0; i < candidatos.length && faltan > 0; i++) {
+        asign[p.id][candidatos[i]] = { turno:'LIBRE', hora_entrada:'', hora_salida:'', seccion:p.seccion, _libre:true, _propuesto:true };
+        faltan--;
+      }
+    });
+  });
+
+  // ---- 3. CUBRIR cada día × franja ----
+  // Procesar franjas en orden de ESCASEZ (la que tiene más hueco relativo primero),
+  // para repartir la gente en vez de saturar apertura y vaciar cierre.
+  fechas.forEach(fecha => {
+    const cod = _diaCod(fecha);
+    // cobertura del día: día especial si existe, si no DEFAULT
+    const cobDia = cob[cod] || cob['DEFAULT'] || cob[diaEspecialKey(cob, fecha)] || {};
+
+    // Ordenar franjas por nº de personas requeridas (descendente): primero las más exigentes
+    const franjasOrden = turnosDef.slice().sort((a,b) => {
+      const na = Number((cobDia[a.codigo]||{}).num) || 0;
+      const nb = Number((cobDia[b.codigo]||{}).num) || 0;
+      return nb - na;
+    });
+
+    franjasOrden.forEach(franja => {
+      const codF = franja.codigo;
+      const conf = cobDia[codF] || { num:0, skills:{} };
+      const necesita = Number(conf.num) || 0;
+      if (necesita <= 0) return;
+
+      // ¿Quién ya está asignado a esta franja por ancla?
+      let asignados = personas.filter(p => asign[p.id][fecha] && asign[p.id][fecha].turno === codF);
+
+      // Skills requeridas pendientes (descontar las que ya cubren los anclados)
+      const skillsReq = Object.assign({}, conf.skills || {});
+      asignados.forEach(p => descontarSkill(skillsReq, skMatriz[p.id]));
+
+      // Candidatos disponibles para esta franja
+      let candidatos = personas.filter(p => {
+        if (asign[p.id][fecha]) return false;                 // ya tiene algo ese día
+        if (noDia[p.id] && noDia[p.id].has(cod)) return false; // no trabaja ese día
+        if (soloFranja[p.id] && !soloFranja[p.id].has(codF)) return false; // solo otra franja
+        if (p.pt) {                                           // PT solo en su disponibilidad
+          const disp = p.disp[cod];
+          if (disp && disp.length && !disp.includes(codF)) return false;
+          if (!disp || !disp.length) return false; // PT sin disponibilidad ese día = no
+        }
+        if (excedeSemana(asign, p, fecha, franja, semanas, colacion)) return false; // ya en 42h/30h
+        return true;
+      });
+
+      // Orden: primero quien aporta skill requerida (mayor nivel), luego FT antes que PT
+      candidatos = ordenarCandidatos(candidatos, skillsReq, skMatriz);
+
+      // Regla dura: 2 JL nunca juntos en la misma franja
+      const hayJL = asignados.some(p => esJL(p));
+
+      while (asignados.length < necesita && candidatos.length) {
+        const p = candidatos.shift();
+        if (esJL(p) && hayJLenFranja(asignados)) continue; // ya hay un JL aquí
+        asign[p.id][fecha] = {
+          turno: codF,
+          hora_entrada: franja.entrada,
+          hora_salida:  franja.salida,
+          seccion: p.seccion,
+          _propuesto: true
+        };
+        asignados.push(p);
+        descontarSkill(skillsReq, skMatriz[p.id]);
+      }
+
+      // ---- ALERTAS ----
+      if (asignados.length < necesita) {
+        alertas.push({
+          tipo: 'FRANJA_SIN_CUBRIR',
+          fecha, franja: codF,
+          msg: `${fechaLegible(fecha)} · ${franja.label}: faltan ${necesita - asignados.length} de ${necesita}`,
+          severidad: 'alta'
+        });
+      }
+      const skillsFaltan = Object.keys(skillsReq).filter(s => skillsReq[s] > 0);
+      if (skillsFaltan.length) {
+        alertas.push({
+          tipo: 'SKILL_INCOMPLETA',
+          fecha, franja: codF,
+          msg: `${fechaLegible(fecha)} · ${franja.label}: falta competencia ${skillsFaltan.join(', ')}`,
+          severidad: 'media'
+        });
+      }
+    });
+  });
+
+  // ---- 4. CERRAR HORAS: ajustar duración para no pasar 42h/30h ----
+  // (recorte simple: si la semana supera el límite, marca alerta; el ajuste fino de
+  //  duración por nº de libres se afina luego — aquí avisamos, no bloqueamos)
+  personas.forEach(p => {
+    Object.entries(semanas).forEach(([lunesSem, fechasSem]) => {
+      const horas = horasSemana(asign, p, fechasSem, colacion);
+      const limite = p.pt ? P.HORAS_MAX_SEMANA_PT : P.HORAS_MAX_SEMANA;
+      if (horas > limite + 0.1) {
+        alertas.push({
+          tipo:'EXCEDE_HORAS', fecha:lunesSem, persona:p.nombre,
+          msg:`${p.nombre}: ${horas.toFixed(1)}h en semana del ${fechaLegible(lunesSem)} (límite ${limite}h)`,
+          severidad:'alta'
+        });
+      }
+    });
+    // >6 días seguidos
+    const seguidos = maxDiasSeguidos(asign, p, fechas);
+    if (seguidos > P.MAX_DIAS_SEGUIDOS) {
+      alertas.push({
+        tipo:'SEIS_DIAS', persona:p.nombre,
+        msg:`${p.nombre}: ${seguidos} días seguidos (máx ${P.MAX_DIAS_SEGUIDOS})`,
+        severidad:'alta'
+      });
+    }
+  });
+
+  // ---- Salida: lista plana de turnos (para grilla y guardarMultiplesTurnos) ----
+  const turnos = [];
+  personas.forEach(p => {
+    fechas.forEach(f => {
+      const c = asign[p.id][f];
+      if (!c) return;
+      turnos.push({
+        id_personal: p.id,
+        nombre: p.nombre,
+        fecha: f,
+        turno: c.turno,                       // 'LIBRE' o código de franja
+        hora_entrada: c.hora_entrada || '',
+        hora_salida:  c.hora_salida || '',
+        seccion: c.seccion || '',
+        estado: 'NORMAL',
+        modo: 'OFICIAL',
+        notas: '',
+        _ancla: !!c._ancla,
+        _propuesto: !!c._propuesto,
+        _libre: !!c._libre
+      });
+    });
+  });
+
+  return { turnos, alertas, fechas, personas: personas.map(p=>({id:p.id,nombre:p.nombre,pt:p.pt,rol:p.rol})) };
+}
+
+// ---------- helpers de motor ----------
+function numerizar(params) {
+  const out = {};
+  Object.entries(params || {}).forEach(([k,v]) => {
+    const n = Number(v);
+    out[k] = isNaN(n) ? v : n;
+  });
+  return out;
+}
+function esJL(p) { return p.rol === 'JL'; }
+function hayJLenFranja(asignados) { return asignados.some(p => esJL(p)); }
+function descontarSkill(req, skillsPersona) {
+  if (!skillsPersona) return;
+  Object.keys(req).forEach(s => {
+    if ((skillsPersona[s]||0) > 0 && req[s] > 0) req[s] -= 1;
+  });
+}
+function ordenarCandidatos(cands, skillsReq, skMatriz) {
+  const reqKeys = Object.keys(skillsReq).filter(s => skillsReq[s] > 0);
+  return cands.slice().sort((a,b) => {
+    const sa = aportaSkill(skMatriz[a.id], reqKeys);
+    const sb = aportaSkill(skMatriz[b.id], reqKeys);
+    if (sb !== sa) return sb - sa;          // más skill útil primero
+    if (a.pt !== b.pt) return a.pt ? 1 : -1; // FT antes que PT
+    return 0;
+  });
+}
+function aportaSkill(skills, reqKeys) {
+  if (!skills) return 0;
+  let s = 0; reqKeys.forEach(k => s += (skills[k]||0)); return s;
+}
+function excedeSemana(asign, p, fecha, franja, semanas, colacion) {
+  const lunes = _fmt(_getLunes(new Date(fecha + 'T12:00:00')));
+  const fechasSem = semanas[lunes] || [];
+  const actual = horasSemana(asign, p, fechasSem, colacion);
+  const extra = _horasTurno(franja.entrada, franja.salida, colacion);
+  const limite = p.pt ? MOTOR_DEFAULTS.HORAS_MAX_SEMANA_PT : MOTOR_DEFAULTS.HORAS_MAX_SEMANA;
+  return (actual + extra) > limite + 0.1;
+}
+function horasSemana(asign, p, fechasSem, colacion) {
+  let tot = 0;
+  fechasSem.forEach(f => {
+    const c = asign[p.id][f];
+    if (c && c.turno && c.turno !== 'LIBRE') tot += _horasTurno(c.hora_entrada, c.hora_salida, colacion);
+  });
+  return tot;
+}
+function maxDiasSeguidos(asign, p, fechas) {
+  let max = 0, run = 0;
+  fechas.forEach(f => {
+    const c = asign[p.id][f];
+    const trabaja = c && c.turno && c.turno !== 'LIBRE';
+    if (trabaja) { run++; max = Math.max(max, run); }
+    else run = 0;
+  });
+  return max;
+}
+function diaEspecialKey(cob, fecha) {
+  // hook para días especiales por fecha exacta (no implementado: usa DEFAULT)
+  return null;
+}
+function fechaLegible(fechaStr) {
+  const d = new Date(fechaStr + 'T12:00:00');
+  return `${d.getDate()} ${MESES_LARGO[d.getMonth()].slice(0,3)}`;
+}
+
+// ══════════════════════════════════════════════════════════
+// MOTOR — CAPA UI (puente entre el motor JS puro y la app)
+// ══════════════════════════════════════════════════════════
+let _borrador = null;   // { turnos, alertas, fechas, personas }
+let _brdPeriodo = null; // texto legible del período
+
+// Lee las ANCLAS: turnos/libres YA guardados en el período elegido.
+// Son los que el humano puso a mano → el motor los respeta.
+function leerAnclasDePeriodo(periodo) {
+  const fechasSet = new Set(construirCalendario(periodo));
+  const anclas = {};
+  // turnosMes ya está cargado en memoria (grilla actual)
+  (turnosMes || []).concat(turnosBorde || []).forEach(t => {
+    if (!fechasSet.has(t.FECHA)) return;
+    if (t.MODO && String(t.MODO).toUpperCase() === 'OPERATIVO') return; // doble turno no es ancla oficial
+    const id = t.ID_PERSONAL;
+    (anclas[id] = anclas[id] || {})[t.FECHA] = {
+      turno: t.TURNO || 'LIBRE',
+      hora_entrada: t.HORA_ENTRADA || '',
+      hora_salida: t.HORA_SALIDA || '',
+      seccion: t.SECCION || ''
+    };
+  });
+  return anclas;
+}
+
+// Parsea el value del <select id="genPeriodo"> -> objeto periodo del motor
+function parsePeriodoSel() {
+  const raw = document.getElementById('genPeriodo').value || '';
+  if (raw.startsWith('mes:')) {
+    const [y,m] = raw.slice(4).split('-').map(Number);
+    return { tipo:'mes', anio:y, mes:m, _label:`${MESES_ES[m-1]} ${y}` };
+  }
+  if (raw.startsWith('sem:')) {
+    const ini = raw.slice(4);
+    const d = new Date(ini+'T12:00:00');
+    const fin = new Date(d); fin.setDate(d.getDate()+6);
+    return { tipo:'sem', inicio:ini,
+      _label:`Semana ${d.getDate()} ${MESES_ES[d.getMonth()].slice(0,3)} – ${fin.getDate()} ${MESES_ES[fin.getMonth()].slice(0,3)}` };
+  }
+  return { tipo:'sem', inicio: formatFecha(getLunes(new Date())), _label:'Esta semana' };
+}
+
+// Reescrita: guarda reglas Y ejecuta el motor, mostrando el borrador.
+async function generarBorrador() {
+  genReglas.domingos = parseInt(document.getElementById('genDomingos').value) || 2;
+  if (genReglas.dias_libres.length === 0) {
+    mostrarToast('Elegí al menos un día donde puedan caer los libres', 'err');
+    return;
+  }
+  const periodo = parsePeriodoSel();
+  const btn = document.getElementById('btnGenerar');
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+
+  try {
+    // 1) Guardar reglas en el MAESTRO (como antes)
+    await fetch(GAS_MAESTRO_URL, { method:'POST', body: JSON.stringify({
+      local: LOCAL, accion: 'guardarReglas',
+      reglas: { dias_libres: genReglas.dias_libres, domingos: genReglas.domingos },
+      excepciones: genExcep
+    })});
+
+    // 2) Asegurar inputs en memoria (personal, turnosDef, skills, cobertura)
+    await asegurarInputsMotor(periodo);
+
+    // 3) Leer anclas del período (lo que ya está puesto a mano)
+    const anclas = leerAnclasDePeriodo(periodo);
+
+    // 4) Ejecutar el MOTOR (JS puro, en el navegador)
+    _borrador = generarTurnos({
+      periodo, personal, turnosDef,
+      skVocab: (typeof skVocab!=='undefined'?skVocab:[]),
+      skMatriz: (typeof skMatriz!=='undefined'?skMatriz:{}),
+      cobData: (typeof cobData!=='undefined'?cobData:{}),
+      reglas: genReglas, excepciones: genExcep,
+      params: parametros, anclas
+    });
+    _brdPeriodo = periodo._label;
+
+    // 5) Mostrar pantalla Borrador
+    abrirBorrador();
+  } catch(e) {
+    console.error(e);
+    mostrarToast('Error generando el borrador', 'err');
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '✦ Generar borrador'; }
+}
+
+// Carga lo que falte: personal, params/turnosDef, skills, cobertura
+async function asegurarInputsMotor(periodo) {
+  // personal
+  if (!personal || personal.length === 0) {
+    const rp = await fetch(`${GAS_URL}?local=${LOCAL}&accion=getPersonal`).then(r=>r.json());
+    personal = rp.personal || [];
+  }
+  // parametros + turnosDef
+  if (!parametros || Object.keys(parametros).length === 0) {
+    const rpa = await fetch(`${GAS_URL}?local=${LOCAL}&accion=getParametros`).then(r=>r.json());
+    parametros = rpa.parametros || rpa || {};
+  }
+  if (!turnosDef || turnosDef.length === 0) construirTurnos();
+  // skills
+  if (typeof skMatriz === 'undefined' || !skMatriz || Object.keys(skMatriz).length === 0) {
+    try {
+      const rs = await fetch(`${GAS_MAESTRO_URL}?local=${LOCAL}&accion=getSkills`).then(r=>r.json());
+      if (rs && rs.ok) { skVocab = rs.vocab||[]; skMatriz = rs.matriz||{}; }
+    } catch(e){}
+  }
+  // cobertura
+  if (typeof cobData === 'undefined' || !cobData || Object.keys(cobData).length === 0) {
+    try {
+      const rc = await fetch(`${GAS_MAESTRO_URL}?local=${LOCAL}&accion=getCobertura`).then(r=>r.json());
+      cobData = (rc && rc.ok && rc.cobertura) ? rc.cobertura : {};
+    } catch(e){}
+  }
+  // turnos del período (para leer anclas): cargar mes si es necesario
+  if (!turnosMes || turnosMes.length === 0) {
+    try { await cargarTurnosMes(); } catch(e){}
+  }
+}
+
+// ── Pantalla Borrador ──
+function abrirBorrador() {
+  document.getElementById('brdPeriodo').textContent = _brdPeriodo || '';
+  renderBrdAlertas();
+  renderBrdTabla();
+  document.getElementById('modalBorrador').classList.add('open');
+}
+function cerrarBorrador() {
+  document.getElementById('modalBorrador').classList.remove('open');
+  _borrador = null;
+}
+
+function renderBrdAlertas() {
+  const cont = document.getElementById('brdAlertas');
+  const al = (_borrador && _borrador.alertas) || [];
+  if (!al.length) {
+    cont.innerHTML = '<div style="background:rgba(46,204,113,.12);border:1px solid var(--oficial);color:var(--oficial);padding:8px 12px;border-radius:var(--radius);font-size:12px">✓ Sin alertas. El borrador cumple la norma.</div>';
+    return;
+  }
+  const altas = al.filter(a=>a.severidad==='alta');
+  const medias = al.filter(a=>a.severidad!=='alta');
+  let html = `<details style="background:rgba(233,69,96,.10);border:1px solid var(--rojo);border-radius:var(--radius);padding:8px 12px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--rojo);font-weight:600">
+      ⚠ ${al.length} alerta${al.length>1?'s':''} · ${altas.length} alta${altas.length!==1?'s':''}, ${medias.length} media${medias.length!==1?'s':''} (no bloquean)
+    </summary>
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;max-height:160px;overflow:auto">`;
+  al.forEach(a => {
+    const col = a.severidad==='alta' ? 'var(--rojo)' : 'var(--tarde)';
+    html += `<div style="font-size:11px;color:${col}">• ${a.msg}</div>`;
+  });
+  html += '</div></details>';
+  cont.innerHTML = html;
+}
+
+function renderBrdTabla() {
+  const t = _borrador;
+  if (!t) return;
+  const fechas = t.fechas;
+  const personas = t.personas;
+  // index turnos: [id][fecha] -> turno obj
+  const idx = {};
+  t.turnos.forEach(x => { (idx[x.id_personal]=idx[x.id_personal]||{})[x.fecha]=x; });
+
+  const codCorto = c => c==='LIBRE'?'🛌':(c?c.charAt(0):'·');
+  let html = '<thead><tr>';
+  html += '<th style="position:sticky;left:0;background:var(--gris1);padding:6px 8px;text-align:left;z-index:2;border-bottom:1px solid var(--gris3)">Persona</th>';
+  fechas.forEach(f => {
+    const d = new Date(f+'T12:00:00');
+    const dn = ['Do','Lu','Ma','Mi','Ju','Vi','Sa'][d.getDay()];
+    const dom = d.getDay()===0;
+    html += `<th style="padding:5px 4px;text-align:center;border-bottom:1px solid var(--gris3);${dom?'color:var(--permiso)':''}">${dn}<br><span style="font-size:10px;color:var(--gris4)">${d.getDate()}</span></th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  personas.forEach(p => {
+    html += `<tr><td style="position:sticky;left:0;background:var(--gris1);padding:5px 8px;white-space:nowrap;border-bottom:1px solid var(--gris2);font-weight:500">${p.nombre}${p.pt?' <span style=\"font-size:9px;color:var(--gris4)\">PT</span>':''}</td>`;
+    fechas.forEach(f => {
+      const c = idx[p.id] && idx[p.id][f];
+      let bg='transparent', fg='var(--gris4)', txt='·', tip='';
+      if (c) {
+        if (c.turno==='LIBRE') { txt='🛌'; fg='var(--oficial)'; tip='Libre'; }
+        else { txt=codCorto(c.turno); fg='var(--blanco)'; tip=`${c.turno} ${c.hora_entrada}-${c.hora_salida}`; }
+        if (c._ancla) { bg='rgba(217,146,63,.18)'; tip='⚓ '+tip; }
+        else if (c._propuesto) { bg='rgba(46,204,113,.08)'; }
+      }
+      html += `<td title="${tip}" onclick="editarCeldaBrd('${p.id}','${f}')"
+        style="padding:5px 3px;text-align:center;cursor:pointer;background:${bg};color:${fg};border-bottom:1px solid var(--gris2);font-size:13px">
+        ${c&&c._ancla?'⚓':''}${txt}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody>';
+  document.getElementById('brdTabla').innerHTML = html;
+}
+
+// Editar una celda del borrador: ciclo rápido entre franjas / libre / vacío
+function editarCeldaBrd(idPersona, fecha) {
+  if (!_borrador) return;
+  const opciones = ['', 'LIBRE'].concat(turnosDef.map(t=>t.codigo));
+  // turno actual
+  const i = _borrador.turnos.findIndex(x=>x.id_personal===idPersona && x.fecha===fecha);
+  const actual = i>=0 ? _borrador.turnos[i].turno : '';
+  // si es ancla, avisar (igual se puede pisar manualmente)
+  if (i>=0 && _borrador.turnos[i]._ancla) {
+    if (!confirm('Esta celda es un ancla (la pusiste a mano). ¿Cambiarla igual?')) return;
+  }
+  // menú simple
+  const lista = opciones.map((o,n)=>`${n}. ${o===''?'(vacío)':o==='LIBRE'?'🛌 Libre':o}`).join('\n');
+  const sel = prompt(`Turno para ${fecha}:\n\n${lista}\n\nNúmero:`);
+  if (sel===null) return;
+  const n = parseInt(sel);
+  if (isNaN(n) || n<0 || n>=opciones.length) return;
+  const nuevo = opciones[n];
+
+  // aplicar cambio en _borrador.turnos
+  const p = (personal||[]).find(x=>x.ID_PERSONAL===idPersona);
+  const def = turnosDef.find(t=>t.codigo===nuevo);
+  if (nuevo==='') {
+    if (i>=0) _borrador.turnos.splice(i,1);
+  } else {
+    const cell = {
+      id_personal:idPersona, nombre:p?p.NOMBRE:idPersona, fecha,
+      turno:nuevo,
+      hora_entrada: nuevo==='LIBRE'?'':(def?def.entrada:''),
+      hora_salida:  nuevo==='LIBRE'?'':(def?def.salida:''),
+      seccion: p?(p.SECCION_DEFAULT||''):'', estado:'NORMAL', modo:'OFICIAL', notas:'',
+      _ancla:false, _propuesto:false, _editado:true,
+      _libre: nuevo==='LIBRE'
+    };
+    if (i>=0) _borrador.turnos[i]=cell; else _borrador.turnos.push(cell);
+  }
+  renderBrdTabla();
+}
+
+// Confirmar: guarda TODO el borrador vía guardarMultiplesTurnos (acción que YA existe).
+async function confirmarBorrador() {
+  if (!_borrador) return;
+  // solo turnos reales (excluye libres? -> NO: los libres se guardan como registro vacío
+  //   para que el sistema sepa quién descansa, igual que en el modal manual)
+  const turnos = _borrador.turnos.map(t => ({
+    id_personal:  t.id_personal,
+    nombre:       t.nombre,
+    fecha:        t.fecha,
+    turno:        t.turno==='LIBRE' ? '' : t.turno,   // LIBRE se guarda con TURNO vacío
+    hora_entrada: t.hora_entrada || '',
+    hora_salida:  t.hora_salida || '',
+    seccion:      t.seccion || '',
+    estado:       'NORMAL',
+    modo:         'OFICIAL',
+    notas:        ''
+  }));
+
+  const btn = document.getElementById('brdConfirmar');
+  if (btn) { btn.disabled=true; btn.textContent='Guardando…'; }
+  try {
+    const res = await fetch(GAS_URL, { method:'POST', body: JSON.stringify({
+      accion:'guardarMultiplesTurnos', local:LOCAL, turnos
+    })});
+    const data = await res.json();
+    if (data && data.ok) {
+      mostrarToast(`Borrador guardado · ${data.guardados||turnos.length} turnos ✓`, 'ok');
+      cerrarBorrador();
+      cambiarTab('turnosMes');
+      cargarTurnosMes();
+    } else {
+      mostrarToast((data&&data.error)||'Error al guardar el borrador', 'err');
+    }
+  } catch(e) {
+    mostrarToast('Error de conexión al guardar', 'err');
+  }
+  if (btn) { btn.disabled=false; btn.textContent='✓ Confirmar y guardar'; }
+}
+
+// ====== fin MOTOR V30 ======
+
 arrancarAuth();
 </script>
 </body>
