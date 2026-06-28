@@ -382,7 +382,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v14 · 27jun</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v15 · 28jun</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -944,7 +944,7 @@ function arrancar(){
     cargarVocabDesdeBD().then(function(res){
       window.__vocabCargado=res.ok; window.__vocabCargando=false; window.__vocabRes=res;
       var ve=document.getElementById('ver');
-      if(ve){ ve.textContent='v14 · 27jun · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
+      if(ve){ ve.textContent='v15 · 28jun · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
               ve.style.color=res.ok?'var(--ok)':'var(--warn)'; }
       render();
     });
@@ -1098,6 +1098,9 @@ function editarQ(idx){
   } else {
     it.qty = dec?num:Math.round(num);
   }
+  // la Q corregida está en UO (el prompt pide "en <UO>"): el total UTM = qty×factor.
+  // Borrar utmReal evita que un peso viejo pegado se guarde en vez del nuevo total.
+  delete it.utmReal;
   render();
 }
 function pickCand(idx, sku){
@@ -1394,22 +1397,36 @@ function buildPicker(mode, idx){
   var precioWrap=host.querySelector('#pkPrecio'), precioIn=host.querySelector('#pkPrecioIn');
   var grupoFilas=null;   // null = modo simple (campo Q clásico) · array = grammatica a gruppi
   var chosen=null;
-  var unidad='base';   // FIX #2: 'base' (UTM, suelta) por defecto · 'uo' (paquete) opcional
+  // DOBLE ENTRADA UNIVERSAL (28-jun) · cada producto con factor>1 ofrece SIEMPRE
+  // dos modos de captura: 'uo' (paquetes/botellas, lo que define la BD) o 'base'
+  // (UTM suelta: gr/cc pesados). El operador elige; el frontend convierte y manda
+  // SIEMPRE el total en UTM. El método=Peso de la BD ya NO obliga: sólo decide el
+  // DEFAULT, y combinado con el verbo (Ingreso→cuentas paquetes · Merma→pesas).
+  var unidad='base';   // se re-decide en defaultUnidad() al elegir producto
+  var _unidadTocada=false;  // si el OP tocó el switch, respetamos su elección
+  function defaultUnidad(){
+    // UO=UTM (factor<=1): no hay doble lectura posible → siempre 'uo'
+    if(!chosen || skuFactor(chosen.sku)<=1) return 'uo';
+    var v=verboActual(); var vid=v?v.id:'';
+    // Ingreso BLoc → recibes envases enteros → cuentas paquetes (UO)
+    if(vid==='Ingreso BLoc') return 'uo';
+    // Merma / Inventario → mides el resto físico → pesas (base/UTM) si es de peso
+    if((vid==='Ajuste - menos' || vid==='Conteo Fisico') && esPeso(chosen.sku)) return 'base';
+    // Entrega a sección y resto: peso→balanza, no-peso→paquetes
+    return esPeso(chosen.sku) ? 'base' : 'uo';
+  }
   function syncUnitSwitch(){
-    var esPeso=false;
-    if(chosen){ var mt=(skuItem(chosen.sku)&&skuItem(chosen.sku).metodo||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); esPeso=(mt.indexOf('peso')>=0); }
-    // Peso (balanza) → NUNCA switch: se escribe directo en la unidad UTM (gr/cc).
-    if(chosen && !esPeso && skuFactor(chosen.sku)>1){
+    if(chosen && skuFactor(chosen.sku)>1){
       unitWrap.style.display='flex';
       var uo=skuUO(chosen.sku), utm=skuUTM(chosen.sku), f=skuFactor(chosen.sku);
       uBaseBtn.textContent = utm? (utm+' suelta') : 'unidad suelta';
       uUoBtn.textContent   = uo ? (uo+' (×'+f+')') : 'por paquete';
-    } else { unitWrap.style.display='none'; unidad='base'; }
+    } else { unitWrap.style.display='none'; unidad='uo'; }
     uBaseBtn.classList.toggle('ready', unidad==='base');
     uUoBtn.classList.toggle('ready', unidad==='uo');
   }
-  uBaseBtn.onclick=function(){ unidad='base'; syncUnitSwitch(); refreshOk(); };
-  uUoBtn.onclick  =function(){ unidad='uo';   syncUnitSwitch(); refreshOk(); };
+  uBaseBtn.onclick=function(){ unidad='base'; _unidadTocada=true; syncUnitSwitch(); refreshHint(); };
+  uUoBtn.onclick  =function(){ unidad='uo';   _unidadTocada=true; syncUnitSwitch(); refreshHint(); };
 
   // ── GRAMÁTICA a gruppi · una sola meccanica: la UO es un contenedor ──────
   function baseLbl(){ // nombre de la unidad-base (lata, cc, gr, unidad)
@@ -1507,52 +1524,51 @@ function buildPicker(mode, idx){
       okBtn.classList.toggle('ready', totUO>0);
       return;
     }
-    // ── ramo PESO: el número son gramos (balanza). Bottone muestra gr (+precio) ──
-    if(esPeso(chosen.sku)){
-      var qg=qEl.value.trim();
-      okBtn.style.display='block';
-      var um=skuUTM(chosen.sku)||'gr';
-      var prc=_leerPrecioSuper();
-      var colaP = SESION_SUPER ? (prc!=null?('  · $'+prc.toLocaleString('es-CL')):' · falta precio') : '';
-      okBtn.textContent='✓ Agregar '+chosen.nombre+(qg?(' · '+qg+' '+um+colaP):' · pesa y escribe');
-      okBtn.classList.toggle('ready', qg!=='' && !(SESION_SUPER && prc==null));
-      return;
-    }
-    // ── ramo clásico (simple) ──
+    // ── ramo simple · doble modo (uo / base) — la preview SIEMPRE muestra el total UTM ──
     var uo=skuUO(chosen.sku), utm=skuUTM(chosen.sku), f=skuFactor(chosen.sku);
     var q=qEl.value.trim();
     okBtn.style.display='block';
+    var prc=_leerPrecioSuper();
+    var faltaPrecio = (SESION_SUPER && prc==null);
     var qn=q?parseFloat(q.replace(',','.')):null;
     var etiqueta='', equiv='';
+    var modoBase = (unidad==='base' && f>1) || (esPeso(chosen.sku) && f<=1);
     if(qn!=null && !isNaN(qn)){
-      if(unidad==='base' && f>1){
-        etiqueta=q+' '+(utm||'u'); equiv=nInt(qn/f)+' '+(uo||'UO');
+      if(modoBase){
+        // el número son UTM sueltas (gr/cc pesados): se guarda tal cual
+        etiqueta=q+' '+(utm||'u'); equiv=totalUTM(chosen.sku, f>0?qn/f:qn);
       } else {
+        // el número son UO (paquetes): el total UTM = q × factor
         etiqueta=q+' '+(uo||utm||''); equiv=totalUTM(chosen.sku, qn);
       }
     }
-    okBtn.textContent = '✓ Agregar '+chosen.nombre + (q?(' · '+etiqueta+(equiv?('  → '+equiv):'')):' · falta cantidad');
-    okBtn.classList.toggle('ready', q!=='');
+    var colaP = SESION_SUPER ? (prc!=null?('  · $'+prc.toLocaleString('es-CL')):' · falta precio') : '';
+    okBtn.textContent = '✓ Agregar '+chosen.nombre + (q?(' · '+etiqueta+(equiv?('  → '+equiv):'')+colaP):' · falta cantidad');
+    okBtn.classList.toggle('ready', q!=='' && !faltaPrecio);
   }
   function refreshHint(){
     if(chosen){
       // decide modo: pack/cc → grammatica a gruppi · simple → campo Q clásico
       var usaGrupos = activarGrupos();
       qEl.style.display = usaGrupos ? 'none' : '';   // en grupos, la Q vive en las filas
-      if(!usaGrupos){ syncUnitSwitch(); }
+      if(!usaGrupos){
+        if(!_unidadTocada) unidad=defaultUnidad();   // default por verbo (sólo si el OP no eligió)
+        syncUnitSwitch();
+      }
       // SESIÓN SUPER: pide precio neto de la boleta (a todos los productos)
       if(precioWrap){
         if(SESION_SUPER){ precioWrap.style.display='flex';
           if(mode==='fix' && ITEMS[idx] && ITEMS[idx].precioSuper!=null && precioIn.value==='') precioIn.value=ITEMS[idx].precioSuper;
         } else precioWrap.style.display='none';
       }
-      var uo=skuUO(chosen.sku);
-      var peso=esPeso(chosen.sku);
-      if(peso && !usaGrupos){
-        qEl.placeholder=(skuUTM(chosen.sku)||'gr');   // se pesa: el número es la balanza
-        hintE.innerHTML='<b style="color:var(--t1)">'+esc(chosen.nombre)+'</b> · se pesa — escribe los '+
-          esc(skuUTM(chosen.sku)||'gramos')+' que marca la balanza'+(SESION_SUPER?' y el precio':'');
+      var uo=skuUO(chosen.sku), utm=skuUTM(chosen.sku);
+      var modoPeso = (!usaGrupos && unidad==='base' && skuFactor(chosen.sku)>1) || (!usaGrupos && esPeso(chosen.sku) && skuFactor(chosen.sku)<=1);
+      if(modoPeso){
+        qEl.placeholder=(utm||'gr');   // el número es la balanza (UTM suelta)
+        hintE.innerHTML='<b style="color:var(--t1)">'+esc(chosen.nombre)+'</b> · escribe los '+
+          esc(utm||'gramos')+' (balanza)'+(SESION_SUPER?' y el precio':'');
       } else {
+        qEl.placeholder=(uo||utm||'');  // el número son UO (paquetes)
         hintE.innerHTML = '<b style="color:var(--t1)">'+esc(chosen.nombre)+'</b>'+(uo?(' · en <b style="color:var(--t2)">'+esc(uo)+'</b>'):'')+
           ' · '+esc(capSec(skuSec(chosen.sku)))+
           (usaGrupos ? ' — declara los grupos y confirma con ✓' : ' — escribe la cantidad y confirma con ✓');
@@ -1596,52 +1612,48 @@ function buildPicker(mode, idx){
     // REALES (la balanza no miente, el factor de BD sí). Guardamos utmReal =
     // esos gramos; el GAS escribe M=utmReal directo, sin multiplicar por el
     // factor mentiroso. La qty en UO se deriva sólo para coherencia interna.
-    if(esPeso(chosen.sku)){
-      var rawP=qEl.value.trim().replace(',','.');
-      if(rawP===''){ qEl.focus(); qEl.style.borderColor='var(--bad)'; hintE.innerHTML='<span style="color:var(--bad)">Falta el peso — pesa y escribe los gramos.</span>'; return; }
-      var gr=parseFloat(rawP); if(isNaN(gr)||gr<=0){ qEl.focus(); return; }
-      var precP=_leerPrecioSuper();
-      if(SESION_SUPER && precP==null){ precioIn&&precioIn.focus(); hintE.innerHTML='<span style="color:var(--bad)">Falta el precio de la boleta.</span>'; return; }
-      var fP=skuFactor(chosen.sku);
-      var qtyUO = fP>0 ? gr/fP : gr;     // UO derivada (coherencia); el dato fuerte es utmReal
-      function setP(o){ o.qty=qtyUO; o.utmReal=gr; if(SESION_SUPER){ o.precioSuper=precP; } }
-      if(mode==='fix'){ var itP=ITEMS[idx];
-        if(itP.sku!==chosen.sku) pushAlias(itP.said, chosen.sku, chosen.nombre);
-        itP.sku=chosen.sku; itP.nombre=chosen.nombre; itP.estado='ok'; itP.sub=skuSec(chosen.sku); setP(itP);
-      } else {
-        var nuevoP={ said:'(a mano) '+chosen.nombre, sku:chosen.sku, nombre:chosen.nombre,
-          sub:skuSec(chosen.sku), estado:'ok', cands:[{sku:chosen.sku,nombre:chosen.nombre,sc:100}] };
-        setP(nuevoP); ITEMS.push(nuevoP);
-      }
-      closePicker(); render(); return;
-    }
+    // ── ramo SIMPLE · doble modo (uo / base). Una sola fuente de verdad:
+    //    modo 'base'  → el número son UTM (gr/cc): utmReal = ese número, qty derivada.
+    //    modo 'uo'    → el número son UO (paquetes): qty = UO, utmReal SE BORRA
+    //    (el GAS calcula UTM = qty × factor). Borrar utmReal evita el bug donde
+    //    un peso viejo quedaba pegado y se guardaba en vez del total UO×factor.
+    var f=skuFactor(chosen.sku);
+    var modoBase = (unidad==='base' && f>1) || (esPeso(chosen.sku) && f<=1);
     var raw=qEl.value.trim().replace(',','.');
     if(raw===''){ qEl.focus(); qEl.style.borderColor='var(--bad)'; hintE.innerHTML='<span style="color:var(--bad)">Falta la cantidad — no se puede agregar sin Q.</span>'; return; }
-    var num=parseFloat(raw); if(isNaN(num)){ qEl.focus(); return; }
-    // FIX #2: qty SIEMPRE se guarda en UO (la planilla convierte UO→UTM con el factor).
-    // Si el OP digitó en unidad suelta (base), convertimos base→UO dividiendo por el factor.
-    var f=skuFactor(chosen.sku);
-    var enteroEnUO = (unidad==='uo' || f<=1);   // FIX #2: control 'enteros' solo si se digitó EN UO
-    if(unidad==='base' && f>1){ num = num/f; }   // base→UO: la UO resultante puede ser fraccionaria (legítima)
-    var qty;
-    if(enteroEnUO && !skuDecimal(chosen.sku) && Math.abs(num-Math.round(num))>0.001){
-      var r=Math.round(num);
-      if(!confirm('"'+chosen.nombre+'" se cuenta por unidades enteras.\n\n'+num+' se va a registrar como '+r+'.\n\n¿Está bien?')){ qEl.focus(); qEl.select&&qEl.select(); return; }
-      qty=r;
-    } else {
-      qty = (enteroEnUO && !skuDecimal(chosen.sku)) ? Math.round(num) : num;
-    }
+    var num=parseFloat(raw); if(isNaN(num)||num<=0){ qEl.focus(); return; }
     var precS = _leerPrecioSuper();
     if(SESION_SUPER && precS==null){ precioIn&&precioIn.focus(); hintE.innerHTML='<span style="color:var(--bad)">Falta el precio de la boleta.</span>'; return; }
+
+    var qty, utmReal;
+    if(modoBase){
+      // el número son UTM sueltas (balanza). El dato fuerte es utmReal.
+      utmReal = num;
+      qty = (f>0) ? num/f : num;   // UO derivada sólo para coherencia interna
+    } else {
+      // el número son UO (paquetes). Sin utmReal: el GAS hace UO×factor.
+      utmReal = null;
+      if(!skuDecimal(chosen.sku) && Math.abs(num-Math.round(num))>0.001){
+        var rr=Math.round(num);
+        if(!confirm('"'+chosen.nombre+'" se cuenta por unidades enteras.\n\n'+num+' se va a registrar como '+rr+'.\n\n¿Está bien?')){ qEl.focus(); qEl.select&&qEl.select(); return; }
+        qty=rr;
+      } else {
+        qty = skuDecimal(chosen.sku) ? num : Math.round(num);
+      }
+    }
+
+    function setS(o){
+      o.sku=chosen.sku; o.nombre=chosen.nombre; o.estado='ok'; o.sub=skuSec(chosen.sku);
+      o.qty=qty;
+      if(utmReal!=null) o.utmReal=utmReal; else delete o.utmReal;  // ← borra el peso viejo
+      if(SESION_SUPER) o.precioSuper=precS;
+    }
     if(mode==='fix'){ var it=ITEMS[idx];
       if(it.sku!==chosen.sku) pushAlias(it.said, chosen.sku, chosen.nombre);
-      it.sku=chosen.sku; it.nombre=chosen.nombre; it.estado='ok'; it.sub=skuSec(chosen.sku); it.qty=qty;
-      if(SESION_SUPER) it.precioSuper=precS;
+      setS(it);
     } else {
-      var nuevoS={ said:'(a mano) '+chosen.nombre, qty:qty, sku:chosen.sku, nombre:chosen.nombre,
-        sub:skuSec(chosen.sku), estado:'ok', cands:[{sku:chosen.sku,nombre:chosen.nombre,sc:100}] };
-      if(SESION_SUPER) nuevoS.precioSuper=precS;
-      ITEMS.push(nuevoS);
+      var nuevoS={ said:'(a mano) '+chosen.nombre, cands:[{sku:chosen.sku,nombre:chosen.nombre,sc:100}] };
+      setS(nuevoS); ITEMS.push(nuevoS);
     }
     closePicker(); render();
   }
