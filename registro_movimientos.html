@@ -816,7 +816,7 @@ var VERBOS = [
   {id:'Entrega Secc',   label:'→ Entrega a sección',          nat:'registrar', qReq:true},
   {id:'Ajuste - menos', label:'− Ajuste / Merma (menos)',     nat:'registrar', qReq:true},
   {id:'Ingreso BLoc',   label:'↓ Ingreso a Bodega Local',     nat:'registrar', qReq:true},
-  {id:'Conteo Fisico',  label:'☑ Inventario BLocal',          nat:'conteo',    qReq:true}
+  {id:'Conteo Fisico',  label:'☑ Inventario',                nat:'conteo',    qReq:true}
 ];
 // NB: el id interno sigue siendo 'Conteo Fisico' (lo lee verboActual y el
 // branch v.nat==='conteo'); cambia SÓLO la etiqueta visible → "Inventario
@@ -988,8 +988,42 @@ function pintarVerboBtns(){
       _verboExpandido=false;     // al elegir, vuelve a colapsar (si hay lista)
       pintarVerboBtns();
       render();
+      // ── BIVIO INVENTARIO (Cantiere A) · BLocal | Sección ─────────────
+      // Al elegir "Inventario" (nat conteo) y SIN lista en curso, preguntamos
+      // qué inventario: BLocal (el de siempre, no se toca) o Sección (abre el
+      // Mapa). La sección NUNCA se elige por el OP: se deduce al cerrar (N16).
+      var _vNuevo=(VERBOS.filter(function(x){return x.id===nuevo;})[0]||{});
+      if(_vNuevo.nat==='conteo' && !ITEMS.length && typeof abrirMapa==='function'){
+        bivioInventario();
+      }
     };
   });
+}
+
+// ── mini-bivio Inventario: BLocal (flujo de siempre) | Sección (Mapa) ──
+function bivioInventario(){
+  var ov=document.getElementById('bivioInv');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='bivioInv';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:70;display:flex;align-items:flex-end;justify-content:center';
+    ov.innerHTML=
+      '<div style="background:var(--panel);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 18px 26px">'+
+        '<div style="font-weight:700;color:var(--ink);font-size:16px;margin-bottom:3px">¿Qué inventario?</div>'+
+        '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:16px">Cuenta tu bodega, o recorre la barra estación por estación.</div>'+
+        '<button id="bivBLocal" style="width:100%;padding:15px;margin-bottom:10px;border:1px solid var(--line);border-radius:12px;background:var(--bg);text-align:left;cursor:pointer">'+
+          '<div style="font-weight:600;color:var(--ink);font-size:15px">📦 Bodega Local</div>'+
+          '<div style="font-size:12px;color:var(--ink-soft)">Cuenta lo sellado en bodega (lo de siempre)</div></button>'+
+        '<button id="bivSeccion" style="width:100%;padding:15px;border:1px solid var(--accent);border-radius:12px;background:var(--bg);text-align:left;cursor:pointer">'+
+          '<div style="font-weight:600;color:var(--ink);font-size:15px">🗺️ Mapa · Sección</div>'+
+          '<div style="font-size:12px;color:var(--ink-soft)">Recorre la barra y cuenta lo que ves</div></button>'+
+      '</div>';
+    document.body.appendChild(ov);
+  }
+  ov.style.display='flex';
+  function cerrar(){ ov.style.display='none'; }
+  ov.onclick=function(e){ if(e.target===ov) cerrar(); };
+  document.getElementById('bivBLocal').onclick=function(){ cerrar(); /* sigue el flujo BLocal normal */ };
+  document.getElementById('bivSeccion').onclick=function(){ cerrar(); abrirMapa(); };
 }
 pintarVerboBtns();
 
@@ -2084,6 +2118,255 @@ var GAS_RIESCO='https://script.google.com/macros/s/AKfycbzPnXz0WOXEiV1qtCrE1xKM2
 async function callGAS(payload){ try{
   var r=await fetch(GAS_RIESCO,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
   var t=await r.text(); try{return JSON.parse(t);}catch(e){return {ok:true};} }catch(e){ return {ok:false,error:e.toString()}; } }
+
+
+// ============================================================================
+// MAPA — Inventario por estación (Cantiere A) · innesto nel registro_movimientos
+// ----------------------------------------------------------------------------
+// El OP hace el GIRO FÍSICO de la barra (11 estaciones, en el orden del ojo) y
+// cuenta lo que ve. NO elige sección: la sección se DEDUCE detrás (skuSec) al
+// armar el payload (N16 · invariante 2/3). Al "Cerrar estación" arma el lote
+// { action:'registrarInventarioSeccion', items:[{sku,desc,seccion,qContadaUTM}] }
+// y lo mete en la MISMA cola offline idempotente de los movimientos (colaEncolar).
+//
+// Reúsa todo lo que ya vive en el registro (N7/N24):
+//   VOCAB · skuFactor · skuSec · skuDecimal · esPeso · totalUTM · skuUO ·
+//   nInt · fmtQ · esc · callGAS · colaEncolar · nuevoLoteId · flushCola
+// El método de conteo (Sellado/Peso/Nivel) decide el gesto de input, ya está
+// en VOCAB como it.metodo (col 'Metodo de conteo' de BD_INSUMOS).
+// ============================================================================
+
+// El giro físico de la Barra Riesco (mapa del recorrido). 'unit' = items
+// directos; 'mueble' = sub[] de casillas. El SKU es la verdad; el nombre-humano
+// (label) es provisional y se sobrescribe con el canónico de VOCAB vía SKU.
+var GIRO_RIESCO = [{"code":"Cong A","nom":"Congelador A","tipo":"unit","items":[{"sku":"1270","label":"Mini Croassan","nombre":"Croissant Mini Bridor","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1279","label":"Galletones Choco Nuez / Chispas Chocolate","nombre":"Galleta chips de chocolagte y nueces 36x80gr","uo":"Caja","factor":"36","utm":"unidad","metodo":"Sellado"},{"sku":"1280","label":"Galletones Red velvet","nombre":"Mix galletas surtidas 36x80gr","uo":"Caja","factor":"36","utm":"unidad","metodo":"Sellado"},{"sku":"1282","label":"Muffin Arandano","nombre":"Muffin relleno de arandanos 20x95gr","uo":"Caja","factor":"20","utm":"unidad","metodo":"Sellado"},{"sku":"1275","label":"Muffin Chips de Chocolate","nombre":"Muffin con chip de chocolate 20x95gr","uo":"Caja","factor":"20","utm":"unidad","metodo":"Sellado"},{"sku":"1281","label":"Media Lunas","nombre":"Medialuna dulce horneada 106x40gr","uo":"Caja","factor":"106","utm":"unidad","metodo":"Sellado"},{"sku":"1283","label":"Rejilla Manzana / Frutilla (Mini cestas)","nombre":"Mix mini cestas c/frutos 100x40gr","uo":"Caja","factor":"100","utm":"unidad","metodo":"Sellado"},{"sku":"1277","label":"Hojaldre de chocolate BRIDOR 76x70gr","nombre":"Hojaldre de chocolate 76x70gr","uo":"Caja","factor":"76","utm":"unidad","metodo":"Sellado"}]},{"code":"Salsera A","nom":"Salsera A","tipo":"unit","items":[{"sku":"1014","label":"Almendras","nombre":"Almendras Laminadas","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1131","label":"Nueces","nombre":"Nueces en cuarto","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1188","label":"Semillas Zapallo","nombre":"Semillas de Calabaza","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1148","label":"Pistacho","nombre":"Pistachos pelados","uo":"Bolsa","factor":"250","utm":"Gr","metodo":"Peso"},{"sku":"","label":"Sesamo Mix","nombre":"Sesamo Mix *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"1290","label":"Pasta Arachide Suprema (Pasta de Mani)","nombre":"Pasta Arachide Suprema (Pasta de Mani)","uo":"Tarro","factor":"3,000","utm":"gr","metodo":"Sellado"}]},{"code":"Refr A","nom":"Refrigerador A","tipo":"mueble","sub":[{"casilla":"Puerta 1","items":[{"sku":"1133","label":"Palta","nombre":"Palta","uo":"Granel","factor":"`","utm":"Gr","metodo":"Peso"},{"sku":"1128","label":"Mizuna","nombre":"Mizuna","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1111","label":"Limon","nombre":"Limon","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1011","label":"Albahaca","nombre":"Albahaca","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1233","label":"Queso Crema","nombre":"Queso Crema","uo":"Paquete","factor":"2000","utm":"gr","metodo":"Sellado"}]},{"casilla":"Gav 1 Sup","items":[{"sku":"1154","label":"Prosciutto","nombre":"Prosciutto crudo","uo":"Paquete","factor":"500","utm":"Gr","metodo":"Peso"},{"sku":"1100","label":"Jamon de pavo","nombre":"Jamon de pavo","uo":"Display","factor":"500","utm":"Gr","metodo":"Sellado"},{"sku":"1155","label":"Queso Camembert","nombre":"Queso camembert","uo":"Paquete","factor":"100","utm":"Gr","metodo":"Sellado"},{"sku":"","label":"Bolitas de Queso Crema","nombre":"Bolitas de Queso Crema *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"","label":"Mozzarella","nombre":"Mozzarella *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"","label":"Aceitunas","nombre":"Aceitunas *","uo":"","factor":"","utm":"","metodo":"","hard":true}]},{"casilla":"Gav 1 Inf","items":[{"sku":"1147","label":"Masas Pinsa","nombre":"Pinsa 230gr","uo":"Caja","factor":"16","utm":"unidad","metodo":"Sellado"},{"sku":"","label":"Masas Pinsita","nombre":"Masas Pinsita *","uo":"","factor":"","utm":"","metodo":"","hard":true}]},{"casilla":"Gav 2 Sup","items":[{"sku":"1169","label":"Mechada","nombre":"Receta Mechada","uo":"Bolsa","factor":"10","utm":"unidad","metodo":"Sellado"},{"sku":"1171","label":"Pollo","nombre":"Receta Pollo","uo":"Bolsa","factor":"10","utm":"unidad","metodo":"Sellado"},{"sku":"5007","label":"Salmon","nombre":"RECETA SALMON","uo":"Lote 1 unidad","factor":"1","utm":"unidad","metodo":"Peso"},{"sku":"1175","label":"Atun","nombre":"Receta Tartar Atun","uo":"Bolsa","factor":"10","utm":"unidad","metodo":"Sellado"}]},{"casilla":"Gav 2 Inf","items":[{"sku":"1158","label":"Quinoa","nombre":"Quinoa Mix","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1066","label":"Cuscus","nombre":"Cous cous","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1186","label":"Salsa Pimenton","nombre":"Salsa Pimienta","uo":"Bolsa","factor":"1000","utm":"gr","metodo":"Peso"},{"sku":"5001","label":"Salsa Pesto","nombre":"SALSA PESTO","uo":"Bolsa","factor":"1,063","utm":"Gr","metodo":"Peso"},{"sku":"1183","label":"Salsa Cilantro","nombre":"Salsa Cilantro","uo":"Bolsa","factor":"1000","utm":"gr","metodo":"Peso"},{"sku":"1185","label":"Salsa Mostaza","nombre":"Salsa Mostaza","uo":"Bolsa","factor":"1000","utm":"gr","metodo":"Peso"},{"sku":"1174","label":"Salsa Tzatziki","nombre":"Receta Salsa Tzatziki","uo":"Bolsa","factor":"1000","utm":"CC","metodo":"Peso"},{"sku":"1079","label":"Flores decorativas","nombre":"Flores comestibles","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1133","label":"Palta","nombre":"Palta","uo":"Granel","factor":"`","utm":"Gr","metodo":"Peso"}]},{"casilla":"Gav 3 Sup","items":[{"sku":"","label":"Cebollas encurtidas","nombre":"Cebollas encurtidas *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"5004","label":"Ensalada Coleslaw","nombre":"COLESLAW","uo":"Granel","factor":"1","utm":"gr","metodo":"Peso"},{"sku":"1055","label":"Champinones","nombre":"Champinones","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"","label":"Tomates confitados","nombre":"Tomates confitados *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"","label":"Hummus Pesto","nombre":"Hummus Pesto *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"1250","label":"Hummus Betarraga","nombre":"Hummus de Betarraga","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Sellado"}]},{"casilla":"Gav 3 Inf","items":[{"sku":"","label":"Masas Sandwiches","nombre":"Masas Sandwiches *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"1032","label":"Masas Bastoncinos","nombre":"Bastoncino 250gr","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"}]}]},{"code":"Salsera B","nom":"Salsera B","tipo":"unit","items":[{"sku":"1213","label":"Tomates Cherry","nombre":"Tomate cherry","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1128","label":"Mizuna","nombre":"Mizuna","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1152","label":"Salsa Pomodoro","nombre":"Pomodoro pelati","uo":"Galon","factor":"2,500","utm":"Gr","metodo":"Sellado"},{"sku":"1185","label":"Salsa Mostaza","nombre":"Salsa Mostaza","uo":"Bolsa","factor":"1000","utm":"gr","metodo":"Peso"},{"sku":"1183","label":"Salsa Cilantro","nombre":"Salsa Cilantro","uo":"Bolsa","factor":"1000","utm":"gr","metodo":"Peso"},{"sku":"5001","label":"Salsa Pesto","nombre":"SALSA PESTO","uo":"Bolsa","factor":"1,063","utm":"Gr","metodo":"Peso"},{"sku":"","label":"Salsa Queso Menta","nombre":"Salsa Queso Menta *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"1005","label":"Aceto","nombre":"Aceto balsámico","uo":"Botella","factor":"500","utm":"CC","metodo":"Nivel"},{"sku":"1186","label":"Salsa Pimenton","nombre":"Salsa Pimienta","uo":"Bolsa","factor":"1000","utm":"gr","metodo":"Peso"},{"sku":"1003","label":"Aceite de Oliva","nombre":"Aceite de oliva EV","uo":"Bidon","factor":"5,000","utm":"CC","metodo":"Nivel"}]},{"code":"Cong B","nom":"Congelador B","tipo":"mueble","sub":[{"casilla":"Puerta 1","items":[{"sku":"1147","label":"Masas Pinsa","nombre":"Pinsa 230gr","uo":"Caja","factor":"16","utm":"unidad","metodo":"Sellado"}]},{"casilla":"Gav 1 Sup","items":[{"sku":"1147","label":"Masa Pinsa","nombre":"Pinsa 230gr","uo":"Caja","factor":"16","utm":"unidad","metodo":"Sellado"}]},{"casilla":"Gav 1 Inf","items":[{"sku":"1246","label":"Masa Sorriso","nombre":"Sorriso","uo":"Sorriso","factor":"1","utm":"unidad","metodo":"Sellado"}]},{"casilla":"Gav 2 Sup","items":[{"sku":"10180","label":"Masa de Sandwich","nombre":"Masa de Sandwich *","uo":"","factor":"","utm":"","metodo":"","hard":true}]},{"casilla":"Gav 2 Inf","items":[{"sku":"1032","label":"Masa Bastoncino","nombre":"Bastoncino 250gr","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"}]},{"casilla":"Gav 3 Sup","items":[{"sku":"5058","label":"Jugo Immunity","nombre":"BASE IMMUNITY","uo":"Bolsa","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"5008","label":"Jugo Golden","nombre":"BASE GOLDEN RISE","uo":"Lote 1 unidad","factor":"1","utm":"unidad","metodo":""},{"sku":"5059","label":"Jugo Banana Fuel","nombre":"BASE BANANA FUEL","uo":"Bolsa","factor":"1","utm":"unidad","metodo":"Sellado"}]},{"casilla":"Gav 3 Inf","items":[{"sku":"5020","label":"Syrup de Frutilla","nombre":"SYRUP DE FRUTILLA","uo":"Granel","factor":"1","utm":"cc","metodo":"Sellado"},{"sku":"5025","label":"Syrup de Mango","nombre":"SYRUP DE MANGO","uo":"Granell","factor":"1","utm":"cc","metodo":"Sellado"},{"sku":"5026","label":"Syrup de Betarraga","nombre":"SYRUP DE BETARRAGA","uo":"Granell","factor":"1","utm":"cc","metodo":"Sellado"}]}]},{"code":"Refr B","nom":"Refrigerador B","tipo":"unit","items":[{"sku":"1007","label":"Agua con Gas","nombre":"Agua con Gas","uo":"Botella","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1009","label":"Agua sin Gas","nombre":"Agua sin Gas","uo":"Botella","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"5020","label":"Syrup Frutilla","nombre":"SYRUP DE FRUTILLA","uo":"Granel","factor":"1","utm":"cc","metodo":"Sellado"},{"sku":"5025","label":"Syrup Mango","nombre":"SYRUP DE MANGO","uo":"Granell","factor":"1","utm":"cc","metodo":"Sellado"},{"sku":"5026","label":"Syrup Betarraga","nombre":"SYRUP DE BETARRAGA","uo":"Granell","factor":"1","utm":"cc","metodo":"Sellado"},{"sku":"1111","label":"Limon","nombre":"Limon","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1130","label":"Naranja","nombre":"Naranja","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1149","label":"Bananas","nombre":"Platano","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1069","label":"Crema de Leche","nombre":"Crema vegetal","uo":"Tetrabrick","factor":"200","utm":"CC","metodo":"Sellado"},{"sku":"1079","label":"Flores decorativas","nombre":"Flores comestibles","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1105","label":"Leche de Avena","nombre":"Leche de Avena","uo":"Tetrabrick","factor":"1,000","utm":"CC","metodo":"Sellado"},{"sku":"1033","label":"Leche de Almendras","nombre":"Leche de almendras","uo":"Tetrabrick","factor":"1,000","utm":"CC","metodo":"Nivel"},{"sku":"1106","label":"Leche sin lactosa semidescremada","nombre":"Leche Descremada S/ Lactosa","uo":"Tetrabrick","factor":"1,000","utm":"CC","metodo":"Sellado"},{"sku":"1238","label":"Leche entera","nombre":"Leche Entera","uo":"Tetrabrick","factor":"1,000","utm":"CC","metodo":"Sellado"},{"sku":"1060","label":"Coca Zero","nombre":"Coca Cola Zero Lata 350cc","uo":"Pack","factor":"6","utm":"unidad","metodo":"Sellado"},{"sku":"1284","label":"Coca Original","nombre":"Coca Cola 350cc","uo":"Pack","factor":"6","utm":"unidad","metodo":"Sellado"},{"sku":"1274","label":"Sprite","nombre":"Sprite Lata 350cc","uo":"Pack","factor":"6","utm":"unidad","metodo":"Sellado"},{"sku":"1286","label":"Fanta","nombre":"Fanta 350cc","uo":"Pack","factor":"6","utm":"unidad","metodo":"Sellado"},{"sku":"1008","label":"Agua de Coco","nombre":"Agua de Coco Natural 520 ml","uo":"Lata","factor":"520","utm":"cc","metodo":"Nivel"}]},{"code":"Refr C","nom":"Refrigerador C","tipo":"unit","items":[{"sku":"","label":"Nitro Cold Brew","nombre":"Nitro Cold Brew *","uo":"","factor":"","utm":"","metodo":"","hard":true}]},{"code":"Mueble 1","nom":"Mueble de Insumos 1","tipo":"unit","items":[{"sku":"","label":"Te Turmeric & Chamomile","nombre":"Te Turmeric & Chamomile *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"","label":"Te Lavanda","nombre":"Te Lavanda *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"","label":"Te Tangerine","nombre":"Te Tangerine *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"","label":"Te Honey & Lemon","nombre":"Te Honey & Lemon *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"","label":"Te Ginger Cinnamon","nombre":"Te Ginger Cinnamon *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"1070","label":"Cucharas (madera)","nombre":"Cuchara","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1071","label":"Cuchillos (madera)","nombre":"Cuchillo","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1212","label":"Tenedores (madera)","nombre":"Tenedor","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1178","label":"Removedor de Madera","nombre":"Revolvedores","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1088","label":"Guantes Talla M","nombre":"Guante domestico amarillo M","uo":"Undad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1257","label":"Rollos de Impresora","nombre":"ROLLO TERMICO","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"","label":"Rollos Transbank","nombre":"Rollos Transbank *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"1138","label":"Papel Pinsa Envoltura","nombre":"Papel Ceresinado Pinsa","uo":"Resma","factor":"2,000","utm":"unidad","metodo":"Sellado"},{"sku":"1043","label":"Bolsas de Papel Grande","nombre":"Bolsas grandes kraft c/ manilla","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1042","label":"Bolsas de Papel Chicas","nombre":"Bolsas chicas kraft","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1127","label":"Miel de Palma","nombre":"Miel de palma 260 cc","uo":"Tarro","factor":"250","utm":"CC","metodo":"Sellado"},{"sku":"1197","label":"Stevia","nombre":"Stevia sachet","uo":"Sachet","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1180","label":"Sal","nombre":"Sal","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1045","label":"Bombillas","nombre":"Bombilla","uo":"Caja","factor":"100","utm":"unidad","metodo":"Sellado"},{"sku":"1068","label":"Creatina","nombre":"Creatina","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"5019","label":"Alulosa","nombre":"ALMIBAR DE ALULOSA","uo":"","factor":"1","utm":"cc","metodo":""},{"sku":"1064","label":"Colageno","nombre":"Colageno","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1048","label":"Cacao en Polvo","nombre":"Cacao Valrhona","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1123","label":"Mascarpone","nombre":"Mascarpone en polvo","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1273","label":"Salted Caramel","nombre":"Syrup Caramelo","uo":"Botella","factor":"750","utm":"cc","metodo":"Sellado"},{"sku":"1272","label":"Pumpkin Spice","nombre":"Syrup Calabaza","uo":"Botella","factor":"750","utm":"cc","metodo":"Sellado"},{"sku":"1271","label":"Syrup Vainilla","nombre":"Syrup Vainilla Sugar Free","uo":"Botella","factor":"750","utm":"cc","metodo":"Sellado"},{"sku":"1049","label":"Cafe en Grano","nombre":"Cafe blend","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"}]},{"code":"Mueble 2","nom":"Mueble de Insumos 2","tipo":"unit","items":[{"sku":"1219","label":"Vasos Grandes 16oz","nombre":"Vasos 16oz Transparente","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1218","label":"Vasos Chicos 12oz","nombre":"Vasos 12oz Transparente","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1102","label":"Jengibre","nombre":"Jengibre polvo","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1123","label":"Mascarpone","nombre":"Mascarpone en polvo","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1064","label":"Colageno","nombre":"Colageno","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1068","label":"Creatina","nombre":"Creatina","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1078","label":"Goma X","nombre":"Estabilizante G Xantana","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1072","label":"Curcuma","nombre":"Curcuma","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"},{"sku":"1083","label":"7 Fungi","nombre":"Fungi mix (Sobre 180 gr.)","uo":"Sobre","factor":"180","utm":"Gr","metodo":"Sellado"},{"sku":"1048","label":"Cacao","nombre":"Cacao Valrhona","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1052","label":"Camu Camu","nombre":"Camu camu","uo":"Bolsa","factor":"250","utm":"Gr","metodo":"Peso"},{"sku":"","label":"Naranja Decorativa","nombre":"Naranja Decorativa *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"1273","label":"Jarabe Salted Caramel","nombre":"Syrup Caramelo","uo":"Botella","factor":"750","utm":"cc","metodo":"Sellado"},{"sku":"1271","label":"Vainilla","nombre":"Syrup Vainilla Sugar Free","uo":"Botella","factor":"750","utm":"cc","metodo":"Sellado"},{"sku":"1272","label":"Pumpkin Spice","nombre":"Syrup Calabaza","uo":"Botella","factor":"750","utm":"cc","metodo":"Sellado"},{"sku":"1285","label":"Lavanda","nombre":"Syrup Lavanda","uo":"Botella","factor":"750","utm":"cc","metodo":"Sellado"},{"sku":"1223","label":"Vinagre","nombre":"Vinagre de manzana","uo":"Botella","factor":"500","utm":"CC","metodo":"Nivel"},{"sku":"1056","label":"Chocolate Hot Polvo","nombre":"Chocolate 70%","uo":"Bolsa","factor":"2,500","utm":"Gr","metodo":"Peso"},{"sku":"1288","label":"Chai Tea","nombre":"Chai Tea spiced","uo":"Tarro","factor":"1,000","utm":"gr","metodo":"Sellado"},{"sku":"5019","label":"Alulosa","nombre":"ALMIBAR DE ALULOSA","uo":"","factor":"1","utm":"cc","metodo":""},{"sku":"5024","label":"Crema de Vainilla","nombre":"CREMA DE VAINILLA","uo":"","factor":"1","utm":"cc","metodo":""},{"sku":"5018","label":"Crema Tiramisu","nombre":"CREMA TIRAMISU","uo":"","factor":"1100","utm":"unidad","metodo":""},{"sku":"1003","label":"Aceite de Oliva","nombre":"Aceite de oliva EV","uo":"Bidon","factor":"5,000","utm":"CC","metodo":"Nivel"},{"sku":"1062","label":"Coco Rallado","nombre":"Coco rayado","uo":"Bolsa","factor":"250","utm":"Gr","metodo":"Peso"},{"sku":"1124","label":"Matcha en Polvo","nombre":"Matcha Ceremonial","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1247","label":"Hojicha","nombre":"Hojicha","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"}]},{"code":"Mueble 3","nom":"Mueble de Insumos 3","tipo":"mueble","sub":[{"casilla":"Superior","items":[{"sku":"1003","label":"Aceite de Oliva","nombre":"Aceite de oliva EV","uo":"Bidon","factor":"5,000","utm":"CC","metodo":"Nivel"},{"sku":"1005","label":"Aceto Balsamico","nombre":"Aceto balsámico","uo":"Botella","factor":"500","utm":"CC","metodo":"Nivel"},{"sku":"1180","label":"Sal","nombre":"Sal","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1145","label":"Pimienta","nombre":"Pimienta negra molida","uo":"Bolsa","factor":"250","utm":"Gr","metodo":"Peso"},{"sku":"","label":"Tomillo","nombre":"Tomillo *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"","label":"Oregano","nombre":"Oregano *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"1153","label":"Envases Ensaladeras","nombre":"Potes ensalada c/ tapa","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1031","label":"Canoas Grandes","nombre":"Bandeja Craft Grande (Focacciotto)","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1030","label":"Canoas Chicas","nombre":"Bandeja Craft Chica (Bastoncino)","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"}]},{"casilla":"Inf · Limpieza","items":[{"sku":"1059","label":"Cloro","nombre":"Cloro","uo":"Bidon","factor":"5,000","utm":"CC","metodo":"Nivel"},{"sku":"1073","label":"Limpia Piso","nombre":"Desengrasante","uo":"Bidon","factor":"5,000","utm":"CC","metodo":"Nivel"},{"sku":"1104","label":"Lavaplatos","nombre":"Lavaloza","uo":"Bidon","factor":"5,000","utm":"CC","metodo":"Nivel"}]}]},{"code":"Mini Bod","nom":"Mini Bodega","tipo":"mueble","sub":[{"casilla":"Nevera 1","items":[{"sku":"","label":"Masas Sandwich","nombre":"Masas Sandwich *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"1250","label":"Hummus Betarraga","nombre":"Hummus de Betarraga","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Sellado"},{"sku":"","label":"Hummus Pesto","nombre":"Hummus Pesto *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"1183","label":"Salsa Cilantro","nombre":"Salsa Cilantro","uo":"Bolsa","factor":"1000","utm":"gr","metodo":"Peso"},{"sku":"1174","label":"Salsa Tzatziki","nombre":"Receta Salsa Tzatziki","uo":"Bolsa","factor":"1000","utm":"CC","metodo":"Peso"},{"sku":"5001","label":"Salsa Pesto","nombre":"SALSA PESTO","uo":"Bolsa","factor":"1,063","utm":"Gr","metodo":"Peso"},{"sku":"1185","label":"Salsa Mostaza","nombre":"Salsa Mostaza","uo":"Bolsa","factor":"1000","utm":"gr","metodo":"Peso"},{"sku":"5058","label":"Jugo Immunity","nombre":"BASE IMMUNITY","uo":"Bolsa","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"5008","label":"Jugo Golden","nombre":"BASE GOLDEN RISE","uo":"Lote 1 unidad","factor":"1","utm":"unidad","metodo":""},{"sku":"5059","label":"Jugo Banana Fuel","nombre":"BASE BANANA FUEL","uo":"Bolsa","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1158","label":"Quinoa","nombre":"Quinoa Mix","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1066","label":"Cuscus","nombre":"Cous cous","uo":"Granel","factor":"1","utm":"Gr","metodo":"Peso"}]},{"casilla":"Nevera 2","items":[{"sku":"1007","label":"Agua con Gas","nombre":"Agua con Gas","uo":"Botella","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1009","label":"Agua sin Gas","nombre":"Agua sin Gas","uo":"Botella","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1238","label":"Leche Entera","nombre":"Leche Entera","uo":"Tetrabrick","factor":"1,000","utm":"CC","metodo":"Sellado"},{"sku":"1106","label":"Leche Semidescremada sin Lactosa","nombre":"Leche Descremada S/ Lactosa","uo":"Tetrabrick","factor":"1,000","utm":"CC","metodo":"Sellado"},{"sku":"1033","label":"Leche de Almendras","nombre":"Leche de almendras","uo":"Tetrabrick","factor":"1,000","utm":"CC","metodo":"Nivel"},{"sku":"1105","label":"Leche de Avena","nombre":"Leche de Avena","uo":"Tetrabrick","factor":"1,000","utm":"CC","metodo":"Sellado"},{"sku":"1060","label":"Coca Zero","nombre":"Coca Cola Zero Lata 350cc","uo":"Pack","factor":"6","utm":"unidad","metodo":"Sellado"},{"sku":"1284","label":"Coca Original","nombre":"Coca Cola 350cc","uo":"Pack","factor":"6","utm":"unidad","metodo":"Sellado"},{"sku":"1274","label":"Sprite","nombre":"Sprite Lata 350cc","uo":"Pack","factor":"6","utm":"unidad","metodo":"Sellado"},{"sku":"1247","label":"Hojicha","nombre":"Hojicha","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"1124","label":"Matcha","nombre":"Matcha Ceremonial","uo":"Bolsa","factor":"1,000","utm":"Gr","metodo":"Peso"},{"sku":"","label":"Reposado Cold Brew","nombre":"Reposado Cold Brew *","uo":"","factor":"","utm":"","metodo":"","hard":true},{"sku":"","label":"Tiramisu","nombre":"Tiramisu *","uo":"","factor":"","utm":"","metodo":"","hard":true}]},{"casilla":"Mueble 1","items":[{"sku":"1217","label":"Vasos Cafe Grande","nombre":"Vasos 12oz cafe","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1220","label":"Vasos Cafe Pequenos","nombre":"Vasos 8oz. Cafe","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1219","label":"Vasos Plasticos Matcha 16oz","nombre":"Vasos 16oz Transparente","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1218","label":"Vasos 12oz Jugos","nombre":"Vasos 12oz Transparente","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1209","label":"Tapas Cafe Grande","nombre":"Tapas cafe 12oz","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1210","label":"Tapas Cafe Pequenas","nombre":"Tapas cafe 8oz","uo":"Unidad","factor":"1","utm":"unidad","metodo":"Sellado"},{"sku":"1117","label":"Limpia Piso","nombre":"Mantenedor de pisos","uo":"Bidon","factor":"5,000","utm":"CC","metodo":"Nivel"},{"sku":"1059","label":"Cloro Gel","nombre":"Cloro","uo":"Bidon","factor":"5,000","utm":"CC","metodo":"Nivel"}]}]}];
+
+// estado de conteo en curso: { 'sku': qContadaUO }  (UO, no UTM; se convierte al cerrar)
+var MAPA_CONTEO = {};
+var MAPA_ESTACION_ABIERTA = null;   // índice de estación abierta en el acordeón
+
+// --- helpers de método (reúsan los del registro, no reinventan) ---
+function mapaMetodo(sku){
+  var v = (typeof skuItem==='function') ? skuItem(sku) : null;
+  var m = (v && v.metodo || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  if (m.indexOf('peso')>=0)  return 'peso';
+  if (m.indexOf('nivel')>=0) return 'nivel';
+  return 'sellado';  // default y 'sellado' → enteros
+}
+
+// nombre canónico (VOCAB manda sobre el label provisional del giro)
+function mapaNombre(it){
+  var v = (typeof skuItem==='function') ? skuItem(it.sku) : null;
+  return (v && v.nombre) ? v.nombre : (it.nombre || it.label || it.sku || '(sin nombre)');
+}
+
+// aplana todas las casillas/items de una estación a una lista de items contables
+function mapaItemsDe(est){
+  var out = [];
+  if (est.items) {
+    est.items.forEach(function(it){ if(it && (it.sku||it.label)) out.push({it:it, casilla:null}); });
+  }
+  if (est.sub) {
+    est.sub.forEach(function(c){
+      (c.items||[]).forEach(function(it){ if(it && (it.sku||it.label)) out.push({it:it, casilla:c.casilla}); });
+    });
+  }
+  return out;
+}
+
+// ¿cuántos items de la estación ya tienen conteo? (para la barra de progreso)
+function mapaProgresoEst(est){
+  var items = mapaItemsDe(est), hechos = 0;
+  items.forEach(function(o){
+    var sku = o.it.sku;
+    if (sku && MAPA_CONTEO[sku] !== undefined) hechos++;
+  });
+  return { hechos: hechos, total: items.length };
+}
+
+// --- conversión UO contada → UTM (el frontend convierte, el GAS se fía · N7) ---
+function mapaUOaUTM(sku, qUO){
+  if (qUO==null) return null;
+  var f = (typeof skuFactor==='function') ? skuFactor(sku) : 1;
+  return qUO * f;   // qContadaUTM = qUO × factor (mismo factor que totalUTM)
+}
+
+// ============================================================================
+// OVERLAY MAPA — pantalla propia (como abrirPendientes). Lista de estaciones
+// con barra de progreso; tocar una abre sus productos; cada producto se cuenta
+// según su método. "Cerrar estación" registra el lote de esa estación.
+// ============================================================================
+function abrirMapa(){
+  if (!OPERADOR){ alert('Primero dime quién eres (arriba).'); return; }
+  var ov = document.getElementById('mapaOverlay');
+  if (!ov){
+    ov = document.createElement('div'); ov.id='mapaOverlay';
+    ov.style.cssText='position:fixed;inset:0;background:var(--bg);z-index:60;display:flex;flex-direction:column;max-width:560px;margin:0 auto';
+    ov.innerHTML =
+      '<div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--panel)">'+
+        '<button id="mapaCerrar" style="background:none;border:none;font-size:22px;color:var(--ink);cursor:pointer;line-height:1">‹</button>'+
+        '<div style="flex:1"><div style="font-weight:700;color:var(--ink);font-size:16px">Mapa · Inventario</div>'+
+          '<div style="font-size:12px;color:var(--ink-soft)" id="mapaSub">Recorre la barra y cuenta lo que ves</div></div>'+
+        '<button id="mapaLock" title="Reordenar" style="background:none;border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:14px;cursor:pointer;color:var(--ink-soft)">🔒</button>'+
+      '</div>'+
+      '<div id="mapaBody" style="flex:1;overflow-y:auto;padding:10px 12px 80px"></div>';
+    document.body.appendChild(ov);
+    document.getElementById('mapaCerrar').onclick = cerrarMapa;
+  }
+  ov.style.display='flex';
+  MAPA_ESTACION_ABIERTA = null;
+  pintarMapa();
+}
+function cerrarMapa(){
+  var ov=document.getElementById('mapaOverlay'); if(ov) ov.style.display='none';
+}
+
+function pintarMapa(){
+  var body=document.getElementById('mapaBody'); if(!body) return;
+  var html='';
+  GIRO_RIESCO.forEach(function(est, idx){
+    var prog = mapaProgresoEst(est);
+    var pct  = prog.total ? Math.round(prog.hechos/prog.total*100) : 0;
+    var estadoColor = (prog.hechos===0) ? 'var(--line)'
+                    : (prog.hechos<prog.total) ? 'var(--accent)' : 'var(--ok)';
+    var abierta = (MAPA_ESTACION_ABIERTA===idx);
+    html += '<div class="mapa-est" data-idx="'+idx+'" style="background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden">'+
+      '<button class="mapa-est-head" data-idx="'+idx+'" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 14px;background:none;border:none;cursor:pointer;text-align:left">'+
+        '<div style="width:30px;height:30px;border-radius:8px;background:'+estadoColor+';display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:13px;flex-shrink:0">'+(idx+1)+'</div>'+
+        '<div style="flex:1"><div style="font-weight:600;color:var(--ink);font-size:15px">'+esc(est.nom)+'</div>'+
+          '<div style="font-size:12px;color:var(--ink-soft)">'+prog.hechos+'/'+prog.total+' contados</div></div>'+
+        '<div style="width:40px;height:4px;border-radius:2px;background:var(--line);overflow:hidden;flex-shrink:0"><div style="width:'+pct+'%;height:100%;background:'+estadoColor+'"></div></div>'+
+        '<div style="font-size:14px;color:var(--ink-soft);flex-shrink:0">'+(abierta?'▾':'▸')+'</div>'+
+      '</button>';
+    if (abierta){
+      html += '<div class="mapa-est-body" style="border-top:1px solid var(--line)">'+ pintarItemsEstacion(est) +
+        '<div style="padding:12px 14px">'+
+          '<button class="mapa-cerrar-est" data-idx="'+idx+'" style="width:100%;padding:13px;border:none;border-radius:10px;background:var(--ok);color:#fff;font-weight:700;font-size:15px;cursor:pointer">✓ Cerrar estación '+esc(est.nom)+'</button>'+
+        '</div></div>';
+    }
+    html += '</div>';
+  });
+  body.innerHTML = html;
+
+  // toggle acordeón
+  body.querySelectorAll('.mapa-est-head').forEach(function(b){
+    b.onclick=function(){
+      var idx=parseInt(b.dataset.idx);
+      MAPA_ESTACION_ABIERTA = (MAPA_ESTACION_ABIERTA===idx) ? null : idx;
+      pintarMapa();
+    };
+  });
+  // inputs de conteo
+  body.querySelectorAll('.mapa-q').forEach(function(inp){
+    inp.oninput=function(){
+      var sku=inp.dataset.sku;
+      var raw=inp.value.trim().replace(',','.');
+      if(raw===''){ delete MAPA_CONTEO[sku]; }
+      else { var n=parseFloat(raw); if(!isNaN(n)) MAPA_CONTEO[sku]=n; }
+      // refresca solo el total UTM de esa fila (sin repintar todo)
+      var totEl=document.getElementById('mtot-'+sku);
+      if(totEl){ var t=(typeof totalUTM==='function')?totalUTM(sku,MAPA_CONTEO[sku]):null;
+        totEl.textContent = t ? ('= '+t) : ''; }
+    };
+  });
+  // cerrar estación
+  body.querySelectorAll('.mapa-cerrar-est').forEach(function(b){
+    b.onclick=function(){ cerrarEstacion(parseInt(b.dataset.idx)); };
+  });
+}
+
+// pinta los productos de una estación, agrupados por casilla si es 'mueble'
+function pintarItemsEstacion(est){
+  var html='';
+  function fila(it, casilla){
+    var sku = it.sku || '';
+    var nombre = mapaNombre(it);
+    var metodo = sku ? mapaMetodo(sku) : 'sellado';
+    var uo = (sku && typeof skuUO==='function' && skuUO(sku)) || it.uo || '';
+    var qActual = (sku && MAPA_CONTEO[sku]!==undefined) ? MAPA_CONTEO[sku] : '';
+    // etiqueta del gesto según método
+    var hint = (metodo==='peso') ? 'pesa · gramos'
+             : (metodo==='nivel') ? 'nivel · ej 0.5 = medio'
+             : 'enteros';
+    var step = (metodo==='sellado') ? '1' : 'any';
+    var sinSku = !sku;
+    var tot = (sku && qActual!=='' && typeof totalUTM==='function') ? totalUTM(sku, qActual) : null;
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line-soft,rgba(0,0,0,.05))">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:14px;color:var(--ink);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nombre)+'</div>'+
+        '<div style="font-size:11px;color:var(--ink-soft)">'+(uo?esc(uo)+' · ':'')+esc(hint)+(casilla?(' · '+esc(casilla)):'')+'</div>'+
+      '</div>'+
+      (sinSku
+        ? '<div style="font-size:11px;color:var(--accent);white-space:nowrap">sin SKU</div>'
+        : '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">'+
+            '<input class="mapa-q" data-sku="'+esc(sku)+'" type="number" inputmode="decimal" step="'+step+'" value="'+esc(String(qActual))+'" '+
+              'style="width:72px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;font-size:15px;text-align:right;color:var(--ink);background:var(--bg)" placeholder="0">'+
+            '<div id="mtot-'+esc(sku)+'" style="font-size:10px;color:var(--ink-soft)">'+(tot?('= '+esc(tot)):'')+'</div>'+
+          '</div>')+
+    '</div>';
+  }
+  if (est.items){ est.items.forEach(function(it){ fila(it, null); }); }
+  if (est.sub){
+    est.sub.forEach(function(c){
+      html += '<div style="padding:6px 14px;background:var(--bg);font-size:11px;font-weight:600;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.3px">'+esc(c.casilla)+'</div>';
+      (c.items||[]).forEach(function(it){ fila(it, null); });
+    });
+  }
+  return html;
+}
+
+// ============================================================================
+// CERRAR ESTACIÓN — arma el lote de inventario de los SKU contados en esa
+// estación y lo mete en la cola offline (idempotente vía loteId).
+// La sección se DEDUCE por SKU (skuSec) — el OP nunca la eligió.
+// ============================================================================
+function cerrarEstacion(idx){
+  var est = GIRO_RIESCO[idx]; if(!est) return;
+  var items = mapaItemsDe(est);
+  var payloadItems = [];
+  items.forEach(function(o){
+    var sku = o.it.sku;
+    if (!sku) return;                                   // sin SKU → no se manda
+    if (MAPA_CONTEO[sku] === undefined) return;         // sin contar → fuera
+    var qUO  = MAPA_CONTEO[sku];
+    var qUTM = mapaUOaUTM(sku, qUO);                    // UO → UTM (factor)
+    var sec  = (typeof skuSec==='function') ? skuSec(sku) : '';   // sección DEDUCIDA
+    payloadItems.push({
+      sku: String(sku),
+      desc: mapaNombre(o.it),
+      seccion: capSec(sec),                             // 'Barra Cafe' (igual que el cerebro)
+      qContadaUTM: qUTM
+    });
+  });
+
+  if (!payloadItems.length){
+    alert('No contaste ningún producto con SKU en esta estación.\nEscribe al menos una cantidad antes de cerrar.');
+    return;
+  }
+
+  var loteId = nuevoLoteId();
+  var payload = {
+    action: 'registrarInventarioSeccion',
+    loteId: loteId,
+    local: 'Riesco',
+    responsable: OPERADOR,
+    items: payloadItems
+  };
+  var resumen = payloadItems.length+' contados · Mapa · '+est.nom;
+
+  // SIEMPRE encola primero (nunca se pierde, ni sin red) — mismo patrón que los movimientos
+  colaEncolar(payload, resumen);
+
+  // marca la estación como enviada (limpia su conteo para no re-mandar)
+  items.forEach(function(o){ if(o.it.sku) delete MAPA_CONTEO[o.it.sku]; });
+
+  if (navigator.onLine && typeof flushCola==='function') flushCola();
+
+  MAPA_ESTACION_ABIERTA = null;
+  pintarMapa();
+  alert('✓ '+est.nom+' registrada\n'+payloadItems.length+' producto'+(payloadItems.length>1?'s':'')+' · se está sincronizando.');
+}
+
 
 // ============================================================================
 // COLA OFFLINE (Strato 3) — los movimientos se guardan local y se sincronizan
