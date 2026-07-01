@@ -430,7 +430,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v21 · 1jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v22 · 1jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -2158,6 +2158,17 @@ function mapaMetodo(sku){
   return 'sellado';  // default y 'sellado' → enteros
 }
 
+// total legible bajo la fila, coherente con el método: Peso ya está en UTM
+// (gr/cc) → NO ×factor (si no, 3500 gr saldría "3500 Kg"); Sellado/Nivel usan
+// totalUTM (×factor). Reúsa totalUTM pasando q/factor en Peso para que su ×factor
+// devuelva los mismos gramos, ya formateados a gr/Kg · cc/litros.
+function mapaTotDisplay(sku, q){
+  if (q==null || q==='' || typeof totalUTM!=='function') return null;
+  var m = (typeof mapaMetodo==='function') ? mapaMetodo(sku) : 'sellado';
+  if (m==='peso'){ var f=(typeof skuFactor==='function')?skuFactor(sku):1; return totalUTM(sku, (f>0? q/f : q)); }
+  return totalUTM(sku, q);
+}
+
 // nombre canónico (VOCAB manda sobre el label provisional del giro)
 function mapaNombre(it){
   var v = (typeof skuItem==='function') ? skuItem(it.sku) : null;
@@ -2396,7 +2407,7 @@ function pintarMapa(){
       else { var n=parseFloat(raw); if(!isNaN(n)) MAPA_CONTEO[sku]=n; }
       // refresca solo el total UTM de esa fila (sin repintar todo)
       var totEl=document.getElementById('mtot-'+sku);
-      if(totEl){ var t=(typeof totalUTM==='function')?totalUTM(sku,MAPA_CONTEO[sku]):null;
+      if(totEl){ var t=mapaTotDisplay(sku, MAPA_CONTEO[sku]);
         totEl.textContent = t ? ('= '+t) : ''; }
     };
   });
@@ -2435,7 +2446,7 @@ function pintarItemsEstacion(est, estIdx){
              : 'enteros';
     var step = (metodo==='sellado') ? '1' : 'any';
     var sinSku = !sku;
-    var tot = (sku && qActual!=='' && typeof totalUTM==='function') ? totalUTM(sku, qActual) : null;
+    var tot = (sku && qActual!=='') ? mapaTotDisplay(sku, qActual) : null;
     html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line-soft,rgba(0,0,0,.05))">'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:14px;color:var(--ink);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nombre)+'</div>'+
@@ -2478,14 +2489,19 @@ function cerrarEstacion(idx){
     var sku = o.it.sku;
     if (!sku) return;                                   // sin SKU → no se manda
     if (MAPA_CONTEO[sku] === undefined) return;         // sin contar → fuera
-    var qUO  = MAPA_CONTEO[sku];
-    var qUTM = mapaUOaUTM(sku, qUO);                    // UO → UTM (factor)
-    var sec  = (typeof skuSec==='function') ? skuSec(sku) : '';   // sección DEDUCIDA
+    var qUO    = MAPA_CONTEO[sku];
+    var metodo = (typeof mapaMetodo==='function') ? mapaMetodo(sku) : 'sellado';
+    // MISMA captura que Ingreso BLoc: mandamos el dato CRUDO + unidad, y el GAS
+    // convierte con _calcFossil (única fuente). Peso: el conteo YA es UTM (gr/cc)
+    // → unidad 'UTM'. Sellado/Nivel: contenedores/fracción → 'UO' (el GAS ×factor).
+    var unidad = (metodo === 'peso') ? 'UTM' : 'UO';
+    var sec    = (typeof skuSec==='function') ? skuSec(sku) : '';   // sección DEDUCIDA
     payloadItems.push({
       sku: String(sku),
       desc: mapaNombre(o.it),
       seccion: capSec(sec),                             // 'Barra Cafe' (igual que el cerebro)
-      qContadaUTM: qUTM
+      unidad: unidad,                                   // 'UO' | 'UTM' — como Ingreso BLoc
+      cantidad: qUO                                     // crudo · el GAS hace la conversión
     });
   });
 
