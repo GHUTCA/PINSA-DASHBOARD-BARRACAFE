@@ -430,7 +430,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v22 · 1jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v23 · 1jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -842,6 +842,15 @@ function skuDecimal(sku){ var v=skuItem(sku);
 // formato chileno, coma = separador de miles ("6,000"=6000). Para el switch UO ⇄ UTM.
 function skuFactor(sku){ var v=skuItem(sku); if(!v) return 1;
   var f=parseFloat(String(v.factor||'').replace(/,/g,'')); return (f&&f>0)?f:1; }
+// ── DOBLE ENTRADA · núcleo compartido (picker + Mapa + todos los verbos) ──
+// UTM total = paquetes_enteros × factor  +  resto_suelto (gr/cc de balanza).
+// Una sola fuente de la suma; el picker y el Mapa la reúsan (mismo resultado).
+function dobleUtm(sku, paqRaw, grRaw){
+  var f=(typeof skuFactor==='function')?skuFactor(sku):1;
+  var p=parseFloat(String(paqRaw==null?'':paqRaw).replace(',','.')); if(isNaN(p)||p<0) p=0;
+  var g=parseFloat(String(grRaw==null?'':grRaw).replace(',','.'));   if(isNaN(g)||g<0) g=0;
+  return p*f + g;
+}
 // #6 (rev2) — "¿qué estoy moviendo de verdad?" depende del VERBO/nivel:
 //   · Entrega a sección  → se mueve el BO (unidad de sección): "48 · Tetrabrick 1000 cc"
 //   · Ingreso/Ajuste/Conteo (nivel BLocal) → se mueve la UO: "4 · Pack 12 un. 1000cc"
@@ -1600,12 +1609,7 @@ function buildPicker(mode, idx){
   // botella=unidad) no hay doble lectura → un solo campo clásico (pk-q).
   function usaDoble(){ return !!(chosen && skuFactor(chosen.sku)>1); }
   // total UTM de los dos campos: paquetes×factor + gramos
-  function dobleTotalUTM(){
-    var f=skuFactor(chosen.sku);
-    var p=parseFloat(String(dPaq.value).replace(',','.')); if(isNaN(p)||p<0) p=0;
-    var g=parseFloat(String(dGr.value).replace(',','.'));  if(isNaN(g)||g<0) g=0;
-    return p*f + g;
-  }
+  function dobleTotalUTM(){ return dobleUtm(chosen.sku, dPaq.value, dGr.value); }
   function syncDoble(){
     if(usaDoble()){
       dblWrap.style.display='flex';
@@ -2169,6 +2173,31 @@ function mapaTotDisplay(sku, q){
   return totalUTM(sku, q);
 }
 
+// ── estado de conteo del Mapa · doble entrada inline (misma lógica que picker) ──
+// factor>1  → MAPA_CONTEO[sku] = {paq, gr}   → utmReal = paq×factor + gr (suelto)
+// factor<=1 → MAPA_CONTEO[sku] = número      → UO = UTM (sin utmReal)
+function mapaValor(sku){
+  var v = MAPA_CONTEO[sku];
+  var f = (typeof skuFactor==='function') ? skuFactor(sku) : 1;
+  if (v===undefined || v===null) return { vacio:true };
+  if (f>1 && typeof v==='object'){
+    var utm = dobleUtm(sku, v.paq, v.gr);
+    return { vacio:(utm<=0), utmReal:utm, qty:(f>0? utm/f : utm) };
+  }
+  var n = parseFloat(String(v).replace(',','.'));
+  if (isNaN(n)) return { vacio:true };
+  return { vacio:(n<=0), qty:n };
+}
+// total legible en UTM (gr/Kg · cc/litros) desde el estado, reusando totalUTM
+function mapaTotUTM(sku){
+  var val = mapaValor(sku); if (val.vacio) return null;
+  if (typeof totalUTM!=='function') return null;
+  var f = (typeof skuFactor==='function') ? skuFactor(sku) : 1;
+  var esPesoUO = (typeof mapaMetodo==='function' && mapaMetodo(sku)==='peso');
+  var u = (val.utmReal!=null) ? val.utmReal : (esPesoUO ? val.qty : val.qty*f);
+  return totalUTM(sku, (f>0? u/f : u));
+}
+
 // nombre canónico (VOCAB manda sobre el label provisional del giro)
 function mapaNombre(it){
   var v = (typeof skuItem==='function') ? skuItem(it.sku) : null;
@@ -2194,7 +2223,7 @@ function mapaProgresoEst(est){
   var items = mapaItemsDe(est), hechos = 0;
   items.forEach(function(o){
     var sku = o.it.sku;
-    if (sku && MAPA_CONTEO[sku] !== undefined) hechos++;
+    if (sku && !mapaValor(sku).vacio) hechos++;
   });
   return { hechos: hechos, total: items.length };
 }
@@ -2398,18 +2427,31 @@ function pintarMapa(){
       pintarMapa();
     };
   });
-  // inputs de conteo
+  // inputs de conteo · refresca el total legible de esa fila (sin repintar)
+  function _mapaRefTot(sku){
+    var totEl=document.getElementById('mtot-'+sku);
+    if(totEl){ var t=mapaTotUTM(sku); totEl.textContent = t ? ('= '+t) : ''; }
+  }
+  // casilla simple (factor<=1): el número es UO=UTM
   body.querySelectorAll('.mapa-q').forEach(function(inp){
     inp.oninput=function(){
-      var sku=inp.dataset.sku;
-      var raw=inp.value.trim().replace(',','.');
-      if(raw===''){ delete MAPA_CONTEO[sku]; }
-      else { var n=parseFloat(raw); if(!isNaN(n)) MAPA_CONTEO[sku]=n; }
-      // refresca solo el total UTM de esa fila (sin repintar todo)
-      var totEl=document.getElementById('mtot-'+sku);
-      if(totEl){ var t=mapaTotDisplay(sku, MAPA_CONTEO[sku]);
-        totEl.textContent = t ? ('= '+t) : ''; }
+      var sku=inp.dataset.sku, raw=inp.value.trim();
+      if(raw===''){ delete MAPA_CONTEO[sku]; } else { MAPA_CONTEO[sku]=raw; }
+      _mapaRefTot(sku);
     };
+  });
+  // doble entrada (factor>1): estado {paq, gr} → utmReal = paq×factor + gr
+  function _mapaDobleSet(sku,campo,valor){
+    var o = (MAPA_CONTEO[sku] && typeof MAPA_CONTEO[sku]==='object') ? MAPA_CONTEO[sku] : {paq:'',gr:''};
+    o[campo]=valor;
+    if((!o.paq) && (!o.gr)) delete MAPA_CONTEO[sku]; else MAPA_CONTEO[sku]=o;
+    _mapaRefTot(sku);
+  }
+  body.querySelectorAll('.mapa-paq').forEach(function(inp){
+    inp.oninput=function(){ _mapaDobleSet(inp.dataset.sku,'paq',inp.value.trim()); };
+  });
+  body.querySelectorAll('.mapa-gr').forEach(function(inp){
+    inp.oninput=function(){ _mapaDobleSet(inp.dataset.sku,'gr',inp.value.trim()); };
   });
   // cerrar estación
   body.querySelectorAll('.mapa-cerrar-est').forEach(function(b){
@@ -2439,14 +2481,34 @@ function pintarItemsEstacion(est, estIdx){
     var nombre = mapaNombre(it);
     var metodo = sku ? mapaMetodo(sku) : 'sellado';
     var uo = (sku && typeof skuUO==='function' && skuUO(sku)) || it.uo || '';
-    var qActual = (sku && MAPA_CONTEO[sku]!==undefined) ? MAPA_CONTEO[sku] : '';
-    // etiqueta del gesto según método
-    var hint = (metodo==='peso') ? 'pesa · gramos'
-             : (metodo==='nivel') ? 'nivel · ej 0.5 = medio'
+    // DOBLE ENTRADA inline (factor>1): dos casillas que se suman (enteros + sueltos),
+    // idéntica a Ingreso BLoc. factor<=1 → una sola casilla (UO=UTM).
+    var f = sku ? ((typeof skuFactor==='function')?skuFactor(sku):1) : 1;
+    var esDoble = (f>1);
+    var cur = (sku && MAPA_CONTEO[sku]!=null) ? MAPA_CONTEO[sku] : null;
+    var val = sku ? mapaValor(sku) : {vacio:true};
+    var uoCorto  = (uo||'ud').trim().split(/\s+/)[0];
+    var utmCorto = (sku && typeof skuUTM==='function' && skuUTM(sku)) || 'sueltos';
+    var hint = esDoble ? ('enteros ×'+nInt(f)+'  +  '+utmCorto+' sueltos')
+             : (metodo==='peso')  ? ('pesa · '+utmCorto)
+             : (metodo==='nivel') ? ('nivel · pon los '+utmCorto)
              : 'enteros';
-    var step = (metodo==='sellado') ? '1' : 'any';
+    var step = (metodo==='sellado' && !esDoble) ? '1' : 'any';
     var sinSku = !sku;
-    var tot = (sku && qActual!=='') ? mapaTotDisplay(sku, qActual) : null;
+    var tot = (sku && !val.vacio) ? mapaTotUTM(sku) : null;
+    var inpSt='padding:7px 6px;border:1px solid var(--line);border-radius:8px;font-size:15px;text-align:right;color:var(--ink);background:var(--bg)';
+    function boxD(cls,v,w,lbl){
+      return '<div style="display:flex;flex-direction:column;align-items:center;gap:2px">'+
+        '<input class="'+cls+'" data-sku="'+esc(sku)+'" type="number" inputmode="'+(cls==='mapa-paq'?'numeric':'decimal')+'" value="'+esc(v)+'" placeholder="0" style="width:'+w+'px;'+inpSt+'">'+
+        '<div style="font-size:9px;color:var(--ink-soft);white-space:nowrap;max-width:'+(w+6)+'px;overflow:hidden;text-overflow:ellipsis">'+esc(lbl)+'</div>'+
+      '</div>';
+    }
+    var inputHtml = esDoble
+      ? '<div style="display:flex;gap:8px;align-items:flex-start">'+
+          boxD('mapa-paq',(cur&&cur.paq!=null?cur.paq:''),52,uoCorto)+
+          boxD('mapa-gr', (cur&&cur.gr!=null ?cur.gr :''),58,utmCorto)+
+        '</div>'
+      : '<input class="mapa-q" data-sku="'+esc(sku)+'" type="number" inputmode="decimal" step="'+step+'" value="'+esc(cur!=null?String(cur):'')+'" style="width:72px;'+inpSt+'" placeholder="0">';
     html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line-soft,rgba(0,0,0,.05))">'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:14px;color:var(--ink);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nombre)+'</div>'+
@@ -2460,8 +2522,7 @@ function pintarItemsEstacion(est, estIdx){
         : (sinSku
           ? '<div style="font-size:11px;color:var(--accent);white-space:nowrap">sin SKU</div>'
           : '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">'+
-              '<input class="mapa-q" data-sku="'+esc(sku)+'" type="number" inputmode="decimal" step="'+step+'" value="'+esc(String(qActual))+'" '+
-                'style="width:72px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;font-size:15px;text-align:right;color:var(--ink);background:var(--bg)" placeholder="0">'+
+              inputHtml+
               '<div id="mtot-'+esc(sku)+'" style="font-size:10px;color:var(--ink-soft)">'+(tot?('= '+esc(tot)):'')+'</div>'+
             '</div>'))+
     '</div>';
@@ -2488,21 +2549,16 @@ function cerrarEstacion(idx){
   items.forEach(function(o){
     var sku = o.it.sku;
     if (!sku) return;                                   // sin SKU → no se manda
-    if (MAPA_CONTEO[sku] === undefined) return;         // sin contar → fuera
-    var qUO    = MAPA_CONTEO[sku];
-    var metodo = (typeof mapaMetodo==='function') ? mapaMetodo(sku) : 'sellado';
-    // MISMA captura que Ingreso BLoc: mandamos el dato CRUDO + unidad, y el GAS
-    // convierte con _calcFossil (única fuente). Peso: el conteo YA es UTM (gr/cc)
-    // → unidad 'UTM'. Sellado/Nivel: contenedores/fracción → 'UO' (el GAS ×factor).
-    var unidad = (metodo === 'peso') ? 'UTM' : 'UO';
-    var sec    = (typeof skuSec==='function') ? skuSec(sku) : '';   // sección DEDUCIDA
-    payloadItems.push({
-      sku: String(sku),
-      desc: mapaNombre(o.it),
-      seccion: capSec(sec),                             // 'Barra Cafe' (igual que el cerebro)
-      unidad: unidad,                                   // 'UO' | 'UTM' — como Ingreso BLoc
-      cantidad: qUO                                     // crudo · el GAS hace la conversión
-    });
+    var val = mapaValor(sku);
+    if (val.vacio) return;                              // sin contar → fuera
+    // MISMA captura que Ingreso BLoc (doble entrada): si hay utmReal (paquetes +
+    // sueltos ya sumados) se manda en 'UTM'; si es casilla simple (factor<=1) se
+    // manda en 'UO'. El GAS convierte/escribe con _calcFossil (única fuente).
+    var sec  = (typeof skuSec==='function') ? skuSec(sku) : '';   // sección DEDUCIDA
+    var push = { sku:String(sku), desc:mapaNombre(o.it), seccion:capSec(sec) };
+    if (val.utmReal!=null){ push.unidad='UTM'; push.cantidad=val.utmReal; }
+    else                  { push.unidad='UO';  push.cantidad=val.qty;    }
+    payloadItems.push(push);
   });
 
   if (!payloadItems.length){
