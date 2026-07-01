@@ -430,7 +430,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v20 · 28jun</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v21 · 1jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -2144,6 +2144,10 @@ var GIRO_RIESCO = [{"code":"Cong A","nom":"Congelador A","tipo":"unit","items":[
 // estado de conteo en curso: { 'sku': qContadaUO }  (UO, no UTM; se convierte al cerrar)
 var MAPA_CONTEO = {};
 var MAPA_ESTACION_ABIERTA = null;   // índice de estación abierta en el acordeón
+var MAPA_EDIT = false;              // candado abierto = modo reordenar (▲▼)
+var MAPA_ORDEN_KEY = 'pinsita_mapa_orden_Riesco';   // cache local del orden compartido
+var _mapaSaveTimer = null;          // debounce del guardado en GAS
+var MAPA_AR = 'display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:1px solid var(--line);border-radius:8px;font-size:13px;color:var(--ink);background:var(--bg);flex-shrink:0;cursor:pointer;-webkit-user-select:none;user-select:none';  // botón ▲▼
 
 // --- helpers de método (reúsan los del registro, no reinventan) ---
 function mapaMetodo(sku){
@@ -2188,7 +2192,127 @@ function mapaProgresoEst(est){
 function mapaUOaUTM(sku, qUO){
   if (qUO==null) return null;
   var f = (typeof skuFactor==='function') ? skuFactor(sku) : 1;
+  var m = (typeof mapaMetodo==='function') ? mapaMetodo(sku) : 'sellado';
+  if (m === 'peso') return qUO;   // 'peso': el conteo ya está en gr/cc = UTM → NO ×factor
+  // 'sellado' (contenedores enteros) y 'nivel' (fracción de contenedor) → ×factor
+  //   sellado: 3 cajas × 36 = 108 unidades ; nivel: 0.5 bidón × 5000 = 2500 cc
   return qUO * f;   // qContadaUTM = qUO × factor (mismo factor que totalUTM)
+}
+
+// ============================================================================
+// REORDENAR (candado) — el OP acomoda el mapa a su recorrido real. El orden es
+// COMPARTIDO por local: se guarda en el GAS (pestaña MAPA_ORDEN del bound) y se
+// cachea en localStorage para pintar al vuelo / offline. Clave por contenedor
+// (estación + casilla) y por item = sku||label, porque los SKU se repiten en el
+// giro y los items 'hard' no tienen SKU. El reorden es DENTRO del contenedor.
+// ============================================================================
+function _mapaItemKey(it){ return (it && it.sku!=null ? String(it.sku) : '') + '||' + ((it && (it.label||it.nombre)) || ''); }
+function _mapaContKey(estCode, casilla){ return estCode + '|' + (casilla||''); }
+function _mapaSwap(arr,i,j){ var t=arr[i]; arr[i]=arr[j]; arr[j]=t; }
+
+// contenedor de items de una estación: ''→est.items ; 's'+k→est.sub[k].items
+function _mapaContArr(est, contKey){
+  if (contKey==='' || contKey==null) return est.items || null;
+  if (contKey.charAt(0)==='s' && est.sub){ var k=parseInt(contKey.slice(1),10); return (est.sub[k] && est.sub[k].items) || null; }
+  return null;
+}
+
+// snapshot del orden actual → objeto persistible
+function mapaOrdenActual(){
+  var o = { v:1, estaciones:[], items:{} };
+  GIRO_RIESCO.forEach(function(est){
+    o.estaciones.push(est.code);
+    if (est.items) o.items[_mapaContKey(est.code,'')] = est.items.map(_mapaItemKey);
+    if (est.sub) est.sub.forEach(function(c){ o.items[_mapaContKey(est.code,c.casilla)] = (c.items||[]).map(_mapaItemKey); });
+  });
+  return o;
+}
+
+// ordena arr según keyList (los no listados → al final, orden original)
+function _mapaOrdArr(arr, keyList){
+  if (!arr || !keyList || !keyList.length) return;
+  var pos={}; keyList.forEach(function(k,i){ if(pos[k]===undefined) pos[k]=i; });
+  arr.forEach(function(it,i){ it.__i=i; });   // estabilidad para no-listados
+  arr.sort(function(a,b){
+    var ia=pos[_mapaItemKey(a)], ib=pos[_mapaItemKey(b)];
+    ia=(ia===undefined)?9000+a.__i:ia; ib=(ib===undefined)?9000+b.__i:ib;
+    return ia-ib;
+  });
+  arr.forEach(function(it){ delete it.__i; });
+}
+
+// aplica un orden guardado sobre GIRO_RIESCO (in place)
+function mapaAplicarOrden(o){
+  if (!o) return;
+  if (o.estaciones && o.estaciones.length){
+    var ep={}; o.estaciones.forEach(function(c,i){ if(ep[c]===undefined) ep[c]=i; });
+    GIRO_RIESCO.forEach(function(est,i){ est.__i=i; });
+    GIRO_RIESCO.sort(function(a,b){
+      var ia=ep[a.code], ib=ep[b.code];
+      ia=(ia===undefined)?9000+a.__i:ia; ib=(ib===undefined)?9000+b.__i:ib;
+      return ia-ib;
+    });
+    GIRO_RIESCO.forEach(function(est){ delete est.__i; });
+  }
+  if (o.items){
+    GIRO_RIESCO.forEach(function(est){
+      if (est.items) _mapaOrdArr(est.items, o.items[_mapaContKey(est.code,'')]);
+      if (est.sub) est.sub.forEach(function(c){ _mapaOrdArr(c.items, o.items[_mapaContKey(est.code,c.casilla)]); });
+    });
+  }
+}
+
+// guarda: localStorage al toque + GAS con debounce (compartido, best-effort)
+function mapaGuardarOrden(){
+  var o = mapaOrdenActual();
+  try{ localStorage.setItem(MAPA_ORDEN_KEY, JSON.stringify(o)); }catch(e){}
+  if (_mapaSaveTimer) clearTimeout(_mapaSaveTimer);
+  _mapaSaveTimer = setTimeout(function(){
+    callGAS({ action:'guardarMapaOrden', local:'Riesco', orden:o });
+  }, 700);
+}
+
+// carga: cache local inmediato + GAS como verdad compartida (repinta al volver)
+function mapaCargarOrden(){
+  try{ var c=JSON.parse(localStorage.getItem(MAPA_ORDEN_KEY)||'null'); if(c) mapaAplicarOrden(c); }catch(e){}
+  try{
+    callGAS({ action:'getMapaOrden', local:'Riesco' }).then(function(res){
+      if (res && res.ok && res.orden){
+        mapaAplicarOrden(res.orden);
+        try{ localStorage.setItem(MAPA_ORDEN_KEY, JSON.stringify(res.orden)); }catch(e){}
+        if (document.getElementById('mapaBody')) pintarMapa();
+      }
+    }).catch(function(){});
+  }catch(e){}
+}
+
+// toggle del candado
+function mapaToggleEdit(){
+  MAPA_EDIT = !MAPA_EDIT;
+  var b=document.getElementById('mapaLock');
+  if (b){ b.textContent = MAPA_EDIT?'🔓':'🔒'; b.title = MAPA_EDIT?'Listo':'Reordenar';
+          b.style.borderColor = MAPA_EDIT?'var(--accent)':'var(--line)';
+          b.style.color = MAPA_EDIT?'var(--accent)':'var(--ink-soft)'; }
+  var sub=document.getElementById('mapaSub');
+  if (sub) sub.textContent = MAPA_EDIT ? 'Ordena con ▲▼ · toca una estación para sus productos'
+                                       : 'Recorre la barra y cuenta lo que ves';
+  if (MAPA_EDIT) MAPA_ESTACION_ABIERTA = null;   // al entrar a editar, colapsa
+  pintarMapa();
+}
+
+// mover estación / item (dir = -1 arriba, +1 abajo)
+function mapaMoverEst(idx, dir){
+  var j=idx+dir; if (j<0 || j>=GIRO_RIESCO.length) return;
+  _mapaSwap(GIRO_RIESCO, idx, j);
+  MAPA_ESTACION_ABIERTA = null;
+  mapaGuardarOrden(); pintarMapa();
+}
+function mapaMoverItem(estIdx, contKey, i, dir){
+  var est=GIRO_RIESCO[estIdx]; if(!est) return;
+  var arr=_mapaContArr(est, contKey); if(!arr) return;
+  var j=i+dir; if (j<0 || j>=arr.length) return;
+  _mapaSwap(arr, i, j);
+  mapaGuardarOrden(); pintarMapa();
 }
 
 // ============================================================================
@@ -2212,9 +2336,12 @@ function abrirMapa(){
       '<div id="mapaBody" style="flex:1;overflow-y:auto;padding:10px 12px 80px"></div>';
     document.body.appendChild(ov);
     document.getElementById('mapaCerrar').onclick = cerrarMapa;
+    document.getElementById('mapaLock').onclick   = mapaToggleEdit;
   }
   ov.style.display='flex';
   MAPA_ESTACION_ABIERTA = null;
+  MAPA_EDIT = false;
+  mapaCargarOrden();   // cache local al vuelo + orden compartido del GAS (repinta al volver)
   pintarMapa();
 }
 function cerrarMapa(){
@@ -2235,14 +2362,18 @@ function pintarMapa(){
         '<div style="width:30px;height:30px;border-radius:8px;background:'+estadoColor+';display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:13px;flex-shrink:0">'+(idx+1)+'</div>'+
         '<div style="flex:1"><div style="font-weight:600;color:var(--ink);font-size:15px">'+esc(est.nom)+'</div>'+
           '<div style="font-size:12px;color:var(--ink-soft)">'+prog.hechos+'/'+prog.total+' contados</div></div>'+
-        '<div style="width:40px;height:4px;border-radius:2px;background:var(--line);overflow:hidden;flex-shrink:0"><div style="width:'+pct+'%;height:100%;background:'+estadoColor+'"></div></div>'+
-        '<div style="font-size:14px;color:var(--ink-soft);flex-shrink:0">'+(abierta?'▾':'▸')+'</div>'+
+        (MAPA_EDIT
+          ? '<span class="mapa-est-up" data-idx="'+idx+'" title="Subir" style="'+MAPA_AR+'">▲</span>'+
+            '<span class="mapa-est-dn" data-idx="'+idx+'" title="Bajar" style="'+MAPA_AR+'">▼</span>'
+          : '<div style="width:40px;height:4px;border-radius:2px;background:var(--line);overflow:hidden;flex-shrink:0"><div style="width:'+pct+'%;height:100%;background:'+estadoColor+'"></div></div>'+
+            '<div style="font-size:14px;color:var(--ink-soft);flex-shrink:0">'+(abierta?'▾':'▸')+'</div>')+
       '</button>';
     if (abierta){
-      html += '<div class="mapa-est-body" style="border-top:1px solid var(--line)">'+ pintarItemsEstacion(est) +
+      html += '<div class="mapa-est-body" style="border-top:1px solid var(--line)">'+ pintarItemsEstacion(est, idx) +
+        (MAPA_EDIT ? '' :
         '<div style="padding:12px 14px">'+
           '<button class="mapa-cerrar-est" data-idx="'+idx+'" style="width:100%;padding:13px;border:none;border-radius:10px;background:var(--ok);color:#fff;font-weight:700;font-size:15px;cursor:pointer">✓ Cerrar estación '+esc(est.nom)+'</button>'+
-        '</div></div>';
+        '</div>')+'</div>';
     }
     html += '</div>';
   });
@@ -2273,12 +2404,26 @@ function pintarMapa(){
   body.querySelectorAll('.mapa-cerrar-est').forEach(function(b){
     b.onclick=function(){ cerrarEstacion(parseInt(b.dataset.idx)); };
   });
+  // reordenar estaciones (▲▼ viven dentro del <button> head → stopPropagation)
+  body.querySelectorAll('.mapa-est-up').forEach(function(b){
+    b.onclick=function(e){ e.stopPropagation(); mapaMoverEst(parseInt(b.dataset.idx),-1); };
+  });
+  body.querySelectorAll('.mapa-est-dn').forEach(function(b){
+    b.onclick=function(e){ e.stopPropagation(); mapaMoverEst(parseInt(b.dataset.idx), 1); };
+  });
+  // reordenar productos dentro de la estación
+  body.querySelectorAll('.mapa-it-up').forEach(function(b){
+    b.onclick=function(){ mapaMoverItem(parseInt(b.dataset.est), b.dataset.cont, parseInt(b.dataset.i),-1); };
+  });
+  body.querySelectorAll('.mapa-it-dn').forEach(function(b){
+    b.onclick=function(){ mapaMoverItem(parseInt(b.dataset.est), b.dataset.cont, parseInt(b.dataset.i), 1); };
+  });
 }
 
 // pinta los productos de una estación, agrupados por casilla si es 'mueble'
-function pintarItemsEstacion(est){
+function pintarItemsEstacion(est, estIdx){
   var html='';
-  function fila(it, casilla){
+  function fila(it, casilla, contKey, i){
     var sku = it.sku || '';
     var nombre = mapaNombre(it);
     var metodo = sku ? mapaMetodo(sku) : 'sellado';
@@ -2296,20 +2441,25 @@ function pintarItemsEstacion(est){
         '<div style="font-size:14px;color:var(--ink);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nombre)+'</div>'+
         '<div style="font-size:11px;color:var(--ink-soft)">'+(uo?esc(uo)+' · ':'')+esc(hint)+(casilla?(' · '+esc(casilla)):'')+'</div>'+
       '</div>'+
-      (sinSku
-        ? '<div style="font-size:11px;color:var(--accent);white-space:nowrap">sin SKU</div>'
-        : '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">'+
-            '<input class="mapa-q" data-sku="'+esc(sku)+'" type="number" inputmode="decimal" step="'+step+'" value="'+esc(String(qActual))+'" '+
-              'style="width:72px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;font-size:15px;text-align:right;color:var(--ink);background:var(--bg)" placeholder="0">'+
-            '<div id="mtot-'+esc(sku)+'" style="font-size:10px;color:var(--ink-soft)">'+(tot?('= '+esc(tot)):'')+'</div>'+
-          '</div>')+
+      (MAPA_EDIT
+        ? '<div style="display:flex;gap:6px">'+
+            '<span class="mapa-it-up" data-est="'+estIdx+'" data-cont="'+esc(contKey)+'" data-i="'+i+'" title="Subir" style="'+MAPA_AR+'">▲</span>'+
+            '<span class="mapa-it-dn" data-est="'+estIdx+'" data-cont="'+esc(contKey)+'" data-i="'+i+'" title="Bajar" style="'+MAPA_AR+'">▼</span>'+
+          '</div>'
+        : (sinSku
+          ? '<div style="font-size:11px;color:var(--accent);white-space:nowrap">sin SKU</div>'
+          : '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">'+
+              '<input class="mapa-q" data-sku="'+esc(sku)+'" type="number" inputmode="decimal" step="'+step+'" value="'+esc(String(qActual))+'" '+
+                'style="width:72px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;font-size:15px;text-align:right;color:var(--ink);background:var(--bg)" placeholder="0">'+
+              '<div id="mtot-'+esc(sku)+'" style="font-size:10px;color:var(--ink-soft)">'+(tot?('= '+esc(tot)):'')+'</div>'+
+            '</div>'))+
     '</div>';
   }
-  if (est.items){ est.items.forEach(function(it){ fila(it, null); }); }
+  if (est.items){ est.items.forEach(function(it,i){ fila(it, null, '', i); }); }
   if (est.sub){
-    est.sub.forEach(function(c){
+    est.sub.forEach(function(c,k){
       html += '<div style="padding:6px 14px;background:var(--bg);font-size:11px;font-weight:600;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.3px">'+esc(c.casilla)+'</div>';
-      (c.items||[]).forEach(function(it){ fila(it, null); });
+      (c.items||[]).forEach(function(it,i){ fila(it, null, 's'+k, i); });
     });
   }
   return html;
