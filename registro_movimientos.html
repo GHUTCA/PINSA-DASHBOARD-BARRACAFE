@@ -430,7 +430,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v23 · 1jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v24 · 1jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -2220,12 +2220,14 @@ function mapaItemsDe(est){
 
 // ¿cuántos items de la estación ya tienen conteo? (para la barra de progreso)
 function mapaProgresoEst(est){
-  var items = mapaItemsDe(est), hechos = 0;
+  var items = mapaItemsDe(est), hechos = 0, total = 0;
   items.forEach(function(o){
     var sku = o.it.sku;
-    if (sku && !mapaValor(sku).vacio) hechos++;
+    if (!sku) return;                        // 'sin SKU' no cuenta ni bloquea el verde
+    total++;
+    if (!mapaValor(sku).vacio) hechos++;
   });
-  return { hechos: hechos, total: items.length };
+  return { hechos: hechos, total: total };
 }
 
 // --- conversión UO contada → UTM (el frontend convierte, el GAS se fía · N7) ---
@@ -2373,14 +2375,19 @@ function abrirMapa(){
           '<div style="font-size:12px;color:var(--ink-soft)" id="mapaSub">Recorre la barra y cuenta lo que ves</div></div>'+
         '<button id="mapaLock" title="Reordenar" style="background:none;border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:14px;cursor:pointer;color:var(--ink-soft)">🔒</button>'+
       '</div>'+
-      '<div id="mapaBody" style="flex:1;overflow-y:auto;padding:10px 12px 80px"></div>';
+      '<div id="mapaBody" style="flex:1;overflow-y:auto;padding:10px 12px 16px"></div>'+
+      '<div style="padding:10px 14px calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--panel)">'+
+        '<button id="mapaConfirmar" style="width:100%;padding:14px;border:none;border-radius:12px;background:var(--ok);color:#fff;font-weight:700;font-size:16px;cursor:pointer">Confirmar inventario</button>'+
+      '</div>';
     document.body.appendChild(ov);
     document.getElementById('mapaCerrar').onclick = cerrarMapa;
     document.getElementById('mapaLock').onclick   = mapaToggleEdit;
+    document.getElementById('mapaConfirmar').onclick = confirmarInventarioGiro;
   }
   ov.style.display='flex';
   MAPA_ESTACION_ABIERTA = null;
   MAPA_EDIT = false;
+  mapaConteoCargar();  // recupera el conteo en curso (si cerró la app a mitad de giro)
   mapaCargarOrden();   // cache local al vuelo + orden compartido del GAS (repinta al volver)
   pintarMapa();
 }
@@ -2394,7 +2401,8 @@ function pintarMapa(){
   GIRO_RIESCO.forEach(function(est, idx){
     var prog = mapaProgresoEst(est);
     var pct  = prog.total ? Math.round(prog.hechos/prog.total*100) : 0;
-    var estadoColor = (prog.hechos===0) ? 'var(--line)'
+    var estadoColor = (prog.total===0)   ? 'var(--line)'
+                    : (prog.hechos===0)  ? 'var(--bad,#c0392b)'
                     : (prog.hechos<prog.total) ? 'var(--accent)' : 'var(--ok)';
     var abierta = (MAPA_ESTACION_ABIERTA===idx);
     html += '<div class="mapa-est" data-idx="'+idx+'" style="background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden">'+
@@ -2412,7 +2420,7 @@ function pintarMapa(){
       html += '<div class="mapa-est-body" style="border-top:1px solid var(--line)">'+ pintarItemsEstacion(est, idx) +
         (MAPA_EDIT ? '' :
         '<div style="padding:12px 14px">'+
-          '<button class="mapa-cerrar-est" data-idx="'+idx+'" style="width:100%;padding:13px;border:none;border-radius:10px;background:var(--ok);color:#fff;font-weight:700;font-size:15px;cursor:pointer">✓ Cerrar estación '+esc(est.nom)+'</button>'+
+          '<button class="mapa-est-listo" data-idx="'+idx+'" style="width:100%;padding:13px;border:1px solid var(--accent);border-radius:10px;background:rgba(200,144,47,.10);color:var(--accent);font-weight:700;font-size:15px;cursor:pointer">✓ Listo · cerrar '+esc(est.nom)+'</button>'+
         '</div>')+'</div>';
     }
     html += '</div>';
@@ -2433,11 +2441,12 @@ function pintarMapa(){
     if(totEl){ var t=mapaTotUTM(sku); totEl.textContent = t ? ('= '+t) : ''; }
   }
   // casilla simple (factor<=1): el número es UO=UTM
+  function _mapaTrasContar(sku){ _mapaRefTot(sku); mapaConteoGuardar(); _mapaRefProgreso(); }
   body.querySelectorAll('.mapa-q').forEach(function(inp){
     inp.oninput=function(){
       var sku=inp.dataset.sku, raw=inp.value.trim();
       if(raw===''){ delete MAPA_CONTEO[sku]; } else { MAPA_CONTEO[sku]=raw; }
-      _mapaRefTot(sku);
+      _mapaTrasContar(sku);
     };
   });
   // doble entrada (factor>1): estado {paq, gr} → utmReal = paq×factor + gr
@@ -2445,7 +2454,7 @@ function pintarMapa(){
     var o = (MAPA_CONTEO[sku] && typeof MAPA_CONTEO[sku]==='object') ? MAPA_CONTEO[sku] : {paq:'',gr:''};
     o[campo]=valor;
     if((!o.paq) && (!o.gr)) delete MAPA_CONTEO[sku]; else MAPA_CONTEO[sku]=o;
-    _mapaRefTot(sku);
+    _mapaTrasContar(sku);
   }
   body.querySelectorAll('.mapa-paq').forEach(function(inp){
     inp.oninput=function(){ _mapaDobleSet(inp.dataset.sku,'paq',inp.value.trim()); };
@@ -2453,9 +2462,9 @@ function pintarMapa(){
   body.querySelectorAll('.mapa-gr').forEach(function(inp){
     inp.oninput=function(){ _mapaDobleSet(inp.dataset.sku,'gr',inp.value.trim()); };
   });
-  // cerrar estación
-  body.querySelectorAll('.mapa-cerrar-est').forEach(function(b){
-    b.onclick=function(){ cerrarEstacion(parseInt(b.dataset.idx)); };
+  // "Listo" = colapsar la estación (NO registra; el registro es la confirmación final)
+  body.querySelectorAll('.mapa-est-listo').forEach(function(b){
+    b.onclick=function(){ estacionLista(parseInt(b.dataset.idx)); };
   });
   // reordenar estaciones (▲▼ viven dentro del <button> head → stopPropagation)
   body.querySelectorAll('.mapa-est-up').forEach(function(b){
@@ -2471,6 +2480,7 @@ function pintarMapa(){
   body.querySelectorAll('.mapa-it-dn').forEach(function(b){
     b.onclick=function(){ mapaMoverItem(parseInt(b.dataset.est), b.dataset.cont, parseInt(b.dataset.i), 1); };
   });
+  _mapaRefProgreso();   // cabecera + botón de confirmación con el estado del giro
 }
 
 // pinta los productos de una estación, agrupados por casilla si es 'mueble'
@@ -2542,51 +2552,107 @@ function pintarItemsEstacion(est, estIdx){
 // estación y lo mete en la cola offline (idempotente vía loteId).
 // La sección se DEDUCE por SKU (skuSec) — el OP nunca la eligió.
 // ============================================================================
-function cerrarEstacion(idx){
-  var est = GIRO_RIESCO[idx]; if(!est) return;
-  var items = mapaItemsDe(est);
-  var payloadItems = [];
-  items.forEach(function(o){
-    var sku = o.it.sku;
-    if (!sku) return;                                   // sin SKU → no se manda
-    var val = mapaValor(sku);
-    if (val.vacio) return;                              // sin contar → fuera
-    // MISMA captura que Ingreso BLoc (doble entrada): si hay utmReal (paquetes +
-    // sueltos ya sumados) se manda en 'UTM'; si es casilla simple (factor<=1) se
-    // manda en 'UO'. El GAS convierte/escribe con _calcFossil (única fuente).
-    var sec  = (typeof skuSec==='function') ? skuSec(sku) : '';   // sección DEDUCIDA
-    var push = { sku:String(sku), desc:mapaNombre(o.it), seccion:capSec(sec) };
-    if (val.utmReal!=null){ push.unidad='UTM'; push.cantidad=val.utmReal; }
-    else                  { push.unidad='UO';  push.cantidad=val.qty;    }
-    payloadItems.push(push);
+// "cerrar/listo" una estación = SOLO colapsar. NO registra (N8: capturar ≠ escribir).
+function estacionLista(idx){ MAPA_ESTACION_ABIERTA = null; pintarMapa(); }
+
+// ── persistencia del conteo en curso (sobrevive recarga/cierre a mitad de giro) ──
+var MAPA_CONTEO_KEY = 'pinsita_mapa_conteo_Riesco';
+function mapaConteoGuardar(){ try{ localStorage.setItem(MAPA_CONTEO_KEY, JSON.stringify(MAPA_CONTEO)); }catch(e){} }
+function mapaConteoCargar(){ try{ var c=JSON.parse(localStorage.getItem(MAPA_CONTEO_KEY)||'null'); if(c&&typeof c==='object') MAPA_CONTEO=c; }catch(e){} }
+function mapaConteoLimpiar(){ MAPA_CONTEO={}; try{ localStorage.removeItem(MAPA_CONTEO_KEY); }catch(e){} }
+
+// ── estadísticas globales del giro (SKU ÚNICOS: el mismo SKU en 2 frigos cuenta 1) ──
+function mapaStatsGiro(){
+  var seen={}, contados=0, total=0, estCompl=0;
+  GIRO_RIESCO.forEach(function(est){
+    var p=mapaProgresoEst(est); if(p.total>0 && p.hechos===p.total) estCompl++;
+    mapaItemsDe(est).forEach(function(o){ var s=o.it.sku; if(!s||seen[s])return; seen[s]=1; total++; if(!mapaValor(s).vacio) contados++; });
   });
+  return { contados:contados, total:total, estCompletas:estCompl, estTotal:GIRO_RIESCO.length };
+}
+// refresca la cabecera de progreso y la etiqueta del botón de confirmación
+function _mapaRefProgreso(){
+  var st=mapaStatsGiro();
+  var subEl=document.getElementById('mapaSub');
+  if(subEl && !MAPA_EDIT) subEl.textContent = st.contados+'/'+st.total+' productos · '+st.estCompletas+'/'+st.estTotal+' estaciones listas';
+  var cf=document.getElementById('mapaConfirmar');
+  if(cf) cf.textContent = st.contados>0 ? ('Confirmar inventario · '+st.contados+' contado'+(st.contados>1?'s':'')) : 'Confirmar inventario';
+}
+// huecos por estación: qué productos quedaron sin contar y DÓNDE
+function mapaGaps(){
+  var g=[];
+  GIRO_RIESCO.forEach(function(est){
+    var f=[]; mapaItemsDe(est).forEach(function(o){ var s=o.it.sku; if(!s)return; if(mapaValor(s).vacio) f.push(mapaNombre(o.it)); });
+    if(f.length) g.push({ nom:est.nom, faltan:f });
+  });
+  return g;
+}
+function mapaPrimeraIncompleta(){
+  for(var i=0;i<GIRO_RIESCO.length;i++){ var p=mapaProgresoEst(GIRO_RIESCO[i]); if(p.total>0 && p.hechos<p.total) return i; }
+  return -1;
+}
+// items a registrar: UN item por SKU único contado (dedup) · sección DEDUCIDA (N16)
+function mapaItemsGiro(){
+  var seen={}, out=[];
+  GIRO_RIESCO.forEach(function(est){
+    mapaItemsDe(est).forEach(function(o){
+      var s=o.it.sku; if(!s||seen[s]) return;
+      var v=mapaValor(s); if(v.vacio) return;
+      seen[s]=1;
+      var sec=(typeof skuSec==='function')?skuSec(s):'';
+      var p={ sku:String(s), desc:mapaNombre(o.it), seccion:capSec(sec) };
+      if(v.utmReal!=null){ p.unidad='UTM'; p.cantidad=v.utmReal; } else { p.unidad='UO'; p.cantidad=v.qty; }
+      out.push(p);
+    });
+  });
+  return out;
+}
 
-  if (!payloadItems.length){
-    alert('No contaste ningún producto con SKU en esta estación.\nEscribe al menos una cantidad antes de cerrar.');
-    return;
-  }
-
-  var loteId = nuevoLoteId();
-  var payload = {
-    action: 'registrarInventarioSeccion',
-    loteId: loteId,
-    local: 'Riesco',
-    responsable: OPERADOR,
-    items: payloadItems
-  };
-  var resumen = payloadItems.length+' contados · Mapa · '+est.nom;
-
-  // SIEMPRE encola primero (nunca se pierde, ni sin red) — mismo patrón que los movimientos
-  colaEncolar(payload, resumen);
-
-  // marca la estación como enviada (limpia su conteo para no re-mandar)
-  items.forEach(function(o){ if(o.it.sku) delete MAPA_CONTEO[o.it.sku]; });
-
-  if (navigator.onLine && typeof flushCola==='function') flushCola();
-
-  MAPA_ESTACION_ABIERTA = null;
+// ── UNA SOLA confirmación al final del giro ──
+function confirmarInventarioGiro(){
+  var items=mapaItemsGiro();
+  if(!items.length){ alert('Todavía no contaste ningún producto del giro.'); return; }
+  _mapaModalConfirm(items, mapaGaps());
+}
+function _mapaRegistrarGiro(items){
+  var loteId=nuevoLoteId();
+  var payload={ action:'registrarInventarioSeccion', loteId:loteId, local:'Riesco', responsable:OPERADOR, items:items };
+  colaEncolar(payload, items.length+' productos · Mapa · giro completo');   // idempotente por loteId
+  mapaConteoLimpiar();
+  if(navigator.onLine && typeof flushCola==='function') flushCola();
+  MAPA_ESTACION_ABIERTA=null;
+  var m=document.getElementById('mapaConfirmModal'); if(m) m.remove();
   pintarMapa();
-  alert('✓ '+est.nom+' registrada\n'+payloadItems.length+' producto'+(payloadItems.length>1?'s':'')+' · se está sincronizando.');
+  alert('✓ Inventario registrado\n'+items.length+' producto'+(items.length>1?'s':'')+' · se está sincronizando.');
+}
+function _mapaModalConfirm(items, gaps){
+  var ov=document.getElementById('mapaOverlay')||document.body;
+  var old=document.getElementById('mapaConfirmModal'); if(old) old.remove();
+  var faltanTot=gaps.reduce(function(a,g){return a+g.faltan.length;},0);
+  var gapsHtml='';
+  if(gaps.length){
+    gapsHtml='<div style="margin:14px 0;padding:12px;border:1px solid var(--accent);border-radius:10px;background:rgba(200,144,47,.08)">'+
+      '<div style="font-weight:700;color:var(--accent);font-size:14px;margin-bottom:8px">⚠️ Faltan '+faltanTot+' producto'+(faltanTot>1?'s':'')+' sin contar</div>'+
+      '<div style="max-height:180px;overflow-y:auto;font-size:13px;color:var(--ink)">'+
+        gaps.map(function(g){ return '<div style="padding:5px 0;border-bottom:1px solid var(--line-soft,rgba(0,0,0,.05))"><b>'+esc(g.nom)+'</b> · '+g.faltan.length+' <span style="color:var(--ink-soft)">('+esc(g.faltan.slice(0,6).join(", "))+(g.faltan.length>6?"…":"")+')</span></div>'; }).join('')+
+      '</div></div>';
+  }
+  var d=document.createElement('div'); d.id='mapaConfirmModal';
+  d.style.cssText='position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;z-index:70';
+  d.innerHTML='<div style="background:var(--panel);width:100%;max-width:560px;border-radius:16px 16px 0 0;padding:20px 18px 22px;max-height:85%;overflow-y:auto">'+
+    '<div style="font-weight:700;color:var(--ink);font-size:18px">Confirmar inventario</div>'+
+    '<div style="font-size:14px;color:var(--ink-soft);margin-top:4px">Vas a registrar <b style="color:var(--ok)">'+items.length+'</b> producto'+(items.length>1?'s':'')+' contado'+(items.length>1?'s':'')+' del giro.</div>'+
+    gapsHtml+
+    '<div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">'+
+      '<button id="mapaCfReg" style="width:100%;padding:14px;border:none;border-radius:12px;background:var(--ok);color:#fff;font-weight:700;font-size:16px;cursor:pointer">✓ Registrar '+items.length+' producto'+(items.length>1?'s':'')+'</button>'+
+      (gaps.length?'<button id="mapaCfComp" style="width:100%;padding:13px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--ink);font-weight:600;font-size:15px;cursor:pointer">Volver a completar los que faltan</button>':'')+
+      '<button id="mapaCfCanc" style="width:100%;padding:10px;border:none;background:none;color:var(--ink-soft);font-size:14px;cursor:pointer">Cancelar</button>'+
+    '</div></div>';
+  ov.appendChild(d);
+  document.getElementById('mapaCfReg').onclick=function(){ _mapaRegistrarGiro(items); };
+  document.getElementById('mapaCfCanc').onclick=function(){ d.remove(); };
+  var comp=document.getElementById('mapaCfComp');
+  if(comp) comp.onclick=function(){ d.remove(); var idx=mapaPrimeraIncompleta(); if(idx>=0){ MAPA_ESTACION_ABIERTA=idx; pintarMapa(); var el=document.querySelector('.mapa-est[data-idx="'+idx+'"]'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); } };
 }
 
 
