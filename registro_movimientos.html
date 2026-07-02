@@ -430,7 +430,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v26 · 1jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v27 · 1jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -2122,9 +2122,26 @@ try{ history.pushState(null,'',location.href); }catch(e){}
 
 // ---------- CONFIRMAR · firma + escritura GAS (N16: destino por sección) ----------
 var GAS_RIESCO='https://script.google.com/macros/s/AKfycbzPnXz0WOXEiV1qtCrE1xKM2imfr2Ac3tzwrB5ysp9trqPNcLwUePnop70R-_0bsF-A/exec';
-async function callGAS(payload){ try{
-  var r=await fetch(GAS_RIESCO,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
-  var t=await r.text(); try{return JSON.parse(t);}catch(e){return {ok:true};} }catch(e){ return {ok:false,error:e.toString()}; } }
+// TIMEOUT obligatorio (1-jul): al -6 el teléfono cree tener red (onLine=true por
+// el WiFi/las barras) pero los datos no pasan → un fetch sin timeout cuelga
+// MINUTOS y deja el Confirmar en "Guardando…" bloqueando el registro siguiente.
+// Con timeout: la llamada muere sola, el lote queda en cola (idempotente) y la
+// captura sigue. _gasDownHasta = memo "red caída": tras un fallo, por 25s los
+// confirmes NO esperan nada (encolan y siguen).
+var _gasDownHasta=0;
+async function callGAS(payload, timeoutMs){
+  var ctl=(typeof AbortController!=='undefined')?new AbortController():null;
+  var tid=ctl?setTimeout(function(){ try{ctl.abort();}catch(e){} }, timeoutMs||12000):null;
+  try{
+    var r=await fetch(GAS_RIESCO,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload),signal:ctl?ctl.signal:undefined});
+    var t=await r.text();
+    _gasDownHasta=0;
+    try{return JSON.parse(t);}catch(e){return {ok:true};}
+  }catch(e){
+    _gasDownHasta=Date.now()+25000;
+    return {ok:false,error:e.toString()};
+  }finally{ if(tid)clearTimeout(tid); }
+}
 
 
 // ============================================================================
@@ -2845,28 +2862,32 @@ $('btnConfirm').onclick=async function(){
   colaEncolar(payload, resumen);
   var n=ITEMS.length;
 
-  // 2) intenta enviar ya
+  // 2) intenta enviar ya — con TIMEOUT corto (6s) y memo red-caída: la captura
+  //    NUNCA se queda colgada en "Guardando…" (bug -6: onLine=true sin datos).
+  //    Si no sale ahora, el lote YA está en cola y se enviará solo (idempotente).
   var enviado=false;
-  if(navigator.onLine){
-    var r=await callGAS(payload);
-    if(r&&r.ok){
-      enviado=true;
-      // marca este lote como ok en la cola
-      var c=colaLeer().map(function(x){ if(x.loteId===loteId){ x.estado='ok'; x.okTs=new Date().toISOString(); } return x; });
-      colaGuardar(c.filter(function(x){return x.estado!=='ok';})); pintarBadge();
-      // si estábamos completando un PENDIENTE → ciérralo y limpia su foto
-      if(_pendActivo){
-        var pid=_pendActivo.pendienteId;
-        try{ await callGAS({action:'cerrarPendienteFoto', pendienteId:pid, idMov:(r.primerIdMov||'')}); }catch(e){}
-        var pc=pendLeer().map(function(x){ if(x.pendienteId===pid) x.estado='cerrado'; return x; });
-        pendGuardar(pc.filter(function(x){return x.estado!=='cerrado';}));
-        try{ idbDel(pid); }catch(e){}
-        _pendActivo=null;
-        var bn=document.getElementById('pendActivoBanner'); if(bn) bn.style.display='none';
-        pintarBadgePend();
+  try{
+    if(navigator.onLine && Date.now()>=_gasDownHasta){
+      var r=await callGAS(payload, 6000);
+      if(r&&r.ok){
+        enviado=true;
+        // marca este lote como ok en la cola
+        var c=colaLeer().map(function(x){ if(x.loteId===loteId){ x.estado='ok'; x.okTs=new Date().toISOString(); } return x; });
+        colaGuardar(c.filter(function(x){return x.estado!=='ok';})); pintarBadge();
+        // si estábamos completando un PENDIENTE → ciérralo y limpia su foto
+        if(_pendActivo){
+          var pid=_pendActivo.pendienteId;
+          try{ await callGAS({action:'cerrarPendienteFoto', pendienteId:pid, idMov:(r.primerIdMov||'')}, 6000); }catch(e){}
+          var pc=pendLeer().map(function(x){ if(x.pendienteId===pid) x.estado='cerrado'; return x; });
+          pendGuardar(pc.filter(function(x){return x.estado!=='cerrado';}));
+          try{ idbDel(pid); }catch(e){}
+          _pendActivo=null;
+          var bn=document.getElementById('pendActivoBanner'); if(bn) bn.style.display='none';
+          pintarBadgePend();
+        }
       }
     }
-  }
+  }catch(e){ /* cualquier excepción: el lote está en cola, seguimos al feedback */ }
 
   // 3) feedback honesto: enviado vs guardado-para-enviar
   listEl.querySelectorAll('.rowwrap,.row,.card,.frase').forEach(function(x){x.remove();});
