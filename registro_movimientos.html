@@ -430,7 +430,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v27 · 1jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v28 · 2jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -439,6 +439,7 @@
       <select class="verbo" id="verbo" style="display:none"></select>
     </div>
     <button class="invbtn" id="invBtn" title="Ver inventario">🔍 Ver inventario</button>
+    <button class="invbtn" id="repoBtn" title="Reposición sugerida">📦 Reposición</button>
     <span class="syncbadge" id="syncBadge" style="display:none"></span>
     <span class="syncbadge wait" id="pendBadge" style="display:none;cursor:pointer"></span>
   </div>
@@ -3152,6 +3153,216 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
   document.getElementById('invSecSel').addEventListener('change', function(){
     secElegida=this.value; render();
   });
+})();
+</script>
+
+<!-- ═══════ REPOSICIÓN SUGERIDA · v28 · 02-jul ═══════════════════════════
+     SPEC: SPEC_SUGERENCIA_REPOSICION_02JUL2026.md · invariante 9: sussurro→tap→fatto.
+     Lee la sugerencia del GAS (getSugerenciaReposicion, decisor en el backend —
+     el frontend NO interpreta, N7). Dos taps: entregas → registrarMovimientoBatch
+     (verbo Entrega Secc, cola offline idempotente) · BC → inviarSolicitudRepo
+     (wrapper idempotente por loteId). El JL ve y manda: puede destildar, corregir
+     Q, agregar producto y ver la lista completa. sug vs conf viaja en obs/payload
+     → alimenta el fine-tuning de los PAR. -->
+<style>
+  #repoModal{align-items:stretch}
+  #repoModal .cmsheet{max-width:560px;max-height:none;height:100dvh;border-radius:0;display:flex;flex-direction:column}
+  @supports not (height:100dvh){ #repoModal .cmsheet{height:100vh} }
+  #repoModal .repo-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding-bottom:24px}
+  .repo-h{font-size:12px;font-weight:800;letter-spacing:.07em;color:var(--t2);margin:16px 2px 4px;text-transform:uppercase}
+  .repo-row{display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid rgba(255,255,255,.07)}
+  .repo-row.off{opacity:.35}
+  .repo-chk{width:20px;height:20px;flex:0 0 auto;accent-color:var(--acc,#4a90d9)}
+  .repo-nom{flex:1 1 auto;min-width:0;font-size:14px;line-height:1.25}
+  .repo-nom small{display:block;color:var(--t3);font-size:11px}
+  .repo-q{width:62px;flex:0 0 auto;text-align:right;font-size:15px;font-weight:700;
+    background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);border-radius:8px;color:inherit;padding:6px 5px}
+  .repo-u{flex:0 0 auto;font-size:10px;color:var(--t3);max-width:60px;text-align:left;line-height:1.2}
+  .repo-flag{font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px;background:rgba(255,255,255,.08);flex:0 0 auto}
+  .repo-flag.ok{color:#3db876}.repo-flag.parcial{color:#f5a623}.repo-flag.agotado{color:#e05252}
+  .repo-btn{width:100%;margin:10px 0 2px;padding:13px;border-radius:12px;border:0;font-size:15px;font-weight:800;
+    background:var(--acc,#4a90d9);color:#fff}
+  .repo-btn:disabled{opacity:.5}
+  .repo-add{display:flex;gap:8px;margin:16px 0 4px}
+  .repo-add input{flex:1;padding:9px 11px;border-radius:10px;border:1px solid rgba(255,255,255,.16);
+    background:rgba(255,255,255,.05);color:inherit;font-size:14px}
+  .repo-mini{flex:0 0 auto;font-size:11px;font-weight:700;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.2);
+    background:rgba(255,255,255,.06);color:inherit}
+  .repo-toggle{display:block;width:100%;text-align:left;background:none;border:0;color:var(--acc,#4a90d9);
+    font-size:13px;font-weight:600;padding:10px 2px;cursor:pointer}
+  .repo-done{padding:13px;border-radius:12px;background:rgba(61,184,118,.12);border:1px solid #3db876;
+    color:#3db876;font-size:13.5px;margin:10px 0;line-height:1.35}
+  .repo-vacio{color:var(--t3);font-size:13px;padding:8px 2px}
+</style>
+<div class="cmodal" id="repoModal">
+  <div class="cmsheet">
+    <div class="top-row" style="margin-bottom:6px">
+      <div class="cm-v" style="margin:0">📦 Reposición · <span id="repoLocal">—</span></div>
+      <button class="inv-close-btn" id="repoClose">✕ Cerrar</button>
+    </div>
+    <div class="repo-body" id="repoBody"><div class="inv-load">Calculando sugerencia…</div></div>
+  </div>
+</div>
+<script>
+(function(){
+  function gid(x){ return document.getElementById(x); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fq(n){ n=parseFloat(n)||0; return (Math.round(n)===n)?String(n):String(Math.round(n*10)/10); }
+  // etiqueta de la unidad de captura: Peso → UTM (gr/cc) · resto → primera palabra de la UO
+  function uLbl(it){
+    if(it.unidad==='UTM') return (it.utm||'gr');
+    var w=(it.uoDesc||'').trim().split(/\s+/)[0].toLowerCase();
+    return w ? (/[aeiouáéíóú]$/.test(w)?w+'s':w+'es') : 'UO';
+  }
+  var SUG=null, E=[], B=[], verTodos=false, msg='';
+
+  async function abrir(){
+    gid('repoLocal').textContent=LOCAL_ACTUAL;
+    gid('repoModal').classList.add('on');
+    gid('repoBody').innerHTML='<div class="inv-load">Calculando sugerencia…</div>';
+    verTodos=false; msg='';
+    try{
+      var r=await callGAS({action:'getSugerenciaReposicion', local:LOCAL_ACTUAL}, 20000);
+      if(!r||!r.ok) throw new Error((r&&r.error)||'sin respuesta del sistema');
+      SUG=r;
+      E=r.entregas.map(function(x){ var o={}; for(var k in x)o[k]=x[k]; o.on=true; o.val=x.cantidad; o.sug=x.cantidad; o.manual=false; return o; });
+      B=r.solicitudBC.map(function(x){ var o={}; for(var k in x)o[k]=x[k]; o.on=true; o.val=x.cantidad; o.sug=x.cantidad; o.manual=false; return o; });
+      render();
+    }catch(e){
+      gid('repoBody').innerHTML='<div class="inv-empty" style="padding:22px">⚠ '+esc(e.message)+
+        '<br><br>La sugerencia lee el cerebro central: necesita señal. Reintenta cuando vuelva la red.</div>';
+    }
+  }
+  function cerrar(){ gid('repoModal').classList.remove('on'); }
+
+  function filaHTML(it,lista,i){
+    var extra;
+    if(lista==='E'){ extra='→ '+esc(it.seccion)+' · sug '+fq(it.sug)+(it.manual?' · agregado':''); }
+    else{
+      var bc=(it.stockBC===null||it.stockBC===undefined)?'BC: sin dato':'BC: '+fq(it.stockBC)+' disp.';
+      extra=bc+' · sug '+fq(it.sug)+(it.manual?' · agregado':'');
+    }
+    var flag='';
+    if(lista==='B'&&it.flag&&it.flag!=='sin dato') flag='<span class="repo-flag '+it.flag+'">'+
+      (it.flag==='ok'?'✓ BC':it.flag==='parcial'?'parcial':'agotado')+'</span>';
+    return '<div class="repo-row'+(it.on?'':' off')+'" data-l="'+lista+'" data-i="'+i+'">'+
+      '<input type="checkbox" class="repo-chk"'+(it.on?' checked':'')+'>'+
+      '<div class="repo-nom">'+esc(it.desc)+'<small>'+extra+'</small></div>'+flag+
+      '<input class="repo-q" type="number" inputmode="decimal" step="any" value="'+fq(it.val)+'">'+
+      '<span class="repo-u">'+esc(uLbl(it))+(it.unidad!=='UTM'&&it.qtyUTM?'<br>≈'+fq(it.qtyUTM)+' '+esc(it.utm||''):'')+'</span>'+
+    '</div>';
+  }
+  function render(){
+    if(!SUG) return;
+    var h='';
+    if(msg){ h+='<div class="repo-done">'+msg+'</div>'; msg=''; }
+    h+='<div class="repo-h">Desde tu bodega → secciones</div>';
+    h+=E.length?E.map(function(it,i){return filaHTML(it,'E',i);}).join(''):'<div class="repo-vacio">Nada pendiente: las secciones están cubiertas con lo que hay en Bodega Local.</div>';
+    if(E.length) h+='<button class="repo-btn" id="repoGoE">Entregar a secciones ('+E.filter(function(x){return x.on;}).length+')</button>';
+    h+='<div class="repo-h">Pedir a Bodega Central</div>';
+    h+=B.length?B.map(function(it,i){return filaHTML(it,'B',i);}).join(''):'<div class="repo-vacio">Nada que pedir: la Bodega Local alcanza a cubrir todo.</div>';
+    if(B.length) h+='<button class="repo-btn" id="repoGoB">Enviar solicitud a BC ('+B.filter(function(x){return x.on;}).length+')</button>';
+    h+='<div class="repo-add"><input id="repoBusca" placeholder="🔍 Agregar producto… (nombre o SKU)" autocomplete="off"></div>'+
+       '<div id="repoBuscaRes"></div>'+
+       '<button class="repo-toggle" id="repoVerTodo">'+(verTodos?'▾ Ocultar lista completa':'▸ Ver lista completa ('+((SUG.todos||[]).length)+' SKU · stock/falta)')+'</button>'+
+       '<div id="repoTodos">'+(verTodos?todosHTML(''):'')+'</div>';
+    gid('repoBody').innerHTML=h;
+    wire();
+  }
+  function todosHTML(filtro){
+    var f=(filtro||'').toLowerCase();
+    var rows=(SUG.todos||[]).filter(function(t){
+      return !f || t.desc.toLowerCase().indexOf(f)>=0 || String(t.sku).indexOf(f)>=0; });
+    if(!rows.length) return '<div class="repo-vacio">Sin resultados.</div>';
+    return rows.slice(0,verTodos?500:6).map(function(t){
+      return '<div class="repo-row" data-sku="'+esc(t.sku)+'">'+
+        '<div class="repo-nom">'+esc(t.desc)+'<small>BLocal: '+fq(t.bl)+' · falta total: '+fq(t.falta)+'</small></div>'+
+        '<button class="repo-mini" data-add="E">+ Entrega</button>'+
+        '<button class="repo-mini" data-add="B">+ BC</button>'+
+      '</div>'; }).join('');
+  }
+  function agregar(sku, lista){
+    var t=(SUG.todos||[]).filter(function(x){return String(x.sku)===String(sku);})[0];
+    var v=skuItem(sku)||{};
+    var met=''; try{ if(typeof mapaMetodo==='function') met=(mapaMetodo(sku)||''); }catch(e){}
+    var esPeso=String(met).toLowerCase().indexOf('peso')>=0;
+    var it={ sku:String(sku), desc:(t&&t.desc)||v.nombre||String(sku),
+      unidad:(esPeso?'UTM':'UO'), cantidad:1, qtyUTM:0,
+      uoDesc:v.uo||'', utm:v.utm||'', on:true, val:1, sug:0, manual:true };
+    if(lista==='E'){ it.seccion=capSec(skuSec(sku)||'Cocina Central'); E.push(it); }
+    else{ it.stockBC=null; it.flag='sin dato'; B.push(it); }
+    render();
+  }
+  async function enviar(lista){
+    var arr=(lista==='E')?E:B;
+    var sel=arr.filter(function(x){return x.on && parseFloat(x.val)>0;});
+    if(!sel.length) return;
+    var btn=gid(lista==='E'?'repoGoE':'repoGoB');
+    if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+    var loteId=nuevoLoteId(), payload, resumen;
+    if(lista==='E'){
+      var items=sel.map(function(x){ return { tipo:'Entrega Secc', origen:'Bodega Local',
+        destino:capSec(x.seccion), sku:x.sku, desc:x.desc, unidad:x.unidad,
+        uoDesc:x.uoDesc||'', cantidad:parseFloat(x.val),
+        obs:'repo sug:'+x.sug+' conf:'+x.val+(x.manual?' ·manual':'') }; });
+      payload={ action:'registrarMovimientoBatch', loteId:loteId, responsable:OPERADOR||'JL', items:items };
+      resumen=items.length+' prod · Reposición → secciones';
+    } else {
+      var itemsB=sel.map(function(x){ return { sku:x.sku, descripcion:x.desc,
+        utm:(x.uoDesc||x.utm||''), qty:parseFloat(x.val),
+        qtySugerida:x.sug, manual:!!x.manual }; });
+      payload={ action:'inviarSolicitudRepo', loteId:loteId, local:LOCAL_ACTUAL,
+                responsable:OPERADOR||'JL', items:itemsB };
+      resumen=itemsB.length+' prod · Solicitud a BC';
+    }
+    // patrón v27: SIEMPRE encola primero (idempotente), luego intenta ya con timeout corto
+    colaEncolar(payload, resumen);
+    var enviado=false;
+    try{
+      if(navigator.onLine && Date.now()>=_gasDownHasta){
+        var r=await callGAS(payload, 6000);
+        if(r&&r.ok){ enviado=true;
+          var c=colaLeer().map(function(x){ if(x.loteId===loteId){x.estado='ok';} return x; });
+          colaGuardar(c.filter(function(x){return x.estado!=='ok';})); pintarBadge();
+        }
+      }
+    }catch(e){}
+    msg= enviado
+      ? '✓ '+(lista==='E'?'Entregas registradas en el sistema':'Solicitud enviada a Bodega Central')+'<br><span style="opacity:.8">'+sel.length+' productos · '+esc(OPERADOR||'JL')+'</span>'
+      : '✓ Guardado en el teléfono<br><span style="opacity:.8">'+sel.length+' productos · se enviará solo al volver la señal</span>';
+    // saca lo ya servido; lo destildado queda para la próxima
+    if(lista==='E') E=E.filter(function(x){ return !(x.on && parseFloat(x.val)>0); });
+    else            B=B.filter(function(x){ return !(x.on && parseFloat(x.val)>0); });
+    render();
+  }
+  function wire(){
+    var body=gid('repoBody');
+    body.querySelectorAll('.repo-row[data-l]').forEach(function(rw){
+      var l=rw.dataset.l, i=parseInt(rw.dataset.i,10), it=(l==='E'?E:B)[i];
+      rw.querySelector('.repo-chk').addEventListener('change', function(){ it.on=this.checked; rw.classList.toggle('off',!it.on); });
+      rw.querySelector('.repo-q').addEventListener('input', function(){ it.val=this.value; });
+    });
+    var gE=gid('repoGoE'); if(gE) gE.addEventListener('click', function(){ enviar('E'); });
+    var gB=gid('repoGoB'); if(gB) gB.addEventListener('click', function(){ enviar('B'); });
+    var bu=gid('repoBusca');
+    if(bu) bu.addEventListener('input', function(){
+      gid('repoBuscaRes').innerHTML=this.value.trim()?todosHTML(this.value.trim()):'';
+      wireAdds(gid('repoBuscaRes'));
+    });
+    var vt=gid('repoVerTodo');
+    if(vt) vt.addEventListener('click', function(){ verTodos=!verTodos; render(); });
+    wireAdds(gid('repoTodos'));
+  }
+  function wireAdds(cont){
+    if(!cont) return;
+    cont.querySelectorAll('.repo-mini').forEach(function(b){
+      b.addEventListener('click', function(){
+        agregar(this.closest('.repo-row').dataset.sku, this.dataset.add); });
+    });
+  }
+  gid('repoBtn').addEventListener('click', abrir);
+  gid('repoClose').addEventListener('click', cerrar);
+  gid('repoModal').addEventListener('click', function(e){ if(e.target===this) cerrar(); });
 })();
 </script>
 </body>
