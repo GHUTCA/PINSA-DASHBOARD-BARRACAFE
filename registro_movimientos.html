@@ -430,7 +430,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v31 · 2jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v32 · 2jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -2028,9 +2028,11 @@ async function flushPendCola(){
       var foto=null; try{ foto=await idbGet(c[i].pendienteId); }catch(e){}
       var payload={ action:'guardarPendienteFoto', pendienteId:c[i].pendienteId,
         operador:c[i].operador||OPERADOR||'', verbo:c[i].verbo||'', nota:c[i].nota||'',
-        local:'Riesco', fotoBase64:(foto?foto.dataUrl:''), mime:(foto?foto.mime:'image/jpeg') };
+        local:LOCAL_ACTUAL, fotoBase64:(foto?foto.dataUrl:''), mime:(foto?foto.mime:'image/jpeg') };
       var r=await callGAS(payload);
-      if(r&&r.ok){ c[i].estado='enviado'; c[i].fotoUrl=r.fotoUrl||''; c[i].enviadoFoto=true; }
+      if(r&&r.ok){ c[i].estado='enviado'; c[i].fotoUrl=r.fotoUrl||''; c[i].enviadoFoto=true;
+        // v32: la foto ya vive en el sistema (Drive) → se borra la copia local sola
+        try{ idbDel(c[i].pendienteId); }catch(e){} }
       else { c[i].estado='pending'; c[i].error=(r&&r.error)||'sin red'; }
       pendGuardar(c); pintarBadgePend();
     }
@@ -3548,6 +3550,147 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
   gid('repoBtn').addEventListener('click', abrir);
   gid('repoClose').addEventListener('click', cerrar);
   gid('repoModal').addEventListener('click', function(e){ if(e.target===this) cerrar(); });
+})();
+</script>
+
+<!-- ═══════ FOTO SHEET · v32 · 02-jul (idea Alberto: cattura stile WhatsApp) ═══
+     Bottom-sheet Cámara/Galería + anteprima + nota, al posto di prompt/alert.
+     Riusa TUTTA la tubatura pendientes esistente (idbPut → pend cola →
+     guardarPendienteFoto → Drive → cierre col movimento). Novità:
+     · compressione canvas max 1280px JPEG 0.8 (payload leggero, -6 friendly)
+     · al enviarse, la copia local si borra sola (flushPendCola, sopra)
+     · invariante 11: la foto è la PROVA di un fatto, non un messaggio. -->
+<style>
+  #fotoSheet .cmsheet{max-width:560px}
+  .fs-opts{display:flex;gap:10px;margin:10px 0}
+  .fs-opt{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:16px 8px;
+    border-radius:14px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05);
+    color:inherit;font-size:14px;font-weight:800}
+  .fs-opt .fs-ic{font-size:26px}
+  .fs-opt small{font-weight:400;font-size:11px;color:var(--t3)}
+  .fs-note{font-size:11.5px;color:var(--t3);line-height:1.45;padding:6px 2px}
+  #fsImg{width:100%;max-height:44vh;object-fit:contain;border-radius:12px;
+    background:rgba(0,0,0,.25);margin:8px 0}
+  #fsNota{width:100%;padding:10px 11px;border-radius:10px;border:1px solid rgba(255,255,255,.16);
+    background:rgba(255,255,255,.05);color:inherit;font-size:14px;margin-bottom:8px}
+  .fs-pend{display:block;width:100%;text-align:center;background:none;border:0;
+    color:var(--acc,#4a90d9);font-size:13px;font-weight:700;padding:10px 2px}
+</style>
+<div class="cmodal" id="fotoSheet">
+  <div class="cmsheet">
+    <div class="top-row" style="margin-bottom:4px">
+      <div class="cm-v" style="margin:0">📷 Foto del hecho</div>
+      <button class="inv-close-btn" id="fsClose">✕ Cerrar</button>
+    </div>
+    <div id="fsPick">
+      <div class="fs-opts">
+        <button class="fs-opt" id="fsCam"><span class="fs-ic">📷</span>Cámara<small>saca la foto ahora</small></button>
+        <button class="fs-opt" id="fsGal"><span class="fs-ic">🖼</span>Galería<small>elige una existente</small></button>
+      </div>
+      <div class="fs-note">La foto queda como <b>pendiente</b> y la completas después con el registro.
+        Al enviarse al sistema, la copia local se borra sola.</div>
+      <button class="fs-pend" id="fsVerPend" style="display:none">📋 Ver pendientes (<span id="fsPendN">0</span>)</button>
+    </div>
+    <div id="fsPrev" style="display:none">
+      <img id="fsImg" alt="foto">
+      <input id="fsNota" placeholder="Nota rápida: ¿qué es esta foto?" autocomplete="off">
+      <button class="repo-btn" id="fsGuardar">✓ Guardar pendiente</button>
+      <div style="display:flex;gap:8px">
+        <button class="repo-btn sec" id="fsOtra" style="flex:1">↻ Otra foto</button>
+        <button class="repo-btn sec" id="fsCancel" style="flex:1">✕ Cancelar</button>
+      </div>
+    </div>
+    <div id="fsDone" class="repo-done" style="display:none"></div>
+  </div>
+</div>
+<script>
+(function(){
+  function gd(x){ return document.getElementById(x); }
+  // due imbocchi: cámara diretta e galería (senza capture → apre il picker)
+  var inCam=document.createElement('input'); inCam.type='file'; inCam.accept='image/*';
+  inCam.capture='environment'; inCam.style.display='none'; document.body.appendChild(inCam);
+  var inGal=document.createElement('input'); inGal.type='file'; inGal.accept='image/*';
+  inGal.style.display='none'; document.body.appendChild(inGal);
+  var CUR=null;   // {dataUrl, mime} della foto scelta (già compressa)
+
+  function mostrar(q){
+    gd('fsPick').style.display=(q==='pick')?'block':'none';
+    gd('fsPrev').style.display=(q==='prev')?'block':'none';
+    gd('fsDone').style.display=(q==='done')?'block':'none';
+  }
+  function abrir(){
+    if(!OPERADOR){ alert('Primero dime quién eres (arriba).'); return; }
+    gd('fotoSheet').classList.add('on'); CUR=null; mostrar('pick');
+    var n=pendAbiertosLocal();
+    gd('fsPendN').textContent=n;
+    gd('fsVerPend').style.display=n?'block':'none';
+  }
+  function cerrar(){ gd('fotoSheet').classList.remove('on'); CUR=null; }
+
+  // compressione: lato lungo max 1280px, JPEG 0.8. Se il canvas fallisce,
+  // si manda l'originale (mai perdere la foto per un dettaglio tecnico).
+  function reducir(file){
+    return new Promise(function(res,rej){
+      var rd=new FileReader();
+      rd.onload=function(){
+        var img=new Image();
+        img.onload=function(){
+          try{
+            var M=1280, w=img.width, h=img.height;
+            if(Math.max(w,h)>M){ var k=M/Math.max(w,h); w=Math.round(w*k); h=Math.round(h*k); }
+            var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+            cv.getContext('2d').drawImage(img,0,0,w,h);
+            res({ dataUrl:cv.toDataURL('image/jpeg',0.8), mime:'image/jpeg' });
+          }catch(e){ res({ dataUrl:rd.result, mime:file.type||'image/jpeg' }); }
+        };
+        img.onerror=function(){ res({ dataUrl:rd.result, mime:file.type||'image/jpeg' }); };
+        img.src=rd.result;
+      };
+      rd.onerror=rej;
+      rd.readAsDataURL(file);
+    });
+  }
+  function onFile(inp){
+    var f=inp.files&&inp.files[0]; if(!f) return;
+    reducir(f).then(function(r){ CUR=r; gd('fsImg').src=r.dataUrl; gd('fsNota').value=''; mostrar('prev'); });
+    inp.value='';
+  }
+  inCam.onchange=function(){ onFile(inCam); };
+  inGal.onchange=function(){ onFile(inGal); };
+
+  gd('fsCam').onclick=function(){ inCam.click(); };
+  gd('fsGal').onclick=function(){ inGal.click(); };
+  gd('fsOtra').onclick=function(){ CUR=null; mostrar('pick'); };
+  gd('fsCancel').onclick=cerrar;
+  gd('fsClose').onclick=cerrar;
+  gd('fotoSheet').addEventListener('click', function(e){ if(e.target===this) cerrar(); });
+  gd('fsVerPend').onclick=function(){ cerrar(); var b=gd('btnPendientes'); if(b) b.click(); };
+
+  gd('fsGuardar').onclick=function(){
+    if(!CUR) return;
+    var btn=gd('fsGuardar'); btn.disabled=true; btn.textContent='Guardando…';
+    var v=(typeof verboActual==='function')?verboActual():null;
+    var pid=nuevoPendId();
+    idbPut(pid,CUR.dataUrl,CUR.mime).then(function(){
+      var c=pendLeer();
+      c.push({ pendienteId:pid, verbo:(v&&v.label)||'', operador:OPERADOR,
+               nota:gd('fsNota').value||'', ts:new Date().toISOString(),
+               estado:'pending', enviadoFoto:false });
+      pendGuardar(c); pintarBadgePend();
+      if(navigator.onLine) flushPendCola();
+      gd('fsDone').innerHTML='✓ Foto guardada como pendiente<br><span style="opacity:.8">'+
+        'La completas después en 📋 Pendientes · al enviarse se borra la copia local</span>';
+      mostrar('done');
+      btn.disabled=false; btn.textContent='✓ Guardar pendiente';
+      setTimeout(cerrar, 1800);
+    }).catch(function(){
+      btn.disabled=false; btn.textContent='✓ Guardar pendiente';
+      alert('No pude guardar la foto en el teléfono. Reintenta.');
+    });
+  };
+
+  // il bottone foto ora apre il sheet (il vecchio input diretto resta dormiente)
+  var bf=gd('btnFoto'); if(bf) bf.onclick=abrir;
 })();
 </script>
 </body>
