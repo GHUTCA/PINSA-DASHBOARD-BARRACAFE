@@ -430,7 +430,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v32 · 2jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v33 · 2jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -3575,6 +3575,22 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
     background:rgba(255,255,255,.05);color:inherit;font-size:14px;margin-bottom:8px}
   .fs-pend{display:block;width:100%;text-align:center;background:none;border:0;
     color:var(--acc,#4a90d9);font-size:13px;font-weight:700;padding:10px 2px}
+  /* striscia foto pendientes (stile WApp: le foto sotto, scorrono, tap = grande) */
+  .fs-strip-h{font-size:11px;font-weight:800;letter-spacing:.06em;color:var(--t2);
+    text-transform:uppercase;margin:10px 2px 4px}
+  .fs-strip{display:flex;gap:8px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch}
+  .fs-thumb{position:relative;flex:0 0 auto;width:86px;height:86px;border-radius:12px;overflow:hidden;
+    border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.25);padding:0}
+  .fs-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .fs-thumb .fs-tag{position:absolute;left:0;right:0;bottom:0;font-size:9px;padding:2px 4px;
+    background:rgba(0,0,0,.55);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* lightbox: la foto grande */
+  #fsLight{position:fixed;inset:0;z-index:70;display:none;flex-direction:column;
+    background:rgba(0,0,0,.88);padding:14px}
+  #fsLight.on{display:flex}
+  #fsLight img{flex:1 1 auto;min-height:0;width:100%;object-fit:contain;border-radius:10px}
+  #fsLight .fsl-meta{color:#fff;font-size:13px;padding:10px 2px;line-height:1.4}
+  #fsLight .fsl-btns{display:flex;gap:8px}
 </style>
 <div class="cmodal" id="fotoSheet">
   <div class="cmsheet">
@@ -3589,6 +3605,8 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
       </div>
       <div class="fs-note">La foto queda como <b>pendiente</b> y la completas después con el registro.
         Al enviarse al sistema, la copia local se borra sola.</div>
+      <div class="fs-strip-h" id="fsStripH" style="display:none">📷 Por completar — toca para agrandar</div>
+      <div class="fs-strip" id="fsStrip"></div>
       <button class="fs-pend" id="fsVerPend" style="display:none">📋 Ver pendientes (<span id="fsPendN">0</span>)</button>
     </div>
     <div id="fsPrev" style="display:none">
@@ -3601,6 +3619,15 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
       </div>
     </div>
     <div id="fsDone" class="repo-done" style="display:none"></div>
+  </div>
+</div>
+<!-- lightbox foto pendiente (tap sulla miniatura → grande) -->
+<div id="fsLight">
+  <img id="fsLightImg" alt="pendiente">
+  <div class="fsl-meta" id="fsLightMeta"></div>
+  <div class="fsl-btns">
+    <button class="repo-btn" id="fsLightGo" style="flex:1;margin:0">📋 Completar registro</button>
+    <button class="repo-btn sec" id="fsLightX" style="flex:1;margin:0">✕ Cerrar</button>
   </div>
 </div>
 <script>
@@ -3624,6 +3651,35 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
     var n=pendAbiertosLocal();
     gd('fsPendN').textContent=n;
     gd('fsVerPend').style.display=n?'block':'none';
+    cargarStrip();
+  }
+  // ── striscia miniature (stile WApp): i pendientes con foto, scorrono,
+  //    tap = si ingrandisce nel lightbox. Fonte: idb (non ancora inviati) o
+  //    Drive fotoUrl (inviati). La galleria del telefono NON è leggibile dal
+  //    browser (privacy) — e va bene così: qui vivono le foto-FATTI. ──
+  function cargarStrip(){
+    var strip=gd('fsStrip'), head=gd('fsStripH');
+    strip.innerHTML='';
+    var abiertos=pendLeer().filter(function(x){ return x.estado!=='cerrado'; });
+    head.style.display = abiertos.length ? 'block' : 'none';
+    if(!abiertos.length) return;
+    abiertos.slice(-12).reverse().forEach(function(p){
+      var b=document.createElement('button'); b.className='fs-thumb';
+      var img=document.createElement('img'); img.alt='';
+      var tag=document.createElement('span'); tag.className='fs-tag';
+      tag.textContent=(p.verbo||'📷')+(p.nota?' · '+p.nota:'');
+      b.appendChild(img); b.appendChild(tag); strip.appendChild(b);
+      if(p.fotoUrl){ img.src=p.fotoUrl; }
+      else{ idbGet(p.pendienteId).then(function(f){ if(f&&f.dataUrl) img.src=f.dataUrl; }).catch(function(){}); }
+      img.onerror=function(){ b.style.display='none'; };
+      b.onclick=function(){
+        if(!img.src) return;
+        gd('fsLightImg').src=img.src;
+        gd('fsLightMeta').textContent=(p.verbo?p.verbo+' · ':'')+(p.nota||'sin nota')+
+          (p.ts?' · '+new Date(p.ts).toLocaleString('es-CL'):'');
+        gd('fsLight').classList.add('on');
+      };
+    });
   }
   function cerrar(){ gd('fotoSheet').classList.remove('on'); CUR=null; }
 
@@ -3665,6 +3721,12 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
   gd('fsClose').onclick=cerrar;
   gd('fotoSheet').addEventListener('click', function(e){ if(e.target===this) cerrar(); });
   gd('fsVerPend').onclick=function(){ cerrar(); var b=gd('btnPendientes'); if(b) b.click(); };
+  gd('fsLightX').onclick=function(){ gd('fsLight').classList.remove('on'); };
+  gd('fsLight').addEventListener('click', function(e){ if(e.target===this) this.classList.remove('on'); });
+  gd('fsLightGo').onclick=function(){
+    gd('fsLight').classList.remove('on'); cerrar();
+    var b=gd('btnPendientes'); if(b) b.click();
+  };
 
   gd('fsGuardar').onclick=function(){
     if(!CUR) return;
