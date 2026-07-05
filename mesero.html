@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="es-CL">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f0f16">
+<title>BKS Servicio</title>
+<!-- ════════════════════════════════════════════════════════════════════
+     mesero.html · v1.0 · 4jul2026 · Cantiere MENU (spec 03-jul)
+     La página del mesero: código de turno + nombre (credenciales de TURNO,
+     cero datos en reposo) → clockIn (marcaje) → sala viva (poll ~10s).
+     MÍO → ⌨ DIGITADO → ✓ ENTREGADO → mesa limpia. Campanilla = Telegram.
+     Backend: MENU GAS v3.3.0 (BLOQUE_SALA_MESERO). Vive en el repo PINSA
+     (sistema.pinsita.cl/mesero.html — el QR impreso apunta aquí y no rota).
+     ════════════════════════════════════════════════════════════════════ -->
+<style>
+  :root{
+    --bg:#0f0f16; --card:#1a1a24; --card2:#222230; --bord:rgba(255,255,255,.09);
+    --t1:#f2ead8; --t2:#b8b0a0; --t3:#8a8577;
+    --acc:#d9a441; --ok:#3db876; --warn:#f5a623; --bad:#e05252;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;
+    font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+  html,body{background:var(--bg);color:var(--t1);min-height:100%}
+  body{max-width:430px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top,0)) 14px calc(40px + env(safe-area-inset-bottom,0))}
+  button{font-family:inherit;cursor:pointer}
+  .hide{display:none!important}
+
+  /* ═════ ENTRADA ═════ */
+  #vEntrada{padding-top:12vh;text-align:center}
+  .ent-logo{font-size:44px;margin-bottom:10px}
+  .ent-title{font-size:22px;font-weight:800;margin-bottom:4px}
+  .ent-sub{font-size:13px;color:var(--t3);margin-bottom:28px}
+  .ent-field{margin-bottom:14px;text-align:left}
+  .ent-label{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin-bottom:6px;display:block}
+  .ent-input{width:100%;background:var(--card);border:1.5px solid var(--bord);border-radius:14px;
+    color:var(--t1);padding:15px 16px;font-size:17px;outline:none}
+  .ent-input:focus{border-color:var(--acc)}
+  #entCodigo{letter-spacing:.35em;font-size:24px;font-weight:800;text-align:center}
+  .ent-err{color:var(--bad);font-size:13px;min-height:18px;margin:8px 0}
+  .btn{display:block;width:100%;border:0;border-radius:14px;padding:16px;font-size:18px;font-weight:900;
+    color:#141018;background:var(--acc)}
+  .btn:disabled{opacity:.55}
+  .btn.sec{background:transparent;border:1.5px solid var(--bord);color:var(--t2);font-size:14px;padding:12px}
+  .btn.verde{background:var(--ok);color:#0c1710}
+  .btn.tg{background:#2ea6da;color:#08131a;font-size:15px;padding:13px;margin-top:8px}
+  .ent-hint{font-size:11.5px;color:var(--t3);margin-top:18px;line-height:1.6}
+
+  /* ═════ SALA ═════ */
+  .top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+  .top h1{font-size:19px;flex:1}
+  .chip{font-size:11px;font-weight:700;padding:4px 9px;border-radius:20px;background:rgba(217,164,65,.15);
+    color:var(--acc);border:1px solid rgba(217,164,65,.4);white-space:nowrap}
+  .sub{font-size:12.5px;color:var(--t3);margin-bottom:6px;line-height:1.5}
+  .sub b{color:var(--t2)}
+  .sub .on{color:var(--ok);font-weight:700}
+  .sub .off{color:var(--warn);font-weight:700}
+  .offline{background:rgba(224,82,82,.12);border:1px solid var(--bad);color:var(--bad);
+    border-radius:10px;padding:8px 12px;font-size:12px;margin:8px 0;display:none}
+  .offline.show{display:block}
+  .camp-banner{background:rgba(46,166,218,.10);border:1px solid rgba(46,166,218,.4);border-radius:14px;
+    padding:12px 14px;margin:10px 0;font-size:13px;color:var(--t2);line-height:1.5}
+  .h{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin:18px 2px 8px}
+  .h.bad{color:var(--bad)}
+  .vacio{font-size:12.5px;color:var(--t3);padding:6px 2px 2px;font-style:italic}
+  .card{background:var(--card);border:1px solid var(--bord);border-radius:16px;padding:14px;margin-bottom:12px}
+  .card.urgente{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+  .mesa-row{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+  .mesa{font-size:30px;font-weight:900;letter-spacing:-.01em;white-space:nowrap}
+  .espera{margin-left:auto;font-size:15px;font-weight:800;padding:3px 10px;border-radius:10px}
+  .espera.ok{background:rgba(61,184,118,.15);color:var(--ok)}
+  .espera.warn{background:rgba(245,166,35,.15);color:var(--warn)}
+  .espera.bad{background:rgba(224,82,82,.18);color:var(--bad)}
+  .plaza{font-size:12px;color:var(--t3)}
+  .cat{font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--acc);text-transform:uppercase;margin:9px 0 3px}
+  .it{display:flex;gap:8px;font-size:15px;padding:3px 0;align-items:baseline}
+  .it .q{font-weight:900;min-width:26px}
+  .it .split{margin-left:auto;font-size:10px;font-weight:700;color:var(--t3);border:1px solid var(--bord);
+    border-radius:8px;padding:1px 6px}
+  .nota{font-size:12.5px;color:var(--warn);margin-top:6px;font-style:italic}
+  .tot{display:flex;justify-content:space-between;font-size:14px;color:var(--t2);border-top:1px dashed var(--bord);
+    margin-top:10px;padding-top:8px}
+  .tot b{color:var(--t1);font-size:16px}
+  .card .btn{margin-top:12px}
+  .mio-meta{font-size:12.5px;color:var(--t3);margin-top:2px;line-height:1.5}
+  .mio-meta b.warn{color:var(--warn)}
+  .limpia{display:flex;align-items:center;gap:10px}
+  .limpia .mesa{font-size:22px}
+  .limpia .btn{margin:0;width:auto;flex:1;padding:12px;font-size:15px}
+  .foot{margin-top:30px;border-top:1px solid var(--bord);padding-top:12px;display:flex;
+    justify-content:space-between;align-items:center}
+  .foot .ver{font-size:10px;color:var(--t3)}
+  .foot button{background:transparent;border:1px solid var(--bord);color:var(--t2);
+    padding:8px 14px;border-radius:10px;font-size:12px}
+
+  /* toast */
+  .toast{position:fixed;left:16px;right:16px;top:calc(16px + env(safe-area-inset-top,0));max-width:398px;margin:0 auto;
+    background:var(--card2);border:1px solid var(--bord);border-radius:12px;padding:12px 14px;font-size:13.5px;
+    z-index:99;transform:translateY(-16px);opacity:0;pointer-events:none;transition:.22s;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+  .toast.show{transform:none;opacity:1}
+  .toast.err{border-color:var(--bad);color:var(--bad)}
+  .toast.ok{border-color:var(--ok);color:var(--ok)}
+  .toast.warn{border-color:var(--warn);color:var(--warn)}
+  @keyframes pulse{50%{opacity:.55}}
+  .cargando{animation:pulse 1.2s infinite}
+</style>
+</head>
+<body>
+
+<!-- ═════ VISTA ENTRADA ═════ -->
+<section id="vEntrada">
+  <div class="ent-logo">🛎</div>
+  <div class="ent-title"><span id="entLocal">BKS</span> SERVICIO</div>
+  <div class="ent-sub">Entra con el código del turno de hoy</div>
+  <div class="ent-field">
+    <label class="ent-label" for="entCodigo">Código del turno</label>
+    <input id="entCodigo" class="ent-input" type="text" inputmode="numeric" maxlength="4" placeholder="····" autocomplete="off">
+  </div>
+  <div class="ent-field">
+    <label class="ent-label" for="entNombre">Tu nombre</label>
+    <input id="entNombre" class="ent-input" type="text" maxlength="30" placeholder="Como te conoce el JL" autocomplete="off">
+  </div>
+  <div class="ent-err" id="entErr"></div>
+  <button class="btn" id="entBtn" onclick="entrar()">ENTRAR</button>
+  <div class="ent-hint">El código te lo muestra el Jefe de Local (QR o 4 cifras).<br>
+    En este teléfono no queda ningún dato al cerrar.</div>
+</section>
+
+<!-- ═════ VISTA SALA ═════ -->
+<section id="vSala" class="hide">
+  <div class="top"><h1>🛎 <span id="salaLocal">BKS</span> SERVICIO</h1><span class="chip">Turno <span id="salaCodigo">····</span></span></div>
+  <div class="sub" id="salaSub">—</div>
+  <div id="campBanner" class="camp-banner hide">
+    🔔 Tu campanilla no está activa: los pedidos de tu plaza no te avisarán a Telegram.
+    <button class="btn tg" id="campBtn" onclick="abrirTelegram()">Activar campanilla en Telegram</button>
+  </div>
+  <div class="offline" id="offline">Sin conexión — mostrando lo último recibido. Reintento solo.</div>
+
+  <div id="secPend"></div>
+  <div id="secSinDueno"></div>
+  <div id="secMios"></div>
+  <div id="secLimpiar"></div>
+
+  <div class="foot">
+    <span class="ver" id="ver">v1.0 · 4jul</span>
+    <button onclick="salir()">Salgo · cerrar</button>
+  </div>
+</section>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ═════ CONFIG ═════ */
+const QS = new URLSearchParams(location.search);
+const CFG = {
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbzZkS3bBaYc34uJ6wXP9FG13i58-NT0FJp964vqkUYbRObUxryeRb9l_Fz24kb42f5t/exec',
+  LOCAL: (QS.get('l') || sessionStorage.getItem('sala_local') || 'BKS').trim().toUpperCase(),
+  POLL_MS: 10000,
+  TIMEOUT_MS: 25000,
+  SK: { COD: 'sala_codigo', NOM: 'sala_nombre', LOC: 'sala_local' },
+};
+
+const STATE = {
+  codigo: sessionStorage.getItem(CFG.SK.COD) || (QS.get('c') || '').trim(),
+  nombre: sessionStorage.getItem(CFG.SK.NOM) || '',
+  tgLink: '',
+  sala: null,          // último payload getSalaMesero
+  enVuelo: {},         // uuid → true (tap in flight)
+  pollTimer: null,
+};
+
+/* ═════ NETWORK (pattern menu_admin: text/plain, no preflight) ═════ */
+async function gasGet(action, params) {
+  const url = new URL(CFG.GAS_URL);
+  url.searchParams.set('action', action);
+  url.searchParams.set('local', CFG.LOCAL);
+  Object.keys(params || {}).forEach(k => url.searchParams.set(k, params[k]));
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), CFG.TIMEOUT_MS);
+  try {
+    const r = await fetch(url.toString(), { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(t);
+    if (!r.ok) throw new Error('http_' + r.status);
+    return await r.json();
+  } catch (e) { clearTimeout(t); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+async function gasPost(action, body) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), CFG.TIMEOUT_MS);
+  try {
+    const r = await fetch(CFG.GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {})),
+      signal: ctrl.signal, cache: 'no-store', redirect: 'follow',
+    });
+    clearTimeout(t);
+    if (!r.ok) throw new Error('http_' + r.status);
+    return await r.json();
+  } catch (e) { clearTimeout(t); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+
+/* ═════ HELPERS ═════ */
+const $ = id => document.getElementById(id);
+const esc = s => (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtPrice = n => '$' + (parseInt(n, 10) || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+const fmtHace = s => { s = Math.max(0, s); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
+let toastT = null;
+function toast(tipo, msg) {
+  const el = $('toast');
+  el.className = 'toast show ' + tipo;
+  el.textContent = msg;
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove('show'), 3200);
+}
+function esperaClass(s, umb) {
+  if (s < (umb ? umb.RING_REPEAT_S : 90)) return 'ok';
+  if (s < (umb ? umb.RING_VECINAS_S : 180)) return 'warn';
+  return 'bad';
+}
+
+/* ═════ ENTRADA ═════ */
+function showEntrada(msg) {
+  $('vSala').classList.add('hide');
+  $('vEntrada').classList.remove('hide');
+  $('entLocal').textContent = CFG.LOCAL;
+  if (STATE.codigo) $('entCodigo').value = STATE.codigo;
+  if (STATE.nombre) $('entNombre').value = STATE.nombre;
+  if (msg) $('entErr').textContent = msg;
+  if (STATE.pollTimer) { clearInterval(STATE.pollTimer); STATE.pollTimer = null; }
+}
+
+async function entrar() {
+  const codigo = $('entCodigo').value.trim();
+  const nombre = $('entNombre').value.trim();
+  if (!/^\d{4}$/.test(codigo)) { $('entErr').textContent = 'El código son 4 cifras'; return; }
+  if (!nombre) { $('entErr').textContent = 'Falta tu nombre'; return; }
+  $('entErr').textContent = '';
+  const btn = $('entBtn');
+  btn.disabled = true; btn.textContent = 'ENTRANDO…'; btn.classList.add('cargando');
+  try {
+    const r = await gasPost('clockIn', { codigo, nombre });
+    if (!r || !r.ok) {
+      const msgs = { codigo_invalid: 'Código incorrecto — pídelo al JL', no_turno_abierto: 'No hay turno abierto todavía', nombre_missing: 'Falta tu nombre' };
+      $('entErr').textContent = msgs[r && r.error] || ('Error: ' + (r && r.error || '?'));
+      return;
+    }
+    STATE.codigo = codigo; STATE.nombre = r.nombre; STATE.tgLink = r.tg_link || '';
+    try {
+      sessionStorage.setItem(CFG.SK.COD, codigo);
+      sessionStorage.setItem(CFG.SK.NOM, r.nombre);
+      sessionStorage.setItem(CFG.SK.LOC, CFG.LOCAL);
+    } catch (e) {}
+    if (r.marcaje_nuevo) toast('ok', '✓ Entrada marcada · ' + new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }));
+    if (r.sin_plaza) toast('warn', 'Aún no tienes plaza asignada — pídesela al JL');
+    entrarSala();
+  } catch (e) {
+    $('entErr').textContent = e.message === 'timeout' ? 'Servidor lento — reintenta' : 'Sin conexión';
+  } finally {
+    btn.disabled = false; btn.textContent = 'ENTRAR'; btn.classList.remove('cargando');
+  }
+}
+
+function salir() {
+  try { sessionStorage.removeItem(CFG.SK.COD); sessionStorage.removeItem(CFG.SK.NOM); sessionStorage.removeItem(CFG.SK.LOC); } catch (e) {}
+  STATE.codigo = ''; STATE.nombre = ''; STATE.sala = null;
+  showEntrada('');
+  toast('ok', 'Sesión cerrada — nada queda en este teléfono');
+}
+
+function abrirTelegram() {
+  if (STATE.tgLink) window.open(STATE.tgLink, '_blank', 'noopener');
+  else toast('warn', 'Vuelve a entrar para generar el link');
+}
+
+/* ═════ SALA ═════ */
+function entrarSala() {
+  $('vEntrada').classList.add('hide');
+  $('vSala').classList.remove('hide');
+  $('salaLocal').textContent = CFG.LOCAL;
+  $('salaCodigo').textContent = STATE.codigo;
+  refrescar(true);
+  if (STATE.pollTimer) clearInterval(STATE.pollTimer);
+  STATE.pollTimer = setInterval(() => refrescar(false), CFG.POLL_MS);
+}
+
+async function refrescar(conSkeleton) {
+  if (!STATE.codigo || !STATE.nombre) return;
+  if (conSkeleton) $('secPend').innerHTML = '<div class="h">Cargando sala…</div><div class="card cargando" style="height:70px"></div>';
+  try {
+    const r = await gasGet('getSalaMesero', { codigo: STATE.codigo, nombre: STATE.nombre });
+    if (!r || !r.ok) {
+      if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) {
+        salirPorCierre(); return;
+      }
+      throw new Error(r && r.error || 'error');
+    }
+    STATE.sala = r;
+    $('offline').classList.remove('show');
+    render(r);
+  } catch (e) {
+    $('offline').classList.add('show');
+  }
+}
+
+function salirPorCierre() {
+  try { sessionStorage.removeItem(CFG.SK.COD); } catch (e) {}
+  STATE.codigo = '';
+  showEntrada('El turno se cerró — pide el código nuevo al JL');
+}
+
+function render(r) {
+  // header
+  const plazas = (r.plazas || []).join(', ');
+  let sub = '<b>' + esc(r.nombre) + '</b>';
+  sub += r.sin_plaza ? ' · <span class="off">sin plaza — pídela al JL</span>' : ' · Plaza <b>' + esc(plazas) + '</b>';
+  sub += ' · campanilla ' + (r.campanilla ? '<span class="on">✓ activa</span>' : '<span class="off">apagada</span>');
+  $('salaSub').innerHTML = sub;
+  $('campBanner').classList.toggle('hide', !!r.campanilla || !STATE.tgLink);
+
+  const umb = r.umbrales;
+
+  // PENDIENTES (pedidos + llamadas genéricas della propria plaza)
+  let h = '';
+  const pend = (r.pendientes || []);
+  const llam = (r.llamadas || []);
+  if (pend.length || llam.length) {
+    h += '<div class="h">Pendientes · tu plaza</div>';
+    pend.forEach(p => { h += cardPedido(p, umb, 'MÍO — voy a la ' + esc(p.mesa), 'mio'); });
+    llam.forEach(l => {
+      h += '<div class="card"><div class="mesa-row"><span class="mesa">MESA ' + esc(l.mesa) + '</span>' +
+        '<span class="plaza">' + esc(l.plaza || '—') + ' · 🙋 llama (sin pedido)</span>' +
+        '<span class="espera ' + esperaClass(l.hace_s, umb) + '">⏱ ' + fmtHace(l.hace_s) + '</span></div>' +
+        '<button class="btn" onclick="marcarLlamada(\'' + esc(l.id_llamada) + '\',this)">MÍO — voy a la ' + esc(l.mesa) + '</button></div>';
+    });
+  } else {
+    h += '<div class="h">Pendientes · tu plaza</div><div class="vacio">Nada pendiente — todo al día ✓</div>';
+  }
+  $('secPend').innerHTML = h;
+
+  // SIN DUEÑO
+  const sd = (r.sin_dueno || []);
+  $('secSinDueno').innerHTML = sd.length
+    ? '<div class="h bad">Sin dueño · nadie lo tomó</div>' + sd.map(p => cardPedido(p, umb, 'MÍO — lo tomo yo', 'mio', true)).join('')
+    : '';
+
+  // MÍOS
+  const mios = (r.mios || []);
+  let hm = '';
+  if (mios.length) {
+    hm += '<div class="h">Míos · en curso</div>';
+    mios.forEach(p => {
+      const esDig = p.estado === 'digitado';
+      hm += '<div class="card"><div class="mesa-row"><span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
+        '<span class="plaza">' + esc(p.plaza || '—') + (esDig ? ' · en producción 🍳' : ' · confirmado en mesa') + '</span></div>' +
+        '<div class="mio-meta">' + resumenCorto(p) + (esDig ? '' : ' · <b class="warn">falta digitarlo</b>') + '</div>' +
+        (esDig
+          ? '<button class="btn verde" onclick="marcar(\'' + esc(p.uuid) + '\',\'entregado\',this)">✓ ENTREGADO</button>'
+          : '<button class="btn" onclick="marcar(\'' + esc(p.uuid) + '\',\'digitado\',this)">⌨ DIGITADO EN ALOHA</button>') +
+        '</div>';
+    });
+  }
+  $('secMios').innerHTML = hm;
+
+  // POR LIMPIAR
+  const pl = (r.por_limpiar || []);
+  $('secLimpiar').innerHTML = pl.length
+    ? '<div class="h">Por limpiar</div>' + pl.map(p =>
+        '<div class="card limpia"><span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
+        '<span class="plaza" style="flex:1">entregado</span>' +
+        '<button class="btn sec" onclick="marcar(\'' + esc(p.uuid) + '\',\'limpia\',this)">✓ Mesa limpia</button></div>').join('')
+    : '';
+}
+
+function itemsDe(p) {
+  try { const a = JSON.parse(p.items_json || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+}
+function resumenCorto(p) {
+  const items = itemsDe(p);
+  const n = items.reduce((s, it) => s + (parseInt(it.qty, 10) || 1), 0);
+  return n + ' producto' + (n === 1 ? '' : 's') + ' · ' + fmtPrice(p.total);
+}
+
+// card completa di un pedido: items raggruppati per categoría (orden ALOHA:
+// il carrito già viaggia nell'orden de CATEGORIAS del menú), split chips.
+function cardPedido(p, umb, btnLabel, marca, urgente) {
+  const items = itemsDe(p);
+  let body = '';
+  let lastCat = null;
+  items.forEach(it => {
+    const cat = (it.cat || '').toString();
+    if (cat && cat !== lastCat) { body += '<div class="cat">' + esc(cat) + '</div>'; lastCat = cat; }
+    body += '<div class="it"><span class="q">' + (parseInt(it.qty, 10) || 1) + '×</span> ' + esc(it.nombre || it.id || '?') +
+      (it.p ? '<span class="split">' + esc(it.p) + '</span>' : '') + '</div>';
+  });
+  const n = items.reduce((s, it) => s + (parseInt(it.qty, 10) || 1), 0);
+  return '<div class="card' + (urgente ? ' urgente' : '') + '">' +
+    '<div class="mesa-row"><span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
+    '<span class="plaza">' + esc(p.plaza || 'sin plaza') + (urgente ? ' · nadie lo tomó' : '') + '</span>' +
+    '<span class="espera ' + esperaClass(p.hace_s, umb) + '">⏱ ' + fmtHace(p.hace_s) + '</span></div>' +
+    body +
+    (p.nota ? '<div class="nota">📝 ' + esc(p.nota) + '</div>' : '') +
+    '<div class="tot"><span>' + n + ' producto' + (n === 1 ? '' : 's') + ' · orden ALOHA ↓</span><b>' + fmtPrice(p.total) + '</b></div>' +
+    '<button class="btn" onclick="marcar(\'' + esc(p.uuid) + '\',\'' + marca + '\',this)">' + btnLabel + '</button>' +
+    '</div>';
+}
+
+/* ═════ AZIONI ═════ */
+async function marcar(uuid, marca, btn) {
+  if (STATE.enVuelo[uuid]) return;
+  STATE.enVuelo[uuid] = true;
+  if (btn) { btn.disabled = true; btn.classList.add('cargando'); }
+  try {
+    const r = await gasPost('marcarPedido', { codigo: STATE.codigo, nombre: STATE.nombre, uuid, marca });
+    if (r && r.ok) {
+      const msg = { atendido: '✓ Tuyo — el cliente ve que vas', digitado: '⌨ Digitado — cocina/barra en marcha', entregado: '✓ Entregado', cerrado: '✓ Mesa libre' };
+      toast('ok', msg[r.estado] || '✓');
+    } else if (r && r.error === 'ya_tomado') {
+      toast('warn', 'Lo tomó ' + (r.mesero || 'otro') + ' primero');
+    } else if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) {
+      salirPorCierre(); return;
+    } else {
+      toast('err', 'No se pudo: ' + (r && r.error || '?'));
+    }
+  } catch (e) {
+    toast('err', e.message === 'timeout' ? 'Servidor lento — reintenta' : 'Sin conexión — reintenta');
+  } finally {
+    delete STATE.enVuelo[uuid];
+    refrescar(false);
+  }
+}
+
+async function marcarLlamada(idLlamada, btn) {
+  if (btn) { btn.disabled = true; btn.classList.add('cargando'); }
+  try {
+    const r = await gasPost('marcarPedido', { codigo: STATE.codigo, nombre: STATE.nombre, marca: 'llamada_mia', id_llamada: idLlamada });
+    if (r && r.ok) toast('ok', '✓ Tuya — anda a la mesa');
+    else toast('err', 'No se pudo: ' + (r && r.error || '?'));
+  } catch (e) {
+    toast('err', 'Sin conexión — reintenta');
+  } finally {
+    refrescar(false);
+  }
+}
+
+/* ═════ BOOTSTRAP ═════ */
+(async function boot() {
+  $('entLocal').textContent = CFG.LOCAL;
+  // sessione viva → rientro diretto (anche dal link della notifica Telegram)
+  if (STATE.codigo && STATE.nombre) {
+    try {
+      const r = await gasPost('clockIn', { codigo: STATE.codigo, nombre: STATE.nombre });
+      if (r && r.ok) { STATE.tgLink = r.tg_link || ''; entrarSala(); return; }
+    } catch (e) { /* cade sull'entrada */ }
+    try { sessionStorage.removeItem(CFG.SK.COD); } catch (e) {}
+  }
+  showEntrada('');
+})();
+
+/* refresh al rientro in foreground */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && STATE.codigo && !$('vSala').classList.contains('hide')) refrescar(false);
+});
+/* invio con tastiera */
+['entCodigo', 'entNombre'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') entrar(); }));
+</script>
+</body>
+</html>
