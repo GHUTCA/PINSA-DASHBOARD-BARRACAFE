@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="es-CL">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f0f16">
+<title>BKS Puerta</title>
+<!-- ════════════════════════════════════════════════════════════════════
+     anfitriona.html · v1.0 · 4jul2026 · Cantiere MENU (spec 03-jul §4)
+     El mapa de mesas de la puerta: verde libre · rojo ocupada · naranja
+     "por limpiar" (su radar) · verde punteado "presunta libre". Su gesto:
+     tap mesa → pax → SENTADOS (fósil SEATS → su métrica: mesas/pax).
+     Misma puerta del mesero: código de turno + nombre (clockIn = marcaje).
+     Backend: MENU GAS v3.4.0 (BLOQUE_ANFITRIONA). Repo PINSA
+     (sistema.pinsita.cl/anfitriona.html).
+     ════════════════════════════════════════════════════════════════════ -->
+<style>
+  :root{
+    --bg:#0f0f16; --card:#1a1a24; --card2:#222230; --bord:rgba(255,255,255,.09);
+    --t1:#f2ead8; --t2:#b8b0a0; --t3:#8a8577;
+    --acc:#d9a441; --ok:#3db876; --warn:#f5a623; --bad:#e05252;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;
+    font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+  html,body{background:var(--bg);color:var(--t1);min-height:100%}
+  body{max-width:430px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top,0)) 14px calc(40px + env(safe-area-inset-bottom,0))}
+  button{font-family:inherit;cursor:pointer}
+  .hide{display:none!important}
+
+  /* entrada (stessa porta del mesero) */
+  #vEntrada{padding-top:12vh;text-align:center}
+  .ent-logo{font-size:44px;margin-bottom:10px}
+  .ent-title{font-size:22px;font-weight:800;margin-bottom:4px}
+  .ent-sub{font-size:13px;color:var(--t3);margin-bottom:28px}
+  .ent-field{margin-bottom:14px;text-align:left}
+  .ent-label{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin-bottom:6px;display:block}
+  .ent-input{width:100%;background:var(--card);border:1.5px solid var(--bord);border-radius:14px;
+    color:var(--t1);padding:15px 16px;font-size:17px;outline:none}
+  .ent-input:focus{border-color:var(--acc)}
+  #entCodigo{letter-spacing:.35em;font-size:24px;font-weight:800;text-align:center}
+  .ent-err{color:var(--bad);font-size:13px;min-height:18px;margin:8px 0}
+  .btn{display:block;width:100%;border:0;border-radius:14px;padding:16px;font-size:18px;font-weight:900;
+    color:#141018;background:var(--acc)}
+  .btn:disabled{opacity:.55}
+  .btn.verde{background:var(--ok);color:#0c1710}
+  .btn.sec{background:transparent;border:1.5px solid var(--bord);color:var(--t2);font-size:14px;padding:12px}
+  .ent-hint{font-size:11.5px;color:var(--t3);margin-top:18px;line-height:1.6}
+
+  /* mapa */
+  .top{display:flex;align-items:center;gap:8px}
+  .top h1{font-size:19px;flex:1}
+  .chip{font-size:11px;font-weight:700;padding:4px 9px;border-radius:20px;background:rgba(217,164,65,.15);
+    color:var(--acc);border:1px solid rgba(217,164,65,.4);white-space:nowrap}
+  .sub{font-size:12.5px;color:var(--t3);margin:4px 0 2px}
+  .sub b{color:var(--t2)}
+  .offline{background:rgba(224,82,82,.12);border:1px solid var(--bad);color:var(--bad);
+    border-radius:10px;padding:8px 12px;font-size:12px;margin:8px 0;display:none}
+  .offline.show{display:block}
+  .score{display:flex;gap:8px;margin:12px 0 4px}
+  .kpi{flex:1;background:var(--card);border:1px solid var(--bord);border-radius:14px;padding:10px;text-align:center}
+  .kpi b{display:block;font-size:24px;font-weight:900;color:var(--acc)}
+  .kpi span{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.05em}
+  .h{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin:16px 2px 8px;
+    display:flex;justify-content:space-between;align-items:baseline}
+  .h .mes{font-size:10px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--t3)}
+  .leg{display:flex;flex-wrap:wrap;gap:10px;font-size:10.5px;color:var(--t3);margin:8px 2px 10px}
+  .leg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:6px}
+  .m{aspect-ratio:1;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    font-weight:900;font-size:17px;border:2px solid transparent;background:var(--card);color:var(--t1);padding:0}
+  .m small{font-size:9px;font-weight:600;margin-top:2px;opacity:.85}
+  .m.libre{border-color:var(--ok);color:var(--ok)}
+  .m.ocupada{background:rgba(224,82,82,.16);border-color:var(--bad);color:var(--t1)}
+  .m.ocupada small{color:var(--bad)}
+  .m.por_limpiar{background:rgba(245,166,35,.16);border-color:var(--warn);color:var(--t1)}
+  .m.por_limpiar small{color:var(--warn)}
+  .m.presunta{border-style:dashed;border-color:var(--ok);color:var(--ok);opacity:.75}
+  .vacio{font-size:12.5px;color:var(--t3);padding:6px 2px;font-style:italic}
+  .foot{margin-top:30px;border-top:1px solid var(--bord);padding-top:12px;display:flex;
+    justify-content:space-between;align-items:center}
+  .foot .ver{font-size:10px;color:var(--t3)}
+  .foot button{background:transparent;border:1px solid var(--bord);color:var(--t2);
+    padding:8px 14px;border-radius:10px;font-size:12px}
+
+  /* sheet sentar */
+  .bs-back{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:90;opacity:0;pointer-events:none;transition:.2s}
+  .bs-back.show{opacity:1;pointer-events:auto}
+  .bs{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;background:var(--card);
+    border:1px solid var(--acc);border-radius:18px 18px 0 0;padding:18px 16px calc(20px + env(safe-area-inset-bottom,0));
+    z-index:91;transform:translateY(100%);transition:.25s}
+  .bs.show{transform:none}
+  .bs h2{font-size:16px;margin-bottom:4px}
+  .bs .bsub{font-size:12px;color:var(--t3);margin-bottom:12px}
+  .pax{display:flex;gap:8px;margin-bottom:12px}
+  .pax button{flex:1;padding:14px 0;border-radius:12px;border:1.5px solid var(--bord);background:transparent;
+    color:var(--t1);font-size:17px;font-weight:900}
+  .pax button.on{background:var(--acc);border-color:var(--acc);color:#141018}
+
+  .toast{position:fixed;left:16px;right:16px;top:calc(16px + env(safe-area-inset-top,0));max-width:398px;margin:0 auto;
+    background:var(--card2);border:1px solid var(--bord);border-radius:12px;padding:12px 14px;font-size:13.5px;
+    z-index:99;transform:translateY(-16px);opacity:0;pointer-events:none;transition:.22s;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+  .toast.show{transform:none;opacity:1}
+  .toast.err{border-color:var(--bad);color:var(--bad)}
+  .toast.ok{border-color:var(--ok);color:var(--ok)}
+  @keyframes pulse{50%{opacity:.55}}
+  .cargando{animation:pulse 1.2s infinite}
+</style>
+</head>
+<body>
+
+<!-- ═════ ENTRADA ═════ -->
+<section id="vEntrada">
+  <div class="ent-logo">👋</div>
+  <div class="ent-title"><span id="entLocal">BKS</span> PUERTA</div>
+  <div class="ent-sub">Entra con el código del turno de hoy</div>
+  <div class="ent-field">
+    <label class="ent-label" for="entCodigo">Código del turno</label>
+    <input id="entCodigo" class="ent-input" type="text" inputmode="numeric" maxlength="4" placeholder="····"
+      autocomplete="one-time-code" autocorrect="off" spellcheck="false" name="turno-otp">
+  </div>
+  <div class="ent-field">
+    <label class="ent-label" for="entNombre">Tu nombre</label>
+    <input id="entNombre" class="ent-input" type="text" maxlength="30" placeholder="Como te conoce el JL"
+      autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" name="apodo-puerta">
+  </div>
+  <div class="ent-err" id="entErr"></div>
+  <button class="btn" id="entBtn" onclick="entrar()">ENTRAR</button>
+  <div class="ent-hint">El código te lo muestra el Jefe de Local.<br>En este teléfono no queda ningún dato al cerrar.</div>
+</section>
+
+<!-- ═════ MAPA ═════ -->
+<section id="vMapa" class="hide">
+  <div class="top"><h1>👋 <span id="mapaLocal">BKS</span> · Puerta</h1><span class="chip"><span id="mapaNombre">—</span> · Turno <span id="mapaCodigo">····</span></span></div>
+  <div class="offline" id="offline">Sin conexión — mostrando lo último recibido. Reintento solo.</div>
+
+  <div class="score">
+    <div class="kpi"><b id="kSentadas">0</b><span>mesas sentadas</span></div>
+    <div class="kpi"><b id="kPax">0</b><span>pax esta noche</span></div>
+    <div class="kpi"><b id="kLimpiar">0</b><span>liberándose 🟠</span></div>
+  </div>
+  <div class="leg">
+    <span><i style="background:var(--ok)"></i>libre</span>
+    <span><i style="background:var(--bad)"></i>ocupada</span>
+    <span><i style="background:var(--warn)"></i>por limpiar ← tu radar</span>
+    <span><i style="border:1px dashed var(--ok);background:transparent"></i>presunta libre</span>
+  </div>
+
+  <div id="mapaPlazas"></div>
+
+  <div class="foot">
+    <span class="ver" id="ver">v1.0 · 4jul</span>
+    <button onclick="salir()">Salgo · cerrar</button>
+  </div>
+</section>
+
+<!-- ═════ SHEET SENTAR ═════ -->
+<div class="bs-back" id="bsBack" onclick="cerrarSheet()"></div>
+<aside class="bs" id="bs">
+  <h2 id="bsTitle">Sentar grupo · Mesa —</h2>
+  <div class="bsub" id="bsSub">—</div>
+  <div class="pax" id="paxRow">
+    <button data-pax="2">2</button><button data-pax="4" class="on">4</button>
+    <button data-pax="6">6</button><button data-pax="8">8+</button>
+  </div>
+  <button class="btn verde" id="bsGo" onclick="confirmarSentar()">✓ Sentados — 4 pax</button>
+  <button class="btn sec" style="margin-top:8px" onclick="cerrarSheet()">Cancelar</button>
+</aside>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ═════ CONFIG (stessa porta del mesero) ═════ */
+const QS = new URLSearchParams(location.search);
+const CFG = {
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbzZkS3bBaYc34uJ6wXP9FG13i58-NT0FJp964vqkUYbRObUxryeRb9l_Fz24kb42f5t/exec',
+  LOCAL: (QS.get('l') || sessionStorage.getItem('puerta_local') || 'BKS').trim().toUpperCase(),
+  POLL_MS: 15000,
+  TIMEOUT_MS: 25000,
+  SK: { COD: 'puerta_codigo', NOM: 'puerta_nombre', LOC: 'puerta_local' },
+};
+const STATE = {
+  codigo: sessionStorage.getItem(CFG.SK.COD) || (QS.get('c') || '').trim(),
+  nombre: sessionStorage.getItem(CFG.SK.NOM) || '',
+  sala: null, pollTimer: null,
+  bsMesa: null, bsPlaza: null, bsMesero: null, bsPax: 4, enviando: false,
+};
+
+async function gasGet(action, params) {
+  const url = new URL(CFG.GAS_URL);
+  url.searchParams.set('action', action); url.searchParams.set('local', CFG.LOCAL);
+  Object.keys(params || {}).forEach(k => url.searchParams.set(k, params[k]));
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), CFG.TIMEOUT_MS);
+  try { const r = await fetch(url.toString(), { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(t); if (!r.ok) throw new Error('http_' + r.status); return await r.json();
+  } catch (e) { clearTimeout(t); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+async function gasPost(action, body) {
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), CFG.TIMEOUT_MS);
+  try { const r = await fetch(CFG.GAS_URL, { method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {})),
+      signal: ctrl.signal, cache: 'no-store', redirect: 'follow' });
+    clearTimeout(t); if (!r.ok) throw new Error('http_' + r.status); return await r.json();
+  } catch (e) { clearTimeout(t); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+
+const $ = id => document.getElementById(id);
+const esc = s => (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hhmm = iso => { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' :
+  String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); };
+let toastT = null;
+function toast(tipo, msg) {
+  const el = $('toast'); el.className = 'toast show ' + tipo; el.textContent = msg;
+  clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+/* ═════ ENTRADA ═════ */
+function showEntrada(msg) {
+  $('vMapa').classList.add('hide'); $('vEntrada').classList.remove('hide');
+  $('entLocal').textContent = CFG.LOCAL;
+  if (STATE.codigo) $('entCodigo').value = STATE.codigo;
+  if (STATE.nombre) $('entNombre').value = STATE.nombre;
+  if (msg) $('entErr').textContent = msg;
+  if (STATE.pollTimer) { clearInterval(STATE.pollTimer); STATE.pollTimer = null; }
+}
+async function entrar() {
+  const codigo = $('entCodigo').value.trim();
+  const nombre = $('entNombre').value.trim();
+  if (!/^\d{4}$/.test(codigo)) { $('entErr').textContent = 'El código son 4 cifras'; return; }
+  if (!nombre) { $('entErr').textContent = 'Falta tu nombre'; return; }
+  $('entErr').textContent = '';
+  const btn = $('entBtn'); btn.disabled = true; btn.textContent = 'ENTRANDO…'; btn.classList.add('cargando');
+  try {
+    // stessa porta del mesero: clockIn = marcaje (fila presencia se sin plaza)
+    const r = await gasPost('clockIn', { codigo, nombre });
+    if (!r || !r.ok) {
+      const msgs = { codigo_invalid: 'Código incorrecto — pídelo al JL', no_turno_abierto: 'No hay turno abierto todavía' };
+      $('entErr').textContent = msgs[r && r.error] || ('Error: ' + (r && r.error || '?')); return;
+    }
+    STATE.codigo = codigo; STATE.nombre = r.nombre;
+    try { sessionStorage.setItem(CFG.SK.COD, codigo); sessionStorage.setItem(CFG.SK.NOM, r.nombre);
+          sessionStorage.setItem(CFG.SK.LOC, CFG.LOCAL); } catch (e) {}
+    if (r.marcaje_nuevo) toast('ok', '✓ Entrada marcada');
+    entrarMapa();
+  } catch (e) {
+    $('entErr').textContent = e.message === 'timeout' ? 'Servidor lento — reintenta' : 'Sin conexión';
+  } finally { btn.disabled = false; btn.textContent = 'ENTRAR'; btn.classList.remove('cargando'); }
+}
+function salir() {
+  try { ['COD','NOM','LOC'].forEach(k => sessionStorage.removeItem(CFG.SK[k])); } catch (e) {}
+  STATE.codigo = ''; STATE.nombre = ''; STATE.sala = null;
+  showEntrada(''); toast('ok', 'Sesión cerrada');
+}
+function salirPorCierre() {
+  try { sessionStorage.removeItem(CFG.SK.COD); } catch (e) {}
+  STATE.codigo = '';
+  showEntrada('El turno se cerró — pide el código nuevo al JL');
+}
+
+/* ═════ MAPA ═════ */
+function entrarMapa() {
+  $('vEntrada').classList.add('hide'); $('vMapa').classList.remove('hide');
+  $('mapaLocal').textContent = CFG.LOCAL;
+  $('mapaNombre').textContent = STATE.nombre;
+  $('mapaCodigo').textContent = STATE.codigo;
+  refrescar(true);
+  if (STATE.pollTimer) clearInterval(STATE.pollTimer);
+  STATE.pollTimer = setInterval(() => refrescar(false), CFG.POLL_MS);
+}
+async function refrescar(conSkeleton) {
+  if (!STATE.codigo || !STATE.nombre) return;
+  if (conSkeleton) $('mapaPlazas').innerHTML = '<div class="h">Cargando mapa…</div><div class="grid">' +
+    '<div class="m cargando"></div>'.repeat(8) + '</div>';
+  try {
+    const r = await gasGet('getSalaAnfitriona', { codigo: STATE.codigo, nombre: STATE.nombre });
+    if (!r || !r.ok) {
+      if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) { salirPorCierre(); return; }
+      throw new Error(r && r.error || 'error');
+    }
+    STATE.sala = r; $('offline').classList.remove('show'); render(r);
+  } catch (e) { $('offline').classList.add('show'); }
+}
+
+function render(r) {
+  $('kSentadas').textContent = r.kpis.sentadas;
+  $('kPax').textContent = r.kpis.pax;
+  $('kLimpiar').textContent = r.kpis.liberandose;
+
+  let h = '';
+  (r.plazas || []).forEach(p => {
+    h += '<div class="h"><span>' + esc(p.plaza) + '</span>' +
+      (p.mesero ? '<span class="mes">mesero: ' + esc(p.mesero) + '</span>' : '<span class="mes" style="color:var(--warn)">sin mesero</span>') + '</div>';
+    if (!p.mesas.length) { h += '<div class="vacio">Sin mesas configuradas (rango en PLAZAS, ej: 1–15)</div>'; return; }
+    h += '<div class="grid">' + p.mesas.map(m => {
+      const tap = (m.estado === 'libre' || m.estado === 'presunta')
+        ? ' onclick="abrirSentar(\'' + esc(m.mesa) + '\',\'' + esc(p.plaza) + '\',\'' + esc(p.mesero) + '\')"' : '';
+      let sm = '';
+      if (m.estado === 'libre') sm = 'libre';
+      else if (m.estado === 'presunta') sm = '¿libre?';
+      else if (m.estado === 'por_limpiar') sm = 'limpia ' + hhmm(m.desde_iso);
+      else sm = hhmm(m.desde_iso) + (m.pendiente ? ' 🛎' : '') + (m.pax ? ' · ' + m.pax + 'p' : '');
+      return '<button class="m ' + m.estado + '"' + tap + '>' + esc(m.mesa) + '<small>' + sm + '</small></button>';
+    }).join('') + '</div>';
+  });
+  if (!h) h = '<div class="vacio">No hay plazas activas — el JL las crea en su panel.</div>';
+  $('mapaPlazas').innerHTML = h;
+}
+
+/* ═════ SENTAR ═════ */
+function abrirSentar(mesa, plaza, mesero) {
+  STATE.bsMesa = mesa; STATE.bsPlaza = plaza; STATE.bsMesero = mesero; STATE.bsPax = 4;
+  $('bsTitle').textContent = 'Sentar grupo · Mesa ' + mesa;
+  $('bsSub').textContent = plaza + (mesero ? ' · mesero de plaza: ' + mesero : ' · sin mesero asignado');
+  document.querySelectorAll('#paxRow button').forEach(b => b.classList.toggle('on', b.dataset.pax === '4'));
+  $('bsGo').textContent = '✓ Sentados — 4 pax';
+  $('bsBack').classList.add('show'); $('bs').classList.add('show');
+}
+function cerrarSheet() { $('bsBack').classList.remove('show'); $('bs').classList.remove('show'); STATE.bsMesa = null; }
+document.getElementById('paxRow').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  STATE.bsPax = parseInt(b.dataset.pax, 10);
+  document.querySelectorAll('#paxRow button').forEach(x => x.classList.toggle('on', x === b));
+  $('bsGo').textContent = '✓ Sentados — ' + b.textContent.trim() + ' pax';
+});
+async function confirmarSentar() {
+  if (!STATE.bsMesa || STATE.enviando) return;
+  STATE.enviando = true;
+  const btn = $('bsGo'); btn.disabled = true; btn.classList.add('cargando');
+  try {
+    const r = await gasPost('sentarMesa', { codigo: STATE.codigo, nombre: STATE.nombre, mesa: STATE.bsMesa, pax: STATE.bsPax });
+    if (r && r.ok) { toast('ok', '✓ Mesa ' + r.mesa + ' · ' + r.pax + ' pax'); cerrarSheet(); }
+    else if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) { cerrarSheet(); salirPorCierre(); return; }
+    else toast('err', 'No se pudo: ' + (r && r.error || '?'));
+  } catch (e) {
+    toast('err', e.message === 'timeout' ? 'Servidor lento — reintenta' : 'Sin conexión — reintenta');
+  } finally {
+    STATE.enviando = false; btn.disabled = false; btn.classList.remove('cargando');
+    refrescar(false);
+  }
+}
+
+/* ═════ BOOTSTRAP ═════ */
+(async function boot() {
+  $('entLocal').textContent = CFG.LOCAL;
+  if (STATE.codigo && STATE.nombre) {
+    try {
+      const r = await gasPost('clockIn', { codigo: STATE.codigo, nombre: STATE.nombre });
+      if (r && r.ok) { entrarMapa(); return; }
+    } catch (e) {}
+    try { sessionStorage.removeItem(CFG.SK.COD); } catch (e) {}
+  }
+  showEntrada('');
+})();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && STATE.codigo && !$('vMapa').classList.contains('hide')) refrescar(false);
+});
+['entCodigo', 'entNombre'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') entrar(); }));
+</script>
+</body>
+</html>
