@@ -512,12 +512,23 @@
   function construirTeclado() {
     var tk = document.getElementById('pa-teclado');
     var defs = ['1','2','3','4','5','6','7','8','9','','0','del'];
+    // FIX dígitos perdidos (7-jul): el tecleo dispara al APOYAR el dedo
+    // (pointerdown), como un teclado físico — no al soltar (click), que el
+    // browser puede retrasar/comerse en taps rápidos. preventDefault corta el
+    // click-fantasma posterior (no doble dígito). Fallback: click (browsers viejos).
+    function bindKey(b, fn) {
+      if (window.PointerEvent) {
+        b.onpointerdown = function (e) { e.preventDefault(); fn(); };
+      } else {
+        b.onclick = fn;
+      }
+    }
     defs.forEach(function (d) {
       var b = document.createElement('button');
       b.className = 'pa-key';
       if (d === '') { b.className += ' pa-key-empty'; b.disabled = true; }
-      else if (d === 'del') { b.innerHTML = '⌫'; b.onclick = pinDel; }
-      else { b.textContent = d; b.onclick = function () { pinAdd(d); }; }
+      else if (d === 'del') { b.innerHTML = '⌫'; bindKey(b, pinDel); }
+      else { b.textContent = d; bindKey(b, function () { pinAdd(d); }); }
       tk.appendChild(b);
     });
   }
@@ -676,7 +687,10 @@
     '.pa-dot.on{background:var(--pa-accent);border-color:var(--pa-accent)}' +
     '#pa-teclado{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:260px}' +
     '.pa-key{height:56px;font-size:20px;font-weight:600;color:var(--t1,#F2EDE6);cursor:pointer;' +
-      'background:var(--card,#1A1A1A);border:1px solid var(--b,#242424);border-radius:10px;transition:all .12s}' +
+      'background:var(--card,#1A1A1A);border:1px solid var(--b,#242424);border-radius:10px;transition:all .12s;' +
+      // FIX dígitos perdidos (7-jul): sin touch-action el browser retiene el 2º tap
+      // rápido (gesto doble-tap-zoom) y se lo COME — típico con dígitos repetidos.
+      'touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:rgba(0,0,0,0)}' +
     '.pa-key:hover{border-color:var(--pa-accent)}' +
     '.pa-key:active{transform:scale(.95);background:var(--card2,#141414)}' +
     '.pa-key-empty{background:transparent;border:none;cursor:default}' +
