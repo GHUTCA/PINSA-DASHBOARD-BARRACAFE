@@ -89,8 +89,21 @@
   .ubic{font-size:12px;color:var(--t3)}
   .verbo-wrap{margin-top:8px;display:flex;align-items:center;gap:8px}
   .verbo-wrap label{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px}
-  .verbo-wrap.flash{animation:verboFlash .5s ease-out 2}
-  @keyframes verboFlash{0%,100%{background:transparent}35%{background:rgba(217,146,63,.22);border-radius:10px}}
+  /* FLASH "falta el verbo" (7-jul): antes era una tinta al 22% — invisible al
+     sol. Ahora: sacudida + resplandor fuerte + burbuja de texto (JS). */
+  .verbo-wrap.flash{animation:verboFlash .5s ease-out 3;border-radius:10px}
+  @keyframes verboFlash{
+    0%,100%{background:transparent;transform:none;box-shadow:none}
+    15%{transform:translateX(-7px)}
+    30%{transform:translateX(7px);background:rgba(217,146,63,.5);box-shadow:0 0 0 3px #D9923F}
+    50%{transform:translateX(-4px);background:rgba(217,146,63,.5);box-shadow:0 0 0 3px #D9923F}
+    70%{transform:translateX(3px)}
+    85%{transform:translateX(-1px)}
+  }
+  .verbo-hint{position:absolute;left:12px;right:12px;margin-top:4px;background:#D9923F;color:#1a1208;
+    font-size:14px;font-weight:800;padding:9px 14px;border-radius:10px;z-index:40;text-align:center;
+    box-shadow:0 4px 14px rgba(0,0,0,.35);animation:hintPop .25s ease-out}
+  @keyframes hintPop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
   .verbo{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--t1);
     border-radius:12px;padding:11px 13px;font-size:15px;font-weight:600;-webkit-appearance:none;appearance:none}
   /* ===== VERBO BOTONES (a prueba de error, 24-jun) ===== */
@@ -431,7 +444,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v37 · 7jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v38 · 7jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
     </div>
     <div class="verbo-wrap">
@@ -1470,7 +1483,15 @@ function stopVoz(){ if(srec&&son){ son=false; try{srec.stop();}catch(ex){} }
 function _verboElegido(){
   if(document.getElementById('verbo').value) return true;
   var w=document.querySelector('.verbo-wrap');
-  if(w){ w.classList.remove('flash'); void w.offsetWidth; w.classList.add('flash'); }
+  if(w){
+    w.classList.remove('flash'); void w.offsetWidth; w.classList.add('flash');
+    // burbuja de texto explícita (7-jul): la sacudida sola no bastaba al sol
+    var old=document.getElementById('verboHint'); if(old) old.remove();
+    var h=document.createElement('div'); h.id='verboHint'; h.className='verbo-hint';
+    h.textContent='👆 Primero elige la acción (Entrega, Ajuste, Ingreso o Inventario)';
+    w.parentNode.insertBefore(h, w.nextSibling);
+    setTimeout(function(){ if(h.parentNode) h.remove(); }, 2200);
+  }
   return false;
 }
 $('pVoz').onclick=function(){ if(son){stopVoz();return;} if(!_verboElegido())return; startVoz(); };
@@ -2821,10 +2842,10 @@ $('btnConfirm').onclick=async function(){
   if($('btnConfirm').disabled) return;
   var v=verboActual();
   if(!v){ alert('Elige primero una acción arriba\n(Inventario, Entrega, Ingreso o Ajuste).'); return; }
-  // confirmación explícita CON LISTA REAL (no confirm nativo): el OP ve
-  // exactamente QUÉ se va a registrar — cantidad real UO/BO, no "1 movimiento".
-  var okGo=await confirmarModal(v);
-  if(!okGo) return;
+  // 7-jul: MODAL de reconfirma ELIMINADO (decisión Alberto). En la práctica
+  // nadie lo leía — sólo retrasaba. La red de seguridad queda en la pantalla
+  // de revisión (paso anterior, lista real UO/BO a la vista). confirmarModal()
+  // sigue en el archivo, dormido, por si un día vuelve para un verbo delicado.
   $('btnConfirm').disabled=true; $('btnConfirm').textContent='Guardando…';
   var tipo=v.id;
   var loteId=nuevoLoteId();
