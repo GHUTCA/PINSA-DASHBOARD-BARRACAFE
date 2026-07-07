@@ -444,8 +444,9 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v38 · 7jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v39 · 7jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
+      <button id="btnRecibos" title="Mis registros de hoy" style="background:none;border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:15px;cursor:pointer;line-height:1">🧾</button>
     </div>
     <div class="verbo-wrap">
       <label>acción</label>
@@ -2838,6 +2839,69 @@ function confirmarModal(v){
   });
 }
 
+// ============================================================================
+// RECIBO (7-jul) — el autocontrol pasa a quien registró. Tras confirmar, el OP
+// ve LO QUE CAYÓ EN EL LIBRO (Q → Cantidad UTM → $ total, calculados por el
+// GAS, no re-cálculo local). Queda en pantalla hasta que él lo cierre.
+// Alarmas: línea ≥ $150.000 → roja "¿seguro?" · costo $0 con cantidad → ámbar
+// "sin costo en BD". El mismo overlay sirve para 🧾 "Mis registros de hoy".
+// ============================================================================
+var RECIBO_ALARMA_P = 150000;   // $ por línea que enciende la alarma roja
+function fmtCL(n){ n=parseFloat(n); if(isNaN(n)) return '—'; return '$'+Math.round(n).toLocaleString('es-CL'); }
+function fmtN(n){ n=parseFloat(n); if(isNaN(n)) return '—'; return (Math.abs(n-Math.round(n))<0.001?Math.round(n):Math.round(n*10)/10).toLocaleString('es-CL'); }
+function alarmaLinea(m){
+  var P=parseFloat(m.P), M=parseFloat(m.M);
+  if(!isNaN(P) && Math.abs(P)>=RECIBO_ALARMA_P) return 'rojo';
+  if((isNaN(P)||P===0) && !isNaN(M) && M!==0)   return 'sincosto';
+  return null;
+}
+function mostrarRecibo(titulo, sub, movs, alCerrar){
+  var old=document.getElementById('reciboOverlay'); if(old) old.remove();
+  var ov=document.createElement('div'); ov.id='reciboOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80;display:flex;align-items:flex-end;justify-content:center';
+  var tot=0, alarmas=0, rowsHtml='';
+  movs.forEach(function(m){
+    var al=alarmaLinea(m); if(al) alarmas++;
+    var P=parseFloat(m.P); if(!isNaN(P)) tot+=Math.abs(P);
+    var qStr=fmtN(m.q)+' '+(m.uoDesc||m.unidad||'');
+    var mStr=(m.M!==''&&m.M!=null)?(fmtN(Math.abs(parseFloat(m.M)))+' '+(m.utm||'')):'—';
+    var estilo=(al==='rojo')?'background:rgba(192,57,43,.14);border-left:4px solid #C0392B;'
+             :(al==='sincosto')?'background:rgba(217,146,63,.12);border-left:4px solid #D9923F;':'border-left:4px solid transparent;';
+    rowsHtml+='<div style="'+estilo+'padding:8px 10px;border-bottom:1px solid var(--line)">'+
+      '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">'+
+        '<div style="font-weight:600;color:var(--t1);font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(m.desc||m.sku||'')+'</div>'+
+        '<div style="font-weight:800;font-size:15px;color:'+(al==='rojo'?'#C0392B':'var(--t1)')+';white-space:nowrap">'+fmtCL(m.P)+'</div>'+
+      '</div>'+
+      '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--t2)">'+
+        '<div>'+(m.hora?esc(m.hora)+' · ':'')+(m.tipo?esc(m.tipo)+' · ':'')+esc(qStr)+' → '+esc(mStr)+'</div>'+
+        (al==='rojo'?'<div style="color:#C0392B;font-weight:700">⚠️ ¿seguro? revisa</div>'
+        :al==='sincosto'?'<div style="color:#D9923F;font-weight:700">sin costo en BD</div>':'')+
+      '</div></div>';
+  });
+  ov.innerHTML='<div style="background:var(--panel);width:100%;max-width:560px;border-radius:16px 16px 0 0;max-height:88%;display:flex;flex-direction:column">'+
+    '<div style="padding:16px 16px 10px">'+
+      '<div style="font-weight:800;color:var(--t1);font-size:17px">'+esc(titulo)+'</div>'+
+      (sub?'<div style="font-size:12.5px;color:var(--t2);margin-top:2px">'+esc(sub)+'</div>':'')+
+      (alarmas?'<div style="margin-top:8px;background:rgba(192,57,43,.14);border:1px solid #C0392B;border-radius:8px;padding:7px 10px;font-size:13px;color:#C0392B;font-weight:700">⚠️ '+alarmas+' línea'+(alarmas>1?'s':'')+' con valor raro — revísala'+(alarmas>1?'s':'')+' y avisa si no cuadra</div>':'')+
+    '</div>'+
+    '<div style="flex:1;overflow-y:auto">'+(rowsHtml||'<div style="padding:20px;color:var(--t2);font-size:14px">No hay movimientos tuyos hoy.</div>')+'</div>'+
+    '<div style="padding:10px 14px 14px;border-top:2px solid var(--line)">'+
+      (movs.length?'<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:10px"><b style="color:var(--t2)">Total</b><b style="color:var(--t1);font-size:16px">'+fmtCL(tot)+'</b></div>':'')+
+      '<button id="reciboOk" style="width:100%;padding:14px;border:none;border-radius:12px;background:var(--ok,#3DAA6E);color:#fff;font-weight:800;font-size:16px;cursor:pointer">OK, visto</button>'+
+    '</div></div>';
+  document.body.appendChild(ov);
+  document.getElementById('reciboOk').onclick=function(){ ov.remove(); if(alCerrar) alCerrar(); };
+}
+// 🧾 Mis registros de hoy — el OP se responde solo ("¿registré bien la leche?")
+async function abrirMisRegistros(){
+  if(!OPERADOR){ alert('Primero dime quién eres (arriba).'); return; }
+  if(!navigator.onLine){ alert('🧾 Necesita señal: lee el libro real.\nAl volver la señal, inténtalo de nuevo.'); return; }
+  var r=await callGAS({ action:'getMisMovimientosHoy', responsable:OPERADOR }, 8000);
+  if(!(r&&r.ok)){ alert('No se pudo leer el libro ('+((r&&r.error)||'sin red')+'). Reintenta.'); return; }
+  mostrarRecibo('🧾 Mis registros de hoy', OPERADOR+' · tal como cayeron en el libro', r.movimientos||[]);
+}
+$('btnRecibos').onclick=abrirMisRegistros;
+
 $('btnConfirm').onclick=async function(){
   if($('btnConfirm').disabled) return;
   var v=verboActual();
@@ -2951,6 +3015,14 @@ $('btnConfirm').onclick=async function(){
   // 3) feedback honesto: enviado vs guardado-para-enviar
   listEl.querySelectorAll('.rowwrap,.row,.card,.frase').forEach(function(x){x.remove();});
   emptyEl.style.display='none';
+  // RECIBO (7-jul): si el GAS devolvió el detalle de lo escrito, se muestra la
+  // ricevuta (queda hasta que el OP la cierre). El autocontrol es de quien registró.
+  if(enviado && _respConf && _respConf.detalle && _respConf.detalle.length){
+    actionbar.style.display='none'; revbar.style.display='none';
+    ITEMS.length=0; descartarItems();
+    mostrarRecibo('✓ Registrado · '+v.label, OPERADOR+' · así cayó en el libro', _respConf.detalle, irHome);
+    return;
+  }
   var d=document.createElement('div'); d.className='done';
   if(enviado){
     // v35: en el INVENTARIO el silencio de los que cuadran es quadratura, no pérdida —
