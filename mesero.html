@@ -145,7 +145,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.4 · 6jul</span>
+    <span class="ver" id="ver">v1.5 · 8jul</span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
@@ -401,8 +401,10 @@ function render(r) {
     hm += '<div class="h">Míos · en curso</div>';
     mios.forEach(p => {
       const esDig = p.estado === 'digitado';
+      // v1.5 · dettaglio COMPLETO anche nei míos: è qui che digiti su ALOHA
       hm += '<div class="card"><div class="mesa-row"><span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
         '<span class="plaza">' + esc(p.plaza || '—') + (esDig ? ' · en producción 🍳' : ' · confirmado en mesa') + '</span></div>' +
+        bodyItems(p) +
         '<div class="mio-meta">' + resumenCorto(p) + (esDig ? '' : ' · <b class="warn">falta digitarlo</b>') + '</div>' +
         (esDig
           ? '<button class="btn verde" onclick="marcar(\'' + esc(p.uuid) + '\',\'entregado\',this)">✓ ENTREGADO</button>'
@@ -425,6 +427,22 @@ function render(r) {
 function itemsDe(p) {
   try { const a = JSON.parse(p.items_json || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
 }
+
+/* v1.5 · il corpo items (per categoría, orden ALOHA) — usato da pendientes E míos:
+   il dettaglio serve SOPRATTUTTO dopo il MÍO, quando digiti su ALOHA (oss. Alberto) */
+function bodyItems(p) {
+  const items = itemsDe(p);
+  let body = '';
+  let lastCat = null;
+  items.forEach(it => {
+    const cat = (it.cat || '').toString();
+    if (cat && cat !== lastCat) { body += '<div class="cat">' + esc(cat) + '</div>'; lastCat = cat; }
+    body += '<div class="it"><span class="q">' + (parseInt(it.qty, 10) || 1) + '×</span> ' + esc(it.nombre || it.id || '?') +
+      (it.p ? '<span class="split">' + esc(it.p) + '</span>' : '') + '</div>';
+  });
+  if (p.nota) body += '<div class="nota">📝 ' + esc(p.nota) + '</div>';
+  return body;
+}
 function resumenCorto(p) {
   const items = itemsDe(p);
   const n = items.reduce((s, it) => s + (parseInt(it.qty, 10) || 1), 0);
@@ -435,21 +453,12 @@ function resumenCorto(p) {
 // il carrito già viaggia nell'orden de CATEGORIAS del menú), split chips.
 function cardPedido(p, umb, btnLabel, marca, urgente) {
   const items = itemsDe(p);
-  let body = '';
-  let lastCat = null;
-  items.forEach(it => {
-    const cat = (it.cat || '').toString();
-    if (cat && cat !== lastCat) { body += '<div class="cat">' + esc(cat) + '</div>'; lastCat = cat; }
-    body += '<div class="it"><span class="q">' + (parseInt(it.qty, 10) || 1) + '×</span> ' + esc(it.nombre || it.id || '?') +
-      (it.p ? '<span class="split">' + esc(it.p) + '</span>' : '') + '</div>';
-  });
   const n = items.reduce((s, it) => s + (parseInt(it.qty, 10) || 1), 0);
   return '<div class="card' + (urgente ? ' urgente' : '') + '">' +
     '<div class="mesa-row"><span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
     '<span class="plaza">' + esc(p.plaza || 'sin plaza') + (urgente ? ' · nadie lo tomó' : '') + '</span>' +
     '<span class="espera ' + esperaClass(p.hace_s, umb) + '">⏱ ' + fmtHace(p.hace_s) + '</span></div>' +
-    body +
-    (p.nota ? '<div class="nota">📝 ' + esc(p.nota) + '</div>' : '') +
+    bodyItems(p) +
     '<div class="tot"><span>' + n + ' producto' + (n === 1 ? '' : 's') + ' · orden ALOHA ↓</span><b>' + fmtPrice(p.total) + '</b></div>' +
     '<button class="btn" onclick="marcar(\'' + esc(p.uuid) + '\',\'' + marca + '\',this)">' + btnLabel + '</button>' +
     '</div>';
