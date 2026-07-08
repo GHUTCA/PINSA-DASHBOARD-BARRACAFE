@@ -181,7 +181,7 @@
     <button id="nav-precios" onclick="vista('precios')" style="display:none">Precios</button>
   </nav>
   <span class="userchip" id="userchip">—</span>
-  <span class="ver" id="ver">v1.1 · 08-jul</span>
+  <span class="ver" id="ver">v1.2 · 08-jul</span>
 </header>
 
 <main>
@@ -853,8 +853,19 @@ function renderList(){
          : (r.pv ? '$' + fmtN(r.pv) : 'sin precio')}</div></div>
      ${tipoBadge(r.tipo)}</div>`).join('') || '<div class="loading">Nada con ese filtro.</div>';
 }
+// Costo VERO = Σ Detalle (q × precio) — mai la ARRAYFORMULA del Master (marcia su
+// molte ricette vecchie). Stessa aritmetica del GAS fossile.
+function costoDe(r){
+  const ings = DETALLE[r.id];
+  if (ings && ings.length) return ings.reduce((t,i) => t + i.q * i.precio, 0);
+  return r.costoL || r.costoU || 0;
+}
+function foodCost(r){
+  const cU = costoDe(r) / (r.qlote || 1);
+  return r.pv ? cU / (r.pv / 1.19) * 100 : null;
+}
 function completa(r){
-  return !!(r.foto && r.proc && r.costoL > 0 &&
+  return !!(r.foto && r.proc && costoDe(r) > 0 &&
     (['ENSAMBLE','SIMPLE','OFERTA'].includes(r.tipo) ? r.pv : true));
 }
 function verReceta(id){
@@ -864,6 +875,7 @@ function verReceta(id){
   const ings = DETALLE[id] || [];
   const vidaM = r.notas.match(/\[vida:(\d+)\]/);
   const esCC = r.tipo === 'PREPARACION' || r.tipo === 'SUBRECETA';
+  const costo = costoDe(r), cU = costo / (r.qlote || 1), fc = foodCost(r);
   const puedeActivar = ROLES_PRECIOS.indexOf(ROLE) >= 0 && r.estado !== 'ACTIVA' && completa(r);
   document.getElementById('recdetail').innerHTML = `
     <div class="foto">${r.foto ? `<img src="${esc(r.foto)}" onerror="this.parentNode.textContent='📷 (link foto roto)'">` : '📷 Sin foto de referencia — necesaria para Activar'}</div>
@@ -873,11 +885,11 @@ function verReceta(id){
         ${esCC ? `<span>Tanda: <b style="color:var(--txt)">${fmtN(r.qlote)} ${r.unidad}</b></span>
         <span>Formato: <b style="color:var(--txt)">${esc(r.formato||'—')}</b></span>
         <span>Vida útil: <b style="color:var(--txt)">${vidaM ? vidaM[1]+' días' : '—'}</b></span>
-        <span>Costo: <b style="color:var(--txt)">$${fmtN(r.costoU,2)}/${r.unidad}</b></span>
+        <span>Costo: <b style="color:var(--txt)">$${fmtN(cU,2)}/${r.unidad}</b> · tanda $${fmtN(costo)}</span>
         ${r.transfer ? `<span>Transfer: <b style="color:var(--txt)">$${fmtN(r.transfer)}</b></span>` : ''}`
         : `<span>Precio venta: <b style="color:var(--txt)">${r.pv ? '$'+fmtN(r.pv) : '—'}</b></span>
-        <span>Costo: <b style="color:var(--txt)">$${fmtN(r.costoU)}</b></span>
-        <span>Food cost: <b class="${r.pv&&r.costoU/(r.pv/1.19)*100<25?'fc-ok':r.pv&&r.costoU/(r.pv/1.19)*100<=30?'fc-warn':'fc-bad'}">${r.pv ? (r.costoU/(r.pv/1.19)*100).toFixed(1)+'%' : '—'}</b></span>`}
+        <span>Costo: <b style="color:var(--txt)">$${fmtN(costo)}</b></span>
+        <span>Food cost <span class="hint" style="margin:0">(costo / precio neto sin IVA)</span>: <b class="${fc===null?'':fc<25?'fc-ok':fc<=30?'fc-warn':'fc-bad'}">${fc===null ? '—' : fc.toFixed(1)+'%'}</b></span>`}
         <span>Estado: <b style="color:${r.estado==='ACTIVA'?'var(--green)':'var(--amber)'}">${r.estado}</b>
         ${puedeActivar ? `<button class="btn green" style="padding:3px 14px;font-size:12px;margin-left:8px" onclick="activar('${r.id}')">▶ Activar</button>`
           : (r.estado!=='ACTIVA' && !completa(r) ? '<span class="hint" style="margin-left:8px">(faltan foto/pasos/costo para Activar)</span>' : '')}</span>
@@ -905,10 +917,10 @@ function renderPrecios(){
   if (ROLES_PRECIOS.indexOf(ROLE) < 0) return;
   const ventas = RECETAS.filter(r => ['ENSAMBLE','SIMPLE','OFERTA'].includes(r.tipo) && r.estado !== 'ARCHIVADA');
   document.getElementById('pvbody').innerHTML = ventas.map(r => {
-    const fc = r.pv ? r.costoU/(r.pv/1.19)*100 : null;
+    const fc = foodCost(r);
     const cls = fc===null ? '' : fc<25 ? 'fc-ok' : fc<=30 ? 'fc-warn' : 'fc-bad';
     return `<tr><td>${esc(r.nombre)} <span class="skuchip">${r.id}</span></td>
-      <td class="num">$${fmtN(r.costoU)}</td>
+      <td class="num">$${fmtN(costoDe(r))}</td>
       <td class="num"><input type="number" class="pvedit" value="${r.pv||''}" placeholder="—"
         onchange="setPV('${r.id}', this.value)"></td>
       <td class="num ${cls}">${fc===null ? '— sin precio' : fc.toFixed(1)+'%'}</td>
