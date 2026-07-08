@@ -181,7 +181,7 @@
     <button id="nav-precios" onclick="vista('precios')" style="display:none">Precios</button>
   </nav>
   <span class="userchip" id="userchip">—</span>
-  <span class="ver" id="ver">v1.0 · 08-jul</span>
+  <span class="ver" id="ver">v1.1 · 08-jul</span>
 </header>
 
 <main>
@@ -226,13 +226,14 @@
             <div>
               <label>Sección donde se vende</label>
               <select id="f-seccion">
+                <option value="">— elige —</option>
                 <option>Barra Alimentos</option><option>Barra Cafe</option>
                 <option>Barra Jugos</option><option>Barra Helados</option>
               </select>
             </div>
             <div>
               <label>Categoría</label>
-              <select id="f-categoria"><option>SOLIDOS</option><option>LIQUIDOS</option></select>
+              <select id="f-categoria"><option value="">— elige —</option><option>SOLIDOS</option><option>LIQUIDOS</option></select>
             </div>
           </div>
         </div>
@@ -281,6 +282,7 @@
             <div>
               <label>¿Cómo se conserva?</label>
               <select id="f-conserva" onchange="conservaChange()">
+                <option value="">— elige —</option>
                 <option value="refcocido">Refrigerado · cocido</option>
                 <option value="refcrudo">Refrigerado · crudo</option>
                 <option value="congelado">Congelado</option>
@@ -480,6 +482,19 @@ function parseCSV(text){
 function idx(header, nombre){       // colonna per nome (tollera spazi finali reali)
   return header.findIndex(h => String(h).trim() === nombre.trim());
 }
+function numCL(v){                  // v1.1: il CSV pubblicato arriva FORMATTATO alla cilena ($ 2.200 · 7,38)
+  if (v === null || v === undefined) return 0;
+  let s = String(v).trim().replace(/[$\s ]/g, '');
+  if (!s || s === '-' || s === '—') return 0;
+  if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+  else {
+    const p = s.split('.');
+    if (p.length === 2 && p[1].length === 3) s = s.replace('.', '');   // 2.200 = migliaia
+    else if (p.length > 2) s = s.replace(/\./g, '');                    // 1.234.567
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
 
 /* ═══════════ PARSE FOGLI ═══════════ */
 function parseBD(rows){
@@ -489,7 +504,7 @@ function parseBD(rows){
   INSUMOS = rows.slice(1).map(r => {
     const sku = parseInt(r[iSku]);
     if (!sku) return null;
-    const precio = parseFloat(r[iO]) || parseFloat(r[iN]) || 0;
+    const precio = numCL(r[iO]) || numCL(r[iN]) || 0;
     return { sku, nombre:String(r[iDesc]||'').trim(), precio,
              um:String(r[iP]||'gr').trim().toLowerCase(),
              esBase: sku >= 5000,
@@ -514,11 +529,11 @@ function parseMaster(rows){
       seccion:String(r[map.seccion]||'').trim(), familia:String(r[map.familia]||'').trim(),
       categoria:String(r[map.categoria]||'').trim(), estado:String(r[map.estado]||'').trim().toUpperCase(),
       formato:String(r[map.formato]||'').trim(), unidad:String(r[map.unidad]||'un').trim().toLowerCase(),
-      qlote:parseFloat(r[map.qlote])||1, transfer:parseFloat(r[map.transfer])||null,
-      costoL:parseFloat(r[map.costoL])||0, costoU:parseFloat(r[map.costoU])||0,
-      pv:parseFloat(r[map.pv])||null, foto:String(r[map.foto]||'').trim(),
+      qlote:numCL(r[map.qlote])||1, transfer:numCL(r[map.transfer])||null,
+      costoL:numCL(r[map.costoL])||0, costoU:numCL(r[map.costoU])||0,
+      pv:numCL(r[map.pv])||null, foto:String(r[map.foto]||'').trim(),
       video:String(r[map.video]||'').trim(), proc:String(r[map.proc]||'').trim(),
-      notas:String(r[map.notas]||'').trim(), rend:parseFloat(r[map.rend])||1 };
+      notas:String(r[map.notas]||'').trim(), rend:numCL(r[map.rend])||1 };
   }).filter(Boolean);
 }
 function parseDetalle(rows){
@@ -530,15 +545,15 @@ function parseDetalle(rows){
     const id = String(r[iId]||'').trim();
     if (!id) return;
     (DETALLE[id] = DETALLE[id] || []).push({
-      descripcion:String(r[iD]||'').trim(), q:parseFloat(r[iQ])||0,
-      um:String(r[iU]||'gr').trim(), precio:parseFloat(r[iP])||0,
+      descripcion:String(r[iD]||'').trim(), q:numCL(r[iQ])||0,
+      um:String(r[iU]||'gr').trim(), precio:numCL(r[iP])||0,
       esSub:String(r[iS]).toLowerCase() === 'true' });
   });
 }
 function poblarFamilias(){
   const fams = [...new Set(RECETAS.map(r => r.familia).filter(Boolean))].sort();
   document.getElementById('f-familia').innerHTML =
-    fams.map(f => `<option>${f}</option>`).join('') || '<option>PRODUCCION</option>';
+    '<option value="">— elige —</option>' + fams.map(f => `<option>${f}</option>`).join('');
 }
 
 /* ═══════════ NAV ═══════════ */
@@ -573,8 +588,13 @@ function setFmt(f){
 }
 function conservaChange(noRender){
   const r = RANGOS[val('f-conserva')];
-  document.getElementById('vrango').textContent = 'típico: ' + r[0] + '–' + r[1] + ' días';
-  document.getElementById('f-vida').value = Math.round((r[0]+r[1])/2);
+  if (!r) {                                   // "— elige —": niente suggerimento, niente default
+    document.getElementById('vrango').textContent = 'elige la conservación';
+    document.getElementById('f-vida').value = '';
+  } else {
+    document.getElementById('vrango').textContent = 'típico: ' + r[0] + '–' + r[1] + ' días';
+    document.getElementById('f-vida').value = Math.round((r[0]+r[1])/2);
+  }
   if (!noRender) render();
 }
 function val(id){ return document.getElementById(id).value; }
@@ -607,7 +627,7 @@ function markSugg(){
 function addIng(n){
   const i = suggItems[n];
   if (!i) return;
-  S.ings.push({ sku:i.sku, nombre:i.nombre, q:100, um:i.um, precio:i.precio, esSub:i.esBase });
+  S.ings.push({ sku:i.sku, nombre:i.nombre, q:0, um:i.um, precio:i.precio, esSub:i.esBase }); // q=0: la cantidad la decide el chef, no el default
   document.getElementById('f-inga').value = '';
   document.getElementById('sugg').style.display = 'none';
   render();
@@ -657,7 +677,7 @@ function render(){
     S.pasos.map((p,n) => `<li><span>${esc(p)}</span><button class="del" onclick="delPaso(${n})">✕</button></li>`).join('');
   // vida warning
   const r = RANGOS[val('f-conserva')], vida = num('f-vida');
-  document.getElementById('vwarn').style.display = (S.tipo!=='venta' && (vida<r[0]||vida>r[1])) ? 'block' : 'none';
+  document.getElementById('vwarn').style.display = (S.tipo!=='venta' && r && vida>0 && (vida<r[0]||vida>r[1])) ? 'block' : 'none';
 
   // costi + espejo
   const q = num('f-qlote'), u = val('f-ulote'), qf = num('f-qfmt');
@@ -696,7 +716,7 @@ function render(){
     esp.innerHTML = `<span class="tag">Espejo</span><b>${esc(pref+(nom||'—'))}</b>: con ` +
       `<b>${S.ings.length} ingredientes</b> ($${fmtN(costo)}) sale una tanda de <b>${fmtN(q)} ${u}</b>` +
       (rend ? ` (rendimiento ${rend}%)` : '') + `, entregada ${fTxt}. ` +
-      `Caduca a los <b>${vida} días</b> (${CONS_LBL[val('f-conserva')]}). ` +
+      (vida>0 ? `Caduca a los <b>${vida} días</b> (${CONS_LBL[val('f-conserva')]||'—'}). ` : `<b>Falta la vida útil.</b> `) +
       `Costo: <b>$${fmtN(cU,2)}/${u}</b>` +
       (S.fmt!=='granel' && qf>0 ? ` · <b>$${fmtN(cU*qf)} por ${S.fmt==='bolsa'?'bolsa':'porción'}</b>.` : '.');
   }
@@ -723,7 +743,8 @@ function buildPayload(){
     nombre: (pref + nom).toUpperCase(),
     tipo_receta: S.tipo==='prep' ? 'PREPARACION' : S.tipo==='base' ? 'SUBRECETA' : 'ENSAMBLE',
     seccion: esVenta ? val('f-seccion') : 'Cocina Central',
-    familia: val('f-familia'), categoria: esVenta ? val('f-categoria') : 'SOLIDOS',
+    familia: val('f-familia'),
+    categoria: esVenta ? val('f-categoria') : (val('f-ulote')==='cc' ? 'LIQUIDOS' : 'SOLIDOS'),
     formato, unidad_salida: u, q_lote: q, rendimiento: 1,
     precio_transfer: num('f-transfer') || null,
     dificultad: 'Baja', tiempo_prep: 0, tiempo_coccion: 0,
@@ -739,8 +760,17 @@ function buildPayload(){
 }
 function valida(p){
   if (!p.nombre || p.nombre.length < 4) return 'Falta el nombre.';
+  if (!val('f-familia')) return 'Elige la familia.';
   if (!p.ingredientes.length) return 'Agrega al menos un ingrediente.';
-  if (S.tipo !== 'venta' && p.q_lote <= 0) return 'Indica cuánto sale de una tanda.';
+  if (p.ingredientes.some(i => !i.q_lote || i.q_lote <= 0)) return 'Hay ingredientes con cantidad 0 — completa o quítalos.';
+  if (S.tipo === 'venta') {
+    if (!val('f-seccion')) return 'Elige la sección donde se vende.';
+    if (!val('f-categoria')) return 'Elige la categoría.';
+  } else {
+    if (p.q_lote <= 0) return 'Indica cuánto sale de una tanda.';
+    if (!val('f-conserva')) return 'Indica cómo se conserva.';
+    if (num('f-vida') <= 0) return 'Indica la vida útil.';
+  }
   return null;
 }
 async function llamarGAS(payload){
