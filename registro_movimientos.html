@@ -444,9 +444,9 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v39 · 7jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v40 · 7jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
-      <button id="btnRecibos" title="Mis registros de hoy" style="background:none;border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:15px;cursor:pointer;line-height:1">🧾</button>
+      <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1">🧾</button>
     </div>
     <div class="verbo-wrap">
       <label>acción</label>
@@ -2763,6 +2763,11 @@ async function flushCola(){
     var c=colaLeer();
     for(var i=0;i<c.length;i++){
       if(c[i].estado==='ok') continue;
+      // 7-jul: 15s de cortesía a los lotes recién encolados — el envío DIRECTO
+      // del confirmar está en vuelo; si la cola gana la carrera, el directo
+      // recibe dedup:true SIN detalle y el recibo no aparece. La cola los toma
+      // en el próximo tick si el directo falló.
+      if(c[i].estado==='pending' && (Date.now()-new Date(c[i].ts).getTime()) < 15000) continue;
       c[i].intentos=(c[i].intentos||0)+1;
       var r=await callGAS(c[i].payload);
       if(r&&r.ok){ c[i].estado='ok'; c[i].okTs=new Date().toISOString(); }
@@ -2985,13 +2990,14 @@ $('btnConfirm').onclick=async function(){
   colaEncolar(payload, resumen);
   var n=ITEMS.length;
 
-  // 2) intenta enviar ya — con TIMEOUT corto (6s) y memo red-caída: la captura
-  //    NUNCA se queda colgada en "Guardando…" (bug -6: onLine=true sin datos).
-  //    Si no sale ahora, el lote YA está en cola y se enviará solo (idempotente).
+  // 2) intenta enviar ya — TIMEOUT 12s (7-jul: el batch GAS con fossil suele
+  //    tardar 4-10s; con 6s el envío directo caducaba, el lote salía después
+  //    por la cola y el RECIBO no aparecía). Al -6 el memo red-caída evita
+  //    esperas repetidas. Si no sale ahora, la cola lo manda sola (idempotente).
   var enviado=false, _respConf=null;
   try{
     if(navigator.onLine && Date.now()>=_gasDownHasta){
-      var r=await callGAS(payload, 6000);
+      var r=await callGAS(payload, 12000);
       if(r&&r.ok){
         enviado=true; _respConf=r;
         // marca este lote como ok en la cola
