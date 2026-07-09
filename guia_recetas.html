@@ -87,7 +87,7 @@
 <header>
   <div class="toprow">
     <div class="logo">PINSA · <em>Guía de Recetas</em></div>
-    <span class="ver" id="ver">v1.0 · 09-jul</span>
+    <span class="ver" id="ver">v1.1 · 09-jul</span>
   </div>
   <input id="q" placeholder="Busca receta o ingrediente…" oninput="renderGrid()" style="margin-bottom:10px">
   <div class="chips" id="chips">
@@ -121,7 +121,11 @@ const BASE_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XS
 const GID = { MASTER:'1643758434', DETALLE:'1714485150' };
 const VISIBLES = ['ACTIVA','ACTIVA_SIN_DATA'];   // il ricettario reale — mai SIMULACION/ARCHIVADA
 
-let RECETAS = [], DETALLE = {}, sec = '';
+// v1.1 — scope empresa dallo scope `local` della sessione (come il Taller):
+// locale fisico → la sua empresa · 'pinsa'/'bks'/'exo' → quella empresa · '*' → tutte
+const LOCAL2EMP = { rsc:'PINSA', cdl:'PINSA', pinsa:'PINSA', bks:'BKS', exo:'EXO' };
+
+let RECETAS = [], DETALLE = {}, sec = '', MI_EMP = 'PINSA';
 
 window.addEventListener('DOMContentLoaded', () => {
   if (!window.PinsitaAuth) {
@@ -133,6 +137,8 @@ window.addEventListener('DOMContentLoaded', () => {
     const s = (window.PinsitaAuth && PinsitaAuth.sesion) ? PinsitaAuth.sesion() : null;
     if (!s) return;
     clearInterval(chk);
+    const scope = String(s.local || s.scope || '').trim().toLowerCase();
+    MI_EMP = (scope === '*') ? '*' : (LOCAL2EMP[scope] || 'PINSA');
     cargar();
   }, 300);
 });
@@ -200,12 +206,20 @@ function parseMaster(rows){
   const map = { id:c('ID_Receta'), nombre:c('Nombre'), tipo:c('Tipo Receta'),
     seccion:c('Seccion'), estado:c('Estado'), formato:c('Formato'),
     unidad:c('Unidad salida'), qlote:c('Q lote std'), foto:c('URL_Foto'),
-    video:c('URL_Video'), proc:c('Procedimiento'), ps:c('Perfect_Serve'), notas:c('Notas') };
+    video:c('URL_Video'), proc:c('Procedimiento'), ps:c('Perfect_Serve'), notas:c('Notas'),
+    eP:c('Empresa_PINSA'), eE:c('Empresa_EXO'), eB:c('Empresa_BKS') };
   RECETAS = rows.slice(1).map(r => {
     const id = String(r[map.id]||'').trim();
     if (!id) return null;
     const estado = String(r[map.estado]||'').trim().toUpperCase();
     if (VISIBLES.indexOf(estado) < 0) return null;
+    // v1.1: solo l'empresa dell'utente ('*' vede tutto; senza colonne = PINSA legacy)
+    if (MI_EMP !== '*') {
+      const col = MI_EMP === 'PINSA' ? map.eP : MI_EMP === 'EXO' ? map.eE : map.eB;
+      const flag = col >= 0 ? String(r[col]||'').trim().toUpperCase() : '';
+      const es = flag ? (flag === 'SI') : (MI_EMP === 'PINSA');
+      if (!es) return null;
+    }
     return { id, nombre:String(r[map.nombre]||'').trim(),
       tipo:String(r[map.tipo]||'').trim().toUpperCase(),
       seccion:String(r[map.seccion]||'').trim(),
