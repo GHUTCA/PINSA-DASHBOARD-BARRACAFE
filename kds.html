@@ -7,7 +7,7 @@
 <title>BKS KDS</title>
 <!-- DEVICE-CLASS: 2 · tablet KDS (apoyado, pantalla siempre encendida, Wi-Fi) -->
 <!-- ════════════════════════════════════════════════════════════════════
-     kds.html · v1.2 · 9jul2026 · Cantiere MENU (spec 09-jul)
+     kds.html · v1.6 · 9jul2026 · Cantiere MENU (spec 09-jul)
      v1.1 (oss. Alberto): (a) listos che invecchiano — nadie retira → il chip
      ingiallisce a 3' e pulsa rosso a 6' (in parallelo: GAS v3.3.5 avvisa il
      mesero via Telegram a 2'); (b) cola lunga (20 comande) → card piene solo
@@ -19,6 +19,22 @@
      v1.3 (mesa 12, 8 commensali): badge 👥 n/N quando la stessa mesa ha più
      pedidos in cola (8 telefoni = 8 pedidos = 8 card: il badge dice alla
      cucina che è UNA tavolata che arriva a pezzi) + demo=2 carga completa.
+     v1.4 (oss. Alberto): chip EN ESPERA apribile con un tap (card completa:
+     il chef de partie vede cosa gli viene incontro, LISTO anticipato) +
+     "⬆ PASA ADELANTE" (l'eccezione "mesa 44 urgente": pin locale al tablet,
+     📌 in testa alla griglia, ✕ per rimetterla in fila, sopravvive al riavvio).
+     Lo scroll della pagina resta: "zero scroll" = mai OBBLIGATI a scrollare
+     per servire le urgenti, non vietato guardare avanti.
+     v1.5 (oss. Alberto: "dove clicco quando il runner ritira?"): tap sul
+     chip listo → "¿Retirado? ✓/✕" → marcarKdsRetirado (GAS v3.3.6) →
+     TS_Retirado_<Est> nel foglio, chip via, mesero vede "va en camino",
+     aviso Telegram spento. Chi preme (runner/mesero/chef) è un dettaglio —
+     il fossile è il fatto: i piatti hanno lasciato il pass.
+     v1.6 (oss. Alberto, ergonomia dei tasti): "pasa adelante" via dal fondo
+     → in testa alla card accanto a "cerrar" (il LISTO resta solo, niente
+     tap per errore) · il pass diventa BARRA FISSA in fondo allo schermo
+     (riga rossa, piastrelle quadrate col numero mesa enorme, scroll
+     orizzontale): il runner guarda sempre nello stesso punto.
      Kitchen Display System: una página, dos sombreros — ?st=cocina / ?st=barra.
      Entra con el código del turno (una vez, localStorage) → cola de producción
      (pedidos DIGITADOS, solo los items de la estación, llevar = unidades a
@@ -37,7 +53,8 @@
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;
     font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
   html,body{background:var(--bg);color:var(--t1);min-height:100%}
-  body{padding:calc(10px + env(safe-area-inset-top,0)) 14px calc(24px + env(safe-area-inset-bottom,0))}
+  /* v1.6 · in fondo c'è la barra fissa del pass: il contenuto non ci finisce sotto */
+  body{padding:calc(10px + env(safe-area-inset-top,0)) 14px calc(180px + env(safe-area-inset-bottom,0))}
   button{font-family:inherit;cursor:pointer}
   .hide{display:none!important}
 
@@ -127,19 +144,45 @@
     text-transform:uppercase;color:var(--warn)}
   #espera{display:flex;gap:8px;flex-wrap:wrap}
   .wchip{background:var(--card);border:1px solid var(--bord);border-radius:12px;
-    padding:8px 12px;font-size:14px;color:var(--t2);display:flex;gap:8px;align-items:baseline}
+    padding:8px 12px;font-size:14px;color:var(--t2);display:flex;gap:8px;align-items:baseline;cursor:pointer}
   .wchip b{font-size:19px;color:var(--t1)}
   .wchip .h{font-weight:800;font-variant-numeric:tabular-nums;color:var(--t3)}
+  .wchip .abre{color:var(--t3);font-weight:900}
+  /* v1.4 · chip aperto (card completa dentro la striscia) + pin urgente */
+  .card.esp{flex:1 1 100%;margin:2px 0}
+  .c-pin{font-size:13px;font-weight:900;color:var(--bad);border:1.5px solid var(--bad);
+    border-radius:9px;padding:2px 8px;white-space:nowrap;align-self:center;cursor:pointer;
+    background:rgba(224,82,82,.12)}
+  .c-cerrar{background:transparent;border:1.5px solid var(--bord);color:var(--t3);
+    border-radius:8px;padding:4px 9px;font-size:12px;font-weight:700;margin-left:6px;align-self:center}
+  /* v1.6 · "pasa adelante" in testa alla card (lontano dal LISTO — dita unte) */
+  .c-sube{background:rgba(245,166,35,.15);border:1.5px solid var(--warn);color:var(--warn);
+    border-radius:8px;padding:4px 10px;font-size:12px;font-weight:900;margin-left:6px;align-self:center;white-space:nowrap}
 
-  /* ═════ LISTOS RECIENTES ═════ */
-  .lst-title{margin:22px 0 8px;font-size:12px;font-weight:800;letter-spacing:.1em;
+  /* ═════ IL PASS (v1.6 · barra fissa in fondo, riga rossa, piastrelle) ═════ */
+  #listosBar{position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--card2);
+    border-top:3px solid var(--bad);
+    padding:8px 14px calc(10px + env(safe-area-inset-bottom,0));
+    box-shadow:0 -6px 18px rgba(0,0,0,.45)}
+  .lst-title{margin:0 0 8px;font-size:12px;font-weight:800;letter-spacing:.1em;
     text-transform:uppercase;color:var(--t3)}
-  #listos{display:flex;gap:8px;flex-wrap:wrap}
-  .lchip{background:var(--card);border:1px solid var(--bord);border-radius:12px;
-    padding:8px 12px;font-size:13.5px;color:var(--t2);display:flex;gap:8px;align-items:baseline}
-  .lchip b{font-size:17px;color:var(--t1)}
-  .lchip .h{color:var(--ok);font-weight:700;font-variant-numeric:tabular-nums}
-  /* v1.1 · nadie retira: il chip protesta */
+  #listos{display:flex;gap:10px;overflow-x:auto;padding-bottom:2px}
+  .lchip{flex:0 0 auto;background:var(--card);border:1.5px solid var(--bord);border-radius:14px;
+    padding:10px 14px;font-size:13px;color:var(--t2);display:flex;flex-direction:column;
+    gap:3px;align-items:center;justify-content:center;cursor:pointer;
+    min-width:118px;min-height:100px;text-align:center}
+  .lchip b{font-size:32px;line-height:1;color:var(--t1)}
+  .lchip .det{font-size:11.5px;color:var(--t3);max-width:150px;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .lchip .h{color:var(--ok);font-weight:800;font-variant-numeric:tabular-nums}
+  .lvacio{color:var(--t3);font-size:13px;opacity:.6;padding:8px 4px}
+  /* v1.5 · conferma del ritiro sulla piastrella */
+  .lchip.conf{border-color:var(--ok);color:var(--t1);font-weight:800;cursor:default}
+  .rrow{display:flex;gap:8px;margin-top:4px}
+  .rbtn{border:0;border-radius:10px;padding:10px 18px;font-size:16px;font-weight:900;cursor:pointer}
+  .rbtn.si{background:var(--ok);color:#0c1710}
+  .rbtn.no{background:transparent;border:1.5px solid var(--bord);color:var(--t3)}
+  /* v1.1 · nadie retira: la piastrella protesta */
   .lchip.warn{border-color:var(--warn)}
   .lchip.warn .h{color:var(--warn)}
   .lchip.bad{border-color:var(--bad);animation:lat 1.6s ease-in-out infinite}
@@ -159,7 +202,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.3 · 9jul</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.6 · 9jul</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -187,8 +230,11 @@
   <div id="grid"></div>
   <div class="esp-title hide" id="espTitle">⏳ En espera</div>
   <div id="espera"></div>
-  <div class="lst-title">✓ Listos recientes (esperando retiro)</div>
-  <div id="listos"></div>
+  <!-- v1.6 · IL PASS: barra fissa in fondo (il runner guarda sempre lì) -->
+  <div id="listosBar">
+    <div class="lst-title">✓ Listos · esperando retiro — toca cuando se retira</div>
+    <div id="listos"></div>
+  </div>
 </section>
 
 <div class="toast" id="toast"></div>
@@ -218,7 +264,13 @@ const STATE = {
   pollTimer: null, tickTimer: null,
   vistos: new Set(), vistosInit: false,
   fallos: 0,
+  // v1.4 · chips EN ESPERA aperti + pins "pasa adelante" (locali al tablet,
+  // sopravvivono al riavvio; muoiono da soli quando il pedido esce dalla cola)
+  abiertos: new Set(),
+  pins: (function(){ try { return JSON.parse(localStorage.getItem('kds_pins') || '[]'); } catch (e) { return []; } })(),
+  confirmRet: null,     // v1.5 · chip listo in attesa di conferma "¿retirado?"
 };
+function _savePins(){ try { localStorage.setItem('kds_pins', JSON.stringify(STATE.pins)); } catch (e) {} }
 
 /* ═════ CAMPANA (patrón mesero v1.4: din-don desde la página) ═════ */
 let _audioCtx = null;
@@ -389,7 +441,18 @@ function claseEspera(s){
 function render(){
   const r = STATE.kds;
   if (!r) return;
-  const cola = r.cola || [], listos = r.listos || [];
+  const listos = r.listos || [];
+
+  // v1.4 · URGENTES primero: i pin del chef ("pasa adelante la 44") vincono
+  // sull'ordine del cervello (il più vecchio in cima). Pin di pedidos usciti
+  // dalla cola muoiono da soli.
+  let cola = (r.cola || []).slice();
+  const vivos = STATE.pins.filter(u => cola.some(p => p.uuid === u));
+  if (vivos.length !== STATE.pins.length) { STATE.pins = vivos; _savePins(); }
+  if (vivos.length) {
+    cola = vivos.map(u => cola.find(p => p.uuid === u))
+      .concat(cola.filter(p => vivos.indexOf(p.uuid) < 0));
+  }
   $('tCuenta').textContent = cola.length;
 
   // v1.3 · misma mesa, más pedidos (8 commensali, 8 telefoni = 8 pedidos):
@@ -405,12 +468,15 @@ function render(){
   const enMano = cola.slice(0, CFG.MAX_CARDS);
   const enEspera = cola.slice(CFG.MAX_CARDS);
   $('espTitle').classList.toggle('hide', !enEspera.length);
-  $('espTitle').textContent = '⏳ En espera — ' + enEspera.length;
+  $('espTitle').textContent = '⏳ En espera — ' + enEspera.length + ' · toca para abrir';
   $('espera').innerHTML = enEspera.map(p => {
+    // v1.4 · chip aperto = card completa (il chef vede cosa gli viene
+    // incontro, può dare un LISTO anticipato o farla passare adelante)
+    if (STATE.abiertos.has(p.uuid)) return cardHTML(p, multiBadge, true);
     const n = p.items.reduce((s, it) => s + (parseInt(it.llevar, 10) || 1), 0);
-    return '<div class="wchip"><b>' + esc(p.mesa || '?') + '</b>' + multiBadge(p) +
+    return '<div class="wchip" onclick="toggleEspera(\'' + esc(p.uuid) + '\')"><b>' + esc(p.mesa || '?') + '</b>' + multiBadge(p) +
       n + (n === 1 ? ' ítem' : ' ítems') +
-      '<span class="h" data-base="' + p.hace_s + '">⏱ ' + fmtHace(haceLocal(p.hace_s)) + '</span></div>';
+      '<span class="h" data-base="' + p.hace_s + '">⏱ ' + fmtHace(haceLocal(p.hace_s)) + '</span><span class="abre">▾</span></div>';
   }).join('');
 
   if (!cola.length) {
@@ -418,42 +484,78 @@ function render(){
       (STATE.estacion === 'barra' ? '🍸' : '🍳') +
       '</span>Cola vacía — todo al día.<br>Los pedidos aparecen solos cuando el mesero los digita.</div>';
   } else {
-    $('grid').innerHTML = enMano.map(p => {
-      const s = haceLocal(p.hace_s);
-      const enviando = !!STATE.enVuelo[p.uuid];
-      const xl = p.items.length > 8 ? ' xl' : '';   // v1.2 · tavolata → card larga
-      return '<div class="card ' + claseEspera(s) + xl + '" data-uuid="' + esc(p.uuid) + '">' +
-        '<div class="c-head"><div class="c-mesa"><small>MESA</small> ' + esc(p.mesa || '?') + '</div>' +
-        multiBadge(p) +
-        '<div class="c-sp"></div><div class="c-timer" data-base="' + p.hace_s + '">' + fmtHace(s) + '</div></div>' +
-        '<div class="c-items">' + p.items.map(it =>
-          '<div class="it"><div class="it-q">' + (parseInt(it.llevar, 10) || 1) + '×</div>' +
-          '<div class="it-body"><div class="it-n">' + esc(it.nombre) + '</div>' +
-          ((it.termino || it.op || it.promo) ? '<div class="it-tags">' +
-            (it.termino ? '<span class="tag term">🥩 ' + esc(it.termino) + '</span>' : '') +
-            (it.op ? '<span class="tag op">🥤 ' + esc(it.op) + '</span>' : '') +
-            (it.promo ? '<span class="tag promo">🎁 ' + esc(it.promo) + '</span>' : '') +
-          '</div>' : '') +
-          '</div></div>').join('') + '</div>' +
-        (p.nota ? '<div class="c-nota">📝 ' + esc(p.nota) + '</div>' : '') +
-        (p.mesero ? '<div class="c-mesero">mesero: ' + esc(p.mesero) + '</div>' : '') +
-        '<button class="c-listo" onclick="marcarListo(\'' + esc(p.uuid) + '\')"' + (enviando ? ' disabled' : '') + '>' +
-        (enviando ? '…' : '✓ LISTO') + '</button></div>';
-    }).join('');
+    $('grid').innerHTML = enMano.map(p => cardHTML(p, multiBadge, false)).join('');
   }
 
   // v1.1 · nadie retira → il chip ingiallisce (3') e pulsa rosso (6');
   // in parallelo il GAS (v3.3.5) suona il Telegram del mesero a 2'.
+  // v1.5 · IL TAP DEL RITIRO: quando runner/mesero prende i piatti, tap sul
+  // chip → "¿Retirado?" → ✓ → TS_Retirado nel foglio, chip via, mesero
+  // vede "va en camino", aviso spento. Chi preme è un dettaglio (N7-bis).
   $('listos').innerHTML = listos.length
     ? listos.map(p => {
         const ls = haceLocal(p.listo_hace_s);
         const cls = ls >= CFG.RETIRO_BAD_S ? ' bad' : ls >= CFG.RETIRO_WARN_S ? ' warn' : '';
-        return '<div class="lchip' + cls + '"><b>' + esc(p.mesa || '?') + '</b>' +
-          esc(p.items.map(it => (parseInt(it.llevar, 10) || 1) + '× ' + it.nombre).join(' · ')) +
+        if (STATE.confirmRet === p.uuid) {
+          return '<div class="lchip conf"><b>' + esc(p.mesa || '?') + '</b><span class="det">¿Retirado?</span>' +
+            '<div class="rrow"><button class="rbtn si" onclick="marcarRetirado(\'' + esc(p.uuid) + '\')">✓ Sí</button>' +
+            '<button class="rbtn no" onclick="STATE.confirmRet=null;render()">✕</button></div></div>';
+        }
+        return '<div class="lchip' + cls + '" onclick="STATE.confirmRet=\'' + esc(p.uuid) + '\';render()"><b>' + esc(p.mesa || '?') + '</b>' +
+          '<span class="det">' + esc(p.items.map(it => (parseInt(it.llevar, 10) || 1) + '× ' + it.nombre).join(' · ')) + '</span>' +
           '<span class="h" data-lbase="' + p.listo_hace_s + '">hace ' + fmtHace(ls) + '</span></div>';
       }).join('')
-    : '<div class="lchip" style="opacity:.5">— nada esperando retiro —</div>';
+    : '<div class="lvacio">— nada esperando retiro —</div>';
 }
+
+// v1.4 · la card del pedido — usata dalla griglia E dai chip aperti in espera
+function cardHTML(p, multiBadge, espera){
+  const s = haceLocal(p.hace_s);
+  const enviando = !!STATE.enVuelo[p.uuid];
+  const xl = p.items.length > 8 ? ' xl' : '';   // v1.2 · tavolata → card larga
+  const pinned = STATE.pins.indexOf(p.uuid) >= 0;
+  return '<div class="card ' + claseEspera(s) + xl + (espera ? ' esp' : '') + '" data-uuid="' + esc(p.uuid) + '">' +
+    '<div class="c-head"><div class="c-mesa"><small>MESA</small> ' + esc(p.mesa || '?') + '</div>' +
+    multiBadge(p) +
+    (pinned ? '<span class="c-pin" onclick="bajar(\'' + esc(p.uuid) + '\')">📌 urgente ✕</span>' : '') +
+    '<div class="c-sp"></div><div class="c-timer" data-base="' + p.hace_s + '">' + fmtHace(s) + '</div>' +
+    (espera ? '<button class="c-sube" onclick="subir(\'' + esc(p.uuid) + '\')">⬆ adelante</button>' : '') +
+    (espera ? '<button class="c-cerrar" onclick="toggleEspera(\'' + esc(p.uuid) + '\')">▴ cerrar</button>' : '') +
+    '</div>' +
+    '<div class="c-items">' + p.items.map(it =>
+      '<div class="it"><div class="it-q">' + (parseInt(it.llevar, 10) || 1) + '×</div>' +
+      '<div class="it-body"><div class="it-n">' + esc(it.nombre) + '</div>' +
+      ((it.termino || it.op || it.promo) ? '<div class="it-tags">' +
+        (it.termino ? '<span class="tag term">🥩 ' + esc(it.termino) + '</span>' : '') +
+        (it.op ? '<span class="tag op">🥤 ' + esc(it.op) + '</span>' : '') +
+        (it.promo ? '<span class="tag promo">🎁 ' + esc(it.promo) + '</span>' : '') +
+      '</div>' : '') +
+      '</div></div>').join('') + '</div>' +
+    (p.nota ? '<div class="c-nota">📝 ' + esc(p.nota) + '</div>' : '') +
+    (p.mesero ? '<div class="c-mesero">mesero: ' + esc(p.mesero) + '</div>' : '') +
+    '<button class="c-listo" onclick="marcarListo(\'' + esc(p.uuid) + '\')"' + (enviando ? ' disabled' : '') + '>' +
+    (enviando ? '…' : '✓ LISTO') + '</button></div>';
+}
+
+// v1.4 · il chip d'attesa si apre/chiude · il pin "pasa adelante"
+function toggleEspera(uuid){
+  if (STATE.abiertos.has(uuid)) STATE.abiertos.delete(uuid); else STATE.abiertos.add(uuid);
+  render();
+}
+function subir(uuid){
+  if (STATE.pins.indexOf(uuid) < 0) STATE.pins.unshift(uuid);   // l'ultimo urgente comanda
+  STATE.abiertos.delete(uuid);
+  _savePins();
+  const p = ((STATE.kds && STATE.kds.cola) || []).find(x => x.uuid === uuid);
+  toast('', '📌 Mesa ' + (p ? p.mesa : '?') + ' pasa adelante');
+  render();
+}
+function bajar(uuid){
+  STATE.pins = STATE.pins.filter(u => u !== uuid);
+  _savePins();
+  render();
+}
+
 function tick(){
   // reloj
   const d = new Date();
@@ -478,6 +580,23 @@ function tick(){
     chip.classList.toggle('warn', ls >= CFG.RETIRO_WARN_S && ls < CFG.RETIRO_BAD_S);
     chip.classList.toggle('bad', ls >= CFG.RETIRO_BAD_S);
   });
+}
+
+// v1.5 · il tap del ritiro (dal chip listo, dopo conferma)
+async function marcarRetirado(uuid){
+  STATE.confirmRet = null;
+  try {
+    const r = await gasPost('marcarKdsRetirado', { codigo: STATE.codigo, estacion: STATE.estacion, uuid });
+    if (r.ok) {
+      toast('', r.ya_retirado ? 'Ya estaba retirado ✓' : '🏃 Retirado — en camino a la mesa');
+      if (STATE.kds) STATE.kds.listos = (STATE.kds.listos || []).filter(p => p.uuid !== uuid);
+    } else {
+      toast('bad', 'No se pudo marcar: ' + (r.error || '?'));
+    }
+  } catch (e) {
+    toast('bad', 'Sin conexión — reintenta');
+  }
+  render();
 }
 
 async function marcarListo(uuid){
@@ -542,6 +661,10 @@ if (DEMO === '2') {
     listos: _demo.listos.map(p => Object.assign({}, p, { listo_hace_s: Math.floor((Date.now() - p._l) / 1000) })),
     ts: Date.now() });
   window.gasPost = async (action, body) => {
+    if (action === 'marcarKdsRetirado') {   // v1.5 · il tap del ritiro in demo
+      _demo.listos = _demo.listos.filter(p => p.uuid !== body.uuid);
+      return { ok: true, uuid: body.uuid, estacion: body.estacion };
+    }
     const i = _demo.cola.findIndex(p => p.uuid === body.uuid);
     if (i >= 0) { const p = _demo.cola.splice(i, 1)[0]; p._l = Date.now(); _demo.listos.unshift(p); }
     return { ok: true, uuid: body.uuid, estacion: body.estacion };
@@ -586,6 +709,10 @@ if (DEMO === '1') {
     listos: _demo.listos.map(p => Object.assign({}, p, { listo_hace_s: Math.floor((Date.now() - p._l) / 1000) })),
     ts: Date.now() });
   window.gasPost = async (action, body) => {
+    if (action === 'marcarKdsRetirado') {   // v1.5 · il tap del ritiro in demo
+      _demo.listos = _demo.listos.filter(p => p.uuid !== body.uuid);
+      return { ok: true, uuid: body.uuid, estacion: body.estacion };
+    }
     const i = _demo.cola.findIndex(p => p.uuid === body.uuid);
     if (i >= 0) { const p = _demo.cola.splice(i, 1)[0]; p._l = Date.now(); _demo.listos.unshift(p); }
     return { ok: true, uuid: body.uuid, estacion: body.estacion };
