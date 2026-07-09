@@ -181,7 +181,7 @@
     <button id="nav-precios" onclick="vista('precios')" style="display:none">Precios</button>
   </nav>
   <span class="userchip" id="userchip">—</span>
-  <span class="ver" id="ver">v1.2 · 08-jul</span>
+  <span class="ver" id="ver">v1.3 · 09-jul</span>
 </header>
 
 <main>
@@ -510,6 +510,7 @@ function parseBD(rows){
              esBase: sku >= 5000,
              activo: String(r[iAct]||'').trim().toUpperCase() === 'SI' };
   }).filter(x => x && x.activo && x.nombre);
+  _MAPI = null;   // v1.3: la mappa nome→insumo si ricostruisce a ogni ricarica
 }
 function parseMaster(rows){
   const h = rows[0];
@@ -751,7 +752,8 @@ function buildPayload(){
     precio_venta: esVenta ? (num('f-pv') || null) : null,
     url_foto: val('f-foto').trim(), url_video: val('f-video').trim(),
     procedimiento: S.pasos.join(' | '), perfect_serve: '',
-    notas, visible_para: 'OP,JL,CC,JB,JO,AD', estado: 'SIMULACION',
+    notas, visible_para: 'OP,JL,CC,JB,JO,AD',
+    estado: S.id ? undefined : 'SIMULACION',   // in edit lo estado NON si tocca (una ACTIVA resta ACTIVA)
     ingredientes: S.ings.map(i => ({
       descripcion: i.nombre, q_lote: i.q, um: i.um,
       precio_actual: i.precio, es_subreceta: !!i.esSub, notas: ''
@@ -795,6 +797,7 @@ async function guardar(){
             (esCC ? ' · su SKU nace canónico en bodega' : '') + '.', 'ok');
       localStorage.removeItem('taller_borrador');
       S = null;
+      btn.disabled = false; btn.textContent = '✔ Guardar';
       document.getElementById('wizard').style.display = 'none';
       ['venta','prep','base'].forEach(x => document.getElementById('c-'+x).classList.remove('on'));
       setTimeout(() => { cargar(); vista('recetario'); }, 1800);
@@ -853,11 +856,23 @@ function renderList(){
          : (r.pv ? '$' + fmtN(r.pv) : 'sin precio')}</div></div>
      ${tipoBadge(r.tipo)}</div>`).join('') || '<div class="loading">Nada con ese filtro.</div>';
 }
-// Costo VERO = Σ Detalle (q × precio) — mai la ARRAYFORMULA del Master (marcia su
-// molte ricette vecchie). Stessa aritmetica del GAS fossile.
+// v1.3: prezzo VIVO da BD_INSUMOS (col O, già in INSUMOS) agganciato per nome;
+// il Precio_actual del Detalle è il FOSSILE (fallback + segnalino se diverge).
+let _MAPI = null;
+function insumoVivo(nombre){
+  if (!_MAPI) { _MAPI = {}; INSUMOS.forEach(i => _MAPI[i.nombre.trim().toUpperCase()] = i); }
+  return _MAPI[String(nombre).trim().toUpperCase()] || null;
+}
+function lineaCosto(i){
+  const v = insumoVivo(i.descripcion);
+  const precio = v ? v.precio : i.precio;
+  return { precio, stale: v ? Math.abs(v.precio - i.precio) > 0.01 : false, fossil: i.precio };
+}
+// Costo VERO = Σ Detalle (q × precio VIVO) — mai la ARRAYFORMULA del Master (marcia
+// su molte ricette vecchie).
 function costoDe(r){
   const ings = DETALLE[r.id];
-  if (ings && ings.length) return ings.reduce((t,i) => t + i.q * i.precio, 0);
+  if (ings && ings.length) return ings.reduce((t,i) => t + i.q * lineaCosto(i).precio, 0);
   return r.costoL || r.costoU || 0;
 }
 function foodCost(r){
@@ -892,16 +907,63 @@ function verReceta(id){
         <span>Food cost <span class="hint" style="margin:0">(costo / precio neto sin IVA)</span>: <b class="${fc===null?'':fc<25?'fc-ok':fc<=30?'fc-warn':'fc-bad'}">${fc===null ? '—' : fc.toFixed(1)+'%'}</b></span>`}
         <span>Estado: <b style="color:${r.estado==='ACTIVA'?'var(--green)':'var(--amber)'}">${r.estado}</b>
         ${puedeActivar ? `<button class="btn green" style="padding:3px 14px;font-size:12px;margin-left:8px" onclick="activar('${r.id}')">▶ Activar</button>`
-          : (r.estado!=='ACTIVA' && !completa(r) ? '<span class="hint" style="margin-left:8px">(faltan foto/pasos/costo para Activar)</span>' : '')}</span>
+          : (r.estado!=='ACTIVA' && !completa(r) ? '<span class="hint" style="margin-left:8px">(faltan foto/pasos/costo para Activar)</span>' : '')}
+        ${(esCC || ROLES_PRECIOS.indexOf(ROLE) >= 0) ? `<button class="btn ghost" style="padding:3px 14px;font-size:12px;margin-left:8px" onclick="editarReceta('${r.id}')">✎ Editar</button>` : ''}</span>
       </div>
       <table><thead><tr><th>Ingrediente</th><th class="num">Cantidad</th><th class="num">Costo</th></tr></thead><tbody>
-      ${ings.map(i => `<tr><td>${esc(i.descripcion)}${i.esSub?' <span class="subchip">base</span>':''}</td>
-        <td class="num">${fmtN(i.q)} ${i.um}</td><td class="num">${fmtN(i.q*i.precio)}</td></tr>`).join('')}
+      ${ings.map(i => { const lc = lineaCosto(i); return `<tr><td>${esc(i.descripcion)}${i.esSub?' <span class="subchip">base</span>':''}${lc.stale?` <span title="precio actualizado: guardado $${fmtN(lc.fossil,2)} → vivo $${fmtN(lc.precio,2)}" style="cursor:help;color:var(--amber)">⟳</span>`:''}${!insumoVivo(i.descripcion)?' <span title="no existe en BD_INSUMOS — precio congelado" style="cursor:help;color:var(--red)">∅</span>':''}</td>
+        <td class="num">${fmtN(i.q)} ${i.um}</td><td class="num">${fmtN(i.q*lc.precio)}</td></tr>`; }).join('')}
       </tbody></table>
       ${r.proc ? `<h4 style="margin-top:16px">Cómo se hace</h4><ol class="pasos">${r.proc.split(' | ').map(p=>`<li><span>${esc(p)}</span></li>`).join('')}</ol>` : ''}
       ${r.video ? `<div class="hint" style="margin-top:10px">🎬 <a href="${esc(r.video)}" target="_blank">Video explicativo</a></div>` : ''}
     </div>`;
 }
+/* ── EDITAR: ricarica la ricetta nel wizard, salva con action=editar ── */
+function editarReceta(id){
+  const r = RECETAS.find(x => x.id === id);
+  if (!r) return;
+  const t = r.tipo === 'PREPARACION' ? 'prep' : r.tipo === 'SUBRECETA' ? 'base' : 'venta';
+  if (t === 'venta' && ROLES_PRECIOS.indexOf(ROLE) < 0) return;
+  S = null; vista('crear'); pick(t);
+  S.id = id;
+  // il prefisso lo rimette buildPayload — qui si toglie per non duplicarlo
+  let nom = r.nombre.replace(/^PREPARACION\s+/i, '').replace(/^BASE\s+/i, '');
+  document.getElementById('f-nombre').value = nom;
+  document.getElementById('f-familia').value = r.familia || '';
+  if (t === 'venta') {
+    document.getElementById('f-seccion').value = r.seccion || '';
+    document.getElementById('f-categoria').value = r.categoria || '';
+    document.getElementById('f-pv').value = r.pv || '';
+  } else {
+    document.getElementById('f-qlote').value = r.qlote || '';
+    document.getElementById('f-ulote').value = (r.unidad === 'gr' || r.unidad === 'cc') ? r.unidad : 'un';
+    const fm = (r.formato || '').toLowerCase();
+    setFmt(fm.indexOf('bolsas') === 0 ? 'bolsa' : fm.indexOf('porciones') === 0 ? 'porcion' : 'granel');
+    const mq = fm.match(/de\s+([\d.,]+)/);
+    if (mq) document.getElementById('f-qfmt').value = numCL(mq[1]);
+    const mc = r.notas.match(/\[conserva:(\w+)\]/);
+    document.getElementById('f-conserva').value = (mc && RANGOS[mc[1]]) ? mc[1] : '';
+    const rr = mc && RANGOS[mc[1]];
+    document.getElementById('vrango').textContent = rr ? 'típico: ' + rr[0] + '–' + rr[1] + ' días' : 'elige la conservación';
+    const mv = r.notas.match(/\[vida:(\d+)\]/);
+    document.getElementById('f-vida').value = mv ? mv[1] : '';
+    document.getElementById('f-transfer').value = r.transfer || '';
+  }
+  S.ings = (DETALLE[id] || []).map(i => {
+    const v = insumoVivo(i.descripcion);
+    return { sku: v ? v.sku : '∅', nombre: i.descripcion, q: i.q, um: i.um,
+             precio: v ? v.precio : i.precio, esSub: v ? v.esBase : i.esSub };
+  });
+  S.pasos = r.proc ? r.proc.split(' | ').filter(Boolean) : [];
+  document.getElementById('f-foto').value = r.foto || '';
+  document.getElementById('f-video').value = r.video || '';
+  const btn = document.getElementById('btn-save');
+  btn.disabled = false;
+  btn.textContent = '✔ Guardar cambios en ' + id;
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 async function activar(id){
   const r = RECETAS.find(x => x.id === id);
   if (!r) return;
