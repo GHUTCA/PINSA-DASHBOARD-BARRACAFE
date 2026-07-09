@@ -1,5 +1,12 @@
 /* ════════════════════════════════════════════════════════════════════
- *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.7
+ *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.8
+ *
+ *  v1.8 (09-jul-2026) · fix scope multiempresa (Cantiere Visor):
+ *         - il login classico salva in sessione il LOCAL del foglio usuarios
+ *           (res.local), non quello dell'app — prima chiunque facesse login
+ *           su un'app trasversale (local:'*') diventava corporate '*'.
+ *         - le app trasversali (CFG.local='*') accettano sessioni di
+ *           qualsiasi scope: il "chi vede cosa" lo applica l'app.
  *  Una sola copia in /shared/ · incluso da ogni hub di locale + Portal.
  *
  *  v1.1 · la lista utenti arriva dal GAS (azione lista_usuarios),
@@ -267,7 +274,9 @@
       var s = JSON.parse(raw);
       // v1.3: nel Portal accettiamo qualsiasi local valido (cdl, rsc, *, ...)
       // negli hub locali, accettiamo sessione del locale O sessione corporate (*)
-      if (!modoPortal && s.local !== '*' && s.local !== CFG.local) return null;
+      // v1.8: un'app trasversale (CFG.local='*') accetta sessioni di QUALSIASI scope —
+      // il "chi vede cosa" lo applica l'app; qui si valida solo l'identità.
+      if (!modoPortal && CFG.local !== '*' && s.local !== '*' && s.local !== CFG.local) return null;
       if (!s.expiresAt || s.expiresAt < Date.now()) {   // scaduta
         localStorage.removeItem(SESSION_KEY);
         return null;
@@ -567,7 +576,7 @@
         if (modoPortal) {
           finalizarLoginPortal(res);
         } else {
-          guardarSesion(seleccion.nombre, res.cargo, res.turno);
+          guardarSesion(seleccion.nombre, res.cargo, res.turno, res.local); // v1.8: lo scope viene dal foglio usuarios
           ocultarOverlay();
           aplicarGating(res.cargo);
         }
@@ -614,7 +623,7 @@
         if (modoPortal) {
           finalizarLoginPortal(res);
         } else {
-          guardarSesion(seleccion.nombre, res.cargo, res.turno);
+          guardarSesion(seleccion.nombre, res.cargo, res.turno, res.local); // v1.8: lo scope viene dal foglio usuarios
           ocultarOverlay();
           aplicarGating(res.cargo);
         }
