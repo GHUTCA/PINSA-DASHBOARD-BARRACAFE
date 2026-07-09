@@ -181,7 +181,7 @@
     <button id="nav-precios" onclick="vista('precios')" style="display:none">Precios</button>
   </nav>
   <span class="userchip" id="userchip">—</span>
-  <span class="ver" id="ver">v1.5 · 09-jul</span>
+  <span class="ver" id="ver">v1.6 · 09-jul</span>
 </header>
 
 <main>
@@ -323,9 +323,11 @@
           </div>
           <div class="media">
             <div>
-              <label>📷 Foto de referencia (link)</label>
-              <input id="f-foto" placeholder="https://…" oninput="render()">
-              <div class="hint">la ve la Guía en el local y el control al despacho</div>
+              <label>📷 Foto de referencia (link directo a la imagen)</label>
+              <input id="f-foto" placeholder="https://i.ibb.co/…/foto.jpg" oninput="fotoPrev()">
+              <img id="fotoprev" style="display:none; width:100%; height:130px; object-fit:cover; border-radius:10px; margin-top:8px; border:1px solid var(--line)">
+              <div class="hint" id="fotowarn" style="color:var(--amber)"></div>
+              <div class="hint">la ve la Guía en el local y el control al despacho — en ibb.co usa el «enlace directo» (termina en .jpg/.png)</div>
             </div>
             <div>
               <label>🎬 Video explicativo (link, opcional)</label>
@@ -642,8 +644,42 @@ function addIng(n){
   document.getElementById('sugg').style.display = 'none';
   render();
 }
-function setQ(n, v){ S.ings[n].q = parseFloat(v) || 0; render(); }
+function setQ(n, v){
+  // v1.6: NIENTE ridisegno della tabella mentre si digita — il cursore resta dov'è.
+  S.ings[n].q = parseFloat(v) || 0;
+  const cel = document.getElementById('ingc-' + n);
+  if (cel) cel.textContent = fmtN(S.ings[n].q * S.ings[n].precio);
+  render(true);   // aggiorna solo somme, costi, espejo
+}
 function delIng(n){ S.ings.splice(n,1); render(); }
+
+/* v1.6: anteprima foto live nel form */
+function fotoPrev(){
+  const url = val('f-foto').trim();
+  const img = document.getElementById('fotoprev');
+  const warn = document.getElementById('fotowarn');
+  warn.textContent = '';
+  if (!url) { img.style.display = 'none'; img.removeAttribute('src'); return; }
+  img.onerror = () => {
+    img.style.display = 'none';
+    warn.textContent = '⚠ Ese link no es una imagen directa — en ibb.co copia el «enlace directo» (termina en .jpg/.png).';
+  };
+  img.onload = () => { img.style.display = 'block'; };
+  img.src = url;
+}
+
+/* v1.6: Enter = prossima casella (mai submit, mai perdersi) */
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const t = e.target;
+  if (!t || t.tagName !== 'INPUT') return;
+  if (t.id === 'f-inga' || t.id === 'f-paso') return;   // hanno già il loro Enter
+  e.preventDefault();
+  const foco = [...document.querySelectorAll('#wizard input, #wizard select')]
+    .filter(el => el.offsetParent !== null && !el.disabled && !el.readOnly);
+  const i = foco.indexOf(t);
+  if (i >= 0 && i < foco.length - 1) foco[i+1].focus();
+});
 
 /* ── pasos ── */
 function addPaso(){
@@ -662,21 +698,21 @@ function fmtN(v, dec){ return (v||0).toLocaleString('es-CL', {minimumFractionDig
 function costoTanda(){ return S.ings.reduce((t,i) => t + i.q * i.precio, 0); }
 function entradaTot(){ return S.ings.reduce((t,i) => t + (['gr','cc'].includes(i.um.toLowerCase()) ? i.q : 0), 0); }
 
-function render(){
+function render(soloCalc){
   if (!S) return;
   // nombre preview
   const nom = val('f-nombre').trim();
   const pref = S.tipo==='prep' ? 'PREPARACION ' : S.tipo==='base' ? 'BASE ' : '';
   document.getElementById('nameprev').textContent = nom
     ? '→ ' + pref + nom + (S.tipo!=='venta' ? ' · sección CCentral' : '') : '';
-  // ingredientes
-  document.getElementById('ingbody').innerHTML = S.ings.map((i,n) =>
+  // ingredientes (v1.6: la tabella NON si ricostruisce mentre si digita una cantidad)
+  if (!soloCalc) document.getElementById('ingbody').innerHTML = S.ings.map((i,n) =>
     `<tr><td><span class="skuchip">${i.sku}</span>${esc(i.nombre)}` +
     (i.esSub ? ' <span class="subchip">base</span>' : '') + `</td>` +
-    `<td class="num"><input class="qedit" type="number" value="${i.q}" oninput="setQ(${n},this.value)"></td>` +
+    `<td class="num"><input class="qedit" type="number" value="${i.q||''}" oninput="setQ(${n},this.value)"></td>` +
     `<td style="color:var(--txt3);font-size:12px">${i.um}</td>` +
     `<td class="num">${fmtN(i.precio,2)}</td>` +
-    `<td class="num">${fmtN(i.q*i.precio)}</td>` +
+    `<td class="num" id="ingc-${n}">${fmtN(i.q*i.precio)}</td>` +
     `<td><button class="del" onclick="delIng(${n})">✕</button></td></tr>`).join('');
   const costo = costoTanda(), entrada = entradaTot();
   document.getElementById('ingsum').innerHTML = S.ings.length
@@ -932,6 +968,7 @@ function limpiarForm(){
   ['f-nombre','f-qlote','f-qfmt','f-vida','f-pv','f-transfer','f-foto','f-video','f-paso','f-inga','f-familia','f-seccion','f-categoria','f-conserva']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('vrango').textContent = 'elige la conservación';
+  fotoPrev();
   const btn = document.getElementById('btn-save');
   btn.disabled = false; btn.textContent = '✔ Guardar';
 }
@@ -981,6 +1018,7 @@ function editarReceta(id){
   });
   S.pasos = r.proc ? r.proc.split(' | ').filter(Boolean) : [];
   document.getElementById('f-foto').value = r.foto || '';
+  fotoPrev();
   document.getElementById('f-video').value = r.video || '';
   const btn = document.getElementById('btn-save');
   btn.disabled = false;
