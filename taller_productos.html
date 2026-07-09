@@ -174,9 +174,9 @@
 <header>
   <div class="logo">PINSA · <em>Taller de Productos</em></div>
   <div class="emp">
-    <button class="on">PINSA</button>
-    <button disabled title="Multiempresa: fase F3 (Registry)">EXO</button>
-    <button disabled title="Multiempresa: fase F3 (Registry)">BKS</button>
+    <button class="on" id="emp-PINSA" onclick="setEmp('PINSA')">PINSA</button>
+    <button id="emp-EXO" onclick="setEmp('EXO')">EXO</button>
+    <button id="emp-BKS" onclick="setEmp('BKS')">BKS</button>
   </div>
   <nav>
     <button id="nav-crear" onclick="vista('crear')">＋ Crear</button>
@@ -184,7 +184,7 @@
     <button id="nav-precios" onclick="vista('precios')" style="display:none">Precios</button>
   </nav>
   <span class="userchip" id="userchip">—</span>
-  <span class="ver" id="ver">v1.8 · 09-jul</span>
+  <span class="ver" id="ver">v2.0.2 · 09-jul</span>
 </header>
 
 <main>
@@ -403,18 +403,36 @@
 const BASE_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRKfymDMvJd6XSSnfxuq2entJff2QwmEyKyvRRiiYVqNlwEA_rY7GXv0xVGC4k6746-EVAuLodfS9nt/pub?gid=';
 const GID = { MASTER:'1643758434', DETALLE:'1714485150', BD:'514178276' };
 const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxUsMMbInCEkAVvu6Q8hJkIkj57ZqFgeOegl81mM8Py66vcoqPhIgJ2e7amNOvRrWCG/exec';
-const ROLES_TALLER  = ['CC','GO','GG'];          // chi entra nel Taller
-const ROLES_PRECIOS = ['GO','GG'];               // chi vede/fissa prezzi e Activa
+const ROLES_TALLER  = ['CC','GO','GG','GC'];     // chi entra nel Taller (GC: prezzi/bundle sono suoi)
+const ROLES_PRECIOS = ['GO','GG','GC'];          // chi vede/fissa prezzi e Activa
+// v2.0 — scope empresa dallo scope `local` della sessione (decisione 09-lug):
+//   locale fisico → la sua empresa · 'pinsa'/'bks'/'exo' → tutta quell'empresa ·
+//   '*' → corporate, tutte. Sconosciuto → PINSA (minimo privilegio).
+const LOCAL2EMP = { rsc:'PINSA', cdl:'PINSA', pinsa:'PINSA', bks:'BKS', exo:'EXO' };
+let EMP_ALLOWED = ['PINSA'];
 const RANGOS = { refcocido:[3,5], refcrudo:[1,3], congelado:[30,90], azucar:[14,30], fresco:[1,2] };
 const CONS_LBL = { refcocido:'Refrigerado cocido', refcrudo:'Refrigerado crudo', congelado:'Congelado', azucar:'Seco/alta azúcar', fresco:'Fresco del día' };
 
 /* ═══════════ STATO ═══════════ */
 let ROLE = null;
-let INSUMOS = [];            // {sku, nombre, precio, um, esBase, activo}
+let EMP = 'PINSA';           // v1.9: empresa attiva (F3-lite — Registry più avanti)
+let INSUMOS = [];            // {sku, nombre, precio, um, esBase, activo, emp{}}
 let RECETAS = [];            // righe Master mappate
 let DETALLE = {};            // id → [{descripcion, q, um, precio, esSub}]
 let S = null;                // stato wizard corrente (vedi nuevoEstado)
 let filtro = 'todas', selId = null;
+
+function setEmp(e){
+  if (EMP_ALLOWED.indexOf(e) < 0) return;   // v2.0: mai fuori dal proprio scope
+  EMP = e;
+  ['PINSA','EXO','BKS'].forEach(x =>
+    document.getElementById('emp-'+x).classList.toggle('on', x===e));
+  selId = null;
+  document.getElementById('recdetail').innerHTML = '<div class="loading">Elige una receta.</div>';
+  renderList(); renderPrecios();
+  if (S) render();
+}
+function _flag(v, def){ const s = String(v||'').trim().toUpperCase(); return s ? (s==='SI') : def; }
 
 function nuevoEstado(tipo){
   return { tipo, id:null, ings:[], pasos:[], fmt:'bolsa' };
@@ -433,7 +451,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!s) return;
     clearInterval(chk);
     ROLE = s.role || s.cargo || null;
-    document.getElementById('userchip').textContent = (s.nombre || '') + ' · ' + (ROLE || '');
+    document.getElementById('userchip').textContent = (s.user || s.nombre || '') + ' · ' + (ROLE || '');
     if (ROLES_TALLER.indexOf(ROLE) < 0) {
       document.querySelector('main').innerHTML =
         '<div class="loading">Tu perfil no usa el Taller.<br>Las recetas se consultan en la <b>Guía de Recetas</b>.</div>';
@@ -441,6 +459,13 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     if (ROLES_PRECIOS.indexOf(ROLE) >= 0) document.getElementById('nav-precios').style.display = '';
     if (ROLES_PRECIOS.indexOf(ROLE) < 0)  document.getElementById('c-venta').classList.add('hid'); // chef: prep+base
+    // v2.0: pill empresa secondo lo scope della sessione
+    const scope = String(s.local || s.scope || '').trim().toLowerCase();
+    EMP_ALLOWED = (scope === '*') ? ['PINSA','EXO','BKS'] : [LOCAL2EMP[scope] || 'PINSA'];
+    ['PINSA','EXO','BKS'].forEach(e => {
+      if (EMP_ALLOWED.indexOf(e) < 0) document.getElementById('emp-'+e).style.display = 'none';
+    });
+    setEmp(EMP_ALLOWED[0]);
     cargar();
   }, 300);
 });
@@ -514,7 +539,8 @@ function numCL(v){                  // v1.1: il CSV pubblicato arriva FORMATTATO
 function parseBD(rows){
   const h = rows[0];
   const iSku = idx(h,'SKU'), iDesc = idx(h,'Descripcion'), iO = idx(h,'Precio por Gr CC UN Neto'),
-        iN = idx(h,'Valor Unidad Neto'), iP = idx(h,'UTM'), iAct = idx(h,'Activo No/Activo');
+        iN = idx(h,'Valor Unidad Neto'), iP = idx(h,'UTM'), iAct = idx(h,'Activo No/Activo'),
+        iEP = idx(h,'Empresa_PINSA'), iEE = idx(h,'Empresa_EXO'), iEB = idx(h,'Empresa_BKS');
   INSUMOS = rows.slice(1).map(r => {
     const sku = parseInt(r[iSku]);
     if (!sku) return null;
@@ -522,7 +548,8 @@ function parseBD(rows){
     return { sku, nombre:String(r[iDesc]||'').trim(), precio,
              um:String(r[iP]||'gr').trim().toLowerCase(),
              esBase: sku >= 5000,
-             activo: String(r[iAct]||'').trim().toUpperCase() === 'SI' };
+             activo: String(r[iAct]||'').trim().toUpperCase() === 'SI',
+             emp: { PINSA:_flag(r[iEP], true), EXO:_flag(r[iEE], false), BKS:_flag(r[iEB], false) } };
   }).filter(x => x && x.activo && x.nombre);
   _MAPI = null;   // v1.3: la mappa nome→insumo si ricostruisce a ogni ricarica
 }
@@ -535,7 +562,8 @@ function parseMaster(rows){
     qlote:col('Q lote std'), transfer:col('Precio Transfer'), costoL:col('Costo Lote'),
     costoU:col('Costo Unitario'), pv:col('Precio de Venta Unitario'),
     foto:col('URL_Foto'), video:col('URL_Video'), proc:col('Procedimiento'),
-    notas:col('Notas'), rend:col('Rendimiento') };
+    notas:col('Notas'), rend:col('Rendimiento'),
+    eP:col('Empresa_PINSA'), eE:col('Empresa_EXO'), eB:col('Empresa_BKS') };
   if (map.pv < 0) map.pv = col('Precio de Venta Unitario Bruto');
   RECETAS = rows.slice(1).map(r => {
     const id = String(r[map.id]||'').trim();
@@ -548,7 +576,10 @@ function parseMaster(rows){
       costoL:numCL(r[map.costoL])||0, costoU:numCL(r[map.costoU])||0,
       pv:numCL(r[map.pv])||null, foto:String(r[map.foto]||'').trim(),
       video:String(r[map.video]||'').trim(), proc:String(r[map.proc]||'').trim(),
-      notas:String(r[map.notas]||'').trim(), rend:numCL(r[map.rend])||1 };
+      notas:String(r[map.notas]||'').trim(), rend:numCL(r[map.rend])||1,
+      emp: { PINSA:_flag(map.eP>=0?r[map.eP]:'', true),   // legacy senza colonne = PINSA
+             EXO:_flag(map.eE>=0?r[map.eE]:'', false),
+             BKS:_flag(map.eB>=0?r[map.eB]:'', false) } };
   }).filter(Boolean);
 }
 function parseDetalle(rows){
@@ -621,7 +652,7 @@ function suggest(q){
   q = (q||'').trim().toLowerCase();
   const box = document.getElementById('sugg');
   if (q.length < 2) { box.style.display = 'none'; return; }
-  suggItems = INSUMOS.filter(i => i.nombre.toLowerCase().includes(q)).slice(0, 12);
+  suggItems = INSUMOS.filter(i => i.emp[EMP] && i.nombre.toLowerCase().includes(q)).slice(0, 12);
   suggSel = -1;
   box.innerHTML = suggItems.map((i,n) =>
     `<div onmousedown="addIng(${n})"><span><span class="skuchip">${i.sku}</span>${esc(i.nombre)}` +
@@ -707,7 +738,7 @@ function render(soloCalc){
   const nom = val('f-nombre').trim();
   const pref = S.tipo==='prep' ? 'PREPARACION ' : S.tipo==='base' ? 'BASE ' : '';
   document.getElementById('nameprev').textContent = nom
-    ? '→ ' + pref + nom + (S.tipo!=='venta' ? ' · sección CCentral' : '') : '';
+    ? '→ ' + pref + nom + (S.tipo!=='venta' ? ' · sección CCentral' : '') + ' · ' + EMP : '';
   // ingredientes (v1.6: la tabella NON si ricostruisce mentre si digita una cantidad)
   if (!soloCalc) document.getElementById('ingbody').innerHTML = S.ings.map((i,n) =>
     `<tr><td><span class="skuchip">${i.sku}</span>${esc(i.nombre)}` +
@@ -796,6 +827,7 @@ function buildPayload(){
     categoria: esVenta ? val('f-categoria') : (val('f-ulote')==='cc' ? 'LIQUIDOS' : 'SOLIDOS'),
     formato, unidad_salida: u, q_lote: q, rendimiento: 1,
     formato_entrega: esVenta ? null : { tipo: S.fmt, q: S.fmt === 'granel' ? 1 : qf },
+    empresas: { pinsa: EMP==='PINSA'?'SI':'NO', exo: EMP==='EXO'?'SI':'NO', bks: EMP==='BKS'?'SI':'NO' },
     precio_transfer: num('f-transfer') || null,
     dificultad: 'Baja', tiempo_prep: 0, tiempo_coccion: 0,
     precio_venta: esVenta ? (num('f-pv') || null) : null,
@@ -888,6 +920,7 @@ function setFil(btn, f){
 }
 function pasaFiltro(r){
   if (r.estado === 'ARCHIVADA') return false;
+  if (!r.emp[EMP]) return false;                 // v1.9: solo l'empresa attiva
   if (filtro === 'venta') return ['ENSAMBLE','SIMPLE','OFERTA'].includes(r.tipo);
   if (filtro === 'ccentral') return r.tipo === 'PREPARACION';
   if (filtro === 'base') return r.tipo === 'SUBRECETA';
@@ -1009,6 +1042,11 @@ function editarReceta(id){
   if (!r) return;
   const t = r.tipo === 'PREPARACION' ? 'prep' : r.tipo === 'SUBRECETA' ? 'base' : 'venta';
   if (t === 'venta' && ROLES_PRECIOS.indexOf(ROLE) < 0) return;
+  // v1.9: il pill empresa si allinea alla ricetta — mai ribattezzarla per sbaglio
+  if (!r.emp[EMP]) {
+    const own = ['PINSA','EXO','BKS'].find(e => r.emp[e]) || 'PINSA';
+    setEmp(own);
+  }
   S = null; vista('crear'); pick(t);
   S.id = id;
   // il prefisso lo rimette buildPayload — qui si toglie per non duplicarlo
@@ -1063,7 +1101,7 @@ async function activar(id){
 /* ═══════════ PRECIOS (GO·GG) ═══════════ */
 function renderPrecios(){
   if (ROLES_PRECIOS.indexOf(ROLE) < 0) return;
-  const ventas = RECETAS.filter(r => ['ENSAMBLE','SIMPLE','OFERTA'].includes(r.tipo) && r.estado !== 'ARCHIVADA');
+  const ventas = RECETAS.filter(r => ['ENSAMBLE','SIMPLE','OFERTA'].includes(r.tipo) && r.estado !== 'ARCHIVADA' && r.emp[EMP]);
   document.getElementById('pvbody').innerHTML = ventas.map(r => {
     const fc = foodCost(r);
     const cls = fc===null ? '' : fc<25 ? 'fc-ok' : fc<=30 ? 'fc-warn' : 'fc-bad';
