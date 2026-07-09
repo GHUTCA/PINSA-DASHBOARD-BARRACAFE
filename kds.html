@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="es-CL">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f0f16">
+<title>BKS KDS</title>
+<!-- DEVICE-CLASS: 2 · tablet KDS (apoyado, pantalla siempre encendida, Wi-Fi) -->
+<!-- ════════════════════════════════════════════════════════════════════
+     kds.html · v1.0 · 9jul2026 · Cantiere MENU (spec 09-jul)
+     Kitchen Display System: una página, dos sombreros — ?st=cocina / ?st=barra.
+     Entra con el código del turno (una vez, localStorage) → cola de producción
+     (pedidos DIGITADOS, solo los items de la estación, llevar = unidades a
+     producir) → tap LISTO → TS_Listo_<Estación> → el mesero ve "retirar".
+     Backend: MENU GAS v3.3.4 (getKds GET · marcarKdsListo POST).
+     Vive en el repo PINSA (sistema.pinsita.cl/kds.html).
+     ════════════════════════════════════════════════════════════════════ -->
+<style>
+  :root{
+    --bg:#0f0f16; --card:#1a1a24; --card2:#222230; --bord:rgba(255,255,255,.09);
+    --t1:#f2ead8; --t2:#b8b0a0; --t3:#8a8577;
+    --acc:#d9a441; --ok:#3db876; --warn:#f5a623; --bad:#e05252;
+    --est:#e07b39;              /* cocina */
+  }
+  body[data-st="barra"]{ --est:#39a8e0; }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;
+    font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+  html,body{background:var(--bg);color:var(--t1);min-height:100%}
+  body{padding:calc(10px + env(safe-area-inset-top,0)) 14px calc(24px + env(safe-area-inset-bottom,0))}
+  button{font-family:inherit;cursor:pointer}
+  .hide{display:none!important}
+
+  /* ═════ ENTRADA ═════ */
+  #vEntrada{max-width:430px;margin:0 auto;padding-top:10vh;text-align:center}
+  .ent-logo{font-size:44px;margin-bottom:10px}
+  .ent-title{font-size:22px;font-weight:800;margin-bottom:4px}
+  .ent-sub{font-size:13px;color:var(--t3);margin-bottom:24px}
+  .est-pick{display:flex;gap:12px;margin-bottom:20px}
+  .est-btn{flex:1;border:2px solid var(--bord);background:var(--card);color:var(--t2);
+    border-radius:16px;padding:20px 8px;font-size:18px;font-weight:900}
+  .est-btn .ico{display:block;font-size:34px;margin-bottom:6px}
+  .est-btn.on{border-color:var(--est);color:var(--t1);background:var(--card2)}
+  .ent-field{margin-bottom:14px;text-align:left}
+  .ent-label{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin-bottom:6px;display:block}
+  .ent-input{width:100%;background:var(--card);border:1.5px solid var(--bord);border-radius:14px;
+    color:var(--t1);padding:15px 16px;font-size:24px;font-weight:800;letter-spacing:.35em;text-align:center;outline:none}
+  .ent-input:focus{border-color:var(--acc)}
+  .ent-err{color:var(--bad);font-size:13px;min-height:18px;margin:8px 0}
+  .btn{display:block;width:100%;border:0;border-radius:14px;padding:16px;font-size:18px;font-weight:900;
+    color:#141018;background:var(--acc)}
+  .btn:disabled{opacity:.55}
+  .ent-hint{font-size:11.5px;color:var(--t3);margin-top:18px;line-height:1.6}
+
+  /* ═════ TABLERO ═════ */
+  .top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .top .est{font-size:26px;font-weight:900;color:var(--est);display:flex;align-items:center;gap:8px}
+  .top .cuenta{font-size:15px;font-weight:800;color:var(--t2);background:var(--card);
+    border:1px solid var(--bord);border-radius:20px;padding:5px 14px}
+  .top .sp{flex:1}
+  .top .reloj{font-size:20px;font-weight:800;color:var(--t3);font-variant-numeric:tabular-nums}
+  .top .salir{background:transparent;border:1.5px solid var(--bord);color:var(--t3);
+    border-radius:10px;padding:7px 12px;font-size:12px;font-weight:700}
+  .offline{background:rgba(224,82,82,.12);border:1px solid var(--bad);color:var(--bad);
+    border-radius:10px;padding:8px 12px;font-size:13px;margin:8px 0;display:none;text-align:center}
+  .offline.show{display:block}
+
+  #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px;align-items:start}
+  .vacio{grid-column:1/-1;text-align:center;color:var(--t3);padding:60px 0;font-size:17px}
+  .vacio .ico{font-size:50px;display:block;margin-bottom:12px}
+
+  .card{background:var(--card);border:1.5px solid var(--bord);border-radius:16px;overflow:hidden;
+    border-top:5px solid var(--ok)}
+  .card.warn{border-top-color:var(--warn)}
+  .card.bad{border-top-color:var(--bad);animation:lat 1.6s ease-in-out infinite}
+  @keyframes lat{0%,100%{box-shadow:none}50%{box-shadow:0 0 0 3px rgba(224,82,82,.35)}}
+  .c-head{display:flex;align-items:baseline;gap:10px;padding:12px 14px 8px}
+  .c-mesa{font-size:40px;font-weight:900;line-height:1}
+  .c-mesa small{font-size:14px;font-weight:700;color:var(--t3);letter-spacing:.06em}
+  .c-sp{flex:1}
+  .c-timer{font-size:26px;font-weight:900;font-variant-numeric:tabular-nums;color:var(--ok)}
+  .card.warn .c-timer{color:var(--warn)}
+  .card.bad  .c-timer{color:var(--bad)}
+  .c-items{padding:2px 14px 10px}
+  .it{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-top:1px dashed var(--bord)}
+  .it:first-child{border-top:0}
+  .it-q{font-size:24px;font-weight:900;color:var(--est);min-width:46px;white-space:nowrap}
+  .it-body{flex:1}
+  .it-n{font-size:17px;font-weight:700;line-height:1.25}
+  .it-tags{margin-top:3px;display:flex;flex-wrap:wrap;gap:5px}
+  .tag{font-size:12.5px;font-weight:800;border-radius:8px;padding:2px 8px}
+  .tag.term{background:rgba(224,82,82,.16);color:#f08a8a;border:1px solid rgba(224,82,82,.4)}
+  .tag.op{background:rgba(57,168,224,.14);color:#7cc4ea;border:1px solid rgba(57,168,224,.4)}
+  .tag.promo{background:rgba(217,164,65,.14);color:var(--acc);border:1px solid rgba(217,164,65,.4)}
+  .c-nota{margin:0 14px 10px;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.35);
+    color:#f0c078;border-radius:10px;padding:7px 10px;font-size:14px;font-weight:600}
+  .c-mesero{padding:0 14px 10px;font-size:12px;color:var(--t3)}
+  .c-listo{display:block;width:100%;border:0;padding:16px;font-size:20px;font-weight:900;
+    background:var(--ok);color:#0c1710;letter-spacing:.04em}
+  .c-listo:disabled{opacity:.6}
+
+  /* ═════ LISTOS RECIENTES ═════ */
+  .lst-title{margin:22px 0 8px;font-size:12px;font-weight:800;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--t3)}
+  #listos{display:flex;gap:8px;flex-wrap:wrap}
+  .lchip{background:var(--card);border:1px solid var(--bord);border-radius:12px;
+    padding:8px 12px;font-size:13.5px;color:var(--t2);display:flex;gap:8px;align-items:baseline}
+  .lchip b{font-size:17px;color:var(--t1)}
+  .lchip .h{color:var(--ok);font-weight:700;font-variant-numeric:tabular-nums}
+
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(80px);
+    background:var(--card2);border:1px solid var(--bord);color:var(--t1);border-radius:14px;
+    padding:12px 20px;font-size:15px;font-weight:700;opacity:0;transition:.25s;z-index:50;
+    max-width:90vw;text-align:center}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.bad{border-color:var(--bad);color:#f08a8a}
+</style>
+</head>
+<body>
+
+<!-- ═════ ENTRADA ═════ -->
+<section id="vEntrada">
+  <div class="ent-logo">🍳</div>
+  <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.0 · 9jul</span></div>
+  <div class="est-pick">
+    <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
+    <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
+  </div>
+  <div class="ent-field">
+    <label class="ent-label" for="entCodigo">Código del turno</label>
+    <input class="ent-input" id="entCodigo" inputmode="numeric" maxlength="4" placeholder="····" autocomplete="off">
+  </div>
+  <div class="ent-err" id="entErr"></div>
+  <button class="btn" id="entBtn" onclick="entrar()">Encender pantalla</button>
+  <div class="ent-hint">El código lo abre el JL cada día en Menu Admin.<br>
+    Deja el tablet enchufado — la pantalla se mantiene encendida sola.</div>
+</section>
+
+<!-- ═════ TABLERO ═════ -->
+<section id="vTablero" class="hide">
+  <div class="top">
+    <div class="est" id="tEst">🍳 COCINA</div>
+    <div class="cuenta"><span id="tCuenta">0</span> en cola</div>
+    <div class="sp"></div>
+    <div class="reloj" id="tReloj">--:--</div>
+    <button class="salir" onclick="salir()">cambiar</button>
+  </div>
+  <div class="offline" id="offline">⚠ Sin conexión — reintentando… la cola puede estar desactualizada</div>
+  <div id="grid"></div>
+  <div class="lst-title">✓ Listos recientes (esperando retiro)</div>
+  <div id="listos"></div>
+</section>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ═════ CONFIG ═════ */
+const QS = new URLSearchParams(location.search);
+const CFG = {
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbzZkS3bBaYc34uJ6wXP9FG13i58-NT0FJp964vqkUYbRObUxryeRb9l_Fz24kb42f5t/exec',
+  LOCAL: (QS.get('l') || localStorage.getItem('kds_local') || 'BKS').trim().toUpperCase(),
+  POLL_MS: 8000,
+  TIMEOUT_MS: 25000,
+  // umbrales del semáforo de producción (segundos desde el digitado)
+  T_WARN_S: 300, T_BAD_S: 600,
+  SK: { COD: 'kds_codigo', EST: 'kds_estacion', LOC: 'kds_local' },
+};
+
+const STATE = {
+  estacion: (QS.get('st') || localStorage.getItem(CFG.SK.EST) || '').trim().toLowerCase(),
+  codigo: localStorage.getItem(CFG.SK.COD) || (QS.get('c') || '').trim(),
+  kds: null,            // último payload getKds
+  fetchAt: 0,           // Date.now() del último poll (para correr timers en local)
+  enVuelo: {},          // uuid → true (LISTO in flight)
+  pollTimer: null, tickTimer: null,
+  vistos: new Set(), vistosInit: false,
+  fallos: 0,
+};
+
+/* ═════ CAMPANA (patrón mesero v1.4: din-don desde la página) ═════ */
+let _audioCtx = null;
+document.addEventListener('click', () => {
+  if(!_audioCtx){ try { _audioCtx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){} }
+}, { once: true });
+function alarmaNueva(){
+  try { if(navigator.vibrate) navigator.vibrate([300, 120, 300]); } catch(e){}
+  try {
+    if(!_audioCtx) return;
+    [[880, 0], [1175, 0.18]].forEach(([hz, t]) => {
+      const o = _audioCtx.createOscillator(), g = _audioCtx.createGain();
+      o.frequency.value = hz; o.type = 'sine';
+      g.gain.setValueAtTime(0.001, _audioCtx.currentTime + t);
+      g.gain.exponentialRampToValueAtTime(0.5, _audioCtx.currentTime + t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + t + 0.5);
+      o.connect(g); g.connect(_audioCtx.destination);
+      o.start(_audioCtx.currentTime + t); o.stop(_audioCtx.currentTime + t + 0.55);
+    });
+  } catch(e){}
+}
+
+/* ═════ WAKE LOCK · el tablet KDS no puede dormirse ═════ */
+let _wakeLock = null;
+async function pedirWakeLock(){
+  try {
+    if ('wakeLock' in navigator) _wakeLock = await navigator.wakeLock.request('screen');
+  } catch(e){}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !$('vTablero').classList.contains('hide')) pedirWakeLock();
+});
+
+/* ═════ NETWORK (patrón mesero: text/plain, no preflight) ═════ */
+async function gasGet(action, params) {
+  const url = new URL(CFG.GAS_URL);
+  url.searchParams.set('action', action);
+  url.searchParams.set('local', CFG.LOCAL);
+  Object.keys(params || {}).forEach(k => url.searchParams.set(k, params[k]));
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), CFG.TIMEOUT_MS);
+  try {
+    const r = await fetch(url.toString(), { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(t);
+    if (!r.ok) throw new Error('http_' + r.status);
+    return await r.json();
+  } catch (e) { clearTimeout(t); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+async function gasPost(action, body) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), CFG.TIMEOUT_MS);
+  try {
+    const r = await fetch(CFG.GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {})),
+      signal: ctrl.signal, cache: 'no-store', redirect: 'follow',
+    });
+    clearTimeout(t);
+    if (!r.ok) throw new Error('http_' + r.status);
+    return await r.json();
+  } catch (e) { clearTimeout(t); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+
+/* ═════ HELPERS ═════ */
+const $ = id => document.getElementById(id);
+const esc = s => (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtHace = s => { s = Math.max(0, s); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
+let toastT = null;
+function toast(tipo, msg) {
+  const el = $('toast');
+  el.className = 'toast show ' + tipo;
+  el.textContent = msg;
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+/* ═════ ENTRADA ═════ */
+function pickEst(est){
+  STATE.estacion = est;
+  document.body.dataset.st = est;
+  $('pickCocina').classList.toggle('on', est === 'cocina');
+  $('pickBarra').classList.toggle('on', est === 'barra');
+}
+function showEntrada(msg){
+  $('vTablero').classList.add('hide');
+  $('vEntrada').classList.remove('hide');
+  $('entLocal').textContent = CFG.LOCAL;
+  if (STATE.estacion) pickEst(STATE.estacion);
+  if (STATE.codigo) $('entCodigo').value = STATE.codigo;
+  if (msg) $('entErr').textContent = msg;
+  if (STATE.pollTimer) { clearInterval(STATE.pollTimer); STATE.pollTimer = null; }
+  if (STATE.tickTimer) { clearInterval(STATE.tickTimer); STATE.tickTimer = null; }
+}
+async function entrar(){
+  const codigo = $('entCodigo').value.trim();
+  $('entErr').textContent = '';
+  if (!STATE.estacion) { $('entErr').textContent = 'Elige la estación: cocina o barra.'; return; }
+  if (!/^\d{4}$/.test(codigo)) { $('entErr').textContent = 'El código son 4 números (lo abre el JL).'; return; }
+  $('entBtn').disabled = true;
+  try {
+    const r = await gasGet('getKds', { codigo, estacion: STATE.estacion });
+    if (!r.ok) {
+      $('entErr').textContent = r.error === 'codigo_invalid' ? 'Código inválido o turno cerrado — pide el de hoy al JL.'
+        : 'No se pudo entrar: ' + (r.error || '?');
+      return;
+    }
+    STATE.codigo = codigo;
+    localStorage.setItem(CFG.SK.COD, codigo);
+    localStorage.setItem(CFG.SK.EST, STATE.estacion);
+    localStorage.setItem(CFG.SK.LOC, CFG.LOCAL);
+    aplicar(r);
+    showTablero();
+  } catch (e) {
+    $('entErr').textContent = 'Sin conexión con el sistema — revisa el Wi-Fi y reintenta.';
+  } finally { $('entBtn').disabled = false; }
+}
+function salir(){
+  localStorage.removeItem(CFG.SK.COD);
+  STATE.codigo = ''; STATE.kds = null;
+  STATE.vistos = new Set(); STATE.vistosInit = false;
+  showEntrada();
+}
+
+/* ═════ TABLERO ═════ */
+function showTablero(){
+  $('vEntrada').classList.add('hide');
+  $('vTablero').classList.remove('hide');
+  document.body.dataset.st = STATE.estacion;
+  $('tEst').textContent = STATE.estacion === 'barra' ? '🍸 BARRA' : '🍳 COCINA';
+  pedirWakeLock();
+  if (!STATE.pollTimer) STATE.pollTimer = setInterval(poll, CFG.POLL_MS);
+  if (!STATE.tickTimer) STATE.tickTimer = setInterval(tick, 1000);
+  render();
+}
+async function poll(){
+  try {
+    const r = await gasGet('getKds', { codigo: STATE.codigo, estacion: STATE.estacion });
+    if (!r.ok) {
+      if (r.error === 'codigo_invalid') { salir(); showEntrada('El turno se cerró — pide el código nuevo al JL.'); }
+      return;
+    }
+    STATE.fallos = 0;
+    $('offline').classList.remove('show');
+    aplicar(r);
+    render();
+  } catch (e) {
+    STATE.fallos++;
+    if (STATE.fallos >= 2) $('offline').classList.add('show');
+  }
+}
+function aplicar(r){
+  STATE.kds = r;
+  STATE.fetchAt = Date.now();
+  let hayNuevo = false;
+  (r.cola || []).forEach(p => { if (p.uuid && !STATE.vistos.has(p.uuid)) { STATE.vistos.add(p.uuid); hayNuevo = true; } });
+  if (hayNuevo && STATE.vistosInit) alarmaNueva();
+  STATE.vistosInit = true;
+}
+function haceLocal(base_s){        // corre el timer entre polls sin pedir red
+  return base_s + Math.floor((Date.now() - STATE.fetchAt) / 1000);
+}
+function claseEspera(s){
+  if (s < CFG.T_WARN_S) return '';
+  if (s < CFG.T_BAD_S) return 'warn';
+  return 'bad';
+}
+function render(){
+  const r = STATE.kds;
+  if (!r) return;
+  const cola = r.cola || [], listos = r.listos || [];
+  $('tCuenta').textContent = cola.length;
+
+  if (!cola.length) {
+    $('grid').innerHTML = '<div class="vacio"><span class="ico">' +
+      (STATE.estacion === 'barra' ? '🍸' : '🍳') +
+      '</span>Cola vacía — todo al día.<br>Los pedidos aparecen solos cuando el mesero los digita.</div>';
+  } else {
+    $('grid').innerHTML = cola.map(p => {
+      const s = haceLocal(p.hace_s);
+      const enviando = !!STATE.enVuelo[p.uuid];
+      return '<div class="card ' + claseEspera(s) + '" data-uuid="' + esc(p.uuid) + '">' +
+        '<div class="c-head"><div class="c-mesa"><small>MESA</small> ' + esc(p.mesa || '?') + '</div>' +
+        '<div class="c-sp"></div><div class="c-timer" data-base="' + p.hace_s + '">' + fmtHace(s) + '</div></div>' +
+        '<div class="c-items">' + p.items.map(it =>
+          '<div class="it"><div class="it-q">' + (parseInt(it.llevar, 10) || 1) + '×</div>' +
+          '<div class="it-body"><div class="it-n">' + esc(it.nombre) + '</div>' +
+          ((it.termino || it.op || it.promo) ? '<div class="it-tags">' +
+            (it.termino ? '<span class="tag term">🥩 ' + esc(it.termino) + '</span>' : '') +
+            (it.op ? '<span class="tag op">🥤 ' + esc(it.op) + '</span>' : '') +
+            (it.promo ? '<span class="tag promo">🎁 ' + esc(it.promo) + '</span>' : '') +
+          '</div>' : '') +
+          '</div></div>').join('') + '</div>' +
+        (p.nota ? '<div class="c-nota">📝 ' + esc(p.nota) + '</div>' : '') +
+        (p.mesero ? '<div class="c-mesero">mesero: ' + esc(p.mesero) + '</div>' : '') +
+        '<button class="c-listo" onclick="marcarListo(\'' + esc(p.uuid) + '\')"' + (enviando ? ' disabled' : '') + '>' +
+        (enviando ? '…' : '✓ LISTO') + '</button></div>';
+    }).join('');
+  }
+
+  $('listos').innerHTML = listos.length
+    ? listos.map(p => '<div class="lchip"><b>' + esc(p.mesa || '?') + '</b>' +
+        esc(p.items.map(it => (parseInt(it.llevar, 10) || 1) + '× ' + it.nombre).join(' · ')) +
+        '<span class="h">hace ' + fmtHace(haceLocal(p.listo_hace_s)) + '</span></div>').join('')
+    : '<div class="lchip" style="opacity:.5">— nada esperando retiro —</div>';
+}
+function tick(){
+  // reloj
+  const d = new Date();
+  $('tReloj').textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  // timers de las cards sin re-render completo
+  document.querySelectorAll('.c-timer[data-base]').forEach(el => {
+    const s = haceLocal(parseInt(el.dataset.base, 10) || 0);
+    el.textContent = fmtHace(s);
+    const card = el.closest('.card');
+    card.classList.toggle('warn', s >= CFG.T_WARN_S && s < CFG.T_BAD_S);
+    card.classList.toggle('bad', s >= CFG.T_BAD_S);
+  });
+}
+
+async function marcarListo(uuid){
+  if (STATE.enVuelo[uuid]) return;
+  STATE.enVuelo[uuid] = true;
+  render();
+  try {
+    const r = await gasPost('marcarKdsListo', { codigo: STATE.codigo, estacion: STATE.estacion, uuid });
+    if (r.ok) {
+      toast('', r.ya_listo ? 'Ya estaba listo ✓' : '✓ Listo — el mesero fue avisado');
+      // saca la card al instante (el poll confirma después)
+      if (STATE.kds) {
+        const idx = (STATE.kds.cola || []).findIndex(p => p.uuid === uuid);
+        if (idx >= 0) {
+          const p = STATE.kds.cola.splice(idx, 1)[0];
+          p.listo_hace_s = 0;
+          STATE.kds.listos.unshift(p);
+        }
+      }
+    } else {
+      toast('bad', 'No se pudo marcar: ' + (r.error || '?'));
+    }
+  } catch (e) {
+    toast('bad', 'Sin conexión — reintenta el LISTO');
+  } finally {
+    delete STATE.enVuelo[uuid];
+    render();
+  }
+}
+
+/* ═════ DEMO (?demo=1) · check a secco senza GAS: pedidos finti che vivono ═════ */
+const DEMO = QS.get('demo') === '1';
+if (DEMO) {
+  const POOL = [
+    { mesa: '12',  mesero: 'Alejandro', nota: 'sin picante',
+      items: [ { nombre: 'Gohan de Pollo', llevar: 2 },
+               { nombre: 'Lomo Saltado', llevar: 1, op: 'Copa de vino', termino: 'A punto' } ] },
+    { mesa: '82',  mesero: 'Claret', nota: '',
+      items: [ { nombre: 'Mojito Bourbon (350ml)', llevar: 4, promo: '2x1' } ] },
+    { mesa: '105', mesero: 'Ray', nota: 'cliente apurado',
+      items: [ { nombre: 'Tabla Ganadera', llevar: 1, termino: 'Tres cuartos' } ] },
+    { mesa: '41',  mesero: 'Murieli', nota: '',
+      items: [ { nombre: 'Camarones Crocantes', llevar: 1 }, { nombre: 'Trilogía de Mar', llevar: 1 } ] },
+    { mesa: '61',  mesero: 'Isabel', nota: 'cumpleaños — con velita 🎂',
+      items: [ { nombre: 'Filete Mignon', llevar: 2, termino: 'Inglesa' } ] },
+    { mesa: '94',  mesero: 'Alejandro', nota: '',
+      items: [ { nombre: 'Jugo Frutilla', llevar: 3 }, { nombre: 'Spritz Aperol', llevar: 2 } ] },
+  ];
+  let _n = 0;
+  const _demo = { cola: [], listos: [] };
+  function demoSpawn(viejo_s){
+    const p = JSON.parse(JSON.stringify(POOL[_n % POOL.length])); _n++;
+    p.uuid = 'DEMO-' + _n;
+    p.items.forEach(it => { it.op = it.op || ''; it.termino = it.termino || ''; it.promo = it.promo || ''; });
+    p._t = Date.now() - (viejo_s || 0) * 1000;
+    _demo.cola.push(p);
+  }
+  demoSpawn(40); demoSpawn(390); demoSpawn(660);          // verde · warn · bad
+  setInterval(() => { if (_demo.cola.length < 6) demoSpawn(0); }, 40000);  // arrivi nuovi → campana
+  window.gasGet = async () => ({ ok: true, estacion: STATE.estacion, fecha_op: 'demo',
+    cola: _demo.cola.map(p => Object.assign({}, p, { hace_s: Math.floor((Date.now() - p._t) / 1000) })),
+    listos: _demo.listos.map(p => Object.assign({}, p, { listo_hace_s: Math.floor((Date.now() - p._l) / 1000) })),
+    ts: Date.now() });
+  window.gasPost = async (action, body) => {
+    const i = _demo.cola.findIndex(p => p.uuid === body.uuid);
+    if (i >= 0) { const p = _demo.cola.splice(i, 1)[0]; p._l = Date.now(); _demo.listos.unshift(p); }
+    return { ok: true, uuid: body.uuid, estacion: body.estacion };
+  };
+}
+
+/* ═════ BOOT ═════ */
+(function boot(){
+  if (DEMO) {
+    if (STATE.estacion !== 'barra') STATE.estacion = 'cocina';
+    STATE.codigo = '0000';
+    showTablero();
+    poll();
+    document.querySelector('.top .cuenta').insertAdjacentHTML('beforebegin',
+      '<div class="cuenta" style="color:var(--warn);border-color:var(--warn)">DEMO</div>');
+    return;
+  }
+  if (STATE.estacion !== 'cocina' && STATE.estacion !== 'barra') STATE.estacion = '';
+  if (STATE.estacion) pickEst(STATE.estacion);
+  if (STATE.codigo && STATE.estacion) {
+    // reentrada silenciosa (tablet que se reinicia solo)
+    gasGet('getKds', { codigo: STATE.codigo, estacion: STATE.estacion })
+      .then(r => { if (r.ok) { aplicar(r); showTablero(); } else showEntrada(); })
+      .catch(() => showEntrada());
+  } else showEntrada();
+})();
+</script>
+</body>
+</html>
