@@ -84,6 +84,11 @@
   .card .btn{margin-top:12px}
   .mio-meta{font-size:12.5px;color:var(--t3);margin-top:2px;line-height:1.5}
   .mio-meta b.warn{color:var(--warn)}
+  /* v1.6 · KDS: el pedido está pronto en cocina/barra — a retirar */
+  .retirar{margin-top:8px;background:rgba(61,184,118,.14);border:1.5px solid var(--ok);
+    color:var(--ok);border-radius:12px;padding:10px 12px;font-size:15px;font-weight:900;
+    text-align:center;letter-spacing:.03em;animation:ret 1.4s ease-in-out infinite}
+  @keyframes ret{0%,100%{opacity:1}50%{opacity:.55}}
   .limpia{display:flex;align-items:center;gap:10px}
   .limpia .mesa{font-size:22px}
   .limpia .btn{margin:0;width:auto;flex:1;padding:12px;font-size:15px}
@@ -145,7 +150,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.5 · 8jul</span>
+    <span class="ver" id="ver">v1.7 · 9jul</span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
@@ -175,6 +180,7 @@ const STATE = {
   pollTimer: null,
   vistos: new Set(),   // v1.4 · uuid/llamadas già visti (per la doppia campana)
   vistosInit: false,   // il primo poll riempie senza suonare
+  listoRingAt: 0,      // v1.7 · ultimo squillo "retirar" (re-campana 90s)
 };
 
 /* ═════ v1.4 · DOBLE CAMPANA · vibración + beep DALLA PAGINA ═════
@@ -206,11 +212,20 @@ function detectarNuevos(r){
   const ids = []
     .concat((r.pendientes||[]).map(p=>p.uuid))
     .concat((r.sin_dueno||[]).map(p=>p.uuid))
-    .concat((r.llamadas||[]).map(l=>l.id_llamada));
+    .concat((r.llamadas||[]).map(l=>l.id_llamada))
+    // v1.6 · KDS: un mío che passa a LISTO suona come un arrivo — è un "vieni a ritirare"
+    .concat((r.mios||[]).filter(p=>p.listo).map(p=>'listo:'+p.uuid));
   let hayNuevo = false;
   ids.forEach(id => { if(id && !STATE.vistos.has(id)){ STATE.vistos.add(id); hayNuevo = true; } });
-  if(hayNuevo && STATE.vistosInit) alarmaNueva();
+  if(hayNuevo && STATE.vistosInit) { alarmaNueva(); STATE.listoRingAt = Date.now(); }
   STATE.vistosInit = true;
+  // v1.7 · finché c'è un LISTO non ritirato, la campana INSISTE ogni 90s
+  // (il piatto raffredda — in parallelo il GAS manda il Telegram "retirar")
+  const hayListo = (r.mios||[]).some(p => p.listo);
+  if (hayListo && STATE.vistosInit && Date.now() - STATE.listoRingAt > 90000) {
+    alarmaNueva();
+    STATE.listoRingAt = Date.now();
+  }
 }
 
 /* ═════ NETWORK (pattern menu_admin: text/plain, no preflight) ═════ */
@@ -403,11 +418,14 @@ function render(r) {
     hm += '<div class="h">Míos · en curso — ' + mios.length + '</div>';
     mios.forEach(p => {
       const esDig = p.estado === 'digitado';
+      // v1.6 · KDS: listo=true quando OGNI stazione coinvolta ha dato il suo LISTO
+      const esListo = esDig && !!p.listo;
       // v1.5 · dettaglio COMPLETO anche nei míos: è qui che digiti su ALOHA
       hm += '<div class="card"><div class="mesa-row"><span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
-        '<span class="plaza">' + esc(p.plaza || '—') + (esDig ? ' · en producción 🍳' : ' · confirmado en mesa') + '</span></div>' +
+        '<span class="plaza">' + esc(p.plaza || '—') + (esListo ? '' : esDig ? ' · en producción 🍳' : ' · confirmado en mesa') + '</span></div>' +
         bodyItems(p) +
         '<div class="mio-meta">' + resumenCorto(p) + (esDig ? '' : ' · <b class="warn">falta digitarlo</b>') + '</div>' +
+        (esListo ? '<div class="retirar">🍳 LISTO · retirar de cocina/barra</div>' : '') +
         (esDig
           ? '<button class="btn verde" onclick="marcar(\'' + esc(p.uuid) + '\',\'entregado\',this)">✓ ENTREGADO</button>'
           : '<button class="btn" onclick="marcar(\'' + esc(p.uuid) + '\',\'digitado\',this)">⌨ DIGITADO EN ALOHA</button>') +
