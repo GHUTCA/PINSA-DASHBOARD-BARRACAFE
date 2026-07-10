@@ -444,7 +444,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v40 · 7jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v41 · 7jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1">🧾</button>
     </div>
@@ -1712,14 +1712,11 @@ function buildPicker(mode, idx){
       var canDel=grupoFilas.length>1;
       html+='<div class="grp-row"><input class="grp-q" data-q="'+i+'" inputmode="'+(f.modo==='cont'?'numeric':'decimal')+'" value="'+esc(String(f.q))+'">'+mid+
         (canDel?'<button class="grp-del" data-del="'+i+'" aria-label="quitar">×</button>':'')+'</div>';
+      // la línea-resumen SIEMPRE existe (oculta si vacía) → al teclear se
+      // actualiza in place, sin reconstruir las cajas (fix cursor 7-jul)
       var uoVal=grupoFilaUO(chosen.sku,f);
-      if(uoVal>0){
-        var qn=f.q;
-        var lbl = (f.modo==='suelta') ? (qn+' '+base+' sueltas')
-                : (f.modo==='pct')    ? (qn+'% abierto'+(f.cc?(' ('+f.cc+')'):''))
-                : (qn+' '+cont+(f.cc?(' de '+f.cc):''));
-        html+='<div class="grp-rt">'+lbl+' = '+nInt(uoVal)+' UO</div>';
-      }
+      html+='<div class="grp-rt" data-rt="'+i+'"'+(uoVal>0?'':' style="display:none"')+'>'+
+        (uoVal>0?_grpRtTxt(f,uoVal):'')+'</div>';
     });
     html+='<button class="grp-add" data-add="cont">+ otro '+cont+'</button>';
     if(base!=='sueltas') html+='<button class="grp-add faint" data-add="suelta">+ '+base+' sueltas</button>';
@@ -1733,9 +1730,30 @@ function buildPicker(mode, idx){
       return '<button data-cc="'+i+'" data-v="'+c+'" class="'+(f.cc===c?'on':'')+'">'+c+'</button>';
     }).join('')+'</div>';
   }
+  // texto de la línea-resumen de una fila de grupo ("2 tarros de 250 = 2 UO")
+  function _grpRtTxt(f,uoVal){
+    var base=baseLbl(), cont=contLbl(), qn=f.q;
+    var lbl=(f.modo==='suelta')?(qn+' '+base+' sueltas')
+          :(f.modo==='pct')?(qn+'% abierto'+(f.cc?(' ('+f.cc+')'):''))
+          :(qn+' '+cont+(f.cc?(' de '+f.cc):''));
+    return lbl+' = '+nInt(uoVal)+' UO';
+  }
   function bindGrupos(){
     grpEl.querySelectorAll('[data-q]').forEach(function(inp){
-      inp.oninput=function(){ grupoFilas[+this.getAttribute('data-q')].q=this.value; renderGrupos(); refreshOk(); };
+      // FIX CURSOR (7-jul): NO renderGrupos() al teclear — reconstruía TODAS las
+      // cajas a cada dígito y el cursor se perdía (escribir 1000 = 3 reposiciones).
+      // Al teclear solo se actualiza la línea-resumen de ESA fila, in place.
+      inp.oninput=function(){
+        var i=+this.getAttribute('data-q');
+        grupoFilas[i].q=this.value;
+        var f=grupoFilas[i], uoVal=grupoFilaUO(chosen.sku,f);
+        var rt=grpEl.querySelector('[data-rt="'+i+'"]');
+        if(rt){
+          if(uoVal>0){ rt.style.display=''; rt.textContent=_grpRtTxt(f,uoVal); }
+          else { rt.style.display='none'; rt.textContent=''; }
+        }
+        refreshOk();
+      };
     });
     grpEl.querySelectorAll('[data-cc]').forEach(function(b){
       b.onclick=function(){ grupoFilas[+this.getAttribute('data-cc')].cc=+this.getAttribute('data-v'); renderGrupos(); refreshOk(); };
