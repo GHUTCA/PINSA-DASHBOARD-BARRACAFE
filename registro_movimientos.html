@@ -432,19 +432,20 @@
 </style>
 </head>
 <body>
-  <!-- GATE -->
+  <!-- GATE · v42: la identidad viene SOLO de la sesión AUTH (PIN del portal).
+       El viejo gate con 3 nombres hardcoded + texto libre MURIÓ (10-jul):
+       firmaba con nombres pegajosos/erróneos. Sin sesión → al portal. -->
   <div class="gate" id="gate">
-    <h2>¿Quién está capturando?</h2>
-    <p>Toca tu nombre. Queda registrado quién hizo cada movimiento. Puedes cambiarlo después.</p>
-    <div class="who" id="whoList"></div>
-    <input class="other" id="otherName" placeholder="…u otro nombre, escríbelo aquí">
-    <button class="ios-go" id="otherGo">Empezar</button>
+    <h2>Entra con tu PIN</h2>
+    <p>Para registrar movimientos necesitas tu sesión activa.<br>
+       Así cada movimiento queda firmado por quien lo hizo de verdad.</p>
+    <button class="ios-go" id="gateGo">Ir al portal →</button>
   </div>
 
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v41 · 7jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v42 · 10jul</span></div>
       <span class="ubic" id="ubic">Riesco · BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1">🧾</button>
     </div>
@@ -510,7 +511,7 @@
 
   <div style="text-align:center;padding:6px 0 12px">
     <button class="hand" id="btnHand">cambiar a zurdo ↔</button> &nbsp;·&nbsp;
-    <button class="hand" id="btnOp">cambiar operador</button>
+    <button class="hand" id="btnOp">cambiar usuario (cierra sesión)</button>
   </div>
 
 <script>
@@ -817,10 +818,8 @@ function searchProductos(q, limit){
 // ── FIRMA = SESIÓN AUTH (7-jul) ──────────────────────────────────────────
 // La identidad ya está verificada por el PIN del portal (pinsita_session:
 // user/cargo/local, 8h). La firma de los movimientos SALE DE AHÍ — mata el
-// gate hardcoded y el bug del operador pegajoso (última firma en localStorage
-// heredada por quien abra después). El gate queda SOLO como fallback sin
-// sesión (apertura directa/offline). "cambiar operador" sigue funcionando
-// durante la página; al recargar vuelve a mandar la sesión.
+// gate hardcoded y el bug del operador pegajoso. v42: el gate con nombres
+// MURIÓ del todo — sin sesión válida la pantalla manda al portal (PIN).
 function operadorDesdeSesion(){
   try{
     var s=JSON.parse(localStorage.getItem('pinsita_session')||'null');
@@ -828,7 +827,9 @@ function operadorDesdeSesion(){
   }catch(e){}
   return null;
 }
-var OPERADOR = operadorDesdeSesion() || localStorage.getItem('pinsita_operador') || null;
+// v42: SOLO la sesión firma. El fallback a 'pinsita_operador' (nombre pegajoso
+// del viejo gate) murió con el gate — sin sesión válida no se captura.
+var OPERADOR = operadorDesdeSesion();
 // ---------- PERSISTENCIA de la lista (FIX: la lista NUNCA se pierde) ----------
 // La lista vive en localStorage por operador. Cierran/recargan/swipe → al volver está.
 var ITEMS_KEY = 'pinsita_items_'+(OPERADOR||'x');
@@ -959,23 +960,20 @@ function capSec(s){ return (s||'').split(' ').map(function(w){return w?w.charAt(
 
 // ---------- elementos ----------
 var $=function(id){return document.getElementById(id);};
-var gate=$('gate'), whoList=$('whoList'), otherName=$('otherName'), otherGo=$('otherGo'),
+var gate=$('gate'),
     opChip=$('opChip'), verboSel=$('verbo'), listEl=$('list'), emptyEl=$('empty'),
     portes=$('portes'), actionbar=$('actionbar'), revbar=$('revbar'),
     audio=$('audio'), audioTxt=$('audioTxt'), fotoImbocco=$('fotoImbocco');
 
-// ---------- GATE operador ----------
-var NOMBRES=['DC','NEA','AAG','Matías','Nea'];
-function setOperador(n){ n=(n||'').trim(); if(!n) return;
-  OPERADOR=n; localStorage.setItem('pinsita_operador',n);
-  ITEMS_KEY='pinsita_items_'+n;                 // FIX: clave por operador, coherente al entrar
-  var rec=cargarItems(); ITEMS.length=0; Array.prototype.push.apply(ITEMS, rec);  // restaura su lista
-  opChip.textContent=n; gate.style.display='none'; arrancar(); }
-['DC','NEA','AAG'].forEach(function(n){ var b=document.createElement('button');
-  b.textContent=n; b.onclick=function(){setOperador(n);}; whoList.appendChild(b); });
-otherGo.onclick=function(){ setOperador(otherName.value); };
-$('btnOp').onclick=function(){ localStorage.removeItem('pinsita_operador'); OPERADOR=null;
-  gate.style.display='flex'; };
+// ---------- GATE · solo-AUTH (v42) ----------
+// El gate con 3 nombres hardcoded + texto libre MURIÓ (decisión Alberto 10-jul):
+// la firma sale SOLO de pinsita_session (PIN del portal). Sin sesión → al
+// portal. "cambiar usuario" = cerrar sesión y volver a entrar con otro PIN.
+$('gateGo').onclick=function(){ location.href='atalaya.html'; };
+$('btnOp').onclick=function(){
+  try{ localStorage.removeItem('pinsita_session'); localStorage.removeItem('pinsita_operador'); }catch(e){}
+  location.href='atalaya.html';
+};
 
 // ---------- verbo BOTONES (a prueba de error) ----------
 // El <select id="verbo"> sigue siendo el ESTADO (lo leen todos los flujos
@@ -2054,7 +2052,7 @@ _fotoInput.type='file'; _fotoInput.accept='image/*'; _fotoInput.capture='environ
 _fotoInput.style.display='none'; document.body.appendChild(_fotoInput);
 
 $('btnFoto').onclick=function(){
-  if(!OPERADOR){ alert('Primero dime quién eres (arriba).'); return; }
+  if(!OPERADOR){ alert('Tu sesión no está activa.\nEntra desde el portal con tu PIN.'); return; }
   _fotoInput.value=''; _fotoInput.click();
 };
 _fotoInput.onchange=function(){
@@ -2446,7 +2444,7 @@ function mapaMoverItem(estIdx, contKey, i, dir){
 // según su método. "Cerrar estación" registra el lote de esa estación.
 // ============================================================================
 function abrirMapa(){
-  if (!OPERADOR){ alert('Primero dime quién eres (arriba).'); return; }
+  if (!OPERADOR){ alert('Tu sesión no está activa.\nEntra desde el portal con tu PIN.'); return; }
   var ov = document.getElementById('mapaOverlay');
   if (!ov){
     ov = document.createElement('div'); ov.id='mapaOverlay';
@@ -2917,7 +2915,7 @@ function mostrarRecibo(titulo, sub, movs, alCerrar){
 }
 // 🧾 Mis registros de hoy — el OP se responde solo ("¿registré bien la leche?")
 async function abrirMisRegistros(){
-  if(!OPERADOR){ alert('Primero dime quién eres (arriba).'); return; }
+  if(!OPERADOR){ alert('Tu sesión no está activa.\nEntra desde el portal con tu PIN.'); return; }
   if(!navigator.onLine){ alert('🧾 Necesita señal: lee el libro real.\nAl volver la señal, inténtalo de nuevo.'); return; }
   var r=await callGAS({ action:'getMisMovimientosHoy', responsable:OPERADOR }, 8000);
   if(!(r&&r.ok)){ alert('No se pudo leer el libro ('+((r&&r.error)||'sin red')+'). Reintenta.'); return; }
@@ -3828,7 +3826,7 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
     gd('fsDone').style.display=(q==='done')?'block':'none';
   }
   function abrir(){
-    if(!OPERADOR){ alert('Primero dime quién eres (arriba).'); return; }
+    if(!OPERADOR){ alert('Tu sesión no está activa.\nEntra desde el portal con tu PIN.'); return; }
     gd('fotoSheet').classList.add('on'); CUR=null; mostrar('pick');
     var n=pendAbiertosLocal();
     gd('fsPendN').textContent=n;
