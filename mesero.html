@@ -152,7 +152,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.8 · 9jul</span>
+    <span class="ver" id="ver">v1.9 · 10jul</span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
@@ -173,8 +173,13 @@ const CFG = {
   SK: { COD: 'sala_codigo', NOM: 'sala_nombre', LOC: 'sala_local' },
 };
 
+/* v1.9 · il código del QR (?c=) si usa UNA volta e sparisce dall'URL:
+   mai più turni morti risuscitati dall'indirizzo (bug 10-lug, turno 8161) */
+const QSC = (QS.get('c') || '').trim();
+if (QSC) { try { history.replaceState(null, '', location.pathname); } catch (e) {} }
+
 const STATE = {
-  codigo: localStorage.getItem(CFG.SK.COD) || (QS.get('c') || '').trim(),
+  codigo: localStorage.getItem(CFG.SK.COD) || QSC,
   nombre: localStorage.getItem(CFG.SK.NOM) || '',
   tgLink: '',
   sala: null,          // último payload getSalaMesero
@@ -537,8 +542,20 @@ async function marcarLlamada(idLlamada, btn) {
     try {
       const r = await gasPost('clockIn', { codigo: STATE.codigo, nombre: STATE.nombre });
       if (r && r.ok) { STATE.tgLink = r.tg_link || ''; entrarSala(); return; }
-    } catch (e) { /* cade sull'entrada */ }
-    try { localStorage.removeItem(CFG.SK.COD); } catch (e) {}
+      // v1.9 · si dimentica il código SOLO se il server dice che è morto —
+      // un buco di rete non slogga nessuno (cucina al -1, bug 10-lug)
+      if (r && (r.error === 'codigo_invalid' || r.error === 'no_turno_abierto')) {
+        try { localStorage.removeItem(CFG.SK.COD); } catch (e) {}
+        STATE.codigo = '';
+        showEntrada('El turno se cerró — pide el código de HOY al JL');
+        return;
+      }
+      showEntrada('No se pudo verificar la sesión — reintenta');
+      return;
+    } catch (e) {
+      showEntrada('Sin conexión — tu sesión sigue guardada, reintenta');
+      return;
+    }
   }
   showEntrada('');
 })();
