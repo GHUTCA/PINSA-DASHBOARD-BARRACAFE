@@ -84,6 +84,19 @@
   .card .btn{margin-top:12px}
   .mio-meta{font-size:12.5px;color:var(--t3);margin-top:2px;line-height:1.5}
   .mio-meta b.warn{color:var(--warn)}
+  /* v1.10 · corrección del pedido (la mesa se equivocó de Q) */
+  .corr-it{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed var(--bord);font-size:15px}
+  .corr-it .nom{flex:1}
+  .corr-it .nom.cero{text-decoration:line-through;color:var(--t3)}
+  .stepper{display:flex;align-items:center;gap:2px}
+  .stepper button{width:42px;height:42px;border-radius:12px;border:1.5px solid var(--bord);
+    background:var(--card2);color:var(--t1);font-size:22px;font-weight:900}
+  .stepper b{min-width:34px;text-align:center;font-size:18px}
+  .corr-tot{font-size:13.5px;color:var(--t2);margin:8px 0;text-align:right}
+  .corr-btns{display:flex;gap:8px}
+  .corr-btns .btn{flex:1.5}
+  .corr-btns .btn.sec{flex:1}
+
   /* v1.6 · KDS: el pedido está pronto en cocina/barra — a retirar */
   .retirar{margin-top:8px;background:rgba(61,184,118,.14);border:1.5px solid var(--ok);
     color:var(--ok);border-radius:12px;padding:10px 12px;font-size:15px;font-weight:900;
@@ -152,7 +165,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.9 · 10jul</span>
+    <span class="ver" id="ver">v1.11 · 11jul</span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
@@ -188,7 +201,22 @@ const STATE = {
   vistos: new Set(),   // v1.4 · uuid/llamadas già visti (per la doppia campana)
   vistosInit: false,   // il primo poll riempie senza suonare
   listoRingAt: 0,      // v1.7 · ultimo squillo "retirar" (re-campana 90s)
+  editando: null,      // v1.10 · uuid del mío in correzione (¿la mesa se equivocó?)
+  editQty: {},         // v1.10 · id → qty nuova durante la correzione
+  strikes: 0,          // v1.11 · errori-turno consecutivi (si esce solo a 3)
 };
+
+/* v1.11 · LA CORAZZA: un singolo codigo_invalid/no_turno può essere un
+   singhiozzo del server sotto carico (venerdì 10-jul) — si esce dalla
+   sessione SOLO dopo 3 conferme consecutive. Qualsiasi altro errore
+   (timeout, server_error) è transitorio: banner, mai logout. */
+function _strikeTurno() {
+  STATE.strikes++;
+  if (STATE.strikes >= 3) { STATE.strikes = 0; salirPorCierre(); return true; }
+  $('offline').textContent = '⚠ Verificando el turno… (' + STATE.strikes + '/3)';
+  $('offline').classList.add('show');
+  return false;
+}
 
 /* ═════ v1.4 · DOBLE CAMPANA · vibración + beep DALLA PAGINA ═════
    Telegram avvisa fuori; questa suona DENTRO — anche se le notifiche del
@@ -335,6 +363,50 @@ function salir() {
   toast('ok', 'Sesión cerrada — nada queda en este teléfono');
 }
 
+/* ═════ v1.10 · CORRECCIÓN DEL PEDIDO (GAS corregirPedido, v3.3.8) ═════ */
+function abrirCorreccion(uuid) {
+  const p = ((STATE.sala && STATE.sala.mios) || []).find(x => x.uuid === uuid);
+  if (!p) return;
+  STATE.editando = uuid;
+  STATE.editQty = {};
+  itemsDe(p).forEach(it => { STATE.editQty[it.id] = parseInt(it.qty, 10) || 1; });
+  render(STATE.sala);
+}
+function qtyStep(id, d) {
+  STATE.editQty[id] = Math.max(0, (STATE.editQty[id] || 0) + d);
+  render(STATE.sala);
+}
+function cerrarCorreccion() {
+  STATE.editando = null;
+  render(STATE.sala);
+}
+async function guardarCorreccion(uuid, btn) {
+  if (btn) btn.disabled = true;
+  const items = Object.keys(STATE.editQty).map(id => ({ id: id, qty: STATE.editQty[id] }));
+  try {
+    const r = await gasPost('corregirPedido', { codigo: STATE.codigo, nombre: STATE.nombre, uuid: uuid, items: items });
+    if (r && r.ok) {
+      toast('ok', r.cancelado ? 'Pedido cancelado — la mesa se arrepintió' : (r.sin_cambios ? 'Sin cambios' : '✓ Corregido — queda en el registro'));
+      STATE.editando = null;
+    } else if (r && r.error === 'ya_digitado') {
+      toast('warn', 'Ya está digitado — corrígelo en ALOHA');
+      STATE.editando = null;
+    } else if (r && r.error === 'no_es_tuyo') {
+      toast('warn', 'Es de ' + (r.mesero || 'otro') + ' — que lo corrija él');
+      STATE.editando = null;
+    } else {
+      toast('err', 'No se pudo: ' + (r && r.error || '?'));
+      if (btn) btn.disabled = false;
+      return;
+    }
+  } catch (e) {
+    toast('err', 'Sin conexión — reintenta');
+    if (btn) btn.disabled = false;
+    return;
+  }
+  refrescar(false);
+}
+
 function abrirTelegram() {
   if (STATE.tgLink) window.open(STATE.tgLink, '_blank', 'noopener');
   else toast('warn', 'Vuelve a entrar para generar el link');
@@ -358,10 +430,11 @@ async function refrescar(conSkeleton) {
     const r = await gasGet('getSalaMesero', { codigo: STATE.codigo, nombre: STATE.nombre });
     if (!r || !r.ok) {
       if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) {
-        salirPorCierre(); return;
+        _strikeTurno(); return;   // v1.11 · si esce solo al 3° consecutivo
       }
       throw new Error(r && r.error || 'error');
     }
+    STATE.strikes = 0;   // v1.11 · risposta buona = si riparte da zero
     STATE.sala = r;
     $('offline').classList.remove('show');
     detectarNuevos(r);   // v1.4 · doble campana su arrivi nuovi
@@ -425,6 +498,25 @@ function render(r) {
   if (mios.length) {
     hm += '<div class="h">Míos · en curso — ' + mios.length + '</div>';
     mios.forEach(p => {
+      // v1.10 · card in modalità CORRECCIÓN (steppers al posto del dettaglio)
+      if (STATE.editando === p.uuid) {
+        const its = itemsDe(p);
+        let totNuevo = 0;
+        let hc = '<div class="card"><div class="mesa-row"><span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
+          '<span class="plaza">✎ corrigiendo…</span></div>';
+        its.forEach(it => {
+          const q = STATE.editQty[it.id] != null ? STATE.editQty[it.id] : (parseInt(it.qty, 10) || 1);
+          totNuevo += (parseFloat(it.precio) || 0) * q;
+          hc += '<div class="corr-it"><span class="nom' + (q === 0 ? ' cero' : '') + '">' + esc(it.nombre || it.id) + '</span>' +
+            '<span class="stepper"><button onclick="qtyStep(\'' + esc(it.id) + '\',-1)">−</button><b>' + q + '</b>' +
+            '<button onclick="qtyStep(\'' + esc(it.id) + '\',1)">+</button></span></div>';
+        });
+        hc += '<div class="corr-tot">Total nuevo: <b>' + fmtPrice(totNuevo) + '</b>' + (totNuevo === 0 ? ' · <b class="warn">= pedido CANCELADO</b>' : '') + '</div>' +
+          '<div class="corr-btns"><button class="btn verde" onclick="guardarCorreccion(\'' + esc(p.uuid) + '\',this)">✓ Guardar</button>' +
+          '<button class="btn sec" onclick="cerrarCorreccion()">dejar así</button></div></div>';
+        hm += hc;
+        return;
+      }
       const esDig = p.estado === 'digitado';
       // v1.6 · KDS: listo=true quando OGNI stazione coinvolta ha dato il suo LISTO
       // v1.8 · retirado=true = i piatti hanno lasciato il pass (tap sul KDS):
@@ -440,7 +532,9 @@ function render(r) {
         (esRet ? '<div class="retirar encamino">🏃 Retirado — va en camino a la mesa</div>' : '') +
         (esDig
           ? '<button class="btn verde" onclick="marcar(\'' + esc(p.uuid) + '\',\'entregado\',this)">✓ ENTREGADO</button>'
-          : '<button class="btn" onclick="marcar(\'' + esc(p.uuid) + '\',\'digitado\',this)">⌨ DIGITADO EN ALOHA</button>') +
+          : '<button class="btn" onclick="marcar(\'' + esc(p.uuid) + '\',\'digitado\',this)">⌨ DIGITADO EN ALOHA</button>' +
+            // v1.10 · prima del digitado si può correggere (¿la mesa se equivocó?)
+            '<button class="btn sec" style="margin-top:6px" onclick="abrirCorreccion(\'' + esc(p.uuid) + '\')">✎ Corregir pedido</button>') +
         '</div>';
     });
   }
@@ -509,7 +603,8 @@ async function marcar(uuid, marca, btn) {
     } else if (r && r.error === 'ya_tomado') {
       toast('warn', 'Lo tomó ' + (r.mesero || 'otro') + ' primero');
     } else if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) {
-      salirPorCierre(); return;
+      if (_strikeTurno()) return;   // v1.11 · tre strike, non uno
+      toast('warn', 'No se pudo verificar el turno — reintenta');
     } else {
       toast('err', 'No se pudo: ' + (r && r.error || '?'));
     }
