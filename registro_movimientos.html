@@ -464,7 +464,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v51 · 11jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v52 · 11jul</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -1226,6 +1226,34 @@ async function bcDespachar(sol, ov){
   } finally { btn.disabled=false; btn.textContent='🚚 Despachar a '+esc(sol.local); }
 }
 bcModoUI();
+
+// ── PESOS MEDIOS (11-jul, idea Alberto) — "10 paltas" → gramos ─────────────
+// La tab PESOS_MEDIOS del MAESTRO (31 productos, clave+peso_gr) alimenta uno
+// STIMATORE: casilla unidades → gr = un × peso medio. Il gr resta editabile
+// (la verità è il grammo; il peso medio è solo la mano). Match per nombre
+// normalizzato, clave più LUNGA vince ('cebolla morada' prima di 'cebolla').
+// Cache -6 come il VOCAB. Se il match sbaglia, si cura la tab (dato di Alberto).
+var PESOS_MEDIOS=[];
+function cargarPesosMedios(){
+  try{ var c=JSON.parse(localStorage.getItem('pinsita_pesos_cache')||'null'); if(c&&c.p) PESOS_MEDIOS=c.p; }catch(e){}
+  if(!navigator.onLine) return;
+  callGAS({action:'getPesosMedios'}, 10000).then(function(r){
+    if(r&&r.ok&&r.pesos&&r.pesos.length){
+      PESOS_MEDIOS=r.pesos.sort(function(a,b){ return b.clave.length-a.clave.length; });
+      try{ localStorage.setItem('pinsita_pesos_cache', JSON.stringify({ts:Date.now(), p:PESOS_MEDIOS})); }catch(e){}
+    }
+  }).catch(function(){});
+}
+function pesoMedioDe(sku){
+  var v=(typeof skuItem==='function')?skuItem(sku):null;
+  if(!v||!v.nombre||!PESOS_MEDIOS.length) return null;
+  var n=' '+norm(v.nombre)+' ';
+  for(var i=0;i<PESOS_MEDIOS.length;i++){
+    if(n.indexOf(' '+PESOS_MEDIOS[i].clave+' ')>=0) return PESOS_MEDIOS[i];
+  }
+  return null;
+}
+cargarPesosMedios();
 
 // ---------- verbo BOTONES (a prueba de error) ----------
 // El <select id="verbo"> sigue siendo el ESTADO (lo leen todos los flujos
@@ -2074,7 +2102,30 @@ function buildPicker(mode, idx){
     okBtn.classList.toggle('ready', q!=='' && !faltaPrecio);
     if(pkBigE) pkBigE.textContent = (qn!=null && !isNaN(qn)) ? (etiqueta+' · '+chosen.nombre) : '';
   }
+  // PESO MEDIO (11-jul): casilla "unidades" iniettata accanto al gr per i
+  // prodotti Peso con peso medio. Il gr resta la verità (sempre editabile).
+  function _pkPesoUn(pm){
+    var w=host.querySelector('#pkPesoUnW');
+    if(!pm){ if(w) w.style.display='none'; return; }
+    if(!w){
+      w=document.createElement('div'); w.id='pkPesoUnW';
+      w.style.cssText='display:flex;align-items:center;gap:8px;margin:6px 0';
+      w.innerHTML='<input id="pkPesoUn" type="number" inputmode="numeric" placeholder="unidades" '+
+        'style="width:96px;padding:9px 10px;border:1px solid var(--line);border-radius:9px;font-size:15px;background:var(--bg);color:var(--t1);touch-action:manipulation">'+
+        '<span id="pkPesoUnL" style="font-size:12px;color:var(--t3)"></span>';
+      qEl.parentNode.insertBefore(w, qEl);
+      w.querySelector('#pkPesoUn').addEventListener('input', function(){
+        var un=parseFloat(this.value)||0, p=parseFloat(this.dataset.pm)||0;
+        qEl.value=(un>0&&p>0)?String(Math.round(un*p)):'';
+        refreshOk();
+      });
+    }
+    w.style.display='flex';
+    var inp=w.querySelector('#pkPesoUn'); inp.dataset.pm=pm.peso; inp.value='';
+    w.querySelector('#pkPesoUnL').textContent='× '+pm.peso+' g c/u ≈ gramos (edítalos si no calza)';
+  }
   function refreshHint(){
+    _pkPesoUn(null);   // si riaccende solo nel ramo singolo-Peso con peso medio
     if(chosen){
       // decide modo: pack/cc → grammatica a gruppi · resto → doble o singolo
       var usaGrupos = activarGrupos();
@@ -2094,8 +2145,11 @@ function buildPicker(mode, idx){
           ' — paquetes enteros, resto pesado, o ambos'+(SESION_SUPER?' · y el precio':'');
       } else {
         qEl.placeholder=(uo||utm||'');
+        var pmE=(typeof esPeso==='function'&&esPeso(chosen.sku))?pesoMedioDe(chosen.sku):null;
+        if(pmE) _pkPesoUn(pmE);
         hintE.innerHTML = '<b style="color:var(--t1)">'+esc(chosen.nombre)+'</b>'+(uo?(' · en <b style="color:var(--t2)">'+esc(uo)+'</b>'):'')+
-          ' · '+esc(capSec(skuSec(chosen.sku)))+' — escribe la cantidad y confirma con ✓';
+          ' · '+esc(capSec(skuSec(chosen.sku)))+' — escribe la cantidad y confirma con ✓'+
+          (pmE?(' · o pon <b style="color:var(--acento)">unidades</b> (≈'+pmE.peso+' g c/u)'):'');
       }
     } else {
       grupoFilas=null; grpEl.style.display='none'; qEl.style.display='';
@@ -2808,6 +2862,16 @@ function pintarMapa(){
   body.querySelectorAll('.mapa-gr').forEach(function(inp){
     inp.oninput=function(){ _mapaDobleSet(inp.dataset.sku,'gr',inp.value.trim()); };
   });
+  // PESO MEDIO: unidades → riempie i gr della stessa fila (in place, cursor a salvo)
+  body.querySelectorAll('.mapa-un').forEach(function(inp){
+    inp.oninput=function(){
+      var sku=inp.dataset.sku, un=parseFloat(inp.value)||0, pm=parseFloat(inp.dataset.pm)||0;
+      var gr=(un>0&&pm>0)?String(Math.round(un*pm)):'';
+      var q=body.querySelector('.mapa-q[data-sku="'+sku+'"]'); if(q) q.value=gr;
+      if(gr===''){ delete MAPA_CONTEO[sku]; } else { MAPA_CONTEO[sku]=gr; }
+      _mapaTrasContar(sku);
+    };
+  });
   // "Listo" = colapsar la estación (NO registra; el registro es la confirmación final)
   body.querySelectorAll('.mapa-est-listo').forEach(function(b){
     b.onclick=function(){ estacionLista(parseInt(b.dataset.idx)); };
@@ -2859,10 +2923,19 @@ function pintarItemsEstacion(est, estIdx){
         '<div style="font-size:9px;color:var(--ink-soft);white-space:nowrap;max-width:'+(w+6)+'px;overflow:hidden;text-overflow:ellipsis">'+esc(lbl)+'</div>'+
       '</div>';
     }
+    // PESO MEDIO (11-jul): Peso con peso medio → casilla unidades che stima i gr
+    var pmM=(!esDoble && metodo==='peso' && typeof pesoMedioDe==='function') ? pesoMedioDe(sku) : null;
     var inputHtml = esDoble
       ? '<div style="display:flex;gap:8px;align-items:flex-start">'+
           boxD('mapa-paq',(cur&&cur.paq!=null?cur.paq:''),52,uoCorto)+
           boxD('mapa-gr', (cur&&cur.gr!=null ?cur.gr :''),58,utmCorto)+
+        '</div>'
+      : pmM
+      ? '<div style="display:flex;gap:6px;align-items:flex-start">'+
+          '<div style="display:flex;flex-direction:column;align-items:center;gap:2px">'+
+            '<input class="mapa-un" data-sku="'+esc(sku)+'" data-pm="'+pmM.peso+'" type="number" inputmode="numeric" placeholder="un" style="width:48px;'+inpSt+'">'+
+            '<div style="font-size:9px;color:var(--t3);white-space:nowrap">un ≈'+pmM.peso+'g</div></div>'+
+          '<input class="mapa-q" data-sku="'+esc(sku)+'" type="number" inputmode="decimal" step="any" value="'+esc(cur!=null?String(cur):'')+'" style="width:64px;'+inpSt+'" placeholder="gr">'+
         '</div>'
       : '<input class="mapa-q" data-sku="'+esc(sku)+'" type="number" inputmode="decimal" step="'+step+'" value="'+esc(cur!=null?String(cur):'')+'" style="width:72px;'+inpSt+'" placeholder="0">';
     html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line-soft,rgba(0,0,0,.05))">'+
