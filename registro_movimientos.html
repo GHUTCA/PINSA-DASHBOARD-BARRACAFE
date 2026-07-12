@@ -464,7 +464,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v49 · 10jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v50 · 11jul</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -725,10 +725,23 @@ async function cargarVocabDesdeBD(){
         uxupc:parseFloat(String(r['Unidades por UPC']||'').replace(',','.'))||null             // cuántos BO dentro 1 UO
       });
     });
-    if(nuevo.length<100) throw new Error('BD insuficiente ('+nuevo.length+')');
+    // soglia solo per pinsa: exo/bks legittimamente piccoli finché non flaggano
+    if(CTX.empresa==='pinsa' && nuevo.length<100) throw new Error('BD insuficiente ('+nuevo.length+')');
     VOCAB=nuevo; rebuildNameIdx();
+    // CACHE -6 (11-jul): l'ultimo BD BUONO resta nel telefono. Sottoterra il
+    // catálogo è COMPLETO e coi factores giusti (doble casilla corretta) —
+    // prima cadeva sul fallback EMBEBIDO vecchio: prodotti mancanti + 1 casella.
+    try{ localStorage.setItem('pinsita_vocab_cache_'+CTX_CODE, JSON.stringify({ts:Date.now(), v:nuevo})); }catch(e){}
     return {ok:true, n:VOCAB.length, fuente:'BD_INSUMOS vivo'};
   }catch(e){
+    try{
+      var cch=JSON.parse(localStorage.getItem('pinsita_vocab_cache_'+CTX_CODE)||'null');
+      if(cch && cch.v && cch.v.length){
+        VOCAB=cch.v; rebuildNameIdx();
+        var edadH=Math.round((Date.now()-cch.ts)/3600000);
+        return {ok:true, n:VOCAB.length, fuente:'BD cache '+(edadH<1?'<1h':edadH+'h'), cache:true};
+      }
+    }catch(e2){}
     return {ok:false, error:e.message, fuente:'fallback embebido ('+VOCAB.length+')'};
   }
 }
@@ -1348,7 +1361,7 @@ function arrancar(){
       // NO hardcodear la versión (rompía el termómetro N24: tras cargar la BD
       // pisaba el ver del header con uno viejo). Lee la que ya está y añade BD.
       if(ve){ var base=(ve.textContent||'').split(' · BD')[0].trim();
-              ve.textContent=base+' · '+(res.ok?('BD✓ '+res.n):'BD✗ fallback');
+              ve.textContent=base+' · '+(res.ok?('BD✓ '+res.n+(res.cache?' 📴':'')):'BD✗ fallback');
               ve.style.color=res.ok?'var(--ok)':'var(--warn)'; }
       // BUG primer producto post-refresh (28-jun): si la BD termina de cargar
       // MIENTRAS el OP tiene el picker abierto, render()→closePicker() se lo
@@ -3038,7 +3051,10 @@ async function flushCola(){
       if(c[i].estado==='pending' && (Date.now()-new Date(c[i].ts).getTime()) < 15000) continue;
       c[i].intentos=(c[i].intentos||0)+1;
       var r=await callGAS(c[i].payload, null, c[i].gas);   // multilocal: al SUO endpoint
-      if(r&&r.ok){ c[i].estado='ok'; c[i].okTs=new Date().toISOString(); }
+      // STRETTO (11-jul): 'ok' SOLO se il GAS echeggia il NOSTRO loteId (o dedup).
+      // Un captive portal può rispondere 200 con HTML, ma non può conoscere il
+      // loteId — mai più lotes marcati inviati senza essere scritti.
+      if(r && r.ok===true && (r.loteId===c[i].loteId || r.dedup===true)){ c[i].estado='ok'; c[i].okTs=new Date().toISOString(); }
       else { c[i].estado='fail'; c[i].error=(r&&r.error)||'sin red'; }
       colaGuardar(c); pintarBadge();
     }
@@ -3276,7 +3292,7 @@ $('btnConfirm').onclick=async function(){
   try{
     if(navigator.onLine && Date.now()>=_gasDownHasta){
       var r=await callGAS(payload, 12000);
-      if(r&&r.ok){
+      if(r && r.ok===true && (r.loteId===loteId || r.dedup===true)){   // STRETTO: eco del loteId obbligatoria
         enviado=true; _respConf=r;
         // marca este lote como ok en la cola
         var c=colaLeer().map(function(x){ if(x.loteId===loteId){ x.estado='ok'; x.okTs=new Date().toISOString(); } return x; });
@@ -3835,8 +3851,8 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
     var enviado=false; _lastResp=null;
     try{
       if(navigator.onLine && Date.now()>=_gasDownHasta){
-        var r=await callGAS(payload, 6000);
-        if(r&&r.ok){ enviado=true; _lastResp=r;
+        var r=await callGAS(payload, 15000);   // 11-jul: 6s tagliava i batch lenti (recibo perso)
+        if(r && r.ok===true && (r.loteId===payload.loteId || r.dedup===true)){ enviado=true; _lastResp=r;   // STRETTO: eco loteId
           var c=colaLeer().map(function(x){ if(x.loteId===payload.loteId){x.estado='ok';} return x; });
           colaGuardar(c.filter(function(x){return x.estado!=='ok';})); pintarBadge();
         }
