@@ -223,7 +223,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.7 · 10jul</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.8 · 14jul</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -761,10 +761,22 @@ if (DEMO === '1') {
   if (STATE.estacion !== 'cocina' && STATE.estacion !== 'barra') STATE.estacion = '';
   if (STATE.estacion) pickEst(STATE.estacion);
   if (STATE.codigo && STATE.estacion) {
-    // reentrada silenciosa (tablet que se reinicia solo)
-    gasGet('getKds', { codigo: STATE.codigo, estacion: STATE.estacion })
-      .then(r => { if (r.ok) { aplicar(r); showTablero(); } else showEntrada(); })
-      .catch(() => showEntrada());
+    // reentrada silenciosa con reintentos (v1.8): un hueco de red al reiniciar
+    // NO debe botar la tablet al código. El código queda precargado igual.
+    (async function reentrar(){
+      const backoff = [800, 2000, 4000];   // 3 reintentos antes de rendirse
+      for (let intento = 0; intento <= backoff.length; intento++) {
+        try {
+          const r = await gasGet('getKds', { codigo: STATE.codigo, estacion: STATE.estacion });
+          if (r.ok) { aplicar(r); showTablero(); }
+          else showEntrada();               // respuesta válida pero código rechazado → sí al código
+          return;
+        } catch (e) {
+          if (intento < backoff.length) { await new Promise(res => setTimeout(res, backoff[intento])); continue; }
+          showEntrada('Sin conexión — revisa el Wi-Fi y reintenta');  // último recurso
+        }
+      }
+    })();
   } else showEntrada();
 })();
 </script>
