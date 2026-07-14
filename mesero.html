@@ -182,8 +182,9 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.13 · 14jul</span>
+    <span class="ver" id="ver">v1.14 · 14jul</span>
     <span style="display:flex;gap:8px">
+      <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
     </span>
@@ -233,6 +234,47 @@ function _strikeTurno() {
   $('offline').textContent = '⚠ Verificando el turno… (' + STATE.strikes + '/3)';
   $('offline').classList.add('show');
   return false;
+}
+
+/* ═════ v1.14 · PUSH NATIVO · la campanella a schermo spento, senza Telegram ═════
+   subscribe con la chiave VAPID del relay pinsita-push → la subscription va a
+   GAS legata al mesero. Il push arriva via relay Cloudflare al service worker
+   (pinsita-sw.js). Telegram resta in parallelo come fallback. */
+const VAPID_PUBLIC = 'BERzzeTXAMRJhSXl3_nvWxXjLL6qtmg6K4ozmDsdlHbNR7msIIF8TO1s61jkQmU0RPK0e0YCDXVm2PPVx2iaozY';
+function _u8(b64){ b64=b64.replace(/-/g,'+').replace(/_/g,'/'); const p='='.repeat((4-b64.length%4)%4); const r=atob(b64+p); const a=new Uint8Array(r.length); for(let i=0;i<r.length;i++)a[i]=r.charCodeAt(i); return a; }
+function _pushSoportado(){ return ('serviceWorker' in navigator) && ('PushManager' in window) && (typeof Notification !== 'undefined'); }
+
+async function pushEstado(){
+  const btn = $('btnAvisos');
+  if(!btn) return;
+  if(!_pushSoportado()){ btn.textContent='🔔 —'; btn.disabled=true; btn.title='Este equipo no soporta avisos'; return; }
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if(Notification.permission==='denied'){ btn.textContent='🔕 Bloqueado'; btn.classList.remove('on'); }
+    else if(sub && Notification.permission==='granted'){ btn.textContent='🔔 Avisos ON'; btn.classList.add('on'); }
+    else { btn.textContent='🔔 Activar avisos'; btn.classList.remove('on'); }
+  }catch(e){ btn.textContent='🔔 Activar avisos'; }
+}
+
+async function pushToggle(){
+  if(!STATE.codigo || !STATE.nombre){ toast('warn','Primero entra a tu turno'); return; }
+  if(!_pushSoportado()){ toast('warn','Este equipo no soporta avisos'); return; }
+  // iPhone: solo desde la app instalada (iOS 16.4+)
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const standalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  if(isIOS && !standalone){ toast('warn','En iPhone: instala la app (Compartir → Agregar a inicio) y actívalo desde ahí'); return; }
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    const perm = await Notification.requestPermission();
+    if(perm!=='granted'){ toast('warn','Permiso de avisos '+perm); pushEstado(); return; }
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey:_u8(VAPID_PUBLIC) });
+    const r = await gasPost('guardarSuscripcion', { codigo: STATE.codigo, nombre: STATE.nombre, subscription: sub.toJSON() });
+    if(r && r.ok){ toast('ok','🔔 Avisos activados en este equipo'); }
+    else { toast('warn','No se pudo guardar: '+((r&&r.error)||'?')); }
+    pushEstado();
+  }catch(e){ toast('warn','No se pudo activar: '+e.message); pushEstado(); }
 }
 
 /* ═════ v1.4 · DOBLE CAMPANA · vibración + beep DALLA PAGINA ═════
@@ -439,6 +481,7 @@ function entrarSala() {
   if (STATE.pollTimer) clearInterval(STATE.pollTimer);
   STATE.pollTimer = setInterval(() => refrescar(false), CFG.POLL_MS);
   _wakeLock();   // v1.12 · lo schermo non si spegne finché la sala è davanti
+  pushEstado();  // v1.14 · riflette lo stato del bottone avisos
 }
 
 /* v1.12 · wake lock: con la pagina in primo piano lo schermo resta acceso
