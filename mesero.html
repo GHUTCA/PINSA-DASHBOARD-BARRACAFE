@@ -5,6 +5,23 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0f0f16">
 <title>BKS Servicio</title>
+<!-- v1.12 (13-jul sera) · ROBUSTEZZA: PWA standalone ("Instalar aplicación" →
+     WebAPK che Android non ammazza come le schede Chrome) + SW passthrough
+     condiviso (pinsita-sw.js, NO cache — domani ci vive il push del cantiere
+     UN CLICK) + wake lock in sala + riarmo del poll al rientro. -->
+<link rel="manifest" href="mesero.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BKS Servicio">
+<link rel="apple-touch-icon" href="atalaya_icon_180.png">
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('pinsita-sw.js').catch(function () {});
+    });
+  }
+</script>
 <!-- ════════════════════════════════════════════════════════════════════
      mesero.html · v1.0 · 4jul2026 · Cantiere MENU (spec 03-jul)
      La página del mesero: código de turno + nombre (credenciales de TURNO,
@@ -165,7 +182,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.11 · 11jul</span>
+    <span class="ver" id="ver">v1.12 · 13jul</span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
@@ -421,6 +438,20 @@ function entrarSala() {
   refrescar(true);
   if (STATE.pollTimer) clearInterval(STATE.pollTimer);
   STATE.pollTimer = setInterval(() => refrescar(false), CFG.POLL_MS);
+  _wakeLock();   // v1.12 · lo schermo non si spegne finché la sala è davanti
+}
+
+/* v1.12 · wake lock: con la pagina in primo piano lo schermo resta acceso
+   (si rilascia da solo in background; si riprende al rientro). Best-effort:
+   se il browser non lo supporta, non succede niente. */
+let WLOCK = null;
+async function _wakeLock() {
+  try {
+    if (!('wakeLock' in navigator)) return;
+    if (WLOCK) return;
+    WLOCK = await navigator.wakeLock.request('screen');
+    WLOCK.addEventListener('release', () => { WLOCK = null; });
+  } catch (e) { WLOCK = null; }
 }
 
 async function refrescar(conSkeleton) {
@@ -655,9 +686,22 @@ async function marcarLlamada(idLlamada, btn) {
   showEntrada('');
 })();
 
-/* refresh al rientro in foreground */
+/* refresh al rientro in foreground
+   v1.12 · non solo refresh: si RIARMA anche il poll (Android strozza i timer
+   in background — al rientro l'interval può essere morto: senza riarmo la
+   sala restava ferma e "gli ordini arrivavano tutti insieme" al reload) +
+   si riprende il wake lock (rilasciato dal sistema in background). */
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && STATE.codigo && !$('vSala').classList.contains('hide')) refrescar(false);
+  if (document.visibilityState === 'visible' && STATE.codigo && !$('vSala').classList.contains('hide')) {
+    refrescar(false);
+    if (STATE.pollTimer) clearInterval(STATE.pollTimer);
+    STATE.pollTimer = setInterval(() => refrescar(false), CFG.POLL_MS);
+    _wakeLock();
+  }
+});
+/* v1.12 · anche al ripristino da bfcache (iPhone/Safari) */
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted && STATE.codigo && !$('vSala').classList.contains('hide')) refrescar(false);
 });
 /* invio con tastiera */
 ['entCodigo', 'entNombre'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') entrar(); }));
