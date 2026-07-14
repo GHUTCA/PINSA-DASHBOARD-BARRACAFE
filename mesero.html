@@ -113,6 +113,17 @@
   .corr-btns{display:flex;gap:8px}
   .corr-btns .btn{flex:1.5}
   .corr-btns .btn.sec{flex:1}
+  /* v1.15 · AGREGAR */
+  .agr-add{width:100%;margin-top:8px}
+  .agr-box{margin-top:8px;border-top:1px dashed var(--bord);padding-top:8px}
+  .agr-q{width:100%;box-sizing:border-box;padding:12px;border-radius:12px;border:1.5px solid var(--bord);
+    font-size:16px;background:var(--bg,#111);color:var(--t1,#eee)}
+  .agr-lista{max-height:220px;overflow:auto;margin:8px 0}
+  .agr-it{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;
+    padding:11px 12px;margin:4px 0;border-radius:10px;border:1px solid var(--bord);
+    background:transparent;color:inherit;font-size:15px;text-align:left;cursor:pointer}
+  .agr-it .agr-pre{color:var(--t3,#9aa);font-weight:700;white-space:nowrap}
+  .agr-vacio{padding:14px;text-align:center;color:var(--t3,#9aa);font-size:14px}
 
   /* v1.6 · KDS: el pedido está pronto en cocina/barra — a retirar */
   .retirar{margin-top:8px;background:rgba(61,184,118,.14);border:1.5px solid var(--ok);
@@ -182,7 +193,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.14.1 · 14jul</span>
+    <span class="ver" id="ver">v1.15 · 14jul</span>
     <span style="display:flex;gap:8px">
       <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
@@ -221,6 +232,10 @@ const STATE = {
   listoRingAt: 0,      // v1.7 · ultimo squillo "retirar" (re-campana 90s)
   editando: null,      // v1.10 · uuid del mío in correzione (¿la mesa se equivocó?)
   editQty: {},         // v1.10 · id → qty nuova durante la correzione
+  editNuevos: {},      // v1.15 · id → {nombre,precio,cat} degli item AGGIUNTI
+  catalogo: null,      // v1.15 · lista prodotti (getCatalogo, cache di sessione)
+  agregando: null,     // v1.15 · uuid con il picker AGREGAR aperto
+  agregarQ: '',        // v1.15 · testo di ricerca del picker
   strikes: 0,          // v1.11 · errori-turno consecutivi (si esce solo a 3)
 };
 
@@ -269,13 +284,21 @@ async function pushToggle(){
   if(!STATE.codigo || !STATE.nombre){ toast('warn','Primero entra a tu turno'); return; }
   const falta = _pushFaltantes();
   if(falta.length){ toast('warn','Falta en este navegador: ' + falta.join(' + ') + ' · ' + navigator.userAgent.slice(0, 60)); return; }
-  if(Notification.permission === 'denied'){ toast('warn','Avisos bloqueados: Chrome ⋮ → Configuración del sitio → Notificaciones → Permitir'); return; }
-  // iPhone: solo desde la app instalada (iOS 16.4+)
-  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const standalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
-  if(isIOS && !standalone){ toast('warn','En iPhone: instala la app (Compartir → Agregar a inicio) y actívalo desde ahí'); return; }
   try{
     const reg = await navigator.serviceWorker.ready;
+    // v1.15 · si YA está ON → apagar los avisos en ESTE equipo
+    const yaSub = await reg.pushManager.getSubscription();
+    if(yaSub && Notification.permission === 'granted'){
+      const ep = yaSub.endpoint;
+      try { await yaSub.unsubscribe(); } catch(e){}
+      try { await gasPost('borrarSuscripcion', { codigo: STATE.codigo, endpoint: ep }); } catch(e){}
+      toast('ok','🔕 Avisos apagados en este equipo'); pushEstado(); return;
+    }
+    if(Notification.permission === 'denied'){ toast('warn','Avisos bloqueados: Chrome ⋮ → Configuración del sitio → Notificaciones → Permitir'); return; }
+    // iPhone: solo desde la app instalada (iOS 16.4+)
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const standalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    if(isIOS && !standalone){ toast('warn','En iPhone: instala la app (Compartir → Agregar a inicio) y actívalo desde ahí'); return; }
     const perm = await Notification.requestPermission();
     if(perm!=='granted'){ toast('warn','Permiso de avisos '+perm); pushEstado(); return; }
     let sub = await reg.pushManager.getSubscription();
@@ -438,9 +461,50 @@ function abrirCorreccion(uuid) {
   if (!p) return;
   STATE.editando = uuid;
   STATE.editQty = {};
+  STATE.editNuevos = {};        // v1.15
+  STATE.agregando = null;
+  STATE.agregarQ = '';
   itemsDe(p).forEach(it => { STATE.editQty[it.id] = parseInt(it.qty, 10) || 1; });
   render(STATE.sala);
 }
+
+/* ═════ v1.15 · AGREGAR items al pedido pre-digitado (upsell «¿otra copa?») ═════ */
+async function agregarAbrir(uuid) {
+  STATE.agregando = uuid;
+  STATE.agregarQ = '';
+  if (!STATE.catalogo) {       // fetch una sola volta per sessione
+    try {
+      const r = await gasGet('getCatalogo', { codigo: STATE.codigo });
+      STATE.catalogo = (r && r.ok && Array.isArray(r.productos)) ? r.productos : [];
+    } catch (e) { STATE.catalogo = []; toast('warn', 'No cargó el catálogo — reintenta'); }
+  }
+  render(STATE.sala);
+}
+function agregarBuscar(v) {   // no re-render completo (perderebbe il focus): filtra la lista
+  STATE.agregarQ = v || '';
+  const lista = $('agrLista');
+  if (lista) lista.innerHTML = _agregarListaHtml();
+}
+function _agregarListaHtml() {
+  const q = (STATE.agregarQ || '').toLowerCase().trim();
+  const cat = (STATE.catalogo || []);
+  const filt = (q ? cat.filter(p => (p.nombre || '').toLowerCase().includes(q)) : cat).slice(0, 40);
+  if (!cat.length) return '<div class="agr-vacio">catálogo vacío</div>';
+  if (!filt.length) return '<div class="agr-vacio">nada con «' + esc(q) + '»</div>';
+  return filt.map(p =>
+    '<button class="agr-it" onclick="agregarPick(\'' + esc(p.id) + '\')">' +
+    '<span>' + esc(p.nombre) + '</span><span class="agr-pre">' + fmtPrice(p.precio) + ' ＋</span></button>'
+  ).join('');
+}
+function agregarPick(id) {
+  const p = (STATE.catalogo || []).find(x => x.id === id);
+  if (!p) return;
+  if (!STATE.editNuevos[id]) STATE.editNuevos[id] = { nombre: p.nombre, precio: p.precio, cat: p.cat };
+  STATE.editQty[id] = (STATE.editQty[id] || 0) + 1;   // otro tap = +1
+  STATE.agregando = null;                             // vuelve al panel con el item añadido
+  render(STATE.sala);
+}
+function agregarCerrar() { STATE.agregando = null; render(STATE.sala); }
 function qtyStep(id, d) {
   STATE.editQty[id] = Math.max(0, (STATE.editQty[id] || 0) + d);
   render(STATE.sala);
@@ -451,7 +515,12 @@ function cerrarCorreccion() {
 }
 async function guardarCorreccion(uuid, btn) {
   if (btn) btn.disabled = true;
-  const items = Object.keys(STATE.editQty).map(id => ({ id: id, qty: STATE.editQty[id] }));
+  // v1.15 · gli id nuovi (editNuevos) viaggiano coi dati completi → il GAS li AGGIUNGE
+  const items = Object.keys(STATE.editQty).map(id => {
+    const nu = STATE.editNuevos[id];
+    return nu ? { id: id, qty: STATE.editQty[id], nombre: nu.nombre, precio: nu.precio, cat: nu.cat }
+              : { id: id, qty: STATE.editQty[id] };
+  });
   try {
     const r = await gasPost('corregirPedido', { codigo: STATE.codigo, nombre: STATE.nombre, uuid: uuid, items: items });
     if (r && r.ok) {
@@ -595,6 +664,24 @@ function render(r) {
             '<span class="stepper"><button onclick="qtyStep(\'' + esc(it.id) + '\',-1)">−</button><b>' + q + '</b>' +
             '<button onclick="qtyStep(\'' + esc(it.id) + '\',1)">+</button></span></div>';
         });
+        // v1.15 · righe degli item AGGIUNTI (editNuevos) — steppers uguali
+        Object.keys(STATE.editNuevos).forEach(id => {
+          const nu = STATE.editNuevos[id];
+          const q = STATE.editQty[id] || 0;
+          totNuevo += (parseFloat(nu.precio) || 0) * q;
+          hc += '<div class="corr-it"><span class="nom' + (q === 0 ? ' cero' : '') + '">➕ ' + esc(nu.nombre) + '</span>' +
+            '<span class="stepper"><button onclick="qtyStep(\'' + esc(id) + '\',-1)">−</button><b>' + q + '</b>' +
+            '<button onclick="qtyStep(\'' + esc(id) + '\',1)">+</button></span></div>';
+        });
+        // v1.15 · picker AGREGAR (aperto solo su questa card) o il bottone per aprirlo
+        if (STATE.agregando === p.uuid) {
+          hc += '<div class="agr-box"><input class="agr-q" type="search" placeholder="Buscar producto…" ' +
+            'value="' + esc(STATE.agregarQ) + '" oninput="agregarBuscar(this.value)" autocomplete="off">' +
+            '<div class="agr-lista" id="agrLista">' + _agregarListaHtml() + '</div>' +
+            '<button class="btn sec" onclick="agregarCerrar()">cerrar búsqueda</button></div>';
+        } else {
+          hc += '<button class="btn sec agr-add" onclick="agregarAbrir(\'' + esc(p.uuid) + '\')">➕ Agregar producto</button>';
+        }
         hc += '<div class="corr-tot">Total nuevo: <b>' + fmtPrice(totNuevo) + '</b>' + (totNuevo === 0 ? ' · <b class="warn">= pedido CANCELADO</b>' : '') + '</div>' +
           '<div class="corr-btns"><button class="btn verde" onclick="guardarCorreccion(\'' + esc(p.uuid) + '\',this)">✓ Guardar</button>' +
           '<button class="btn sec" onclick="cerrarCorreccion()">dejar así</button></div></div>';
