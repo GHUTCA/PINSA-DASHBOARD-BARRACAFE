@@ -228,7 +228,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.9 · 15jul</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.10 · 15jul</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -271,7 +271,7 @@ const QS = new URLSearchParams(location.search);
 const CFG = {
   GAS_URL: 'https://script.google.com/macros/s/AKfycbzZkS3bBaYc34uJ6wXP9FG13i58-NT0FJp964vqkUYbRObUxryeRb9l_Fz24kb42f5t/exec',
   LOCAL: (QS.get('l') || localStorage.getItem('kds_local') || 'BKS').trim().toUpperCase(),
-  POLL_MS: 8000,
+  POLL_MS: 6500,   // v1.10 · era 8000: comanda nuova visibile ~2s prima (check 15-lug)
   TIMEOUT_MS: 25000,
   // umbrales del semáforo de producción (segundos desde el digitado)
   T_WARN_S: 300, T_BAD_S: 600,
@@ -288,6 +288,7 @@ const STATE = {
   fetchAt: 0,           // Date.now() del último poll (para correr timers en local)
   enVuelo: {},          // uuid → true (LISTO in flight)
   pollTimer: null, tickTimer: null,
+  pollEnVuelo: 0,       // v1.10 · ts del poll in corso (guardia anti-sovrapposizione)
   vistos: new Set(), vistosInit: false,
   fallos: 0,
   // v1.4 · chips EN ESPERA aperti + pins "pasa adelante" (locali al tablet,
@@ -433,6 +434,11 @@ function showTablero(){
   render();
 }
 async function poll(){
+  // v1.10 · guardia anti-sovrapposizione (check 15-lug: /exec risponde in
+  // 3-6s la notte → col vecchio 8s i poll potevano accavallarsi e accumularsi).
+  // Se un poll resta appeso >20s, il prossimo passa comunque.
+  if (STATE.pollEnVuelo && (Date.now() - STATE.pollEnVuelo) < 20000) return;
+  STATE.pollEnVuelo = Date.now();
   try {
     const r = await gasGet('getKds', { codigo: STATE.codigo, estacion: STATE.estacion });
     if (!r.ok) {
@@ -446,6 +452,8 @@ async function poll(){
   } catch (e) {
     STATE.fallos++;
     if (STATE.fallos >= 2) $('offline').classList.add('show');
+  } finally {
+    STATE.pollEnVuelo = 0;
   }
 }
 function aplicar(r){
