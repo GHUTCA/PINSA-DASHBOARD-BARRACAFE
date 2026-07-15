@@ -193,7 +193,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.15 · 14jul</span>
+    <span class="ver" id="ver">v1.16 · 15jul</span>
     <span style="display:flex;gap:8px">
       <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
@@ -226,6 +226,7 @@ const STATE = {
   tgLink: '',
   sala: null,          // último payload getSalaMesero
   enVuelo: {},         // uuid → true (tap in flight)
+  tomando: {},         // v1.16 · uuid → ts · MÍO ottimistico: soppresso da pendientes finché il poll conferma (anti-flicker)
   pollTimer: null,
   vistos: new Set(),   // v1.4 · uuid/llamadas già visti (per la doppia campana)
   vistosInit: false,   // il primo poll riempie senza suonare
@@ -589,6 +590,12 @@ async function refrescar(conSkeleton) {
     }
     STATE.strikes = 0;   // v1.11 · risposta buona = si riparte da zero
     STATE.sala = r;
+    // v1.16 · rilascia i MÍO ottimistici confermati (ora nei mios) o scaduti (safety 12s)
+    const _tn = Date.now();
+    Object.keys(STATE.tomando).forEach(u => {
+      const mine = (r.mios || []).some(p => p.uuid === u);
+      if (mine || _tn - STATE.tomando[u] > 12000) delete STATE.tomando[u];
+    });
     $('offline').classList.remove('show');
     detectarNuevos(r);   // v1.4 · doble campana su arrivi nuovi
     render(r);
@@ -619,7 +626,8 @@ function render(r) {
 
   // PENDIENTES (pedidos + llamadas genéricas della propria plaza)
   let h = '';
-  const pend = (r.pendientes || []);
+  // v1.16 · esclude i pedidos con MÍO ottimistico in corso (anti-flicker)
+  const pend = (r.pendientes || []).filter(p => !STATE.tomando[p.uuid]);
   const llam = (r.llamadas || []);
   if (pend.length || llam.length) {
     // v1.5 · contatore: il più vecchio sta in cima (è il più urgente), il numero
@@ -640,7 +648,7 @@ function render(r) {
   $('secPend').innerHTML = h;
 
   // SIN DUEÑO
-  const sd = (r.sin_dueno || []);
+  const sd = (r.sin_dueno || []).filter(p => !STATE.tomando[p.uuid]);   // v1.16 · anti-flicker
   $('secSinDueno').innerHTML = sd.length
     ? '<div class="h bad">Sin dueño · nadie lo tomó — ' + sd.length + '</div>' + sd.map(p => cardPedido(p, umb, 'MÍO — lo tomo yo', 'mio', true)).join('')
     : '';
@@ -765,6 +773,10 @@ function cardPedido(p, umb, btnLabel, marca, urgente) {
 async function marcar(uuid, marca, btn) {
   if (STATE.enVuelo[uuid]) return;
   STATE.enVuelo[uuid] = true;
+  // v1.16 · MÍO ottimistico: la card sparisce SUBITO da pendientes e resta soppressa
+  // finché il poll conferma che è nei MÍOS (o safety 12s). Basta col flicker MÍO→riappare
+  // quando la rete balla e il poll rilegge lo stato vecchio.
+  if (marca === 'mio') { STATE.tomando[uuid] = Date.now(); render(STATE.sala); }
   if (btn) { btn.disabled = true; btn.classList.add('cargando'); }
   try {
     const r = await gasPost('marcarPedido', { codigo: STATE.codigo, nombre: STATE.nombre, uuid, marca });
@@ -772,14 +784,18 @@ async function marcar(uuid, marca, btn) {
       const msg = { atendido: '✓ Tuyo — el cliente ve que vas', digitado: '⌨ Digitado — cocina/barra en marcha', entregado: '✓ Digitado en ALOHA', cerrado: '✓ Mesa libre' };
       toast('ok', msg[r.estado] || '✓');
     } else if (r && r.error === 'ya_tomado') {
+      delete STATE.tomando[uuid];   // no es mío → que reaparezca correcto
       toast('warn', 'Lo tomó ' + (r.mesero || 'otro') + ' primero');
     } else if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) {
+      delete STATE.tomando[uuid];
       if (_strikeTurno()) return;   // v1.11 · tre strike, non uno
       toast('warn', 'No se pudo verificar el turno — reintenta');
     } else {
+      delete STATE.tomando[uuid];
       toast('err', 'No se pudo: ' + (r && r.error || '?'));
     }
   } catch (e) {
+    // v1.16 · error de red: NO soltar tomando (puede haber llegado igual) — el poll/safety decide
     toast('err', e.message === 'timeout' ? 'Servidor lento — reintenta' : 'Sin conexión — reintenta');
   } finally {
     delete STATE.enVuelo[uuid];
