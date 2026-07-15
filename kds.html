@@ -200,9 +200,14 @@
   /* v1.5 · conferma del ritiro sulla piastrella */
   .lchip.conf{border-color:var(--ok);color:var(--t1);font-weight:800;cursor:default}
   .rrow{display:flex;gap:8px;margin-top:4px}
-  .rbtn{border:0;border-radius:10px;padding:10px 18px;font-size:16px;font-weight:900;cursor:pointer}
+  .rbtn{border:0;border-radius:10px;padding:10px 18px;font-size:16px;font-weight:900;cursor:pointer;
+    transition:transform .06s ease, filter .06s ease, opacity .1s ease; -webkit-tap-highlight-color:transparent}
   .rbtn.si{background:var(--ok);color:#0c1710}
   .rbtn.no{background:transparent;border:1.5px solid var(--bord);color:var(--t3)}
+  /* v1.9 · feedback al tap: si preme davvero, e durante l'invio si vede "…" */
+  .rbtn:active{transform:scale(.90);filter:brightness(.80)}
+  .rbtn:disabled{opacity:.5;cursor:default;transform:none}
+  .rbtn.cargando{opacity:.7}
   /* v1.1 · nadie retira: la piastrella protesta */
   .lchip.warn{border-color:var(--warn)}
   .lchip.warn .h{color:var(--warn)}
@@ -223,7 +228,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.8 · 14jul</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.9 · 15jul</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -518,9 +523,11 @@ function render(){
         const ls = haceLocal(p.listo_hace_s);
         const cls = ls >= CFG.RETIRO_BAD_S ? ' bad' : ls >= CFG.RETIRO_WARN_S ? ' warn' : '';
         if (STATE.confirmRet === p.uuid) {
+          const env = STATE.retEnVuelo === p.uuid;   // v1.9 · invio in corso
           return '<div class="lchip conf"><b>' + esc(p.mesa || '?') + '</b><span class="det">¿Retirado?</span>' +
-            '<div class="rrow"><button class="rbtn si" onclick="marcarRetirado(\'' + esc(p.uuid) + '\')">✓ Sí</button>' +
-            '<button class="rbtn no" onclick="STATE.confirmRet=null;render()">✕</button></div></div>';
+            '<div class="rrow"><button class="rbtn si' + (env ? ' cargando' : '') + '"' + (env ? ' disabled' : '') +
+              ' onclick="marcarRetirado(\'' + esc(p.uuid) + '\')">' + (env ? '…' : '✓ Sí') + '</button>' +
+            '<button class="rbtn no"' + (env ? ' disabled' : '') + ' onclick="STATE.confirmRet=null;render()">✕</button></div></div>';
         }
         return '<div class="lchip' + cls + '" onclick="STATE.confirmRet=\'' + esc(p.uuid) + '\';render()"><b>' + esc(p.mesa || '?') + '</b>' +
           ((p.plaza || p.mesero) ? '<span class="det" style="color:var(--warn);font-weight:800">📍 ' +
@@ -607,8 +614,12 @@ function tick(){
 }
 
 // v1.5 · il tap del ritiro (dal chip listo, dopo conferma)
+// v1.9 · feedback immediato: il bottone passa a "…" PRIMA dell'invio (non resta
+// piatto durante l'attesa di rete) + anti doppio-tap.
 async function marcarRetirado(uuid){
-  STATE.confirmRet = null;
+  if (STATE.retEnVuelo) return;
+  STATE.retEnVuelo = uuid;
+  render();                        // "…" al instante
   try {
     const r = await gasPost('marcarKdsRetirado', { codigo: STATE.codigo, estacion: STATE.estacion, uuid });
     if (r.ok) {
@@ -620,6 +631,8 @@ async function marcarRetirado(uuid){
   } catch (e) {
     toast('bad', 'Sin conexión — reintenta');
   }
+  STATE.confirmRet = null;
+  STATE.retEnVuelo = null;
   render();
 }
 
