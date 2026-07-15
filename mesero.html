@@ -22,6 +22,11 @@
     });
   }
 </script>
+<!-- v1.17 (15-jul noche) · #15 · NUEVO PEDIDO A VOCE (mano levantada):
+     FAB ➕ PEDIDO in sala → panel: mesa + picker catálogo (riusa la cache
+     AGREGAR) + steppers + «Crear pedido». GAS crearPedidoMesero (v3.5.2):
+     nasce ATENDIDO col mesero già suo, niente ring, Origen='mesero',
+     uuid fisso dal primo intento (retry mai duplica). -->
 <!-- ════════════════════════════════════════════════════════════════════
      mesero.html · v1.0 · 4jul2026 · Cantiere MENU (spec 03-jul)
      La página del mesero: código de turno + nombre (credenciales de TURNO,
@@ -124,6 +129,24 @@
     background:transparent;color:inherit;font-size:15px;text-align:left;cursor:pointer}
   .agr-it .agr-pre{color:var(--t3,#9aa);font-weight:700;white-space:nowrap}
   .agr-vacio{padding:14px;text-align:center;color:var(--t3,#9aa);font-size:14px}
+  /* v1.17 · #15 · NUEVO pedido a voce */
+  .fab-nuevo{position:fixed;right:16px;bottom:calc(18px + env(safe-area-inset-bottom,0));
+    z-index:60;background:var(--ok);color:#08130c;border:none;border-radius:999px;
+    padding:15px 20px;font-size:15px;font-weight:900;letter-spacing:.02em;
+    box-shadow:0 8px 24px rgba(0,0,0,.5);cursor:pointer}
+  .nuevo-overlay{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.55);
+    display:flex;align-items:flex-end;justify-content:center}
+  .nuevo-panel{background:var(--card);border:1px solid var(--bord);border-bottom:none;
+    border-radius:18px 18px 0 0;width:100%;max-width:430px;
+    padding:16px 16px calc(18px + env(safe-area-inset-bottom,0));max-height:88vh;overflow:auto}
+  .nuevo-h{display:flex;justify-content:space-between;align-items:center;
+    font-weight:900;font-size:16px;color:var(--t1);margin-bottom:10px}
+  .nuevo-h button{background:transparent;border:none;color:var(--t3);font-size:24px;padding:4px 8px}
+  .nuevo-mesa{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .nuevo-mesa label{font-size:13px;color:var(--t2);font-weight:800;letter-spacing:.05em}
+  .nuevo-mesa input{flex:1;box-sizing:border-box;padding:12px;border-radius:12px;
+    border:1.5px solid var(--bord);font-size:20px;font-weight:900;text-align:center;
+    background:var(--bg);color:var(--t1)}
 
   /* v1.6 · KDS: el pedido está pronto en cocina/barra — a retirar */
   .retirar{margin-top:8px;background:rgba(61,184,118,.14);border:1.5px solid var(--ok);
@@ -193,7 +216,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.16 · 15jul</span>
+    <span class="ver" id="ver">v1.17 · 15jul</span>
     <span style="display:flex;gap:8px">
       <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
@@ -201,6 +224,10 @@
     </span>
   </div>
 </section>
+
+<!-- v1.17 · #15 · FAB + panel NUEVO pedido (a voce) -->
+<button id="fabNuevo" class="fab-nuevo hide" onclick="nuevoAbrir()">➕ PEDIDO</button>
+<div id="nuevoWrap"></div>
 
 <div class="toast" id="toast"></div>
 
@@ -238,6 +265,7 @@ const STATE = {
   agregando: null,     // v1.15 · uuid con il picker AGREGAR aperto
   agregarQ: '',        // v1.15 · testo di ricerca del picker
   strikes: 0,          // v1.11 · errori-turno consecutivi (si esce solo a 3)
+  nuevo: null,         // v1.17 · #15 · {mesa, qty{}, datos{}, q, uuid, enviando} del pedido a voce
 };
 
 /* v1.11 · LA CORAZZA: un singolo codigo_invalid/no_turno può essere un
@@ -410,6 +438,8 @@ function esperaClass(s, umb) {
 /* ═════ ENTRADA ═════ */
 function showEntrada(msg) {
   $('vSala').classList.add('hide');
+  $('fabNuevo').classList.add('hide');   // v1.17 · il FAB vive solo in sala
+  STATE.nuevo = null; renderNuevo();
   $('vEntrada').classList.remove('hide');
   $('entLocal').textContent = CFG.LOCAL;
   if (STATE.codigo) $('entCodigo').value = STATE.codigo;
@@ -551,10 +581,108 @@ function abrirTelegram() {
   else toast('warn', 'Vuelve a entrar para generar el link');
 }
 
+/* ═════ v1.17 · #15 · NUEVO pedido a voce (mano levantada) ═════
+   Il panel vive in #nuevoWrap, FUORI dalle sezioni della sala: il poll
+   (render ogni 10s) non lo tocca mai. Si ridisegna solo sui gesti. */
+async function nuevoAbrir() {
+  STATE.nuevo = { mesa: '', qty: {}, datos: {}, q: '', uuid: '', enviando: false };
+  renderNuevo();
+  if (!STATE.catalogo) {       // stessa cache di sessione di AGREGAR
+    try {
+      const r = await gasGet('getCatalogo', { codigo: STATE.codigo });
+      STATE.catalogo = (r && r.ok && Array.isArray(r.productos)) ? r.productos : [];
+    } catch (e) { STATE.catalogo = []; toast('warn', 'No cargó el catálogo — reintenta'); }
+    renderNuevo();
+  }
+}
+function nuevoCerrar() { STATE.nuevo = null; renderNuevo(); }
+function nuevoMesaInput(v) { if (STATE.nuevo) STATE.nuevo.mesa = (v || '').replace(/[^0-9]/g, ''); }
+function nuevoBuscar(v) {   // niente re-render completo: si perderebbe il focus
+  if (!STATE.nuevo) return;
+  STATE.nuevo.q = v || '';
+  const el = $('nuevoLista'); if (el) el.innerHTML = _nuevoListaHtml();
+}
+function _nuevoListaHtml() {
+  const n = STATE.nuevo; if (!n) return '';
+  const q = (n.q || '').toLowerCase().trim();
+  const cat = STATE.catalogo || [];
+  if (!cat.length) return '<div class="agr-vacio">cargando catálogo…</div>';
+  const filt = (q ? cat.filter(p => (p.nombre || '').toLowerCase().includes(q)) : cat).slice(0, 40);
+  if (!filt.length) return '<div class="agr-vacio">nada con «' + esc(q) + '»</div>';
+  return filt.map(p =>
+    '<button class="agr-it" onclick="nuevoPick(\'' + esc(p.id) + '\')">' +
+    '<span>' + esc(p.nombre) + '</span><span class="agr-pre">' + fmtPrice(p.precio) + ' ＋</span></button>'
+  ).join('');
+}
+function nuevoPick(id) {
+  const n = STATE.nuevo; if (!n) return;
+  const p = (STATE.catalogo || []).find(x => x.id === id); if (!p) return;
+  if (!n.datos[id]) n.datos[id] = { nombre: p.nombre, precio: p.precio, cat: p.cat || '' };
+  n.qty[id] = (n.qty[id] || 0) + 1;   // otro tap = +1
+  renderNuevo();
+}
+function nuevoQty(id, d) {
+  const n = STATE.nuevo; if (!n) return;
+  n.qty[id] = Math.max(0, (n.qty[id] || 0) + d);
+  if (!n.qty[id]) { delete n.qty[id]; delete n.datos[id]; }
+  renderNuevo();
+}
+function _nuevoTotal() {
+  const n = STATE.nuevo; if (!n) return 0;
+  return Object.keys(n.qty).reduce((s, id) => s + (n.datos[id] ? n.datos[id].precio * n.qty[id] : 0), 0);
+}
+function renderNuevo() {
+  const w = $('nuevoWrap'); if (!w) return;
+  const n = STATE.nuevo;
+  if (!n) { w.innerHTML = ''; return; }
+  const sel = Object.keys(n.qty);
+  const selH = sel.length ? sel.map(id =>
+    '<div class="corr-it"><span class="nom">' + esc(n.datos[id].nombre) + '</span>' +
+    '<div class="stepper"><button onclick="nuevoQty(\'' + esc(id) + '\',-1)">−</button><b>' + n.qty[id] + '</b>' +
+    '<button onclick="nuevoQty(\'' + esc(id) + '\',1)">＋</button></div></div>'
+  ).join('') : '<div class="agr-vacio">toca productos para sumarlos</div>';
+  const total = _nuevoTotal();
+  w.innerHTML =
+    '<div class="nuevo-overlay" onclick="if(event.target===this)nuevoCerrar()">' +
+    '<div class="nuevo-panel">' +
+    '<div class="nuevo-h"><span>➕ Pedido a voz — lo tomas tú</span><button onclick="nuevoCerrar()">✕</button></div>' +
+    '<div class="nuevo-mesa"><label>MESA</label><input id="nuevoMesa" inputmode="numeric" pattern="[0-9]*" placeholder="N°" value="' + esc(n.mesa) + '" oninput="nuevoMesaInput(this.value)"></div>' +
+    '<input class="agr-q" id="nuevoQ" placeholder="busca producto…" value="' + esc(n.q) + '" oninput="nuevoBuscar(this.value)">' +
+    '<div class="agr-lista" id="nuevoLista">' + _nuevoListaHtml() + '</div>' +
+    selH +
+    '<div class="corr-tot">Total: <b>' + fmtPrice(total) + '</b></div>' +
+    '<button class="btn" ' + (n.enviando ? 'disabled' : '') + ' onclick="nuevoEnviar(this)">🛎 Crear pedido' + (total ? ' · ' + fmtPrice(total) : '') + '</button>' +
+    '</div></div>';
+}
+async function nuevoEnviar(btn) {
+  const n = STATE.nuevo; if (!n) return;
+  const mesa = ($('nuevoMesa') ? $('nuevoMesa').value : n.mesa || '').replace(/[^0-9]/g, '');
+  if (!mesa) { toast('warn', '¿Qué mesa es? Pon el número'); return; }
+  const ids = Object.keys(n.qty);
+  if (!ids.length) { toast('warn', 'El pedido está vacío'); return; }
+  // uuid FISSO dal primo intento: il retry non può mai duplicare (dedup GAS)
+  if (!n.uuid) n.uuid = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  const items = ids.map(id => ({ id: id, nombre: n.datos[id].nombre, precio: n.datos[id].precio, qty: n.qty[id], llevar: n.qty[id], cat: n.datos[id].cat || '' }));
+  const total = _nuevoTotal();
+  n.enviando = true; if (btn) btn.disabled = true;
+  try {
+    const r = await gasPost('crearPedidoMesero', { codigo: STATE.codigo, nombre: STATE.nombre, uuid: n.uuid, mesa: mesa, total: total, items_json: JSON.stringify(items) });
+    if (r && r.ok) {
+      toast('ok', '✓ ' + (r.id_pedido || 'Pedido') + ' — Mesa ' + mesa + (r.plaza ? ' · ' + r.plaza : '') + ' · en tus MÍOS');
+      STATE.nuevo = null; renderNuevo();
+      refrescar(false);
+      return;
+    }
+    toast('err', 'No se pudo: ' + (r && r.error || '?'));
+  } catch (e) { toast('err', 'Sin conexión — reintenta (no se duplica)'); }
+  n.enviando = false; if (btn) btn.disabled = false; renderNuevo();
+}
+
 /* ═════ SALA ═════ */
 function entrarSala() {
   $('vEntrada').classList.add('hide');
   $('vSala').classList.remove('hide');
+  $('fabNuevo').classList.remove('hide');   // v1.17 · #15 · pedido a voce
   $('salaLocal').textContent = CFG.LOCAL;
   $('salaCodigo').textContent = STATE.codigo;
   refrescar(true);
