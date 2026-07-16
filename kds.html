@@ -228,7 +228,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.10 · 15jul</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.11 · 16jul</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -278,8 +278,38 @@ const CFG = {
   // v1.1 · card piene in griglia (il resto va nella striscia EN ESPERA) e
   // umbrales del "nadie retira" (el GAS avisa al mesero a los 120s)
   MAX_CARDS: 8, RETIRO_WARN_S: 180, RETIRO_BAD_S: 360,
-  SK: { COD: 'kds_codigo', EST: 'kds_estacion', LOC: 'kds_local' },
+  SK: { COD: 'kds_codigo', EST: 'kds_estacion', LOC: 'kds_local', TOK: 'kds_token' },
 };
+
+/* v1.11 · PATCH ② · tablet battezzato: al primo login col código il tablet
+   riceve un token (bautizarDevice) — da lì il código del turno nuovo se lo
+   pesca da solo (salaCheckIn): mai più digitazione a ogni turno. */
+let kdsToken = (() => { try { return localStorage.getItem('kds_token') || ''; } catch (e) { return ''; } })();
+async function renovarCodigo() {
+  if (!kdsToken) return false;
+  try {
+    const r = await gasPost('salaCheckIn', { device_token: kdsToken });
+    if (r && r.ok && r.codigo) {
+      STATE.codigo = r.codigo;
+      try { localStorage.setItem(CFG.SK.COD, r.codigo); } catch (e) {}
+      return true;
+    }
+    if (r && (r.error === 'device_desconocido' || r.error === 'device_revocado')) {
+      kdsToken = '';
+      try { localStorage.removeItem(CFG.SK.TOK); } catch (e) {}
+    }
+    return false;   // no_turno_abierto o errore: si resta al código manuale
+  } catch (e) { return false; }
+}
+function bautizarSilencioso(codigo) {
+  if (kdsToken) return;
+  gasPost('bautizarDevice', { codigo: codigo, kds: STATE.estacion }).then(b => {
+    if (b && b.ok && b.token) {
+      kdsToken = b.token;
+      try { localStorage.setItem(CFG.SK.TOK, b.token); } catch (e) {}
+    }
+  }).catch(() => {});
+}
 
 const STATE = {
   estacion: (QS.get('st') || localStorage.getItem(CFG.SK.EST) || '').trim().toLowerCase(),
@@ -409,6 +439,7 @@ async function entrar(){
     localStorage.setItem(CFG.SK.COD, codigo);
     localStorage.setItem(CFG.SK.EST, STATE.estacion);
     localStorage.setItem(CFG.SK.LOC, CFG.LOCAL);
+    bautizarSilencioso(codigo);   // v1.11 · da qui il turno nuovo entra da solo
     aplicar(r);
     showTablero();
   } catch (e) {
@@ -442,7 +473,11 @@ async function poll(){
   try {
     const r = await gasGet('getKds', { codigo: STATE.codigo, estacion: STATE.estacion });
     if (!r.ok) {
-      if (r.error === 'codigo_invalid') { salir(); showEntrada('El turno se cerró — pide el código nuevo al JL.'); }
+      if (r.error === 'codigo_invalid') {
+        // v1.11 · turno nuovo: il tablet battezzato si rinnova da solo
+        if (await renovarCodigo()) return;
+        salir(); showEntrada('El turno se cerró — pide el código nuevo al JL.');
+      }
       return;
     }
     STATE.fallos = 0;
@@ -781,6 +816,20 @@ if (DEMO === '1') {
   }
   if (STATE.estacion !== 'cocina' && STATE.estacion !== 'barra') STATE.estacion = '';
   if (STATE.estacion) pickEst(STATE.estacion);
+  // v1.11 · tablet battezzato senza código (es. primo avvio del giorno):
+  // se lo pesca da solo prima ancora di mostrare la schermata
+  if (!STATE.codigo && STATE.estacion && kdsToken) {
+    (async function(){
+      if (await renovarCodigo()) {
+        try {
+          const r = await gasGet('getKds', { codigo: STATE.codigo, estacion: STATE.estacion });
+          if (r.ok) { aplicar(r); showTablero(); return; }
+        } catch (e) {}
+      }
+      showEntrada();
+    })();
+    return;
+  }
   if (STATE.codigo && STATE.estacion) {
     // reentrada silenciosa con reintentos (v1.8): un hueco de red al reiniciar
     // NO debe botar la tablet al código. El código queda precargado igual.
@@ -789,8 +838,13 @@ if (DEMO === '1') {
       for (let intento = 0; intento <= backoff.length; intento++) {
         try {
           const r = await gasGet('getKds', { codigo: STATE.codigo, estacion: STATE.estacion });
-          if (r.ok) { aplicar(r); showTablero(); }
-          else showEntrada();               // respuesta válida pero código rechazado → sí al código
+          if (r.ok) { aplicar(r); showTablero(); return; }
+          // v1.11 · código rechazado: il tablet battezzato prova a rinnovarselo
+          if (await renovarCodigo()) {
+            const r2 = await gasGet('getKds', { codigo: STATE.codigo, estacion: STATE.estacion });
+            if (r2.ok) { aplicar(r2); showTablero(); return; }
+          }
+          showEntrada();               // respuesta válida pero código rechazado → sí al código
           return;
         } catch (e) {
           if (intento < backoff.length) { await new Promise(res => setTimeout(res, backoff[intento])); continue; }

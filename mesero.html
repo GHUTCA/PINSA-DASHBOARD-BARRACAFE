@@ -188,14 +188,16 @@
     <input id="entCodigo" class="ent-input" type="text" inputmode="numeric" maxlength="4" placeholder="····"
       autocomplete="one-time-code" autocorrect="off" spellcheck="false" name="turno-otp">
   </div>
-  <div class="ent-field">
+  <div class="ent-field" id="entNombreField">
     <label class="ent-label" for="entNombre">Tu nombre</label>
     <input id="entNombre" class="ent-input" type="text" maxlength="30" placeholder="Como te conoce el JL"
       autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" name="apodo-sala">
   </div>
+  <!-- v1.19 · battesimo: i nomi vengono dall'anagrafica, mai digitati -->
+  <div id="entNombres" class="hide" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:14px 0 4px"></div>
   <div class="ent-err" id="entErr"></div>
   <button class="btn" id="entBtn" onclick="entrar()">ENTRAR</button>
-  <div class="ent-hint">El código te lo muestra el Jefe de Local (QR o 4 cifras).<br>
+  <div class="ent-hint" id="entHint">El código te lo muestra el Jefe de Local (QR o 4 cifras).<br>
     En este teléfono no queda ningún dato al cerrar.</div>
 </section>
 
@@ -216,7 +218,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.18 · 15jul</span>
+    <span class="ver" id="ver">v1.19 · 16jul</span>
     <span style="display:flex;gap:8px">
       <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
@@ -239,8 +241,15 @@ const CFG = {
   LOCAL: (QS.get('l') || localStorage.getItem('sala_local') || 'BKS').trim().toUpperCase(),
   POLL_MS: 10000,
   TIMEOUT_MS: 25000,
-  SK: { COD: 'sala_codigo', NOM: 'sala_nombre', LOC: 'sala_local' },
+  SK: { COD: 'sala_codigo', NOM: 'sala_nombre', LOC: 'sala_local', TOK: 'sala_device_token' },
 };
+
+/* v1.19 · PATCH ② · QR SALA (?sala=BKS): il QR fisso in zona pass è solo il
+   trigger. Device battezzato → salaCheckIn automatico (código dal server,
+   mai più digitado). Device vergine → flusso battesimo: código UNA volta
+   (gate umano: JL accanto) + nome scelto dall'anagrafica, mai digitato. */
+const BAUTISMO = (QS.get('sala') || '').trim() !== '';
+let deviceToken = (() => { try { return localStorage.getItem(CFG.SK.TOK) || ''; } catch (e) { return ''; } })();
 
 /* v1.9 · il código del QR (?c=) si usa UNA volta e sparisce dall'URL:
    mai più turni morti risuscitati dall'indirizzo (bug 10-lug, turno 8161) */
@@ -442,16 +451,108 @@ function showEntrada(msg) {
   STATE.nuevo = null; renderNuevo();
   $('vEntrada').classList.remove('hide');
   $('entLocal').textContent = CFG.LOCAL;
+  // v1.19 · battesimo (QR SALA, device vergine): solo el código — el nombre
+  // llega después, de la lista del registro (nunca digitado)
+  if (BAUTISMO && !deviceToken) {
+    $('entNombreField').classList.add('hide');
+    $('entHint').innerHTML = 'Bautismo del teléfono — <b>solo esta vez</b>.<br>Pon el código del turno (te lo muestra el JL) y elige tu nombre.';
+  }
   if (STATE.codigo) $('entCodigo').value = STATE.codigo;
   if (STATE.nombre) $('entNombre').value = STATE.nombre;
   if (msg) $('entErr').textContent = msg;
   if (STATE.pollTimer) { clearInterval(STATE.pollTimer); STATE.pollTimer = null; }
 }
 
+/* ═════ v1.19 · PATCH ② · battesimo device + check-in via token ═════ */
+async function checkInConToken() {
+  // ritorna true se è entrato; false = prosegui col flusso normale
+  try {
+    const r = await gasPost('salaCheckIn', { device_token: deviceToken });
+    if (r && r.ok) {
+      STATE.codigo = r.codigo; STATE.nombre = r.nombre; STATE.tgLink = r.tg_link || '';
+      try {
+        localStorage.setItem(CFG.SK.COD, r.codigo);
+        localStorage.setItem(CFG.SK.NOM, r.nombre);
+        localStorage.setItem(CFG.SK.LOC, CFG.LOCAL);
+      } catch (e) {}
+      if (r.marcaje_nuevo) toast('ok', '✓ Entrada marcada · ' + new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }));
+      if (r.sin_plaza) toast('warn', 'Aún no tienes plaza asignada — díselo al JL');
+      entrarSala();
+      return true;
+    }
+    if (r && (r.error === 'device_desconocido' || r.error === 'device_revocado')) {
+      // battesimo non più valido: si torna al mondo di prima, senza drammi
+      try { localStorage.removeItem(CFG.SK.TOK); } catch (e) {}
+      deviceToken = '';
+      return false;
+    }
+    if (r && r.error === 'no_turno_abierto') {
+      showEntrada('No hay turno abierto todavía — tu teléfono ya está bautizado: cuando el JL abra, entras solo.');
+      return true;
+    }
+    return false;
+  } catch (e) { return false; }
+}
+
+async function bautismoElegir(nombre, codigo) {
+  $('entErr').textContent = '';
+  const btn = $('entBtn');
+  btn.disabled = true; btn.textContent = 'BAUTIZANDO…'; btn.classList.add('cargando');
+  try {
+    const b = await gasPost('bautizarDevice', { codigo: codigo, nombre: nombre });
+    if (!b || !b.ok) {
+      $('entErr').textContent = b && b.error === 'mesero_desconocido'
+        ? 'Ese nombre no está en la lista — díselo al JL' : ('Error: ' + (b && b.error || '?'));
+      return;
+    }
+    deviceToken = b.token;
+    try { localStorage.setItem(CFG.SK.TOK, b.token); } catch (e) {}
+    toast('ok', '✓ Teléfono bautizado — desde hoy entras solo');
+    await checkInConToken();
+  } catch (e) {
+    $('entErr').textContent = e.message === 'timeout' ? 'Servidor lento — reintenta' : 'Sin conexión';
+  } finally {
+    btn.disabled = false; btn.textContent = 'ENTRAR'; btn.classList.remove('cargando');
+  }
+}
+
+async function bautismoNombres(codigo) {
+  // código validato dal server → lista nomi dall'anagrafica, mai digitati
+  const r = await gasPost('getStaffSala', { codigo: codigo });
+  if (!r || !r.ok) {
+    const msgs = { codigo_invalid: 'Código incorrecto — pídelo al JL', no_turno_abierto: 'No hay turno abierto todavía' };
+    $('entErr').textContent = msgs[r && r.error] || ('Error: ' + (r && r.error || '?'));
+    return;
+  }
+  const cont = $('entNombres');
+  cont.innerHTML = '';
+  (r.staff || []).forEach(s => {
+    const b = document.createElement('button');
+    b.className = 'btn';
+    b.style.cssText = 'width:auto;padding:10px 18px;font-size:15px';
+    b.textContent = s.nombre;
+    b.onclick = () => bautismoElegir(s.nombre, codigo);
+    cont.appendChild(b);
+  });
+  cont.classList.remove('hide');
+  $('entNombreField').classList.add('hide');
+  $('entBtn').classList.add('hide');
+  $('entHint').innerHTML = '¿Quién eres? Toca tu nombre — una vez y nunca más.<br>¿No estás en la lista? Díselo al JL.';
+}
+
 async function entrar() {
   const codigo = $('entCodigo').value.trim();
-  const nombre = $('entNombre').value.trim();
   if (!/^\d{4}$/.test(codigo)) { $('entErr').textContent = 'El código son 4 cifras'; return; }
+  // v1.19 · QR SALA su device vergine → battesimo: nome dalla lista, mai digitato
+  if (BAUTISMO && !deviceToken) {
+    $('entErr').textContent = '';
+    const btn0 = $('entBtn');
+    btn0.disabled = true; btn0.textContent = 'CARGANDO…'; btn0.classList.add('cargando');
+    try { await bautismoNombres(codigo); }
+    finally { btn0.disabled = false; btn0.textContent = 'ENTRAR'; btn0.classList.remove('cargando'); }
+    return;
+  }
+  const nombre = $('entNombre').value.trim();
   if (!nombre) { $('entErr').textContent = 'Falta tu nombre'; return; }
   $('entErr').textContent = '';
   const btn = $('entBtn');
@@ -954,6 +1055,12 @@ async function marcarLlamada(idLlamada, btn) {
 /* ═════ BOOTSTRAP ═════ */
 (async function boot() {
   $('entLocal').textContent = CFG.LOCAL;
+  // v1.19 · device battezzato → check-in automatico: addio schermata código.
+  // Se il token non regge (revocado/sin turno/rete) si cade nel mondo di prima.
+  if (deviceToken) {
+    const entrato = await checkInConToken();
+    if (entrato) return;
+  }
   // sessione viva → rientro diretto (anche dal link della notifica Telegram)
   if (STATE.codigo && STATE.nombre) {
     try {
