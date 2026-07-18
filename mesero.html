@@ -174,6 +174,34 @@
   .toast.warn{border-color:var(--warn);color:var(--warn)}
   @keyframes pulse{50%{opacity:.55}}
   .cargando{animation:pulse 1.2s infinite}
+  /* ═ v2.0 · MIS MESAS · griglia + sheet (richiesta mesera 17-lug) ═ */
+  .mesa-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:9px;margin-bottom:4px}
+  .mtile{position:relative;aspect-ratio:1;border-radius:14px;border:2px solid var(--line);
+    background:var(--panel);display:flex;flex-direction:column;align-items:center;justify-content:center;
+    cursor:pointer;transition:transform .08s;font-family:inherit;color:inherit;padding:0}
+  .mtile:active{transform:scale(.94)}
+  .mtile b{font-size:20px;font-weight:800;line-height:1} .mtile small{font-size:9.5px;color:var(--t2);margin-top:2px;font-weight:700}
+  .mtile .bdg{position:absolute;top:3px;right:5px;font-size:11px}
+  .mtile .cnt{position:absolute;top:3px;left:6px;font-size:9px;color:var(--t3);font-weight:700}
+  .mt-nuevo{border-color:var(--warn);background:rgba(245,166,35,.15);animation:mtpulse 1.1s infinite}
+  .mt-nuevo small{color:var(--warn)}
+  .mt-listo{border-color:var(--ok);background:rgba(61,184,118,.15);animation:mtpulse 2s infinite}
+  .mt-listo small{color:var(--ok)}
+  .mt-prep{border-color:#4aa3c0;background:rgba(74,163,192,.10)} .mt-prep small{color:#6fc3de}
+  .mt-ok{opacity:.72}
+  .mt-add{border-style:dashed;color:var(--t2)} .mt-add b{font-size:24px;color:var(--acc)}
+  @keyframes mtpulse{0%,100%{box-shadow:0 0 0 0 rgba(245,166,35,.35)}50%{box-shadow:0 0 0 7px rgba(245,166,35,0)}}
+  .mesa-ovl{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;z-index:40}
+  .mesa-ovl.on{display:block}
+  .mesa-sheet{position:fixed;left:50%;bottom:0;transform:translate(-50%,105%);width:100%;max-width:520px;
+    background:var(--panel);border-radius:18px 18px 0 0;padding:14px;transition:transform .28s;z-index:41;
+    max-height:84dvh;overflow-y:auto;border:1px solid var(--line);border-bottom:none}
+  .mesa-sheet.on{transform:translate(-50%,0)}
+  .msh-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
+  .msh-top h2{margin:0;font-size:19px} .msh-x{background:none;border:none;color:var(--t2);font-size:22px;cursor:pointer;padding:4px 8px}
+  .msh-sub{font-size:12px;color:var(--t2);margin-bottom:10px}
+  .msh-row{display:flex;gap:8px;margin-top:8px}
+  .msh-row .btn{margin:0}
 </style>
 </head>
 <body>
@@ -212,13 +240,18 @@
   </div>
   <div class="offline" id="offline">Sin conexión — mostrando lo último recibido. Reintento solo.</div>
 
+  <!-- v2.0 · MIS MESAS: la griglia (richiesta mesera 17-lug, mockup validato) -->
+  <div id="secMesas"></div>
   <div id="secPend"></div>
   <div id="secSinDueno"></div>
   <div id="secMios"></div>
+  <!-- v2.0 · sheet dettaglio tavolo -->
+  <div id="mesaOvl" class="mesa-ovl" onclick="cerrarMesa()"></div>
+  <aside id="mesaSheet" class="mesa-sheet"><div id="mesaSheetContent"></div></aside>
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.22 · 17jul</span>
+    <span class="ver" id="ver">v2.0 · MIS MESAS · 17jul</span>
     <span style="display:flex;gap:8px">
       <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
@@ -275,6 +308,8 @@ const STATE = {
   agregarQ: '',        // v1.15 · testo di ricerca del picker
   strikes: 0,          // v1.11 · errori-turno consecutivi (si esce solo a 3)
   nuevo: null,         // v1.17 · #15 · {mesa, qty{}, datos{}, q, uuid, enviando} del pedido a voce
+  mesaAbierta: '',     // v2.0 · mesa aperta nello sheet dettaglio
+  mesasModel: [],      // v2.0 · modello griglia MIS MESAS (ricostruito a ogni render)
 };
 
 /* v1.11 · LA CORAZZA: un singolo codigo_invalid/no_turno può essere un
@@ -696,8 +731,9 @@ function abrirTelegram() {
 /* ═════ v1.17 · #15 · NUEVO pedido a voce (mano levantada) ═════
    Il panel vive in #nuevoWrap, FUORI dalle sezioni della sala: il poll
    (render ogni 10s) non lo tocca mai. Si ridisegna solo sui gesti. */
-async function nuevoAbrir() {
-  STATE.nuevo = { mesa: '', qty: {}, datos: {}, q: '', uuid: '', enviando: false };
+async function nuevoAbrir(mesaPre) {
+  // v2.0 · dal sheet del tavolo arriva con la mesa già scritta
+  STATE.nuevo = { mesa: (mesaPre || '').toString(), qty: {}, datos: {}, q: '', uuid: '', enviando: false };
   renderNuevo();
   if (!STATE.catalogo) {       // stessa cache di sessione di AGREGAR
     try {
@@ -850,6 +886,95 @@ function salirPorCierre() {
   showEntrada('El turno se cerró — pide el código nuevo al JL');
 }
 
+/* ═════ v2.0 · MIS MESAS (richiesta mesera 17-lug · mockup validato) ═════
+   La griglia di tessere-dito sostituisce la lista dei MÍOS: una tessera per
+   mesa, colore = stato (🟡 nuevo su mesa mía · 🟢 listo al pass · 🔵 in
+   preparazione · grigia tranquila), tap → sheet del tavolo con i pedidos e
+   i gesti di sempre (MÍO/digitado/entregado/corregir/limpia) + ➕ agregar.
+   Il pendiente su mesa GIÀ MÍA non torna nei pendientes di plaza: è tuo. */
+function _mesasModel(r) {
+  const map = {};
+  const add = function (mesa) {
+    if (!map[mesa]) map[mesa] = { mesa: mesa, pend: [], mios: [], limpiar: [], grupo: '', regalo: false };
+    return map[mesa];
+  };
+  (r.mios || []).forEach(function (p) {
+    const m = add(p.mesa); m.mios.push(p);
+    if (p.mesa_grupo) m.grupo = p.mesa_grupo;
+    if (p.regalo_destino) m.regalo = true;
+  });
+  (r.por_limpiar || []).forEach(function (p) { add(p.mesa).limpiar.push(p); });
+  (r.pendientes || []).filter(function (p) { return !STATE.tomando[p.uuid]; }).forEach(function (p) {
+    if (map[p.mesa]) { map[p.mesa].pend.push(p); if (p.regalo_destino) map[p.mesa].regalo = true; }
+  });
+  const list = Object.keys(map).map(function (k) {
+    const m = map[k];
+    const hayListo = m.mios.some(function (p) { return p.estado === 'digitado' && p.listo && !p.retirado; });
+    m.st = m.pend.length ? 'nuevo' : hayListo ? 'listo' : m.mios.length ? 'prep' : 'ok';
+    m.n = m.pend.length + m.mios.length + m.limpiar.length;
+    return m;
+  });
+  const ord = { nuevo: 0, listo: 1, prep: 2, ok: 3 };
+  list.sort(function (a, b) {
+    return ord[a.st] - ord[b.st] || (parseInt(a.mesa, 10) || 0) - (parseInt(b.mesa, 10) || 0);
+  });
+  return list;
+}
+
+function renderMesas(r) {
+  const list = _mesasModel(r);
+  STATE.mesasModel = list;
+  let h = '';
+  if (list.length) {
+    h += '<div class="h">Mis mesas — ' + list.length + '</div><div class="mesa-grid">';
+    list.forEach(function (m) {
+      const lbl = { nuevo: 'NUEVO', listo: 'LISTO', prep: 'en prep.', ok: 'ok' }[m.st];
+      const bdg = m.st === 'nuevo' ? '🔔' : m.st === 'listo' ? '🍸'
+        : (m.grupo && m.grupo !== m.mesa) ? '🔗' : m.regalo ? '🎁' : '';
+      h += '<button class="mtile mt-' + m.st + '" onclick="abrirMesa(\'' + esc(m.mesa) + '\')">' +
+        (m.n > 1 ? '<span class="cnt">' + m.n + '</span>' : '') +
+        (bdg ? '<span class="bdg">' + bdg + '</span>' : '') +
+        '<b>' + esc(m.mesa) + '</b><small>' + lbl + '</small></button>';
+    });
+    // il gesto manuale vive anche qui, stesso design (oss. Alberto)
+    h += '<button class="mtile mt-add" onclick="nuevoAbrir()"><b>➕</b><small>pedido</small></button>';
+    h += '</div>';
+  }
+  $('secMesas').innerHTML = h;
+}
+
+function abrirMesa(mesa) {
+  STATE.mesaAbierta = mesa;
+  $('mesaOvl').classList.add('on');
+  $('mesaSheet').classList.add('on');
+  if (STATE.sala) renderMesaSheet(STATE.sala);
+}
+function cerrarMesa() {
+  STATE.mesaAbierta = '';
+  $('mesaOvl').classList.remove('on');
+  $('mesaSheet').classList.remove('on');
+}
+function renderMesaSheet(r) {
+  const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === STATE.mesaAbierta; });
+  if (!m) { cerrarMesa(); return; }   // mesa chiusa/limpia: lo sheet muore con lei
+  const umb = r.umbrales;
+  const tot = m.pend.concat(m.mios).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0);
+  let h = '<div class="msh-top"><h2>MESA ' + esc(m.mesa) +
+    ((m.grupo && m.grupo !== m.mesa) ? ' <span style="font-size:14px;color:var(--acc)">🔗' + esc(m.grupo) + '</span>' : '') +
+    '</h2><button class="msh-x" onclick="cerrarMesa()">✕</button></div>';
+  h += '<div class="msh-sub">' + m.n + ' pedido' + (m.n === 1 ? '' : 's') + ' · total ' + fmtPrice(tot) + '</div>';
+  m.pend.forEach(function (p) { h += cardPedido(p, umb, '✋ MÍO — lo tomo yo', 'mio'); });
+  m.mios.forEach(function (p) { h += cardMio(p, umb); });
+  m.limpiar.forEach(function (p) {
+    h += '<div class="card limpia"><span class="mesa">PED entregado</span>' +
+      '<span class="plaza" style="flex:1">digitado en ALOHA</span>' +
+      '<button class="btn sec" onclick="marcar(\'' + esc(p.uuid) + '\',\'limpia\',this)">✓ Mesa limpia</button></div>';
+  });
+  h += '<div class="msh-row"><button class="btn sec" style="border-color:var(--acc);color:var(--acc)" ' +
+    'onclick="cerrarMesa();nuevoAbrir(\'' + esc(m.mesa) + '\')">➕ Agregar productos</button></div>';
+  $('mesaSheetContent').innerHTML = h;
+}
+
 function render(r) {
   // header · v1.1: plazas con sus mesas
   const det = r.plazas_detalle || [];
@@ -864,10 +989,16 @@ function render(r) {
 
   const umb = r.umbrales;
 
+  // v2.0 · griglia MIS MESAS in testa; i pendientes su mesa GIÀ MÍA vengono
+  // assorbiti dalla tessera gialla (non tornano nei pendientes di plaza)
+  renderMesas(r);
+  const absorbidos = {};
+  STATE.mesasModel.forEach(function (m) { m.pend.forEach(function (p) { absorbidos[p.uuid] = true; }); });
+
   // PENDIENTES (pedidos + llamadas genéricas della propria plaza)
   let h = '';
   // v1.16 · esclude i pedidos con MÍO ottimistico in corso (anti-flicker)
-  const pend = (r.pendientes || []).filter(p => !STATE.tomando[p.uuid]);
+  const pend = (r.pendientes || []).filter(p => !STATE.tomando[p.uuid] && !absorbidos[p.uuid]);
   const llam = (r.llamadas || []);
   if (pend.length || llam.length) {
     // v1.5 · contatore: il più vecchio sta in cima (è il più urgente), il numero
@@ -893,12 +1024,18 @@ function render(r) {
     ? '<div class="h bad">Sin dueño · nadie lo tomó — ' + sd.length + '</div>' + sd.map(p => cardPedido(p, umb, 'MÍO — lo tomo yo', 'mio', true)).join('')
     : '';
 
-  // MÍOS
-  const mios = (r.mios || []);
-  let hm = '';
-  if (mios.length) {
-    hm += '<div class="h">Míos · en curso — ' + mios.length + '</div>';
-    mios.forEach(p => {
+  // v2.0 · i MÍOS vivono nella griglia MIS MESAS + sheet: la vecchia lista
+  // si spegne. cardMio() (sotto) resta il renderer, usato dallo sheet.
+  $('secMios').innerHTML = '';
+  // v2.0 · por_limpiar: tessere grigie + bottone nello sheet
+  $('secLimpiar').innerHTML = '';
+  // v2.0 · lo sheet aperto si rinfresca a ogni poll
+  if (STATE.mesaAbierta) renderMesaSheet(r);
+}
+
+function cardMio(p, umb) {
+  {
+    {
       // v1.10 · card in modalità CORRECCIÓN (steppers al posto del dettaglio)
       if (STATE.editando === p.uuid) {
         const its = itemsDe(p);
@@ -933,8 +1070,7 @@ function render(r) {
         hc += '<div class="corr-tot">Total nuevo: <b>' + fmtPrice(totNuevo) + '</b>' + (totNuevo === 0 ? ' · <b class="warn">= pedido CANCELADO</b>' : '') + '</div>' +
           '<div class="corr-btns"><button class="btn verde" onclick="guardarCorreccion(\'' + esc(p.uuid) + '\',this)">✓ Guardar</button>' +
           '<button class="btn sec" onclick="cerrarCorreccion()">dejar así</button></div></div>';
-        hm += hc;
-        return;
+        return hc;
       }
       const esDig = p.estado === 'digitado';
       // v1.6 · KDS: listo=true quando OGNI stazione coinvolta ha dato il suo LISTO
@@ -943,7 +1079,7 @@ function render(r) {
       const esRet = esDig && !!p.retirado;
       const esListo = esDig && !!p.listo && !esRet;
       // v1.5 · dettaglio COMPLETO anche nei míos: è qui che digiti su ALOHA
-      hm += '<div class="card"><div class="mesa-row"><span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
+      return '<div class="card"><div class="mesa-row"><span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
         '<span class="plaza">' + esc(p.plaza || '—') + ((esListo || esRet) ? '' : esDig ? ' · en producción 🍳' : ' · confirmado en mesa') + '</span></div>' +
         bodyItems(p) +
         '<div class="mio-meta">' + resumenCorto(p) + (esDig ? '' : ' · <b class="warn">falta digitarlo</b>') + '</div>' +
@@ -955,18 +1091,8 @@ function render(r) {
             // v1.10 · prima del digitado si può correggere (¿la mesa se equivocó?)
             '<button class="btn sec" style="margin-top:6px" onclick="abrirCorreccion(\'' + esc(p.uuid) + '\')">✎ Corregir pedido</button>') +
         '</div>';
-    });
+    }
   }
-  $('secMios').innerHTML = hm;
-
-  // POR LIMPIAR
-  const pl = (r.por_limpiar || []);
-  $('secLimpiar').innerHTML = pl.length
-    ? '<div class="h">Por limpiar — ' + pl.length + '</div>' + pl.map(p =>
-        '<div class="card limpia"><span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
-        '<span class="plaza" style="flex:1">digitado en ALOHA</span>' +
-        '<button class="btn sec" onclick="marcar(\'' + esc(p.uuid) + '\',\'limpia\',this)">✓ Mesa limpia</button></div>').join('')
-    : '';
 }
 
 function itemsDe(p) {
