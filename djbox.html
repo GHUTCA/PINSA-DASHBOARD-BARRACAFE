@@ -7,7 +7,7 @@
 <title>DJ-BOX · BKS</title>
 <!-- DEVICE-CLASS: 2 · tablet in cabina (Galaxy Tab A11 Plus landscape · Swan 15.6") -->
 <!-- ════════════════════════════════════════════════════════════════════
-     djbox.html · v1.1 · 18-lug-2026 (maratona sab) — IL KDS DELLA CABINA
+     djbox.html · v1.2 · 18-lug-2026 (maratona sab) — IL KDS DELLA CABINA
      Dal mockup VALIDATO (MOCKUP_DJBOX_APERTURA_v2, 6 passate con Alberto).
      Backend: GAS MENU v3.13.1 (@65) — getDjBox (poll 5s) · djLogin ·
      djResolver LA PONGO/PASO · djSetEstilos · djAcepta.
@@ -118,9 +118,14 @@
   .eq i{width:4px;background:var(--neon);animation:beq .7s ease-in-out infinite alternate}
   .eq i:nth-child(2){animation-delay:.15s;background:var(--vio)} .eq i:nth-child(3){animation-delay:.3s;background:var(--mag)} .eq i:nth-child(4){animation-delay:.45s}
   @keyframes beq{from{height:5px}to{height:24px}}
-  .tog{justify-self:end;flex:none;background:rgba(0,255,200,.10);border:2px solid var(--neon);color:var(--neon);border-radius:16px;
-    padding:16px 26px;font-size:17px;font-weight:900;letter-spacing:1px;cursor:pointer}
-  .tog.off{background:transparent;border-color:var(--rojo);color:var(--rojo)}
+  /* v1.2 · IL SEMAFORO: OFF 🔴 · PRONTO 🟡 · ON 🟢 (VB sab sera) */
+  .tog3{justify-self:end;display:flex;gap:6px;background:var(--panel2);border:1.5px solid var(--bord);
+    border-radius:18px;padding:5px}
+  .tog3 button{border:none;background:transparent;color:var(--t3);border-radius:13px;
+    padding:13px 18px;font-size:15.5px;font-weight:900;letter-spacing:.5px;cursor:pointer}
+  .tog3 button.sel.off{background:rgba(255,84,112,.16);color:var(--rojo);box-shadow:inset 0 0 0 2px var(--rojo)}
+  .tog3 button.sel.pronto{background:rgba(255,207,107,.14);color:var(--gold);box-shadow:inset 0 0 0 2px var(--gold)}
+  .tog3 button.sel.on{background:rgba(0,255,200,.14);color:var(--neon);box-shadow:inset 0 0 0 2px var(--neon)}
 
   .lato{padding:16px;border-right:1px solid var(--bord);overflow-y:auto;display:flex;flex-direction:column;gap:16px}
   .sec-t{font-size:13px;letter-spacing:2.5px;color:var(--t3);text-transform:uppercase;margin-bottom:8px}
@@ -243,7 +248,11 @@
           <span class="now-para" id="nowPara" style="display:none"></span></span>
         <span class="eq"><i></i><i></i><i></i><i></i></span>
       </div>
-      <button class="tog" id="tog" onclick="togAcepta()">🎧 PEDIDOS ON</button>
+      <div class="tog3" id="tog3">
+        <button class="off" onclick="setEstado('off')">🔴 OFF</button>
+        <button class="pronto" onclick="setEstado('pronto')">🟡 PRONTO</button>
+        <button class="on" onclick="setEstado('on')">🟢 ON</button>
+      </div>
     </div>
     <div class="off-banner" id="offBanner">⏸ PEDIDOS OFF — el menú no acepta canciones hasta que reabras</div>
 
@@ -388,11 +397,20 @@ function render(){
     $('nowTitle').textContent = DJ ? DJ + ' en cabina' : '—';
     $('nowPara').style.display = 'none';
   }
-  // acepta
-  const t = $('tog');
-  t.classList.toggle('off', !s.acepta);
-  t.textContent = s.acepta ? '🎧 PEDIDOS ON' : '⏸ PEDIDOS OFF';
-  $('offBanner').style.display = s.acepta ? 'none' : 'block';
+  // semaforo (VB sab sera)
+  const est = s.estado || (s.acepta ? 'on' : 'off');
+  document.querySelectorAll('#tog3 button').forEach(b => b.classList.toggle('sel', b.classList.contains(est)));
+  const ob = $('offBanner');
+  if(est === 'on'){ ob.style.display = 'none'; }
+  else {
+    ob.style.display = 'block';
+    ob.style.color = est === 'off' ? '#ff8fa3' : 'var(--gold)';
+    ob.style.borderColor = est === 'off' ? 'var(--rojo)' : 'var(--gold)';
+    ob.style.background = est === 'off' ? 'rgba(255,84,112,.12)' : 'rgba(255,207,107,.10)';
+    ob.textContent = est === 'off'
+      ? '🔴 CERRADA — ni pedidos ni aplausos llegan al menú'
+      : '🟡 PRONTO — los aplausos ya entran, los pedidos aún no';
+  }
   // marcador
   $('kPed').textContent = s.marcador.pedidas;
   $('kPue').textContent = s.marcador.puestas;
@@ -441,13 +459,13 @@ async function resolver(id, accion){
   } catch(e){ toast('Sin conexión — reintenta'); }
   delete EN_VUELO[id]; render();
 }
-async function togAcepta(){
+async function setEstado(e){
   if(!STATE) return;
-  const on = !STATE.acepta;
   try {
-    const r = await gasPost('djAcepta', {pwd:PWD, on:on});
-    if(r.ok){ STATE.acepta = r.acepta; render(); toast(on ? '🎧 Pedidos abiertos' : '⏸ Pedidos en pausa'); }
-  } catch(e){ toast('Sin conexión'); }
+    const r = await gasPost('djEstado', {pwd:PWD, estado:e});
+    if(r.ok){ STATE.estado = r.estado; STATE.acepta = r.estado === 'on'; render();
+      toast(e === 'on' ? '🟢 Cabina ABIERTA — que pidan' : e === 'pronto' ? '🟡 PRONTO — calentando motores' : '🔴 Cabina cerrada'); }
+  } catch(err){ toast('Sin conexión'); }
 }
 function abrirCatalogo(){ pintaCatalogo(); $('ovCat').classList.add('on'); }
 function cerrarCatalogo(){ $('ovCat').classList.remove('on'); }
