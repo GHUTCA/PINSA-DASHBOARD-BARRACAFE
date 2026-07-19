@@ -1,5 +1,7 @@
 /* ════════════════════════════════════════════════════════════════════
- *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.8
+ *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.9
+ *  v1.9 (19-jul-2026) · briciola pinsita_conocido al login (il nudo di atalaya
+ *    non mostra la porta mesero sui telefoni che hanno mai fatto PIN)
  *
  *  v1.8 (09-jul-2026) · fix scope multiempresa (Cantiere Visor):
  *         - il login classico salva in sessione il LOCAL del foglio usuarios
@@ -292,6 +294,11 @@
       turno: turno || '', expiresAt: Date.now() + SESSION_HORAS * 3600 * 1000
     };
     try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) {}
+    // v1.9 · briciola permanente (sopravvive alla scadenza): questo telefono ha
+    // fatto login col PIN almeno una volta → NON è il telefono di un mesero
+    // (loro entrano in mesero.html col codigo turno, mai dal portale).
+    // La usa il landing nudo di atalaya per non mostrare «¿Eres mesero?» ai capi.
+    try { localStorage.setItem('pinsita_conocido', s.local); } catch (e) {}
     return s;
   }
 
