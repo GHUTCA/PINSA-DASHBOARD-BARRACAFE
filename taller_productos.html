@@ -184,7 +184,7 @@
     <button id="nav-precios" onclick="vista('precios')" style="display:none">Precios</button>
   </nav>
   <span class="userchip" id="userchip">—</span>
-  <span class="ver" id="ver">v2.1.4 · 21-jul</span>
+  <span class="ver" id="ver">v2.2 · 21-jul</span>
 </header>
 
 <main>
@@ -286,6 +286,11 @@
                 <input type="number" id="f-qfmt" value="500" oninput="render()">
                 <span class="hint" style="margin:0" id="uFmt">gr</span>
               </div>
+              <div style="display:flex;gap:8px;align-items:center;margin-top:8px" id="fmtagrup">
+                <span class="hint" style="margin:0; white-space:nowrap">agrupadas de a</span>
+                <input type="number" id="f-agrup" value="0" oninput="render()" style="width:70px">
+                <span class="hint" style="margin:0">por <b>bolsa madre</b> (0 = sueltas)</span>
+              </div>
             </div>
             <div>
               <label>¿Cómo se conserva?</label>
@@ -360,7 +365,8 @@
           <div class="kpi big"><span id="k2l">Costo por gr</span><b id="k2">—</b></div>
           <div class="kpi" id="k3row"><span id="k3l">—</span><b id="k3">—</b></div>
           <div class="kpi" id="kfcrow" style="display:none"><span>Food cost</span><b id="kfc">—</b></div>
-          <div class="kpi" id="ktrrow"><span>Precio transfer → bodega</span><b><input type="number" id="f-transfer" class="pvedit" placeholder="opc."></b></div>
+          <div class="kpi" id="ktrrow"><span>Precio transfer → bodega</span><b><input type="number" id="f-transfer" class="pvedit" placeholder="auto" oninput="S&&(S.trManual=true); render()"></b></div>
+          <div class="hint" id="trhint" style="margin:-4px 0 0"></div>
           <div class="semaf ok" id="cohere" style="display:none"></div>
           <div class="estado"><span class="dot"></span> Nace en <b>&nbsp;SIMULACION&nbsp;</b> — «Activar» cuando esté completa</div>
         </div>
@@ -2963,6 +2969,7 @@ function setFmt(f){
   ['granel','bolsa','porcion'].forEach(x =>
     document.getElementById('fmt-'+x).classList.toggle('on', x===f));
   document.getElementById('fmtq').style.display = (f==='granel') ? 'none' : 'flex';
+  document.getElementById('fmtagrup').style.display = (f==='granel') ? 'none' : 'flex';   // v2.2
   render();
 }
 function conservaChange(noRender){
@@ -3124,14 +3131,38 @@ function render(soloCalc){
       document.getElementById('k3l').textContent = `Costo por ${S.fmt==='bolsa'?'bolsa':'porción'} (${fmtN(qf)} ${u})`;
       document.getElementById('k3').textContent = '$' + fmtN(cU*qf);
     } else k3r.style.display = 'none';
+    // v2.2: agrupación en BOLSA MADRE (3° livello: tanda → madre → unidad)
+    const agrup = num('f-agrup');
+    const uds   = (qf > 0) ? Math.round(q / qf) : 0;
+    const madres = (agrup > 0 && uds > 0) ? Math.ceil(uds / agrup) : 0;
+    const unNom = S.fmt==='bolsa' ? 'bolsas' : 'porciones';
     const fTxt = S.fmt==='granel' ? 'a granel'
-      : `<b>${fmtN(Math.round(q/qf*10)/10)} ${S.fmt==='bolsa'?'bolsas':'porciones'} de ${fmtN(qf)} ${u}</b>`;
+      : `<b>${fmtN(uds)} ${unNom} de ${fmtN(qf)} ${u}</b>` +
+        (madres ? `, en <b>${fmtN(madres)} bolsas madre de ${fmtN(agrup)}</b>` : '');
     esp.innerHTML = `<span class="tag">Espejo</span><b>${esc(pref+(nom||'—'))}</b>: con ` +
       `<b>${S.ings.length} ingredientes</b> ($${fmtN(costo)}) sale una tanda de <b>${fmtN(q)} ${u}</b>` +
       (rend ? ` (rendimiento ${rend}%)` : '') + `, entregada ${fTxt}. ` +
       (vida>0 ? `Caduca a los <b>${vida} días</b> (${CONS_LBL[val('f-conserva')]||'—'}). ` : `<b>Falta la vida útil.</b> `) +
       `Costo: <b>$${fmtN(cU,2)}/${u}</b>` +
-      (S.fmt!=='granel' && qf>0 ? ` · <b>$${fmtN(cU*qf)} por ${S.fmt==='bolsa'?'bolsa':'porción'}</b>.` : '.');
+      (S.fmt!=='granel' && qf>0 ? ` · <b>$${fmtN(cU*qf)} por ${S.fmt==='bolsa'?'bolsa':'porción'}</b>` : '') +
+      (madres ? ` · <b>$${fmtN(cU*qf*agrup)} por bolsa madre</b>.` : '.');
+
+    // v2.2 · PRECIO TRANSFER — dentro de la misma empresa NO lleva margen:
+    // transfer = costo estándar de la unidad de entrega (calcolato, non digitato).
+    // Manuale solo per il caso cross-empresa (venta real entre sociedades).
+    const trIn = document.getElementById('f-transfer');
+    const unidEnt = (S.fmt !== 'granel' && qf > 0) ? qf : 1;
+    const trAuto = Math.round(cU * unidEnt);
+    if (!S.trManual) trIn.value = trAuto || '';
+    const trH = document.getElementById('trhint');
+    if (S.trManual) {
+      const dif = num('f-transfer') - trAuto;
+      trH.innerHTML = `manual · costo estándar ${S.fmt==='granel' ? 'por '+u : 'por '+(S.fmt==='bolsa'?'bolsa':'porción')}: <b>$${fmtN(trAuto)}</b>` +
+        (Math.abs(dif) > 0.5 ? ` · <span style="color:var(--amber)">${dif>0?'+':''}${fmtN(dif)} de margen</span>` : '') +
+        ` <button class="btn ghost" style="padding:1px 8px;font-size:11px" onclick="S.trManual=false;render()">↺ auto</button>`;
+    } else {
+      trH.innerHTML = `= costo estándar ${S.fmt==='granel' ? 'por '+u : 'por '+(S.fmt==='bolsa'?'bolsa':'porción')} · sin margen (misma empresa)`;
+    }
   }
   const coh = document.getElementById('cohere');
   coh.style.display = S.ings.length ? '' : 'none';
@@ -3146,9 +3177,11 @@ function buildPayload(){
   const u = esVenta ? 'unidad' : (val('f-ulote')==='un' ? 'unidad' : val('f-ulote'));
   const q = esVenta ? 1 : num('f-qlote');
   const qf = num('f-qfmt');
+  const agrup = num('f-agrup');   // v2.2: 3° livello — bolsa madre
   const formato = esVenta ? '' :
     S.fmt==='granel' ? 'A granel' :
-    (S.fmt==='bolsa' ? 'Bolsas de ' : 'Porciones de ') + qf + ' ' + val('f-ulote');
+    (S.fmt==='bolsa' ? 'Bolsas de ' : 'Porciones de ') + qf + ' ' + val('f-ulote') +
+      (agrup > 0 ? ', agrupadas de a ' + agrup : '');
   // vida útil/conservación: tag in Notas finché il Master non ha la colonna (debito F4)
   const notas = esVenta ? '' :
     '[vida:' + num('f-vida') + '][conserva:' + val('f-conserva') + ']';
@@ -3159,7 +3192,7 @@ function buildPayload(){
     familia: val('f-familia'),
     categoria: esVenta ? val('f-categoria') : (val('f-ulote')==='cc' ? 'LIQUIDOS' : 'SOLIDOS'),
     formato, unidad_salida: u, q_lote: q, rendimiento: 1,
-    formato_entrega: esVenta ? null : { tipo: S.fmt, q: S.fmt === 'granel' ? 1 : qf },
+    formato_entrega: esVenta ? null : { tipo: S.fmt, q: S.fmt === 'granel' ? 1 : qf, agrup: agrup || 0 },
     empresas: { pinsa: EMP==='PINSA'?'SI':'NO', exo: EMP==='EXO'?'SI':'NO', bks: EMP==='BKS'?'SI':'NO' },
     precio_transfer: num('f-transfer') || null,
     dificultad: 'Baja', tiempo_prep: 0, tiempo_coccion: 0,
@@ -3266,7 +3299,7 @@ function descartarBorrador(){
 function guardarBorrador(silencioso){
   if (!S) return;
   const dump = { S, campos:{} };
-  ['f-nombre','f-familia','f-seccion','f-categoria','f-qlote','f-ulote','f-qfmt',
+  ['f-nombre','f-familia','f-seccion','f-categoria','f-qlote','f-ulote','f-qfmt','f-agrup',
    'f-conserva','f-vida','f-pv','f-transfer','f-foto','f-video'].forEach(id =>
     dump.campos[id] = val(id));
   localStorage.setItem('taller_borrador', JSON.stringify(dump));
@@ -3389,7 +3422,7 @@ function verReceta(id){
 }
 /* ── CANCELAR: scarta tutto, pulisce il form, torna al Recetario ── */
 function limpiarForm(){
-  ['f-nombre','f-qlote','f-qfmt','f-vida','f-pv','f-transfer','f-foto','f-video','f-paso','f-inga','f-familia','f-seccion','f-categoria','f-conserva']
+  ['f-nombre','f-qlote','f-qfmt','f-agrup','f-vida','f-pv','f-transfer','f-foto','f-video','f-paso','f-inga','f-familia','f-seccion','f-categoria','f-conserva']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('vrango').textContent = 'elige la conservación';
   fotoPrev();
@@ -3432,13 +3465,18 @@ function editarReceta(id){
     setFmt(fm.indexOf('bolsas') === 0 ? 'bolsa' : fm.indexOf('porciones') === 0 ? 'porcion' : 'granel');
     const mq = fm.match(/de\s+([\d.,]+)/);
     if (mq) document.getElementById('f-qfmt').value = numCL(mq[1]);
+    const ma = fm.match(/agrupadas\s+de\s+a\s+([\d.,]+)/);          // v2.2: bolsa madre
+    document.getElementById('f-agrup').value = ma ? numCL(ma[1]) : 0;
     const mc = r.notas.match(/\[conserva:(\w+)\]/);
     document.getElementById('f-conserva').value = (mc && RANGOS[mc[1]]) ? mc[1] : '';
     const rr = mc && RANGOS[mc[1]];
     document.getElementById('vrango').textContent = rr ? 'típico: ' + rr[0] + '–' + rr[1] + ' días' : 'elige la conservación';
     const mv = r.notas.match(/\[vida:(\d+)\]/);
     document.getElementById('f-vida').value = mv ? mv[1] : '';
+    // v2.2: un transfer già scritto NON si sovrascrive in silenzio — si mostra
+    // come "manual" col confronto sul costo estándar (bottone ↺ auto per allinearlo)
     document.getElementById('f-transfer').value = r.transfer || '';
+    S.trManual = !!r.transfer;
   }
   S.ings = (DETALLE[id] || []).map(i => {
     const v = insumoVivo(i.descripcion);
@@ -3515,7 +3553,8 @@ function abrirPrint(id){
   document.getElementById('pm-salida').value = r.qlote || '';
   const fm = (r.formato || '').match(/de\s+([\d.,]+)/i);
   document.getElementById('pm-fmt').value = fm ? numCL(fm[1]) : '';
-  document.getElementById('pm-agrup').value = /porciones/i.test(r.formato || '') ? 10 : 0;
+  const magr = (r.formato || '').match(/agrupadas\s+de\s+a\s+([\d.,]+)/i);   // v2.2: dal formato della receta
+  document.getElementById('pm-agrup').value = magr ? numCL(magr[1]) : 0;
   document.getElementById('pm-fecha').value = new Date().toISOString().slice(0,10);
   const vm = r.notas.match(/\[vida:(\d+)\]/);
   document.getElementById('pm-vida').value = vm ? vm[1] : '';
