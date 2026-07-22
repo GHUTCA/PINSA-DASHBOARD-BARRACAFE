@@ -464,7 +464,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v56 · 16jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v57 · 22jul</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -510,7 +510,7 @@
     </div>
     <!-- PORTE · orden: QR · Teclado · Voz (fix 3) -->
     <div class="portes" id="portes">
-      <button class="porta soon" id="pQR"><span class="ic">▦</span>QR<span class="tag">pronto</span></button>
+      <button class="porta" id="pQR"><span class="ic">▦</span>QR<span class="tag">escanea</span></button>
       <button class="porta" id="pTeclado"><span class="ic">⌨️</span>Teclado<span class="tag">escribe</span></button>
       <button class="porta" id="pVoz"><span class="ic">🎤</span>Voz<span class="tag">dicta</span></button>
     </div>
@@ -1590,6 +1590,10 @@ var ALIAS_COLA_GAS_KEY='pinsita_alias_cola_gas';   // pendientes de enviar al GA
 function _aliasKey(said,sku){ return (norm(said||'')+'|'+String(sku||'').trim()); }
 function pushAlias(said,sku,nombre){
   said=norm(said||''); if(!said||!sku) return;
+  // v57: un CÓDIGO escaneado no es un alias — nadie va a decirle "7802210010015"
+  // al micrófono. Si entrara, ensuciaría el diccionario de nombres. Los códigos
+  // tienen su propia tabla (BD_CODIGOS), y se enseñan por ahí.
+  if(said.indexOf('qr ')===0) return;
   // 1) historial local (como antes, ahora con clave normalizada)
   try{ var k='pinsita_alias_cola'; var cola=JSON.parse(localStorage.getItem(k)||'[]');
     cola.push({ts:new Date().toISOString(),operador:OPERADOR,said:said,sku:sku,nombre:nombre});
@@ -1795,7 +1799,254 @@ $('pVoz').onclick=function(){ if(son){stopVoz();return;} if(!_verboElegido())ret
 
 // ---------- PUERTA TECLADO (Puerta D) ----------
 $('pTeclado').onclick=function(){ if(!_verboElegido())return; abrirPickerAdd(false); };
-$('pQR').onclick=function(){ alert('▦ QR: todavía no.\nViene cuando exista el campo codigo_barras.\nPor ahora usa Voz o Teclado.'); };
+// ============================================================================
+// ▦ ESCÁNER · QR de lote y códigos de barras (22-jul-2026)
+// ----------------------------------------------------------------------------
+// DOS FAMILIAS de códigos, dos caminos distintos:
+//
+//  · NUESTRO QR de lote — 'SKU-AAMMGG-NNN' (+ '-M04' madre · '/034' hija).
+//    El SKU va DENTRO del código: se lee y listo. Sin tabla, sin red, sin
+//    nada que mantener. Estándar en PATTERN_ETIQUETAS_IMPRESION_21JUL2026 §4.
+//
+//  · EAN/UPC del proveedor — no dice nada por sí solo. Se busca en BD_CODIGOS
+//    (MAESTRO), que el TERRENO enseña escaneando: código desconocido → "¿qué
+//    es?" → desde la segunda vez es instantáneo, y para todos los locales.
+//    Un código identifica un FORMATO, no un producto: la caja de botellas y
+//    la botella de adentro son dos EAN del mismo SKU con Q distinta (Alberto,
+//    22-jul) — por eso el código puede traer la cantidad ya puesta.
+//
+// REGLAS DE LA PUERTA (mismas que Voz y Teclado):
+//  · sin verbo no se abre — un movimiento sin verbo es un dato corrupto;
+//  · NUNCA bloquea la captura: lo que no reconoce, cae en el picker normal;
+//  · el código escaneado queda en 'said' → y 'said' viaja a Observaciones del
+//    libro. La trazabilidad del lote empieza hoy, antes de que exista BD_LOTES.
+//
+// Motor: BarcodeDetector NATIVO (Chrome/Android, y el KDS corre en Galaxy Tab).
+// Cero librerías, cero CDN — el frontend sigue siendo un archivo solo.
+// ============================================================================
+var CODIGOS_MAP={};                       // codigo → {sku,q,formato,desc}
+var COD_COLA_KEY='pinsita_codigos_cola';  // aprendizajes que aún no subieron
+
+function cargarCodigos(){
+  try{ var c=JSON.parse(localStorage.getItem('pinsita_codigos_cache')||'null');
+       if(c&&c.m) CODIGOS_MAP=c.m; }catch(e){}
+  if(!navigator.onLine) return;
+  flushCodigosCola();
+  callGAS({action:'getCodigos'}, 12000).then(function(r){
+    if(r&&r.ok&&r.codigos){
+      var m={};
+      r.codigos.forEach(function(c){
+        if(!c||!c.codigo) return;
+        m[String(c.codigo).trim()]={ sku:String(c.sku||'').trim(),
+          q:(parseFloat(c.q)>0?parseFloat(c.q):1), formato:c.formato||'', desc:c.desc||'' };
+      });
+      CODIGOS_MAP=m;
+      try{ localStorage.setItem('pinsita_codigos_cache', JSON.stringify({ts:Date.now(),m:m})); }catch(e){}
+    }
+  }).catch(function(){});
+}
+// ⚠️ diferido: GAS_* se asigna MÁS ABAJO en el archivo — llamarlo aquí
+// fetchearía contra 'undefined' y los códigos no llegarían nunca (bug de los
+// pesos medios, 11-jul: la misma trampa, ya pagada una vez).
+setTimeout(cargarCodigos, 0);
+
+// ── el código de lote se explica solo ───────────────────────────────────────
+// Tolerante a propósito con el separador de la madre: las etiquetas viejas
+// llevaban '·M4' (y el '·' mal codificado sale 'Â·M4'). El lote es el mismo
+// pedazo de carne — que un byte sucio no nos deje sin leerlo.
+var RE_LOTE=/^(\d{3,6})-(\d{6})-(\d{1,4})(?:[^\d\/]{0,3}M(\d{1,3})|\/(\d{1,4}))?$/;
+function codParseLote(txt){
+  var m=RE_LOTE.exec(String(txt||'').trim());
+  if(!m) return null;
+  return { sku:m[1], lote:m[1]+'-'+m[2]+'-'+m[3], madre:m[4]||null, bolsa:m[5]||null };
+}
+function codResolver(txt){
+  var cod=String(txt||'').trim();
+  if(!cod) return null;
+  var L=codParseLote(cod);
+  if(L) return { codigo:cod, tipo:'QR_LOTE', sku:L.sku, q:null, formato:'',
+                 nuestro:true, conocido:!!skuItem(L.sku), lote:L };
+  var c=CODIGOS_MAP[cod];
+  if(c && c.sku) return { codigo:cod, tipo:'EAN', sku:c.sku, q:c.q||1, formato:c.formato||'',
+                          nuestro:false, conocido:!!skuItem(c.sku) };
+  return { codigo:cod, tipo:'EAN', sku:null, q:null, formato:'',
+           nuestro:false, conocido:false, nuevo:true };
+}
+
+// ── APRENDIZAJE · idempotente y con eco (lección eco-loteId, 11-jul) ────────
+// Sólo se marca aprendido si el GAS repite el código. Sin red: a la cola.
+function codEncolar(reg){
+  try{ var c=JSON.parse(localStorage.getItem(COD_COLA_KEY)||'[]');
+    if(c.some(function(x){return x.codigo===reg.codigo;})) return;
+    c.push(reg); localStorage.setItem(COD_COLA_KEY, JSON.stringify(c)); }catch(e){}
+}
+function flushCodigosCola(){
+  var c=[]; try{ c=JSON.parse(localStorage.getItem(COD_COLA_KEY)||'[]'); }catch(e){ return; }
+  if(!c.length || !navigator.onLine) return;
+  var quedan=[];
+  (function siguiente(i){
+    if(i>=c.length){
+      try{ localStorage.setItem(COD_COLA_KEY, JSON.stringify(quedan)); }catch(e){}
+      return;
+    }
+    var reg=c[i];
+    callGAS({ action:'guardarCodigo', codigo:reg.codigo, tipo:reg.tipo, sku:reg.sku,
+              desc:reg.desc, formato:reg.formato, q:reg.q, operador:OPERADOR,
+              empresa:(CTX&&CTX.empresa?CTX.empresa.toUpperCase():'*') }, 15000)
+    .then(function(r){
+      // ECO: sólo sale de la cola si el servidor repite el código (o si el
+      // código está tomado por otro producto — reintentarlo sería inútil).
+      if(!(r && (r.codigo===reg.codigo || r.conflicto))) quedan.push(reg);
+      siguiente(i+1);
+    }).catch(function(){ quedan.push(reg); siguiente(i+1); });
+  })(0);
+}
+function codAprender(ctx, sku, nombre, q, formato){
+  var reg={ codigo:ctx.codigo, tipo:ctx.tipoDet||'EAN', sku:String(sku),
+            desc:nombre||'', formato:formato||'', q:q||1 };
+  CODIGOS_MAP[reg.codigo]={ sku:reg.sku, q:reg.q, formato:reg.formato, desc:reg.desc };  // sirve YA en este teléfono
+  try{ localStorage.setItem('pinsita_codigos_cache', JSON.stringify({ts:Date.now(),m:CODIGOS_MAP})); }catch(e){}
+  codEncolar(reg);
+  if(navigator.onLine) flushCodigosCola();
+}
+// aviso breve propio (el registro no tiene toast — el de la barra es del Taller)
+function _codToast(msg){
+  var t=document.createElement('div');
+  t.style.cssText='position:fixed;left:50%;bottom:88px;transform:translateX(-50%);z-index:9700;'+
+    'background:rgba(20,20,20,.94);color:#fff;padding:11px 18px;border-radius:22px;font-size:14px;'+
+    'font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.35);max-width:88vw;text-align:center';
+  t.textContent=msg; document.body.appendChild(t);
+  setTimeout(function(){ try{ t.remove(); }catch(e){} }, 2600);
+}
+// El diálogo aparece DESPUÉS de registrar: la captura nunca espera al aprendizaje.
+function codAprenderDialogo(ctx, sku, nombre, qty){
+  if(!ctx||!ctx.codigo||!sku) return;
+  var uo=(typeof skuUO==='function'?skuUO(sku):'')||'unidad';
+  var n=Math.round(parseFloat(qty)||0);
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9600;display:flex;align-items:flex-end;justify-content:center';
+  ov.innerHTML=
+    '<div style="background:var(--panel,#fff);color:var(--t1,#111);width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:18px 16px 22px;box-shadow:0 -6px 24px rgba(0,0,0,.3)">'+
+      '<div style="font-size:13px;color:var(--t3,#888);letter-spacing:.4px;text-transform:uppercase">Código nuevo</div>'+
+      '<div style="font-family:ui-monospace,Consolas,monospace;font-size:16px;font-weight:700;margin:4px 0 10px;word-break:break-all">'+esc(ctx.codigo)+'</div>'+
+      '<div style="font-size:15px;margin-bottom:4px">¿Qué trae este código de <b>'+esc(nombre)+'</b>?</div>'+
+      '<div style="font-size:12.5px;color:var(--t3,#888);margin-bottom:14px">La caja y la unidad tienen códigos distintos. Lo aprendo una vez y vale para todos los locales.</div>'+
+      '<button id="cdUn" style="width:100%;padding:14px;margin-bottom:8px;border:none;border-radius:12px;background:var(--ok,#2e7d32);color:#fff;font-weight:700;font-size:16px">1 '+esc(uo)+'</button>'+
+      (n>1?('<button id="cdCaja" style="width:100%;padding:14px;margin-bottom:8px;border:1.5px solid var(--acc,#4A90D9);border-radius:12px;background:transparent;color:var(--acc,#4A90D9);font-weight:700;font-size:16px">un pack de '+n+' '+esc(uo)+'</button>'):'')+
+      '<button id="cdNo" style="width:100%;padding:11px;border:none;background:none;color:var(--t3,#888);font-size:14px">Ahora no</button>'+
+    '</div>';
+  document.body.appendChild(ov);
+  function cerrar(){ try{ ov.remove(); }catch(e){} }
+  ov.querySelector('#cdUn').onclick=function(){ codAprender(ctx, sku, nombre, 1, 'unidad'); cerrar();
+    _codToast('▦ Aprendido: 1 '+uo); };
+  var bc=ov.querySelector('#cdCaja');
+  if(bc) bc.onclick=function(){ codAprender(ctx, sku, nombre, n, 'pack de '+n); cerrar();
+    _codToast('▦ Aprendido: pack de '+n+' '+uo); };
+  ov.querySelector('#cdNo').onclick=cerrar;
+  ov.onclick=function(e){ if(e.target===ov) cerrar(); };
+}
+
+// ── LA CÁMARA ───────────────────────────────────────────────────────────────
+var _scanCerrar=null;
+function abrirEscaner(){
+  if(!_verboElegido()) return;
+  if(!('BarcodeDetector' in window)){
+    alert('▦ Este teléfono no trae lector de códigos.\n\n'+
+          'Funciona en Chrome de Android (y en las tablets).\n'+
+          'Mientras tanto: Voz o Teclado.');
+    return;
+  }
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:#000;z-index:9500;display:flex;flex-direction:column';
+  ov.innerHTML=
+    '<div style="position:relative;flex:1;overflow:hidden">'+
+      '<video id="scVid" playsinline muted style="width:100%;height:100%;object-fit:cover"></video>'+
+      '<div style="position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);width:74vw;max-width:340px;aspect-ratio:1;'+
+           'border:3px solid rgba(255,255,255,.9);border-radius:20px;box-shadow:0 0 0 100vmax rgba(0,0,0,.45)"></div>'+
+      '<div id="scMsg" style="position:absolute;left:0;right:0;bottom:18px;text-align:center;color:#fff;font-size:15px;'+
+           'text-shadow:0 1px 4px #000;padding:0 20px">Apunta al código</div>'+
+    '</div>'+
+    '<div style="display:flex;gap:10px;padding:12px 14px 20px;background:#000">'+
+      '<button id="scLuz" style="flex:0 0 auto;padding:14px 16px;border:1px solid #555;border-radius:12px;background:#111;color:#fff;font-size:18px">🔦</button>'+
+      '<button id="scX" style="flex:1;padding:14px;border:none;border-radius:12px;background:#222;color:#fff;font-weight:700;font-size:16px">Cancelar</button>'+
+    '</div>';
+  document.body.appendChild(ov);
+  var vid=ov.querySelector('#scVid'), msg=ov.querySelector('#scMsg');
+  var activo=true, stream=null, track=null, luz=false;
+
+  function cerrar(){
+    activo=false; _scanCerrar=null;
+    try{ if(track) track.stop(); }catch(e){}
+    try{ if(stream) stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
+    try{ ov.remove(); }catch(e){}
+  }
+  _scanCerrar=cerrar;
+  ov.querySelector('#scX').onclick=cerrar;
+  ov.querySelector('#scLuz').onclick=function(){
+    if(!track) return;
+    luz=!luz;
+    try{ track.applyConstraints({advanced:[{torch:luz}]}); }catch(e){ msg.textContent='Este teléfono no deja encender la linterna'; }
+  };
+
+  var fmts=['qr_code','ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'];
+  Promise.resolve(BarcodeDetector.getSupportedFormats ? BarcodeDetector.getSupportedFormats() : fmts)
+  .then(function(sup){
+    var usar=fmts.filter(function(f){ return sup.indexOf(f)>=0; });
+    if(!usar.length) usar=['qr_code'];
+    var det=new BarcodeDetector({formats:usar});
+    return navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}})
+      .then(function(st){
+        stream=st; track=st.getVideoTracks()[0];
+        vid.srcObject=st; vid.play();
+        function tick(){
+          if(!activo) return;
+          det.detect(vid).then(function(bs){
+            if(!activo) return;
+            if(bs && bs.length && bs[0].rawValue){ leido(String(bs[0].rawValue).trim(), bs[0].format); }
+            else setTimeout(tick, 120);        // ~8 lecturas/s: alcanza y no cuece el teléfono
+          }).catch(function(){ if(activo) setTimeout(tick, 220); });
+        }
+        setTimeout(tick, 300);
+      });
+  }).catch(function(e){
+    var t=String(e&&e.name||e);
+    msg.textContent = (t.indexOf('NotAllowed')>=0)
+      ? 'Falta el permiso de cámara — dáselo al navegador y vuelve a entrar'
+      : 'No pude abrir la cámara: '+t;
+  });
+
+  function leido(cod, formato){
+    activo=false;
+    try{ if(navigator.vibrate) navigator.vibrate(60); }catch(e){}
+    var r=codResolver(cod);
+    r.tipoDet=formato||r.tipo;
+    cerrar();
+    // ① NUESTRO lote y el producto está en el catálogo → directo al picker
+    if(r.nuestro && r.conocido){
+      abrirPickerAdd(false, { sku:r.sku, codigo:r.codigo, tipo:r.tipoDet });
+      return;
+    }
+    // ② NUESTRO lote pero ese SKU no está en el catálogo de este contexto:
+    //    se dice la verdad (pasa si el lote es de otra empresa o el insumo
+    //    está inactivo), y se deja capturar a mano igual.
+    if(r.nuestro && !r.conocido){
+      alert('▦ Es un lote nuestro ('+r.lote.lote+')\n\n'+
+            'pero el producto '+r.sku+' no está en el catálogo de '+((CTX&&CTX.nombre)||'este local')+'.\n\n'+
+            'Búscalo a mano — y avisa, porque eso hay que curarlo en BD_INSUMOS.');
+      abrirPickerAdd(false, { codigo:r.codigo, tipo:r.tipoDet });
+      return;
+    }
+    // ③ código de proveedor YA conocido → producto + cantidad del formato
+    if(r.sku && r.conocido){
+      abrirPickerAdd(false, { sku:r.sku, q:r.q, codigo:r.codigo, tipo:r.tipoDet, formato:r.formato });
+      return;
+    }
+    // ④ desconocido → NO bloquea: picker normal, y al confirmar se ofrece aprenderlo
+    abrirPickerAdd(false, { codigo:r.codigo, tipo:r.tipoDet, aprender:true });
+  }
+}
+
+$('pQR').onclick=function(){ abrirEscaner(); };
 
 // ---------- PICKER (alta a mano y corrección) ----------
 function closePicker(){
@@ -1894,8 +2145,12 @@ function gruposTotalUO(sku, filas){
 }
 function nMil(x){ var s=nInt(x); return s.replace(/\B(?=(\d{3})+(?!\d))/g,'.'); }
 
-function buildPicker(mode, idx){
+// v57 · 3° parametro PRE: el escáner abre el picker YA con el producto puesto
+// (y con la Q del formato, si el código dice que es una caja). El OP sólo
+// confirma. pre = {sku, q, codigo, tipo, aprender}
+function buildPicker(mode, idx, pre){
   closePicker();
+  var preCtx = pre || null;
   var host=document.createElement('div'); host.className='picker'; pickerEl=host;
   var qInit=(mode==='fix'&&ITEMS[idx]&&ITEMS[idx].qty!=null)?ITEMS[idx].qty:'';
   host.innerHTML=
@@ -2180,6 +2435,19 @@ function buildPicker(mode, idx){
     if(raw==='') return null;
     var n=parseInt(raw,10); return (isNaN(n)||n<=0)?null:n;
   }
+  // v57 · de dónde viene la casilla. Si vino de un escaneo, el CÓDIGO queda
+  // escrito en 'said' → y 'said' viaja a la col Observaciones del libro
+  // ('pinsita · QR 5003-260721-001/034'). La trazabilidad del lote empieza hoy,
+  // sin BD_LOTES: cuando exista, el histórico ya está escrito.
+  function _saidNuevo(nombre){
+    return (preCtx && preCtx.codigo) ? ('QR '+preCtx.codigo) : ('(a mano) '+nombre);
+  }
+  // código desconocido: se pregunta DESPUÉS de registrar, nunca antes — la
+  // captura manda, el aprendizaje es un regalo que viene después (N7).
+  function _postAdd(sku, nombre, qty){
+    if(mode==='fix' || !preCtx || !preCtx.aprender) return;
+    setTimeout(function(){ codAprenderDialogo(preCtx, sku, nombre, qty); }, 280);
+  }
   function commit(){
     if(!chosen){ inEl.focus(); return; }
     // ── ramo GRAMÁTICA a gruppi: la qty guardada es la SUMA en UO ──
@@ -2194,10 +2462,11 @@ function buildPicker(mode, idx){
         itG.sku=chosen.sku; itG.nombre=chosen.nombre; itG.estado='ok'; itG.sub=skuSec(chosen.sku); itG.qty=qtyG;
         if(SESION_SUPER) itG.precioSuper=precG;
       } else {
-        var nuevoG={ said:'(a mano) '+chosen.nombre, qty:qtyG, sku:chosen.sku, nombre:chosen.nombre,
+        var nuevoG={ said:_saidNuevo(chosen.nombre), qty:qtyG, sku:chosen.sku, nombre:chosen.nombre,
           sub:skuSec(chosen.sku), estado:'ok', cands:[{sku:chosen.sku,nombre:chosen.nombre,sc:100}] };
         if(SESION_SUPER) nuevoG.precioSuper=precG;
         ITEMS.push(nuevoG);
+        _postAdd(chosen.sku, chosen.nombre, qtyG);
       }
       closePicker(); render(); return;
     }
@@ -2223,8 +2492,9 @@ function buildPicker(mode, idx){
         if(itD.sku!==chosen.sku) pushAlias(itD.said, chosen.sku, chosen.nombre);
         setD(itD);
       } else {
-        var nuevoD={ said:'(a mano) '+chosen.nombre, cands:[{sku:chosen.sku,nombre:chosen.nombre,sc:100}] };
+        var nuevoD={ said:_saidNuevo(chosen.nombre), cands:[{sku:chosen.sku,nombre:chosen.nombre,sc:100}] };
         setD(nuevoD); ITEMS.push(nuevoD);
+        _postAdd(chosen.sku, chosen.nombre, qty);
       }
       closePicker(); render(); return;
     }
@@ -2251,8 +2521,9 @@ function buildPicker(mode, idx){
       if(it.sku!==chosen.sku) pushAlias(it.said, chosen.sku, chosen.nombre);
       setS(it);
     } else {
-      var nuevoS={ said:'(a mano) '+chosen.nombre, cands:[{sku:chosen.sku,nombre:chosen.nombre,sc:100}] };
+      var nuevoS={ said:_saidNuevo(chosen.nombre), cands:[{sku:chosen.sku,nombre:chosen.nombre,sc:100}] };
       setS(nuevoS); ITEMS.push(nuevoS);
+      _postAdd(chosen.sku, chosen.nombre, qty);
     }
     closePicker(); render();
   }
@@ -2287,13 +2558,36 @@ function buildPicker(mode, idx){
     }
     closePicker();
   };
+  // ── v57 · PRESELECCIÓN desde el escáner ────────────────────────────────
+  // Hace exactamente lo que hace un tap en la lista (misma ruta, sin atajos):
+  // fija el producto, pinta el hint, y deja el cursor en la cantidad. Si el
+  // código traía formato (caja de 12), la Q ya viene puesta y sólo se confirma.
+  if(preCtx && preCtx.sku){
+    var pv=skuItem(preCtx.sku);
+    if(pv){
+      chosen=pv; inEl.value=pv.nombre; listE.innerHTML=''; refreshHint();
+      if(preCtx.q!=null && preCtx.q>0){
+        if(usaDoble()){ if(dPaq) dPaq.value=String(preCtx.q); }
+        else if(qEl.style.display!=='none'){ qEl.value=String(preCtx.q); }
+      }
+      refreshOk();
+      setTimeout(function(){
+        var pq = usaDoble() ? dPaq : (qEl.style.display!=='none' ? qEl : null);
+        if(pq){ try{ pq.focus(); pq.select&&pq.select(); }catch(e){} }
+      }, 60);
+    }
+  } else if(preCtx && preCtx.codigo){
+    // código leído que NO sabemos qué es: se pide el producto, no se bloquea
+    hintE.innerHTML='▦ <b style="color:var(--t1)">Código nuevo</b> · '+esc(preCtx.codigo)+
+      '<br>Dime qué producto es y lo aprendo para la próxima.';
+  }
   return host;
 }
-function abrirPickerAdd(focusFromVoice){
+function abrirPickerAdd(focusFromVoice, pre){
   // COMPONI a tastiera: pannello a SCHERMO PIENO (vedi CSS .picker.full).
   // Il ✓ Agregar (pk-foot) è fixed e lo teniamo ancorato sopra la tastiera con
   // visualViewport — funziona anche quando dvh non si accorcia (tastiera numerica Samsung).
-  var host=buildPicker('add', null);
+  var host=buildPicker('add', null, pre);
   host.classList.add('full');
   document.body.appendChild(host);
   document.body.style.overflow='hidden';
