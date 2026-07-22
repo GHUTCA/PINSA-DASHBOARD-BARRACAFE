@@ -464,7 +464,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v57 · 22jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v58 · 22jul</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -1442,7 +1442,7 @@ function setEstado(e){
 }
 
 // ---------- RENDER de la lista ----------
-function render(){
+function render(foco){
   persistItems();   // FIX: cada cambio de la lista se guarda (render se llama tras toda modificación)
   if(typeof syncSuper==='function') syncSuper();
   if(typeof pintarVerboBtns==='function') pintarVerboBtns();  // colapsa/expande según haya lista
@@ -1529,7 +1529,26 @@ function render(){
   listEl.querySelectorAll('[data-ed]').forEach(function(b){ b.onclick=function(){ abrirPickerFix(+b.dataset.ed); }; });
   listEl.querySelectorAll('[data-eq]').forEach(function(b){ b.onclick=function(){ editarQ(+b.dataset.eq); }; });
   listEl.querySelectorAll('[data-rm]').forEach(function(b){ b.onclick=function(){ quitar(+b.dataset.rm); }; });
-  listEl.scrollTop=listEl.scrollHeight;
+  // ── v58 · DÓNDE MIRA LA LISTA DESPUÉS DE REPINTAR (pedido Alberto 22-jul) ──
+  // Al AÑADIR se baja al final: quieres ver lo que acaba de entrar.
+  // Al CORREGIR una fila de en medio, NO: el OP terminaba abajo y tenía que
+  // volver a buscar dónde estaba — dos veces mal, porque no puede comprobar la
+  // corrección y porque lo siguiente que toca suele estar al lado.
+  // foco = índice de la fila tocada; sin foco, comportamiento de siempre.
+  if(foco===undefined || foco===null){
+    listEl.scrollTop=listEl.scrollHeight;
+  } else {
+    var fr=document.getElementById('row-'+foco);
+    if(fr){
+      try{ fr.scrollIntoView({block:'center'}); }catch(e){ }
+      // parpadeo corto: el ojo encuentra la fila sin buscarla
+      try{
+        fr.style.transition='background-color .5s';
+        fr.style.backgroundColor='var(--acento-glow, rgba(200,144,47,.28))';
+        setTimeout(function(){ fr.style.backgroundColor=''; }, 800);
+      }catch(e){ }
+    }
+  }
   if(ESTADO==='componi') setEstado('componi');
   actualizarStats();
 }
@@ -1548,15 +1567,15 @@ function actualizarStats(){
 }
 
 // ---------- acciones de fila ----------
-function quitar(idx){ ITEMS.splice(idx,1); render(); }
+function quitar(idx){ ITEMS.splice(idx,1); render(ITEMS.length?Math.min(idx,ITEMS.length-1):undefined); }
 function editarQ(idx){
   var it=ITEMS[idx];
   var dec=skuDecimal(it.sku);
   var v=prompt('Cantidad'+(skuUO(it.sku)?(' en '+skuUO(it.sku)):'')+' para "'+(it.nombre||it.said)+'":', it.qty!=null?it.qty:'');
   if(v===null) return;
   v=String(v).trim().replace(',','.');
-  if(v===''){ it.qty=null; render(); return; }
-  var num=parseFloat(v); if(isNaN(num)){ render(); return; }
+  if(v===''){ it.qty=null; render(idx); return; }
+  var num=parseFloat(v); if(isNaN(num)){ render(idx); return; }
   if(!dec && Math.abs(num-Math.round(num))>0.001){
     // decimal en producto que se cuenta por unidades enteras → avisa, no redondea callado
     var r=Math.round(num);
@@ -1569,14 +1588,14 @@ function editarQ(idx){
   // Borrar utmReal evita que un peso viejo pegado se guarde en vez del nuevo total.
   delete it.utmReal;
   it.locked=true;   // el OP fijó la Q a mano → el dedup de voz no la vuelve a tocar
-  render();
+  render(idx);
 }
 function pickCand(idx, sku){
   var it=ITEMS[idx], c=(it.cands||[]).filter(function(x){return x.sku===sku;})[0]; if(!c) return;
   if(it.sku!==sku) pushAlias(it.said, sku, c.nombre);
   it.sku=sku; it.nombre=c.nombre; it.estado='ok'; it.sub=skuSec(sku);
   it.locked=true;   // el OP la corrigió → el dedup de voz no la vuelve a tocar
-  render();
+  render(idx);
 }
 
 // ---------- cola alias (N22, nunca fuente) ----------
@@ -1840,6 +1859,18 @@ function cargarCodigos(){
         m[String(c.codigo).trim()]={ sku:String(c.sku||'').trim(),
           q:(parseFloat(c.q)>0?parseFloat(c.q):1), formato:c.formato||'', desc:c.desc||'' };
       });
+      // ── v58 · FUNDIR, no sustituir ───────────────────────────────────────
+      // Lo que enseñaste en este teléfono y todavía NO subió tiene que
+      // sobrevivir a la respuesta del servidor. El 22-jul pasó al revés: un
+      // refresh reemplazaba el mapa con el del servidor, se perdía lo recién
+      // enseñado, y el MISMO código volvía a abrir la casilla vacía.
+      // Sólo se superpone la COLA (lo no confirmado): así un código dado de
+      // baja en el servidor desaparece de verdad y no revive desde el caché.
+      try{
+        JSON.parse(localStorage.getItem(COD_COLA_KEY)||'[]').forEach(function(p){
+          if(p&&p.codigo) m[p.codigo]={ sku:String(p.sku), q:p.q||1, formato:p.formato||'', desc:p.desc||'' };
+        });
+      }catch(e){}
       CODIGOS_MAP=m;
       try{ localStorage.setItem('pinsita_codigos_cache', JSON.stringify({ts:Date.now(),m:m})); }catch(e){}
     }
@@ -1859,6 +1890,31 @@ function codParseLote(txt){
   var m=RE_LOTE.exec(String(txt||'').trim());
   if(!m) return null;
   return { sku:m[1], lote:m[1]+'-'+m[2]+'-'+m[3], madre:m[4]||null, bolsa:m[5]||null };
+}
+// ── v58 · QUÉ ES ESTO QUE ACABO DE LEER ────────────────────────────────────
+// El 22-jul entraron al flujo un QR con la descripción de un jabón y una URL:
+// ninguno de los dos es un código de producto, y ofrecerse a "aprenderlos"
+// habría ensuciado BD_CODIGOS con basura imposible de volver a escanear.
+function codEsURL(t){ return /^(https?:\/\/|www\.)/i.test(t) || /:\/\//.test(t); }
+// dígito verificador EAN-8 / UPC-A / EAN-13 / GTIN-14. Una lectura sucia casi
+// siempre lo falla: mejor pedir otra pasada que grabar un código que no existe.
+function codDigitoOk(t){
+  if(!/^\d+$/.test(t)) return null;
+  if([8,12,13,14].indexOf(t.length)<0) return null;    // no aplica
+  var d=t.split('').map(Number), chk=d.pop(), suma=0;
+  d.reverse().forEach(function(n,i){ suma += n * ((i%2===0)?3:1); });
+  return ((10-(suma%10))%10)===chk;
+}
+function codClasificar(txt){
+  var t=String(txt||'').trim();
+  if(!t) return 'vacio';
+  if(codParseLote(t)) return 'lote';
+  if(codEsURL(t)) return 'url';
+  var dv=codDigitoOk(t);
+  if(dv===true) return 'ean';
+  if(dv===false) return 'ean_malo';
+  if(/^[A-Za-z0-9][A-Za-z0-9\-\._\/]{3,23}$/.test(t)) return 'interno';  // Code128/39, sin verificador
+  return 'texto';
 }
 function codResolver(txt){
   var cod=String(txt||'').trim();
@@ -1921,29 +1977,50 @@ function _codToast(msg){
 // El diálogo aparece DESPUÉS de registrar: la captura nunca espera al aprendizaje.
 function codAprenderDialogo(ctx, sku, nombre, qty){
   if(!ctx||!ctx.codigo||!sku) return;
+  // v58: la unidad REAL del producto, no la palabra "unidad". Hay insumos cuya
+  // UO ya ES un pack (Sprite Lata se cuenta en 'Pack' de 6): decirle "1 unidad"
+  // era mentirle al OP — y por eso el 22-jul no había forma de declarar el
+  // pack de 6 y Alberto tuvo que decir que no.
   var uo=(typeof skuUO==='function'?skuUO(sku):'')||'unidad';
-  var n=Math.round(parseFloat(qty)||0);
+  var n=parseFloat(qty); if(!(n>0)) n=1;
+  n=Math.round(n*100)/100;
   var ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9600;display:flex;align-items:flex-end;justify-content:center';
   ov.innerHTML=
     '<div style="background:var(--panel,#fff);color:var(--t1,#111);width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:18px 16px 22px;box-shadow:0 -6px 24px rgba(0,0,0,.3)">'+
       '<div style="font-size:13px;color:var(--t3,#888);letter-spacing:.4px;text-transform:uppercase">Código nuevo</div>'+
       '<div style="font-family:ui-monospace,Consolas,monospace;font-size:16px;font-weight:700;margin:4px 0 10px;word-break:break-all">'+esc(ctx.codigo)+'</div>'+
-      '<div style="font-size:15px;margin-bottom:4px">¿Qué trae este código de <b>'+esc(nombre)+'</b>?</div>'+
-      '<div style="font-size:12.5px;color:var(--t3,#888);margin-bottom:14px">La caja y la unidad tienen códigos distintos. Lo aprendo una vez y vale para todos los locales.</div>'+
-      '<button id="cdUn" style="width:100%;padding:14px;margin-bottom:8px;border:none;border-radius:12px;background:var(--ok,#2e7d32);color:#fff;font-weight:700;font-size:16px">1 '+esc(uo)+'</button>'+
-      (n>1?('<button id="cdCaja" style="width:100%;padding:14px;margin-bottom:8px;border:1.5px solid var(--acc,#4A90D9);border-radius:12px;background:transparent;color:var(--acc,#4A90D9);font-weight:700;font-size:16px">un pack de '+n+' '+esc(uo)+'</button>'):'')+
+      '<div style="font-size:15px;margin-bottom:12px">¿Cuántas <b>'+esc(uo)+'</b> trae este código de <b>'+esc(nombre)+'</b>?</div>'+
+      '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">'+
+        '<input id="cdQ" inputmode="decimal" value="'+n+'" style="width:110px;padding:14px;border:1.5px solid var(--line,#ccc);border-radius:12px;background:var(--bg,#fff);color:var(--t1,#111);font-size:20px;font-weight:700;text-align:center">'+
+        '<div style="flex:1;font-size:13px;color:var(--t3,#888)">'+esc(uo)+' por código.<br>La caja y la unidad llevan códigos distintos.</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:10px">'+
+        '<button class="cdPre" data-q="1" style="flex:1;padding:9px;border:1px solid var(--line,#ccc);border-radius:10px;background:transparent;color:var(--t2,#555);font-size:13px">1</button>'+
+        '<button class="cdPre" data-q="6" style="flex:1;padding:9px;border:1px solid var(--line,#ccc);border-radius:10px;background:transparent;color:var(--t2,#555);font-size:13px">6</button>'+
+        '<button class="cdPre" data-q="12" style="flex:1;padding:9px;border:1px solid var(--line,#ccc);border-radius:10px;background:transparent;color:var(--t2,#555);font-size:13px">12</button>'+
+        '<button class="cdPre" data-q="24" style="flex:1;padding:9px;border:1px solid var(--line,#ccc);border-radius:10px;background:transparent;color:var(--t2,#555);font-size:13px">24</button>'+
+      '</div>'+
+      '<button id="cdOk" style="width:100%;padding:14px;margin-bottom:8px;border:none;border-radius:12px;background:var(--ok,#2e7d32);color:#fff;font-weight:700;font-size:16px">Guardar este código</button>'+
       '<button id="cdNo" style="width:100%;padding:11px;border:none;background:none;color:var(--t3,#888);font-size:14px">Ahora no</button>'+
     '</div>';
   document.body.appendChild(ov);
+  var qEl=ov.querySelector('#cdQ');
   function cerrar(){ try{ ov.remove(); }catch(e){} }
-  ov.querySelector('#cdUn').onclick=function(){ codAprender(ctx, sku, nombre, 1, 'unidad'); cerrar();
-    _codToast('▦ Aprendido: 1 '+uo); };
-  var bc=ov.querySelector('#cdCaja');
-  if(bc) bc.onclick=function(){ codAprender(ctx, sku, nombre, n, 'pack de '+n); cerrar();
-    _codToast('▦ Aprendido: pack de '+n+' '+uo); };
+  ov.querySelectorAll('.cdPre').forEach(function(b){
+    b.onclick=function(){ qEl.value=b.dataset.q; try{ qEl.focus(); qEl.select(); }catch(e){} };
+  });
+  ov.querySelector('#cdOk').onclick=function(){
+    var v=parseFloat(String(qEl.value||'').replace(',','.'));
+    if(!(v>0)){ qEl.style.borderColor='var(--bad,#c33)'; qEl.focus(); return; }
+    var fmt=(v===1)?('1 '+uo):(v+' '+uo+' por código');
+    codAprender(ctx, sku, nombre, v, fmt);
+    cerrar();
+    _codToast('▦ Aprendido: '+v+' '+uo);
+  };
   ov.querySelector('#cdNo').onclick=cerrar;
-  ov.onclick=function(e){ if(e.target===ov) cerrar(); };
+  // v58: NO se cierra tocando el fondo — un dedo apoyado por error borraba el
+  // aprendizaje y el código volvía a ser desconocido en la siguiente pasada.
 }
 
 // ── LA CÁMARA ───────────────────────────────────────────────────────────────
@@ -2018,6 +2095,22 @@ function abrirEscaner(){
   function leido(cod, formato){
     activo=false;
     try{ if(navigator.vibrate) navigator.vibrate(60); }catch(e){}
+    // ── v58 · filtro de entrada: lo que no es un código no entra ───────────
+    var clase=codClasificar(cod);
+    if(clase==='url' || clase==='texto'){
+      cerrar();
+      alert('▦ Esto no es un código de producto:\n\n'+cod.slice(0,90)+(cod.length>90?'…':'')+
+            '\n\n'+(clase==='url' ? 'Es un enlace (publicidad del envase).' : 'Es texto, no un código.')+
+            '\nBúscalo a mano — no lo guardo, para no ensuciar el catálogo.');
+      abrirPickerAdd(false, null);
+      return;
+    }
+    if(clase==='ean_malo'){
+      cerrar();
+      alert('▦ Lectura sucia\n\n'+cod+'\n\nEse número no cuadra con su dígito verificador:\n'+
+            'casi seguro se leyó mal. Vuelve a escanear con mejor luz.');
+      return;
+    }
     var r=codResolver(cod);
     r.tipoDet=formato||r.tipo;
     cerrar();
@@ -2468,7 +2561,7 @@ function buildPicker(mode, idx, pre){
         ITEMS.push(nuevoG);
         _postAdd(chosen.sku, chosen.nombre, qtyG);
       }
-      closePicker(); render(); return;
+      closePicker(); render(mode==='fix'?idx:undefined); return;
     }
     var precS = _leerPrecioSuper();
     if(SESION_SUPER && precS==null){ precioIn&&precioIn.focus(); hintE.innerHTML='<span style="color:var(--bad)">Falta el precio de la boleta.</span>'; return; }
@@ -2496,7 +2589,7 @@ function buildPicker(mode, idx, pre){
         setD(nuevoD); ITEMS.push(nuevoD);
         _postAdd(chosen.sku, chosen.nombre, qty);
       }
-      closePicker(); render(); return;
+      closePicker(); render(mode==='fix'?idx:undefined); return;
     }
 
     // ── ramo SINGOLO (factor<=1: UO=UTM) — el número son UO, sin utmReal ──
@@ -2525,7 +2618,7 @@ function buildPicker(mode, idx, pre){
       setS(nuevoS); ITEMS.push(nuevoS);
       _postAdd(chosen.sku, chosen.nombre, qty);
     }
-    closePicker(); render();
+    closePicker(); render(mode==='fix'?idx:undefined);
   }
   function paint(){
     var res=searchProductos(inEl.value, 8);
