@@ -481,7 +481,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v59 · 22jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v60 · 22jul</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -965,6 +965,12 @@ function skuItem(sku){ return VOCAB.filter(function(x){return x.sku===sku;})[0];
 function skuUO(sku){ var v=skuItem(sku); return (v&&v.uo)?v.uo:''; }
 function esPeso(sku){ var v=skuItem(sku); var m=(v&&v.metodo||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); return m.indexOf('peso')>=0; }
 function skuSec(sku){ var v=skuItem(sku); return (v&&v.secs&&v.secs.length)?v.secs[0]:''; }
+// v60 · ¿el producto se cuenta por PIEZAS? (UTM discreta: lata, pinsa, galleta)
+// Decide el idioma de la Q en BD_CODIGOS: piezas para lo discreto (la lata
+// tiene su propio código y no puede decir "soy 1/6 de pack"), contenedores UO
+// para lo continuo (la caja de leche son 12 tetrabricks, no 12.000 cc).
+function esPieza(sku){ var u=((typeof skuUTM==='function'?skuUTM(sku):'')||'').toLowerCase();
+  return u.indexOf('unidad')>=0 || u==='un' || u==='unid' || u==='u'; }
 function skuDecimal(sku){ var v=skuItem(sku);
   // norma Unidades v2 inv.#3: decimales SOLO en métodos parciales (Nivel/Peso).
   // robusto a acentos/mayúsculas/variantes de escritura del campo "Metodo de conteo".
@@ -1607,6 +1613,14 @@ function editarQ(idx){
   // la Q corregida está en UO (el prompt pide "en <UO>"): el total UTM = qty×factor.
   // Borrar utmReal evita que un peso viejo pegado se guarde en vez del nuevo total.
   delete it.utmReal;
+  // v60 · freno tzatziki también al corregir a mano (mismo umbral del recibo)
+  var _vi=skuItem(it.sku), _pr=(_vi&&_vi.precio>0)?_vi.precio:0, _f=skuFactor(it.sku)||1;
+  if(_pr){
+    var _val=Math.abs(it.qty*_f)*_pr;
+    if(_val>=RECIBO_ALARMA_P && !confirm('⚠️ OJO — esta línea vale '+fmtCL(_val)+'\n\n'+(it.nombre||'')+': '+fmtN(it.qty*_f)+' '+(skuUTM(it.sku)||'')+'\n\n¿Es correcto?')){
+      it.qty=null; render(idx); return;   // se anula la Q: mejor vacía que un millón fantasma
+    }
+  }
   it.locked=true;   // el OP fijó la Q a mano → el dedup de voz no la vuelve a tocar
   render(idx);
 }
@@ -1997,11 +2011,16 @@ function _codToast(msg){
 // El diálogo aparece DESPUÉS de registrar: la captura nunca espera al aprendizaje.
 function codAprenderDialogo(ctx, sku, nombre, qty){
   if(!ctx||!ctx.codigo||!sku) return;
-  // v58: la unidad REAL del producto, no la palabra "unidad". Hay insumos cuya
-  // UO ya ES un pack (Sprite Lata se cuenta en 'Pack' de 6): decirle "1 unidad"
-  // era mentirle al OP — y por eso el 22-jul no había forma de declarar el
-  // pack de 6 y Alberto tuvo que decir que no.
-  var uo=(typeof skuUO==='function'?skuUO(sku):'')||'unidad';
+  // v60 · EL IDIOMA DE LA Q (la lección Sprite del 22-jul):
+  // · producto por PIEZAS (lata, galleta — UTM discreta): la Q se declara en
+  //   UNIDADES. La lata dice 1, el pack dice 6. Antes preguntaba en UO ('Pack')
+  //   y la lata no podía decir "soy 1/6 de pack" — de ahí el enredo.
+  // · producto CONTINUO (leche en cc): la Q se declara en CONTENEDORES UO
+  //   (la caja son 12 tetrabricks) — los cc no se escanean.
+  var f=(typeof skuFactor==='function')?(skuFactor(sku)||1):1;
+  var pieza=esPieza(sku) && f>1;
+  var uo=pieza ? 'unidades' : ((typeof skuUO==='function'?skuUO(sku):'')||'unidad');
+  var uoCont=(typeof skuUO==='function'?skuUO(sku):'')||'pack';
   var n=parseFloat(qty); if(!(n>0)) n=1;
   n=Math.round(n*100)/100;
   var ov=document.createElement('div');
@@ -2013,7 +2032,8 @@ function codAprenderDialogo(ctx, sku, nombre, qty){
       '<div style="font-size:15px;margin-bottom:12px">¿Cuántas <b>'+esc(uo)+'</b> trae este código de <b>'+esc(nombre)+'</b>?</div>'+
       '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">'+
         '<input id="cdQ" inputmode="decimal" value="'+n+'" style="width:110px;padding:14px;border:1.5px solid var(--line,#ccc);border-radius:12px;background:var(--bg,#fff);color:var(--t1,#111);font-size:20px;font-weight:700;text-align:center">'+
-        '<div style="flex:1;font-size:13px;color:var(--t3,#888)">'+esc(uo)+' por código.<br>La caja y la unidad llevan códigos distintos.</div>'+
+        '<div style="flex:1;font-size:13px;color:var(--t3,#888)">'+esc(uo)+' por código.<br>'+
+          (pieza?('1 '+esc(uoCont)+' = '+nInt(f)+' unidades. '):'')+'La caja y la unidad llevan códigos distintos.</div>'+
       '</div>'+
       '<div style="display:flex;gap:8px;margin-bottom:10px">'+
         '<button class="cdPre" data-q="1" style="flex:1;padding:9px;border:1px solid var(--line,#ccc);border-radius:10px;background:transparent;color:var(--t2,#555);font-size:13px">1</button>'+
@@ -2557,9 +2577,27 @@ function buildPicker(mode, idx, pre){
   }
   // código desconocido: se pregunta DESPUÉS de registrar, nunca antes — la
   // captura manda, el aprendizaje es un regalo que viene después (N7).
-  function _postAdd(sku, nombre, qty){
+  function _postAdd(sku, nombre, qty, utmTot){
     if(mode==='fix' || !preCtx || !preCtx.aprender) return;
-    setTimeout(function(){ codAprenderDialogo(preCtx, sku, nombre, qty); }, 280);
+    // v60: al diálogo la cantidad llega en el IDIOMA del producto — piezas
+    // (UTM) para lo discreto, contenedores UO para lo continuo (caso Sprite).
+    var f=skuFactor(sku)||1;
+    var nDlg=(esPieza(sku)&&f>1) ? (utmTot!=null?utmTot:qty*f) : qty;
+    setTimeout(function(){ codAprenderDialogo(preCtx, sku, nombre, nDlg); }, 280);
+  }
+  // ── v60 · GUARDIA DE VALOR — el freno del tzatziki (21-jul: q=600 bolsas
+  // en la casilla equivocada = $1.572.600 escritos sin que nadie los viera).
+  // El recibo alarma DESPUÉS de escribir; esto pregunta ANTES, con los pesos
+  // delante. Misma soglia del recibo. Sin precio en BD no puede opinar (y esa
+  // línea saldrá ámbar 'sin costo' en el recibo — la red de atrás sigue).
+  function _guardiaValor(utmTot){
+    var vi=chosen?skuItem(chosen.sku):null;
+    var pr=(vi&&vi.precio>0)?vi.precio:0;
+    if(!pr) return true;
+    var val=Math.abs(utmTot)*pr;
+    if(val<RECIBO_ALARMA_P) return true;
+    var utm=skuUTM(chosen.sku)||'';
+    return confirm('⚠️ OJO — esta línea vale '+fmtCL(val)+'\n\n'+chosen.nombre+': '+fmtN(utmTot)+' '+utm+'\n\n¿Es correcto? Revisa la casilla antes de aceptar.');
   }
   function commit(){
     if(!chosen){ inEl.focus(); return; }
@@ -2570,6 +2608,7 @@ function buildPicker(mode, idx, pre){
       var qtyG = skuDecimal(chosen.sku) ? totUO : Math.round(totUO*1000)/1000;
       var precG = _leerPrecioSuper();
       if(SESION_SUPER && precG==null){ precioIn&&precioIn.focus(); hintE.innerHTML='<span style="color:var(--bad)">Falta el precio de la boleta.</span>'; return; }
+      if(!_guardiaValor(qtyG*(skuFactor(chosen.sku)||1))) return;   // v60 freno tzatziki
       if(mode==='fix'){ var itG=ITEMS[idx];
         if(itG.sku!==chosen.sku) pushAlias(itG.said, chosen.sku, chosen.nombre);
         itG.sku=chosen.sku; itG.nombre=chosen.nombre; itG.estado='ok'; itG.sub=skuSec(chosen.sku); itG.qty=qtyG;
@@ -2596,6 +2635,7 @@ function buildPicker(mode, idx, pre){
       if(totUtm<=0){ dPaq.focus(); hintE.innerHTML='<span style="color:var(--bad)">Falta la cantidad — pon paquetes, gramos, o ambos.</span>'; return; }
       var utmReal=totUtm;
       var qty=(f>0)?totUtm/f:totUtm;   // UO equivalente (puede ser fraccionaria, legítima)
+      if(!_guardiaValor(utmReal)) return;   // v60 freno tzatziki — ANTES de escribir
       function setD(o){
         o.sku=chosen.sku; o.nombre=chosen.nombre; o.estado='ok'; o.sub=skuSec(chosen.sku);
         o.qty=qty; o.utmReal=utmReal;
@@ -2607,7 +2647,7 @@ function buildPicker(mode, idx, pre){
       } else {
         var nuevoD={ said:_saidNuevo(chosen.nombre), cands:[{sku:chosen.sku,nombre:chosen.nombre,sc:100}] };
         setD(nuevoD); ITEMS.push(nuevoD);
-        _postAdd(chosen.sku, chosen.nombre, qty);
+        _postAdd(chosen.sku, chosen.nombre, qty, utmReal);
       }
       closePicker(); render(mode==='fix'?idx:undefined); return;
     }
@@ -2625,6 +2665,7 @@ function buildPicker(mode, idx, pre){
     } else {
       qty = skuDecimal(chosen.sku) ? num : Math.round(num);
     }
+    if(!_guardiaValor(qty*(f||1))) return;   // v60 freno tzatziki
     function setS(o){
       o.sku=chosen.sku; o.nombre=chosen.nombre; o.estado='ok'; o.sub=skuSec(chosen.sku);
       o.qty=qty; delete o.utmReal;
@@ -2680,7 +2721,18 @@ function buildPicker(mode, idx, pre){
     if(pv){
       chosen=pv; inEl.value=pv.nombre; listE.innerHTML=''; refreshHint();
       if(preCtx.q!=null && preCtx.q>0){
-        if(usaDoble()){ if(dPaq) dPaq.value=String(preCtx.q); }
+        if(usaDoble()){
+          // v60 · el IDIOMA de la Q depende del producto (caso Sprite, 22-jul):
+          // · PIEZAS (lata, galleta): Q viaja en unidades → packs enteros si es
+          //   múltiplo del factor, sueltas si no. La lata escaneada cae en
+          //   "sueltos: 1", el pack en "enteros: 1" — cada uno en su casilla.
+          // · CONTINUO (leche en cc): Q viaja en contenedores UO → enteros.
+          var fPre=skuFactor(chosen.sku);
+          if(esPieza(chosen.sku) && fPre>1){
+            if(preCtx.q>=fPre && Math.abs(preCtx.q % fPre)<0.001){ if(dPaq) dPaq.value=String(Math.round(preCtx.q/fPre)); }
+            else { if(dGr) dGr.value=String(preCtx.q); }
+          } else { if(dPaq) dPaq.value=String(preCtx.q); }
+        }
         else if(qEl.style.display!=='none'){ qEl.value=String(preCtx.q); }
       }
       refreshOk();
