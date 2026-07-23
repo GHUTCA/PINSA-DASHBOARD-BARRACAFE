@@ -251,7 +251,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v2.3 · comandera mesa-first · 23jul</span>
+    <span class="ver" id="ver">v2.3.1 · variantes · 23jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <span style="display:flex;gap:8px">
       <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
@@ -741,7 +741,7 @@ function abrirTelegram() {
    (render ogni 10s) non lo tocca mai. Si ridisegna solo sui gesti. */
 async function nuevoAbrir(mesaPre) {
   // v2.0 · dal sheet del tavolo arriva con la mesa già scritta
-  STATE.nuevo = { mesa: (mesaPre || '').toString(), qty: {}, datos: {}, ops: {}, q: '', filtro: '', uuid: '', enviando: false };
+  STATE.nuevo = { mesa: (mesaPre || '').toString(), qty: {}, datos: {}, preguntando: null, q: '', filtro: '', uuid: '', enviando: false };
   renderNuevo();
   if (!STATE.catalogo) {       // stessa cache di sessione di AGREGAR
     try {
@@ -770,16 +770,17 @@ function otraRondaMesa(mesa){
   let its = [];
   try { its = JSON.parse(ult.items_json); } catch(e){ toast('err', 'No pude leer el pedido'); return; }
   cerrarMesa();
-  STATE.nuevo = { mesa: mesa, qty: {}, datos: {}, ops: {}, q: '', filtro: '', uuid: '', enviando: false };
+  STATE.nuevo = { mesa: mesa, qty: {}, datos: {}, preguntando: null, q: '', filtro: '', uuid: '', enviando: false };
   const catg = STATE.catalogo || [];
   its.forEach(function(i){
     if (!i.id) return;
     const pc = catg.find(function(p){ return p.id === i.id; });
-    STATE.nuevo.qty[i.id] = (STATE.nuevo.qty[i.id] || 0) + (parseInt(i.qty,10) || 1);
-    STATE.nuevo.datos[i.id] = { nombre: i.nombre || (pc && pc.nombre) || i.id,
+    const op = (i.op || '').toString();
+    const key = op ? (i.id + '##' + op) : i.id;
+    STATE.nuevo.qty[key] = (STATE.nuevo.qty[key] || 0) + (parseInt(i.qty,10) || 1);
+    STATE.nuevo.datos[key] = { id: i.id, nombre: i.nombre || (pc && pc.nombre) || i.id,
       precio: (pc && pc.precio != null) ? pc.precio : (parseFloat(i.precio) || 0),
-      cat: i.cat || (pc && pc.cat) || '', mods: pc ? _modsDe(pc) : null };
-    if (i.op) STATE.nuevo.ops[i.id] = i.op;
+      cat: i.cat || (pc && pc.cat) || '', op: op };
   });
   renderNuevo();
   if (!catg.length) {
@@ -825,6 +826,18 @@ function _nuevoListaHtml() {
   const q = (n.q || '').toLowerCase().trim();
   const cat = STATE.catalogo || [];
   if (!cat.length) return '<div class="agr-vacio">cargando catálogo…</div>';
+  // v2.3.1 · ¿cómo lo quiere? — appare al tap di un prodotto con mods, prima
+  // di tutto: la scelta crea la variante. Cancelar torna alla lista.
+  if (n.preguntando) {
+    const pg = n.preguntando;
+    return '<div style="background:rgba(245,196,81,.1);border:1px solid var(--acc,#f5c451);border-radius:12px;padding:12px">' +
+      '<div style="font-size:14px;font-weight:700;margin-bottom:2px">' + esc(pg.nombre) + '</div>' +
+      '<div style="font-size:12px;opacity:.7;margin-bottom:10px">¿Cómo lo quiere?</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + pg.mods.map(function(o){
+        return '<button onclick="nuevoElegirOp(\'' + esc(o) + '\')" style="flex:1;min-width:44%;border-radius:10px;padding:12px 8px;font-size:14px;font-weight:600;border:1.5px solid var(--acc,#f5c451);background:rgba(245,196,81,.12);color:inherit">' + esc(o) + '</button>';
+      }).join('') + '</div>' +
+      '<button onclick="nuevoCancelarPreg()" style="margin-top:10px;width:100%;border:none;background:none;color:inherit;opacity:.6;font-size:12px;padding:4px">← cancelar</button></div>';
+  }
   const porFam = function(p){ return !n.filtro || _famDe(p.cat) === n.filtro; };
   const FF = [['comida','🍽 Comida','#f5a623'],['cocteles','🍸 Cócteles','#22d3ee'],['postres','🍰 Postres','#f472b6']];
   let h = '<div style="display:flex;gap:6px;margin:2px 0 8px">' + FF.map(function(f){
@@ -846,42 +859,54 @@ function _nuevoListaHtml() {
   ).join('');
 }
 function nuevoFiltro(f){ const n = STATE.nuevo; if(!n) return; n.filtro = (n.filtro === f ? '' : f); const el = $('nuevoLista'); if(el) el.innerHTML = _nuevoListaHtml(); }
+// v2.3.1 · chiave COMPOSTA id##op: «con queso» e «sin queso» sono due righe.
+// L'op si sceglie AL TAP (come il menù cliente) — l'unico modo che regge due
+// varianti dello stesso piatto. I prodotti con mods aprono il mini-selettore;
+// gli altri entrano diretti.
 function nuevoPick(id) {
   const n = STATE.nuevo; if (!n) return;
   const p = (STATE.catalogo || []).find(x => x.id === id); if (!p) return;
-  if (!n.datos[id]) n.datos[id] = { nombre: p.nombre, precio: p.precio, cat: p.cat || '', mods: _modsDe(p) };
-  n.qty[id] = (n.qty[id] || 0) + 1;   // otro tap = +1
+  const mods = _modsDe(p);
+  if (mods) { n.preguntando = { id: id, mods: mods, nombre: p.nombre }; renderNuevo(); return; }
+  _nuevoAdd(p, '');
+}
+function _nuevoAdd(p, op) {
+  const n = STATE.nuevo; if (!n) return;
+  const key = op ? (p.id + '##' + op) : p.id;
+  if (!n.datos[key]) n.datos[key] = { id: p.id, nombre: p.nombre, precio: p.precio, cat: p.cat || '', op: op };
+  n.qty[key] = (n.qty[key] || 0) + 1;
+  n.preguntando = null;
   renderNuevo();
 }
-function nuevoOp(id, o){ const n = STATE.nuevo; if(!n) return; n.ops[id] = o; renderNuevo(); }
-function nuevoQty(id, d) {
+function nuevoElegirOp(op) {
+  const n = STATE.nuevo; if (!n || !n.preguntando) return;
+  const p = (STATE.catalogo || []).find(x => x.id === n.preguntando.id); if (!p) return;
+  _nuevoAdd(p, op === 'Como viene' ? '' : op);   // «Como viene» = sin op, non si stampa
+}
+function nuevoCancelarPreg(){ const n = STATE.nuevo; if(!n) return; n.preguntando = null; renderNuevo(); }
+function nuevoQty(key, d) {
   const n = STATE.nuevo; if (!n) return;
-  n.qty[id] = Math.max(0, (n.qty[id] || 0) + d);
-  if (!n.qty[id]) { delete n.qty[id]; delete n.datos[id]; }
+  n.qty[key] = Math.max(0, (n.qty[key] || 0) + d);
+  if (!n.qty[key]) { delete n.qty[key]; delete n.datos[key]; }
   renderNuevo();
 }
 function _nuevoTotal() {
   const n = STATE.nuevo; if (!n) return 0;
-  return Object.keys(n.qty).reduce((s, id) => s + (n.datos[id] ? n.datos[id].precio * n.qty[id] : 0), 0);
+  return Object.keys(n.qty).reduce(function(s, k){ return s + (n.datos[k] ? n.datos[k].precio * n.qty[k] : 0); }, 0);
 }
 function renderNuevo() {
   const w = $('nuevoWrap'); if (!w) return;
   const n = STATE.nuevo;
   if (!n) { w.innerHTML = ''; return; }
   const sel = Object.keys(n.qty);
-  const selH = sel.length ? sel.map(function(id){
-    const d = n.datos[id];
-    let fila = '<div class="corr-it"><span class="nom">' + esc(d.nombre) + '</span>' +
-      '<div class="stepper"><button onclick="nuevoQty(\'' + esc(id) + '\',-1)">−</button><b style="font-size:19px;min-width:26px;text-align:center;display:inline-block">' + n.qty[id] + '</b>' +
-      '<button onclick="nuevoQty(\'' + esc(id) + '\',1)">＋</button></div></div>';
-    // v2.3 · chips modificadores inline (una op per línea; mixtas = dos pedidos)
-    if (d.mods) {
-      fila += '<div style="display:flex;gap:5px;flex-wrap:wrap;margin:-2px 0 6px">' + d.mods.map(function(o){
-        const on = (n.ops[id] || d.mods[0]) === o;
-        return '<button onclick="nuevoOp(\'' + esc(id) + '\',\'' + esc(o) + '\')" style="border-radius:14px;padding:4px 10px;font-size:11.5px;background:none;border:1px solid ' + (on ? 'var(--acc,#f5c451)' : 'rgba(128,128,128,.4)') + ';color:' + (on ? 'var(--acc,#f5c451)' : 'inherit') + ';font-weight:' + (on ? '700' : '400') + '">' + esc(o) + '</button>';
-      }).join('') + '</div>';
-    }
-    return fila;
+  const selH = sel.length ? sel.map(function(key){
+    const d = n.datos[key];
+    // v2.3.1 · l'op è FISSA nella riga (scelta al tap): label, non chip. Due
+    // varianti dello stesso piatto = due righe distinte, mai sovrascritte.
+    return '<div class="corr-it"><span class="nom">' + esc(d.nombre) +
+      (d.op ? '<br><small style="opacity:.7;color:var(--acc,#f5c451)">· ' + esc(d.op) + '</small>' : '') + '</span>' +
+      '<div class="stepper"><button onclick="nuevoQty(\'' + esc(key) + '\',-1)">−</button><b style="font-size:19px;min-width:26px;text-align:center;display:inline-block">' + n.qty[key] + '</b>' +
+      '<button onclick="nuevoQty(\'' + esc(key) + '\',1)">＋</button></div></div>';
   }).join('') : '<div class="agr-vacio">toca productos para sumarlos</div>';
   const total = _nuevoTotal();
   w.innerHTML =
@@ -904,11 +929,9 @@ async function nuevoEnviar(btn) {
   if (!ids.length) { toast('warn', 'El pedido está vacío'); return; }
   // uuid FISSO dal primo intento: il retry non può mai duplicare (dedup GAS)
   if (!n.uuid) n.uuid = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
-  const items = ids.map(function(id){
-    const d = n.datos[id];
-    let op = (n.ops && n.ops[id]) || (d.mods ? d.mods[0] : '');
-    if (op === 'Como viene') op = '';
-    return { id: id, nombre: d.nombre, precio: d.precio, qty: n.qty[id], llevar: n.qty[id], cat: d.cat || '', op: op };
+  const items = ids.map(function(key){
+    const d = n.datos[key];
+    return { id: d.id, nombre: d.nombre, precio: d.precio, qty: n.qty[key], llevar: n.qty[key], cat: d.cat || '', op: d.op || '' };
   });
   const total = _nuevoTotal();
   const body = { codigo: STATE.codigo, nombre: STATE.nombre, uuid: n.uuid, mesa: mesa, total: total, items_json: JSON.stringify(items) };
