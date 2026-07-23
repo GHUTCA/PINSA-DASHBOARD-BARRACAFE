@@ -481,7 +481,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v61 · 22jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v62 · 23jul</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -2066,16 +2066,74 @@ function codAprenderDialogo(ctx, sku, nombre, qty){
   // aprendizaje y el código volvía a ser desconocido en la siguiente pasada.
 }
 
+// ── EL LECTOR · DOS MOTORES, UNA SOLA INTERFAZ (v62 · 23-jul) ───────────────
+// Android/Chrome trae BarcodeDetector NATIVO: rápido, cero peso, se usa tal cual.
+// iOS Safari NO lo expone (Apple lo tiene cerrado) — aunque el iPhone sabe leer
+// códigos de sobra. Para no dejar media flota sin escáner, ahí se carga un motor
+// JS (ZXing, MIT/Apache-2.0) **bajo demanda**: sólo en el teléfono que lo
+// necesita y sólo al abrir la cámara. Android no lo descarga NUNCA.
+// Los dos motores exponen el MISMO método detect(video) → [{rawValue, format}],
+// así el resto del escáner no sabe cuál está corriendo (ni le importa).
+var _ZX_FMT={11:'qr_code',7:'ean_13',6:'ean_8',14:'upc_a',15:'upc_e',4:'code_128',2:'code_39',8:'itf'};
+function _cargarZXing(){
+  if(window.ZXing) return Promise.resolve();
+  return new Promise(function(res,rej){
+    var s=document.createElement('script');
+    s.src='shared/zxing.min.js';
+    s.onload=function(){ window.ZXing?res():rej(new Error('lector vacío')); };
+    s.onerror=function(){ rej(new Error('sin conexión para bajar el lector')); };
+    document.head.appendChild(s);
+  });
+}
+function _crearLector(){
+  var fmts=['qr_code','ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'];
+  // ① motor NATIVO (Android, tablets)
+  // typeof === 'function' y no ('X' in window): hay navegadores que exponen el
+  // nombre con valor undefined — el `in` daba true y reventaba en la línea
+  // siguiente (cazado por la prueba del 23-jul simulando iPhone).
+  if(typeof window.BarcodeDetector==='function'){
+    return Promise.resolve(BarcodeDetector.getSupportedFormats?BarcodeDetector.getSupportedFormats():fmts)
+      .then(function(sup){
+        var usar=fmts.filter(function(f){ return sup.indexOf(f)>=0; });
+        if(!usar.length) usar=['qr_code'];
+        var det=new BarcodeDetector({formats:usar});
+        return { motor:'nativo', detect:function(vid){ return det.detect(vid); } };
+      });
+  }
+  // ② motor JS (iPhone) — se baja una vez y queda en caché del navegador
+  return _cargarZXing().then(function(){
+    var hints=new Map(), F=ZXing.BarcodeFormat;
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
+      [F.QR_CODE,F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER,true);
+    var reader=new ZXing.MultiFormatReader(); reader.setHints(hints);
+    var cv=document.createElement('canvas'), cx=cv.getContext('2d',{willReadFrequently:true});
+    return { motor:'zxing', detect:function(vid){
+      return new Promise(function(res){
+        var vw=vid.videoWidth||0, vh=vid.videoHeight||0;
+        if(!vw||!vh) return res([]);
+        // se limita a 1280 de ancho: más resolución no mejora la lectura y
+        // en un iPhone cada cuadro de más son décimas de segundo perdidas
+        var esc=Math.min(1,1280/vw), w=Math.round(vw*esc), h=Math.round(vh*esc);
+        if(cv.width!==w||cv.height!==h){ cv.width=w; cv.height=h; }
+        cx.drawImage(vid,0,0,w,h);
+        try{
+          var px=cx.getImageData(0,0,w,h).data, lum=new Uint8ClampedArray(w*h);
+          for(var i=0,j=0;j<lum.length;i+=4,j++) lum[j]=(px[i]*0.299+px[i+1]*0.587+px[i+2]*0.114)|0;
+          var bmp=new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.RGBLuminanceSource(lum,w,h)));
+          var r=reader.decode(bmp);
+          res([{ rawValue:r.getText(), format:(_ZX_FMT[r.getBarcodeFormat()]||'desconocido') }]);
+        }catch(e){ res([]); }        // sin código en el cuadro: normal, sigue
+        finally{ try{ reader.reset(); }catch(e2){} }
+      });
+    }};
+  });
+}
+
 // ── LA CÁMARA ───────────────────────────────────────────────────────────────
 var _scanCerrar=null;
 function abrirEscaner(){
   if(!_verboElegido()) return;
-  if(!('BarcodeDetector' in window)){
-    alert('▦ Este teléfono no trae lector de códigos.\n\n'+
-          'Funciona en Chrome de Android (y en las tablets).\n'+
-          'Mientras tanto: Voz o Teclado.');
-    return;
-  }
   var ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;background:#000;z-index:9500;display:flex;flex-direction:column';
   ov.innerHTML=
@@ -2108,31 +2166,35 @@ function abrirEscaner(){
     try{ track.applyConstraints({advanced:[{torch:luz}]}); }catch(e){ msg.textContent='Este teléfono no deja encender la linterna'; }
   };
 
-  var fmts=['qr_code','ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'];
-  Promise.resolve(BarcodeDetector.getSupportedFormats ? BarcodeDetector.getSupportedFormats() : fmts)
-  .then(function(sup){
-    var usar=fmts.filter(function(f){ return sup.indexOf(f)>=0; });
-    if(!usar.length) usar=['qr_code'];
-    var det=new BarcodeDetector({formats:usar});
+  // en iPhone el motor pesa ~330 KB: se avisa mientras baja (una sola vez)
+  if(typeof window.BarcodeDetector!=='function' && !window.ZXing) msg.textContent='Preparando el lector…';
+  _crearLector().then(function(lector){
+    msg.textContent='Apunta al código';
+    // el motor JS necesita más tiempo por cuadro que el nativo: ~4 lecturas/s
+    var pausa = (lector.motor==='zxing') ? 260 : 120;
     return navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}})
       .then(function(st){
         stream=st; track=st.getVideoTracks()[0];
-        vid.srcObject=st; vid.play();
+        vid.srcObject=st;
+        vid.setAttribute('playsinline','');   // iOS: sin esto el video se abre a pantalla completa
+        vid.play();
         function tick(){
           if(!activo) return;
-          det.detect(vid).then(function(bs){
+          lector.detect(vid).then(function(bs){
             if(!activo) return;
             if(bs && bs.length && bs[0].rawValue){ leido(String(bs[0].rawValue).trim(), bs[0].format); }
-            else setTimeout(tick, 120);        // ~8 lecturas/s: alcanza y no cuece el teléfono
-          }).catch(function(){ if(activo) setTimeout(tick, 220); });
+            else setTimeout(tick, pausa);
+          }).catch(function(){ if(activo) setTimeout(tick, pausa+100); });
         }
         setTimeout(tick, 300);
       });
   }).catch(function(e){
-    var t=String(e&&e.name||e);
-    msg.textContent = (t.indexOf('NotAllowed')>=0)
+    var t=String(e&&e.name||e&&e.message||e);
+    msg.textContent = (t.indexOf('NotAllowed')>=0||t.indexOf('Permission')>=0)
       ? 'Falta el permiso de cámara — dáselo al navegador y vuelve a entrar'
-      : 'No pude abrir la cámara: '+t;
+      : (t.indexOf('lector')>=0||t.indexOf('conexión')>=0)
+        ? 'No pude preparar el lector: '+t+'. Con red vuelve a intentar; mientras tanto usa Voz o Teclado.'
+        : 'No pude abrir la cámara: '+t;
   });
 
   function leido(cod, formato){
