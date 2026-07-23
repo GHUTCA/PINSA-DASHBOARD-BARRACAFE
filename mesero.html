@@ -251,7 +251,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v2.2.1 · cola timbrada · 23jul</span>
+    <span class="ver" id="ver">v2.3 · comandera mesa-first · 23jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <span style="display:flex;gap:8px">
       <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
@@ -741,7 +741,7 @@ function abrirTelegram() {
    (render ogni 10s) non lo tocca mai. Si ridisegna solo sui gesti. */
 async function nuevoAbrir(mesaPre) {
   // v2.0 · dal sheet del tavolo arriva con la mesa già scritta
-  STATE.nuevo = { mesa: (mesaPre || '').toString(), qty: {}, datos: {}, q: '', uuid: '', enviando: false };
+  STATE.nuevo = { mesa: (mesaPre || '').toString(), qty: {}, datos: {}, ops: {}, q: '', filtro: '', uuid: '', enviando: false };
   renderNuevo();
   if (!STATE.catalogo) {       // stessa cache di sessione di AGREGAR
     try {
@@ -759,31 +759,101 @@ async function nuevoAbrir(mesaPre) {
   }
 }
 function nuevoCerrar() { STATE.nuevo = null; renderNuevo(); }
+// v2.3 · F1 · OTRA RONDA: l'ultimo pedido precompila il nuevo — modificadores
+// inclusi (il sin alcohol della señora torna da solo). NON auto-invia: il
+// mesero vede, corregge e conferma (lo specchio resta l'ultimo passo).
+function otraRondaMesa(mesa){
+  const m = (STATE.mesasModel || []).find(function(x){ return x.mesa === mesa; });
+  if (!m) return;
+  const ult = m.pend.concat(m.mios).concat(m.limpiar).sort(function(a,b){ return (a.hace_s||9e9) - (b.hace_s||9e9); })[0];
+  if (!ult || !ult.items_json) { toast('warn', 'Sin pedido previo en esta mesa'); return; }
+  let its = [];
+  try { its = JSON.parse(ult.items_json); } catch(e){ toast('err', 'No pude leer el pedido'); return; }
+  cerrarMesa();
+  STATE.nuevo = { mesa: mesa, qty: {}, datos: {}, ops: {}, q: '', filtro: '', uuid: '', enviando: false };
+  const catg = STATE.catalogo || [];
+  its.forEach(function(i){
+    if (!i.id) return;
+    const pc = catg.find(function(p){ return p.id === i.id; });
+    STATE.nuevo.qty[i.id] = (STATE.nuevo.qty[i.id] || 0) + (parseInt(i.qty,10) || 1);
+    STATE.nuevo.datos[i.id] = { nombre: i.nombre || (pc && pc.nombre) || i.id,
+      precio: (pc && pc.precio != null) ? pc.precio : (parseFloat(i.precio) || 0),
+      cat: i.cat || (pc && pc.cat) || '', mods: pc ? _modsDe(pc) : null };
+    if (i.op) STATE.nuevo.ops[i.id] = i.op;
+  });
+  renderNuevo();
+  if (!catg.length) {
+    gasGet('getCatalogo', { codigo: STATE.codigo }).then(function(r){
+      STATE.catalogo = (r && r.ok && Array.isArray(r.productos)) ? r.productos : [];
+      renderNuevo();
+    }).catch(function(){});
+  }
+}
+// v2.3 · F1 · la precuenta del tavolo a un tap: papel in barra col QR —
+// l'evento entra nel libro (PRECUENTAS + seme LEGGE 2). GAS @83 la aspettava.
+async function precuentaMesa(mesa, btn){
+  if (btn) { btn.disabled = true; btn.classList.add('cargando'); }
+  try {
+    const r = await gasPost('emitirPreCuenta', { codigo: STATE.codigo, nombre: STATE.nombre, emitida_por: STATE.nombre, mesa: mesa, canal: 'papel' });
+    if (r && r.ok) toast('ok', '🧾 ' + (r.folio || '') + ' · ' + fmtPrice(r.total || 0) + ' — imprimiendo en barra');
+    else if (r && r.error === 'sin_consumo') toast('warn', 'Mesa ' + mesa + ' sin consumo en esta sesión');
+    else toast('err', 'No se pudo: ' + (r && r.error || '?'));
+  } catch (e) { toast('err', 'Sin conexión — reintenta'); }
+  if (btn) { btn.disabled = false; btn.classList.remove('cargando'); }
+}
 function nuevoMesaInput(v) { if (STATE.nuevo) STATE.nuevo.mesa = (v || '').replace(/[^0-9]/g, ''); }
 function nuevoBuscar(v) {   // niente re-render completo: si perderebbe il focus
   if (!STATE.nuevo) return;
   STATE.nuevo.q = v || '';
   const el = $('nuevoLista'); if (el) el.innerHTML = _nuevoListaHtml();
 }
+// v2.3 · le tre famiglie di Alberto: un colpo d'occhio, non una navigazione.
+// Il colore CODIFICA (ámbar=cocina, cian=barra, rosa=dolce), mai decora.
+var FAM_COCTELES = ['bar','sour','mojitos','spritz','cervezas','vinos','jarras','destilados','jugos','bebidas','mocktails'];
+var FAM_POSTRES  = ['postres','cafes'];
+function _famDe(c){ c=(c||'').toLowerCase(); if(FAM_POSTRES.indexOf(c)>=0) return 'postres'; if(FAM_COCTELES.indexOf(c)>=0) return 'cocteles'; return 'comida'; }
+// v2.3 · chips modificadores: singola → «Como viene» implicito (non si stampa)
+function _modsDe(p){
+  const m = (p.modificadores || '').toString().trim();
+  if (!m) return null;
+  let o = m.split('/').map(function(x){ return x.trim(); }).filter(Boolean);
+  if (o.length === 1) o = ['Como viene'].concat(o);
+  return o.length >= 2 ? o : null;
+}
 function _nuevoListaHtml() {
   const n = STATE.nuevo; if (!n) return '';
   const q = (n.q || '').toLowerCase().trim();
   const cat = STATE.catalogo || [];
   if (!cat.length) return '<div class="agr-vacio">cargando catálogo…</div>';
-  const filt = (q ? cat.filter(p => (p.nombre || '').toLowerCase().includes(q)) : cat).slice(0, 40);
-  if (!filt.length) return '<div class="agr-vacio">nada con «' + esc(q) + '»</div>';
-  return filt.map(p =>
+  const porFam = function(p){ return !n.filtro || _famDe(p.cat) === n.filtro; };
+  const FF = [['comida','🍽 Comida','#f5a623'],['cocteles','🍸 Cócteles','#22d3ee'],['postres','🍰 Postres','#f472b6']];
+  let h = '<div style="display:flex;gap:6px;margin:2px 0 8px">' + FF.map(function(f){
+    const on = n.filtro === f[0];
+    return '<button onclick="nuevoFiltro(\'' + f[0] + '\')" style="flex:1;border-radius:9px;padding:7px 2px;font-size:12px;font-weight:700;border:1.5px solid ' + f[2] + ';color:' + f[2] + ';background:' + (on ? f[2] + '33' : 'transparent') + '">' + f[1] + '</button>';
+  }).join('') + '</div>';
+  // v2.3 · F3 · «lo que la sala pide ahora»: il cervello ordina per probabilità
+  const frec = (STATE.frecuentes || []).map(function(id){ return cat.find(function(p){ return p.id === id; }); }).filter(Boolean).filter(porFam).slice(0, 9);
+  if (!q && frec.length) {
+    h += '<div style="font-size:10px;opacity:.6;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Lo que la sala pide ahora</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">' +
+      frec.map(function(p){ return '<button class="agr-it" style="display:block;text-align:center;font-size:11.5px;padding:8px 4px" onclick="nuevoPick(\'' + esc(p.id) + '\')">' + esc(p.nombre.length > 26 ? p.nombre.slice(0, 25) + '…' : p.nombre) + '</button>'; }).join('') + '</div>';
+  }
+  const filt = (q ? cat.filter(p => (p.nombre || '').toLowerCase().includes(q)) : cat).filter(porFam).slice(0, 40);
+  if (!filt.length) return h + '<div class="agr-vacio">nada con «' + esc(q) + '»</div>';
+  return h + filt.map(p =>
     '<button class="agr-it" onclick="nuevoPick(\'' + esc(p.id) + '\')">' +
     '<span>' + esc(p.nombre) + '</span><span class="agr-pre">' + fmtPrice(p.precio) + ' ＋</span></button>'
   ).join('');
 }
+function nuevoFiltro(f){ const n = STATE.nuevo; if(!n) return; n.filtro = (n.filtro === f ? '' : f); const el = $('nuevoLista'); if(el) el.innerHTML = _nuevoListaHtml(); }
 function nuevoPick(id) {
   const n = STATE.nuevo; if (!n) return;
   const p = (STATE.catalogo || []).find(x => x.id === id); if (!p) return;
-  if (!n.datos[id]) n.datos[id] = { nombre: p.nombre, precio: p.precio, cat: p.cat || '' };
+  if (!n.datos[id]) n.datos[id] = { nombre: p.nombre, precio: p.precio, cat: p.cat || '', mods: _modsDe(p) };
   n.qty[id] = (n.qty[id] || 0) + 1;   // otro tap = +1
   renderNuevo();
 }
+function nuevoOp(id, o){ const n = STATE.nuevo; if(!n) return; n.ops[id] = o; renderNuevo(); }
 function nuevoQty(id, d) {
   const n = STATE.nuevo; if (!n) return;
   n.qty[id] = Math.max(0, (n.qty[id] || 0) + d);
@@ -799,11 +869,20 @@ function renderNuevo() {
   const n = STATE.nuevo;
   if (!n) { w.innerHTML = ''; return; }
   const sel = Object.keys(n.qty);
-  const selH = sel.length ? sel.map(id =>
-    '<div class="corr-it"><span class="nom">' + esc(n.datos[id].nombre) + '</span>' +
-    '<div class="stepper"><button onclick="nuevoQty(\'' + esc(id) + '\',-1)">−</button><b>' + n.qty[id] + '</b>' +
-    '<button onclick="nuevoQty(\'' + esc(id) + '\',1)">＋</button></div></div>'
-  ).join('') : '<div class="agr-vacio">toca productos para sumarlos</div>';
+  const selH = sel.length ? sel.map(function(id){
+    const d = n.datos[id];
+    let fila = '<div class="corr-it"><span class="nom">' + esc(d.nombre) + '</span>' +
+      '<div class="stepper"><button onclick="nuevoQty(\'' + esc(id) + '\',-1)">−</button><b style="font-size:19px;min-width:26px;text-align:center;display:inline-block">' + n.qty[id] + '</b>' +
+      '<button onclick="nuevoQty(\'' + esc(id) + '\',1)">＋</button></div></div>';
+    // v2.3 · chips modificadores inline (una op per línea; mixtas = dos pedidos)
+    if (d.mods) {
+      fila += '<div style="display:flex;gap:5px;flex-wrap:wrap;margin:-2px 0 6px">' + d.mods.map(function(o){
+        const on = (n.ops[id] || d.mods[0]) === o;
+        return '<button onclick="nuevoOp(\'' + esc(id) + '\',\'' + esc(o) + '\')" style="border-radius:14px;padding:4px 10px;font-size:11.5px;background:none;border:1px solid ' + (on ? 'var(--acc,#f5c451)' : 'rgba(128,128,128,.4)') + ';color:' + (on ? 'var(--acc,#f5c451)' : 'inherit') + ';font-weight:' + (on ? '700' : '400') + '">' + esc(o) + '</button>';
+      }).join('') + '</div>';
+    }
+    return fila;
+  }).join('') : '<div class="agr-vacio">toca productos para sumarlos</div>';
   const total = _nuevoTotal();
   w.innerHTML =
     '<div class="nuevo-overlay" onclick="if(event.target===this)nuevoCerrar()">' +
@@ -825,7 +904,12 @@ async function nuevoEnviar(btn) {
   if (!ids.length) { toast('warn', 'El pedido está vacío'); return; }
   // uuid FISSO dal primo intento: il retry non può mai duplicare (dedup GAS)
   if (!n.uuid) n.uuid = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
-  const items = ids.map(id => ({ id: id, nombre: n.datos[id].nombre, precio: n.datos[id].precio, qty: n.qty[id], llevar: n.qty[id], cat: n.datos[id].cat || '' }));
+  const items = ids.map(function(id){
+    const d = n.datos[id];
+    let op = (n.ops && n.ops[id]) || (d.mods ? d.mods[0] : '');
+    if (op === 'Como viene') op = '';
+    return { id: id, nombre: d.nombre, precio: d.precio, qty: n.qty[id], llevar: n.qty[id], cat: d.cat || '', op: op };
+  });
   const total = _nuevoTotal();
   const body = { codigo: STATE.codigo, nombre: STATE.nombre, uuid: n.uuid, mesa: mesa, total: total, items_json: JSON.stringify(items) };
   n.enviando = true; if (btn) btn.disabled = true;
@@ -907,6 +991,8 @@ function entrarSala() {
   _wakeLock();   // v1.12 · lo schermo non si spegne finché la sala è davanti
   pushEstado();  // v1.14 · riflette lo stato del bottone avisos
   _colaBadge(); _colaFlush();   // v2.2 · pedidos rimasti in cola da un turno interrotto → atterrano subito
+  // v2.3 · F3 · frecuentes de ahora: il cervello, non l'alfabeto (cache GAS 5min)
+  gasGet('getFrecuentes', { codigo: STATE.codigo }).then(function(r){ if (r && r.ok && Array.isArray(r.ids)) STATE.frecuentes = r.ids; }).catch(function(){});
 }
 
 /* v1.12 · wake lock: con la pagina in primo piano lo schermo resta acceso
@@ -1035,8 +1121,17 @@ function renderMesaSheet(r) {
   m.pend.forEach(function (p) { h += cardPedido(p, umb, '✋ MÍO — lo tomo yo', 'mio'); });
   m.mios.forEach(function (p) { h += cardMio(p, umb); });
   m.limpiar.forEach(function (p) { h += cardLiberar(p); });
-  h += '<div class="msh-row"><button class="btn sec" style="border-color:var(--acc);color:var(--acc)" ' +
-    'onclick="cerrarMesa();nuevoAbrir(\'' + esc(m.mesa) + '\')">➕ Agregar productos</button></div>';
+  // v2.3 · F1 comandera: la mesa parla — otra ronda (73% dei pedidos) e
+  // precuenta a un tap. L'ultimo pedido della mesa precompila, mods inclusi.
+  const ultP = m.pend.concat(m.mios).concat(m.limpiar).sort(function(a,b){ return (a.hace_s||9e9) - (b.hace_s||9e9); })[0];
+  if (ultP && ultP.items_json) {
+    let resU = '';
+    try { const its0 = JSON.parse(ultP.items_json); resU = its0.slice(0,2).map(function(i){ return (i.qty||1) + '× ' + (i.nombre||i.id); }).join(', ') + (its0.length > 2 ? '…' : ''); } catch(e){}
+    if (resU) h += '<div class="msh-row"><button class="btn" onclick="otraRondaMesa(\'' + esc(m.mesa) + '\')">🔁 Otra ronda — ' + esc(resU.slice(0,40)) + '</button></div>';
+  }
+  h += '<div class="msh-row" style="display:flex;gap:8px">' +
+    '<button class="btn sec" style="flex:1;border-color:var(--acc);color:var(--acc)" onclick="cerrarMesa();nuevoAbrir(\'' + esc(m.mesa) + '\')">➕ Agregar</button>' +
+    '<button class="btn sec" style="flex:1" onclick="precuentaMesa(\'' + esc(m.mesa) + '\',this)">🧾 Precuenta</button></div>';
   $('mesaSheetContent').innerHTML = h;
 }
 
