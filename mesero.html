@@ -110,6 +110,11 @@
   .corr-it{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed var(--bord);font-size:15px}
   .corr-it .nom{flex:1}
   .corr-it .nom.cero{text-decoration:line-through;color:var(--t3)}
+  /* v2.4 · ES ENTRADA: el botón ⬆ marca la línea que sale primero */
+  .pri-btn{width:42px;height:42px;border-radius:12px;border:1.5px solid var(--bord);
+    background:transparent;color:var(--t3);font-size:18px;flex:none}
+  .pri-btn.on{background:rgba(245,196,81,.18);border-color:#f5c451;color:#f5c451}
+  .corr-it.pri{border-left:3px solid #f5c451;padding-left:8px;margin-left:-11px}
   .stepper{display:flex;align-items:center;gap:2px}
   .stepper button{width:42px;height:42px;border-radius:12px;border:1.5px solid var(--bord);
     background:var(--card2);color:var(--t1);font-size:22px;font-weight:900}
@@ -251,7 +256,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v2.3.1 · variantes · 23jul</span>
+    <span class="ver" id="ver">v2.4 · va primero · 23jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <span style="display:flex;gap:8px">
       <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
@@ -894,17 +899,29 @@ function _nuevoTotal() {
   const n = STATE.nuevo; if (!n) return 0;
   return Object.keys(n.qty).reduce(function(s, k){ return s + (n.datos[k] ? n.datos[k].precio * n.qty[k] : 0); }, 0);
 }
+// v2.4 · ES ENTRADA: el ⬆ marca la línea que sale primero. Es un hecho de la
+// mesa en ese momento — no del plato: lo decide el mesero, no la categoría.
+function nuevoPri(key) {
+  const n = STATE.nuevo; if (!n || !n.datos[key]) return;
+  n.datos[key].pri = n.datos[key].pri ? 0 : 1;
+  renderNuevo();
+}
 function renderNuevo() {
   const w = $('nuevoWrap'); if (!w) return;
   const n = STATE.nuevo;
   if (!n) { w.innerHTML = ''; return; }
-  const sel = Object.keys(n.qty);
+  // v2.4 · las líneas «primero» suben arriba (sort estable: el resto no se mueve)
+  const sel = Object.keys(n.qty).sort(function(a, b){
+    return ((n.datos[b] && n.datos[b].pri) ? 1 : 0) - ((n.datos[a] && n.datos[a].pri) ? 1 : 0);
+  });
   const selH = sel.length ? sel.map(function(key){
     const d = n.datos[key];
     // v2.3.1 · l'op è FISSA nella riga (scelta al tap): label, non chip. Due
     // varianti dello stesso piatto = due righe distinte, mai sovrascritte.
-    return '<div class="corr-it"><span class="nom">' + esc(d.nombre) +
-      (d.op ? '<br><small style="opacity:.7;color:var(--acc,#f5c451)">· ' + esc(d.op) + '</small>' : '') + '</span>' +
+    return '<div class="corr-it' + (d.pri ? ' pri' : '') + '"><span class="nom">' + esc(d.nombre) +
+      (d.op ? '<br><small style="opacity:.7;color:var(--acc,#f5c451)">· ' + esc(d.op) + '</small>' : '') +
+      (d.pri ? '<br><small style="color:#f5c451">⬆ primero — sale solo</small>' : '') + '</span>' +
+      '<button class="pri-btn' + (d.pri ? ' on' : '') + '" onclick="nuevoPri(\'' + esc(key) + '\')" title="va primero">⬆</button>' +
       '<div class="stepper"><button onclick="nuevoQty(\'' + esc(key) + '\',-1)">−</button><b style="font-size:19px;min-width:26px;text-align:center;display:inline-block">' + n.qty[key] + '</b>' +
       '<button onclick="nuevoQty(\'' + esc(key) + '\',1)">＋</button></div></div>';
   }).join('') : '<div class="agr-vacio">toca productos para sumarlos</div>';
@@ -931,7 +948,7 @@ async function nuevoEnviar(btn) {
   if (!n.uuid) n.uuid = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   const items = ids.map(function(key){
     const d = n.datos[key];
-    return { id: d.id, nombre: d.nombre, precio: d.precio, qty: n.qty[key], llevar: n.qty[key], cat: d.cat || '', op: d.op || '' };
+    return { id: d.id, nombre: d.nombre, precio: d.precio, qty: n.qty[key], llevar: n.qty[key], cat: d.cat || '', op: d.op || '', pri: d.pri ? 1 : 0 };   // v2.4 · ES ENTRADA
   });
   const total = _nuevoTotal();
   const body = { codigo: STATE.codigo, nombre: STATE.nombre, uuid: n.uuid, mesa: mesa, total: total, items_json: JSON.stringify(items) };
