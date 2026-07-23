@@ -478,10 +478,31 @@
     <button class="ios-go" id="gateGo">Ir al portal →</button>
   </div>
 
+  <!-- ═══ MODO UNA-SOLA-TAREA (v63 · 23-jul) ═══════════════════════════════
+       Link con ?solo=mapa → el tablet del turno abre EL INVENTARIO DE SECCIÓN
+       y nada más. Sin verbos, sin puertas, sin BC: una pantalla, una tarea.
+       Nace de la prueba de fuego pedida por Alberto: el equipo dijo "engorroso
+       pero se entiende" y sigue contando en papel. Antes de tocar el diseño
+       queremos VER dónde se equivocan con datos reales — y para eso el tablet
+       no puede ofrecer diez caminos: tiene que ofrecer uno.
+       La identidad sigue viniendo del PIN: un conteo sin firma no sirve para
+       preguntarle a nadie después. ═════════════════════════════════════════ -->
+  <style id="soloMapaCSS" media="not all">
+    .top, .bottombar, .actionbar, .list, .empty { display:none !important; }
+    body { overflow:hidden; }
+    #mapaOverlay { inset:0 !important; }
+  </style>
+  <script>
+    // se enciende YA, no al final del arranque: si no, el turno vería medio
+    // segundo la app entera (verbos, puertas) antes de que desaparezca.
+    try{ if((new URLSearchParams(location.search).get('solo')||'').toLowerCase()==='mapa')
+      document.getElementById('soloMapaCSS').media='all'; }catch(e){}
+  </script>
+
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v62 · 23jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v63 · 23jul</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -1087,7 +1108,12 @@ var gate=$('gate'),
 // El gate con 3 nombres hardcoded + texto libre MURIÓ (decisión Alberto 10-jul):
 // la firma sale SOLO de pinsita_session (PIN del portal). Sin sesión → al
 // portal. "cambiar usuario" = cerrar sesión y volver a entrar con otro PIN.
-$('gateGo').onclick=function(){ location.href='atalaya.html'; };
+// v63: en el tablet del turno el portal se abre YA en su frente (?f=rsc). Sin
+// esto, al vencer la sesión de 8h caían en el portal desnudo — y ahí un tablet
+// sin llave no tiene dónde poner el PIN.
+$('gateGo').onclick=function(){
+  location.href='atalaya.html'+((typeof SOLO_MAPA!=='undefined'&&SOLO_MAPA&&CTX_CODE)?('?f='+CTX_CODE):'');
+};
 $('btnOp').onclick=function(){
   try{ localStorage.removeItem('pinsita_session'); localStorage.removeItem('pinsita_operador'); }catch(e){}
   location.href='atalaya.html';
@@ -1440,11 +1466,17 @@ function arrancar(){
       // cerraba en la cara (aparece 1s y se cierra). El VOCAB ya está fresco;
       // NO hace falta re-renderizar la lista por debajo. Si el picker está
       // abierto, dejamos que el OP termine: la próxima búsqueda ya usa la BD nueva.
+      // v63 · el tablet de una-sola-tarea abre el Mapa aquí: con el catálogo
+      // ya en mano (nombres, factores, métodos de conteo). Antes no: pintaría
+      // un giro sin los datos que hacen que las casillas sean las correctas.
+      if(typeof _soloMapaArrancar==='function') _soloMapaArrancar();
       if(pickerEl){ return; }
       render();
     });
   }
   setEstado('componi'); render();
+  // catálogo ya en memoria (volver a la app sin recargar): abre igual
+  if(window.__vocabCargado && typeof _soloMapaArrancar==='function') _soloMapaArrancar();
 }
 // Fix 2: el empty refleja SIEMPRE el estado real (no se queda la clessidra colgada)
 function setEmptyMsg(state){
@@ -3299,6 +3331,26 @@ function mapaMoverItem(estIdx, contKey, i, dir){
 // con barra de progreso; tocar una abre sus productos; cada producto se cuenta
 // según su método. "Cerrar estación" registra el lote de esa estación.
 // ============================================================================
+// ── v63 · MODO UNA-SOLA-TAREA (?solo=mapa) ─────────────────────────────────
+// El tablet del turno hace UNA cosa: el inventario de sección. Todo lo demás
+// se apaga (verbos, puertas, BC, lista). No es una versión recortada: es la
+// misma app con una sola puerta abierta — el motor, la cola offline y la firma
+// por PIN son exactamente los de siempre.
+var SOLO_MAPA=false;
+try{ SOLO_MAPA=(new URLSearchParams(location.search).get('solo')||'').toLowerCase()==='mapa'; }catch(e){}
+function _soloMapaArrancar(){
+  if(!SOLO_MAPA) return;
+  var st=document.getElementById('soloMapaCSS'); if(st) st.media='all';
+  if(!OPERADOR) return;              // sin sesión manda el gate del PIN, como siempre
+  var yaAbierto=document.getElementById('mapaOverlay');
+  if(yaAbierto && yaAbierto.style.display!=='none') return;   // idempotente: no reabre encima
+  if(typeof GIRO_RIESCO==='undefined' || !GIRO_RIESCO.length){
+    alert('Este local todavía no tiene el giro del Mapa cargado.\nAvisa a tu Jefe de Local.');
+    return;
+  }
+  abrirMapa();
+}
+
 function abrirMapa(){
   if (!OPERADOR){ alert('Tu sesión no está activa.\nEntra desde el portal con tu PIN.'); return; }
   var ov = document.getElementById('mapaOverlay');
@@ -3322,6 +3374,14 @@ function abrirMapa(){
     document.getElementById('mapaLock').onclick   = mapaToggleEdit;
     document.getElementById('mapaConfirmar').onclick = confirmarInventarioGiro;
     document.getElementById('mapaLimpiar').onclick   = mapaLimpiarTodo;
+    // v63 · en el tablet de una-sola-tarea no hay «atrás» (no existe un detrás)
+    // ni reordenar (el giro lo fija el Jefe, no el turno).
+    if(SOLO_MAPA){
+      var bc=document.getElementById('mapaCerrar'); if(bc) bc.style.display='none';
+      var bl=document.getElementById('mapaLock');   if(bl) bl.style.display='none';
+      var sb=document.getElementById('mapaSub');
+      if(sb) sb.textContent='Recorre la barra y cuenta lo que ves · '+(OPERADOR||'');
+    }
   }
   ov.style.display='flex';
   MAPA_ESTACION_ABIERTA = null;
