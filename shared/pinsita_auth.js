@@ -1,5 +1,9 @@
 /* ════════════════════════════════════════════════════════════════════
- *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.9
+ *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.10
+ *  v1.10 (23-jul-2026) · FIX PAINT iOS: la lista «¿Quién eres?» era nel DOM ma
+ *    Safari non la dipingeva (scroller vh + figli async) — appariva solo con lo
+ *    zoom. Cura: translateZ(0) sul contenitore + reflow forzato post-inject.
+ *    Solo rendering, zero logica auth. Zona rossa: annunciata (Alberto+Claude).
  *  v1.9 (19-jul-2026) · briciola pinsita_conocido al login (il nudo di atalaya
  *    non mostra la porta mesero sui telefoni che hanno mai fatto PIN)
  *
@@ -470,6 +474,13 @@
       row.onclick = function () { seleccion = u; irAPin(); };
       cont.appendChild(row);
     });
+    // v1.10 (23-lug) · FIX PAINT iOS: figli iniettati in async dentro uno
+    // scroller con max-height in vh — WebKit a volte NON li dipinge finché
+    // uno zoom/rotazione forza il reflow (caso reale: iPhone al portale,
+    // lista invisibile, appariva con lo zoom). Leggere offsetHeight forza
+    // il reflow ADESSO; il translateZ nel CSS gli dà un layer suo. Innocuo
+    // per ogni altro browser.
+    void cont.offsetHeight;
   }
 
   function avatarHTML(u) {
@@ -680,7 +691,8 @@
       'background-position:center;background-size:contain}' +
     '.pa-sub{font-size:12px;color:var(--t3,#6A6460);margin:4px 0 24px}' +
     '.pa-h{font-size:13px;font-weight:600;color:var(--t2,#A8A29C);align-self:flex-start;margin-bottom:10px}' +
-    '#pa-lista{width:100%;display:flex;flex-direction:column;gap:8px;max-height:46vh;overflow-y:auto}' +
+    '#pa-lista{width:100%;display:flex;flex-direction:column;gap:8px;max-height:46vh;overflow-y:auto;' +
+      '-webkit-overflow-scrolling:touch;transform:translateZ(0)}' +   /* v1.10 · layer proprio = iOS dipinge sempre */
     '.pa-user{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;cursor:pointer;' +
       'background:var(--card,#1A1A1A);border:1px solid var(--b,#242424);border-radius:10px;text-align:left;' +
       'transition:border-color .15s,transform .15s}' +
