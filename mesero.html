@@ -256,7 +256,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v2.4.1 · marcha auto · 23jul</span>
+    <span class="ver" id="ver">v2.5 · mover mesa · 24jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <span style="display:flex;gap:8px">
       <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
@@ -767,6 +767,31 @@ function nuevoCerrar() { STATE.nuevo = null; renderNuevo(); }
 // v2.3 · F1 · OTRA RONDA: l'ultimo pedido precompila il nuevo — modificadores
 // inclusi (il sin alcohol della señora torna da solo). NON auto-invia: il
 // mesero vede, corregge e conferma (lo specchio resta l'ultimo passo).
+/* v2.5 · 🔀 MOVER MESA — el cliente se cambió (caso 86→82 del 23-jul).
+   El GAS mueve solo el consumo ABIERTO de la sesión (cerrados jamás) y deja
+   fósil en AUDIT; con precuenta emitida susurra a la cúpula (anti-truco).
+   El menú del cliente (v2.30.0) sigue solo: su historia viaja con el teléfono. */
+async function moverMesaUI(de){
+  const a = (window.prompt('¿A qué mesa se cambió el cliente de la mesa ' + de + '?') || '').replace(/[^0-9]/g, '');
+  if (!a) return;
+  if (a === de) { toast('warn', 'Es la misma mesa'); return; }
+  if (!window.confirm('Mover la mesa ' + de + ' → ' + a + '\n\nSe mueven los pedidos abiertos de la sesión. Los ya cerrados se quedan.')) return;
+  try {
+    const r = await gasPost('moverMesa', { codigo: STATE.codigo, nombre: STATE.nombre, de: de, a: a });
+    if (r && r.ok) {
+      toast('ok', '🔀 Mesa ' + de + ' → ' + a + ' · ' + r.movidos + ' pedido' + (r.movidos > 1 ? 's' : '') +
+        (r.cerrados_quedan ? ' · ' + r.cerrados_quedan + ' cerrados quedan en la ' + de : '') +
+        (r.plaza ? ' · ' + r.plaza : ''));
+      cerrarMesa();
+      refrescar(false);
+      return;
+    }
+    const msj = { nada_que_mover: 'No hay pedidos abiertos en la mesa ' + de,
+                  grupo_activo: 'La mesa está en un grupo — deshace el grupo primero',
+                  misma_mesa: 'Es la misma mesa' }[r && r.error] || ('No se pudo: ' + (r && r.error || '?'));
+    toast('err', msj);
+  } catch (e) { toast('err', 'Sin señal — inténtalo de nuevo'); }
+}
 function otraRondaMesa(mesa){
   const m = (STATE.mesasModel || []).find(function(x){ return x.mesa === mesa; });
   if (!m) return;
@@ -1176,6 +1201,12 @@ function renderMesaSheet(r) {
     '<button class="btn sec" style="flex:1;border-color:var(--acc);color:var(--acc)" onclick="cerrarMesa();nuevoAbrir(\'' + esc(m.mesa) + '\')">➕ Agregar</button>' +
     (r.precuenta_on ? '<button class="btn sec" style="flex:1" onclick="precuentaMesa(\'' + esc(m.mesa) + '\',this)">🧾 Precuenta</button>' : '') +
     '</div>';
+  // v2.5 · 🔀 MOVER MESA (caso 86→82 del 23-jul): el traslado es un EVENTO con
+  // fósil, nunca un edit a mano. El GAS mueve SOLO el consumo abierto (los
+  // cerrados no se mueven jamás) y si hay precuenta emitida susurra a la
+  // cúpula (pagar→mover = la firma del truco). Discreto: link, no botón.
+  h += '<div class="msh-row" style="text-align:center;margin-top:2px">' +
+    '<a style="font-size:12px;opacity:.6;text-decoration:underline;cursor:pointer" onclick="moverMesaUI(\'' + esc(m.mesa) + '\')">🔀 El cliente se cambió de mesa</a></div>';
   $('mesaSheetContent').innerHTML = h;
 }
 
