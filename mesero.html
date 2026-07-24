@@ -166,6 +166,9 @@
   .foot{margin-top:30px;border-top:1px solid var(--bord);padding-top:12px;display:flex;
     justify-content:space-between;align-items:center}
   .foot .ver{font-size:10px;color:var(--t3)}
+  /* v2.6 · canale Pinsita: il ✨ pulsa quando hay novedad */
+  @keyframes novPulsa{0%,100%{transform:scale(1);filter:brightness(1)}50%{transform:scale(1.25);filter:brightness(1.6)}}
+  .nov-pulsa{animation:novPulsa 1.6s ease-in-out infinite;color:#f5c451}
   .foot button{background:transparent;border:1px solid var(--bord);color:var(--t2);
     padding:8px 14px;border-radius:10px;font-size:12px}
 
@@ -256,8 +259,10 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v2.5 · mover mesa · 24jul</span>
+    <span class="ver" id="ver">v2.6 · canal pinsita · 24jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
+    <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
+    <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
     <span style="display:flex;gap:8px">
       <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
@@ -767,6 +772,53 @@ function nuevoCerrar() { STATE.nuevo = null; renderNuevo(); }
 // v2.3 · F1 · OTRA RONDA: l'ultimo pedido precompila il nuevo — modificadores
 // inclusi (il sin alcohol della señora torna da solo). NON auto-invia: il
 // mesero vede, corregge e conferma (lo specchio resta l'ultimo passo).
+/* ═════ v2.6 · CANALE PINSITA · NOVEDADES + AYUDA (fase 1) ═════
+   Dottrina PATTERN_FORMACION: il verdetto dei fossili (1.768 pedidos, zero
+   regalos) ha ucciso il canale umano — IL PRODOTTO È IL CANALE. Il ✨ in
+   testata: spento = archivio ayuda · PULSA = hay novedad. Tap → sheet
+   «Pinsita te cuenta» → ✓ Entendido = FOSSILE (NOVEDADES_LEIDAS via GAS).
+   Le novedades viaggiano nel poll esistente (zero letture extra). */
+const NOV_LEIDAS_KEY = 'mesero_nov_leidas_v1';
+function _novLeidas(){ try { return JSON.parse(localStorage.getItem(NOV_LEIDAS_KEY) || '[]'); } catch(e){ return []; } }
+function _novMarcaLocal(id){ const a = _novLeidas(); if (a.indexOf(id) < 0) { a.push(id); try { localStorage.setItem(NOV_LEIDAS_KEY, JSON.stringify(a.slice(-80))); } catch(e){} } }
+function novActualizar(novs){
+  STATE.novedades = novs || [];
+  const leidas = _novLeidas();
+  const sin = STATE.novedades.filter(function(n){ return leidas.indexOf(n.id) < 0; });
+  const b = $('novBadge'); if (!b) return;
+  if (sin.length) { b.style.opacity = '1'; b.classList.add('nov-pulsa'); b.textContent = '✨' + (sin.length > 1 ? sin.length : ''); }
+  else { b.style.opacity = '.45'; b.classList.remove('nov-pulsa'); b.textContent = '✨'; }
+}
+function novAbrir(){
+  const novs = STATE.novedades || [];
+  const leidas = _novLeidas();
+  const card = function(n, leida){
+    return '<div class="corr-it" style="flex-direction:column;align-items:flex-start;gap:6px' + (leida ? ';opacity:.55' : '') + '">' +
+      '<div style="font-size:16px;font-weight:800">' + esc(n.emoji || '✨') + ' ' + esc(n.titulo) + ' <small style="opacity:.5;font-weight:400">· ' + esc(n.fecha || '') + '</small></div>' +
+      '<div style="font-size:14px;line-height:1.45;white-space:pre-line">' + esc(n.texto) + '</div>' +
+      (leida ? '' : '<button class="btn" style="align-self:stretch" onclick="novEntendida(\'' + esc(n.id) + '\')">✓ Entendido</button>') +
+      '</div>';
+  };
+  const sin = novs.filter(function(n){ return leidas.indexOf(n.id) < 0; });
+  const ya  = novs.filter(function(n){ return leidas.indexOf(n.id) >= 0; });
+  const w = $('novWrap') || (function(){ const d = document.createElement('div'); d.id = 'novWrap'; document.body.appendChild(d); return d; })();
+  w.innerHTML =
+    '<div class="nuevo-overlay" onclick="if(event.target===this)novCerrar()">' +
+    '<div class="nuevo-panel">' +
+    '<div class="nuevo-h"><span>✨ Pinsita te cuenta</span><button onclick="novCerrar()">✕</button></div>' +
+    (sin.length ? sin.map(function(n){ return card(n, false); }).join('') : '<div class="agr-vacio">Nada nuevo — acá abajo queda todo lo ya contado 💛</div>') +
+    (ya.length ? '<div class="h" style="margin-top:10px">📖 Ayuda — lo ya contado</div>' + ya.map(function(n){ return card(n, true); }).join('') : '') +
+    '</div></div>';
+}
+function novCerrar(){ const w = $('novWrap'); if (w) w.innerHTML = ''; }
+function novEntendida(id){
+  _novMarcaLocal(id);
+  novActualizar(STATE.novedades);
+  novAbrir();   // re-render: la card scivola nell'ayuda
+  // il fossile — best-effort, mai blocca il gesto
+  try { gasPost('novedadEntendida', { codigo: STATE.codigo, nombre: STATE.nombre, id: id, app: 'mesero' }).catch(function(){}); } catch(e){}
+}
+
 /* v2.5 · 🔀 MOVER MESA — el cliente se cambió (caso 86→82 del 23-jul).
    El GAS mueve solo el consumo ABIERTO de la sesión (cerrados jamás) y deja
    fósil en AUDIT; con precuenta emitida susurra a la cúpula (anti-truco).
@@ -1086,6 +1138,7 @@ async function refrescar(conSkeleton) {
     }
     STATE.strikes = 0;   // v1.11 · risposta buona = si riparte da zero
     STATE.sala = r;
+    novActualizar(r.novedades || []);   // v2.6 · canale Pinsita (viaggia nel poll)
     // v1.16 · rilascia i MÍO ottimistici confermati (ora nei mios) o scaduti (safety 12s)
     const _tn = Date.now();
     Object.keys(STATE.tomando).forEach(u => {
