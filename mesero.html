@@ -259,7 +259,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v2.8 · producido a color (anti doble-comanda) · 25jul</span>
+    <span class="ver" id="ver">v2.9 · el detalle vive hasta el cierre · 25jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1267,7 +1267,9 @@ function renderMesaSheet(r) {
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === STATE.mesaAbierta; });
   if (!m) { cerrarMesa(); return; }   // mesa chiusa/limpia: lo sheet muore con lei
   const umb = r.umbrales;
-  const tot = m.pend.concat(m.mios).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0);
+  // v2.9 · el total contaba los entregados en `n` pero no en la suma → una
+  // mesa ya servida mostraba «1 pedido · total $0» (caso 104 del 25-jul)
+  const tot = m.pend.concat(m.mios).concat(m.limpiar).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0);
   let h = '<div class="msh-top"><h2>MESA ' + esc(m.mesa) +
     ((m.grupo && m.grupo !== m.mesa) ? ' <span style="font-size:14px;color:var(--acc)">🔗' + esc(m.grupo) + '</span>' : '') +
     '</h2><button class="msh-x" onclick="cerrarMesa()">✕</button></div>';
@@ -1306,11 +1308,16 @@ function renderMesaSheet(r) {
    conseguenza (cierra la cuenta); la card spiega perché resta lì; e se
    l'entrega è di pochi minuti fa si chiede conferma — un tavolo che ha appena
    ricevuto il postre di rado se n'è già andato. */
+/* v2.9 · EL DETALLE ES DE LA MESA, NO DEL ESTADO (Alberto 25-jul): lo que
+   pidió el cliente se ve hasta que la mesa se cierra. Antes el entregado
+   escondía los productos justo cuando había que retirarlos del pass. */
 function cardLiberar(p) {
-  return '<div class="card limpia"><div style="flex:1;min-width:0">' +
-    '<span class="mesa" style="font-size:14px">✓ entregado</span>' +
-    '<span class="plaza" style="display:block">esperando que el cliente se vaya</span></div>' +
-    '<button class="btn sec" onclick="liberarMesa(\'' + esc(p.uuid) + '\',\'' + esc(p.mesa) + '\',\'' +
+  return '<div class="card limpia" style="display:block">' +
+    '<div class="mesa-row"><span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
+    '<span class="plaza">✓ entregado · esperando que el cliente se vaya</span></div>' +
+    bodyItems(p) +
+    '<div class="mio-meta">' + resumenCorto(p) + '</div>' +
+    '<button class="btn sec" style="width:100%;margin-top:6px" onclick="liberarMesa(\'' + esc(p.uuid) + '\',\'' + esc(p.mesa) + '\',\'' +
     esc(p.ts_entregado_iso || '') + '\',this)">🚪 Se fue — liberar mesa' +
     '<small style="display:block;font-size:10px;opacity:.75;font-weight:400">esto cierra la cuenta de la mesa</small></button></div>';
 }
@@ -1443,7 +1450,8 @@ function cardMio(p, umb) {
         (esListo ? '<div class="retirar">🍳 LISTO · retirar de cocina/barra</div>' : '') +
         (esRet ? '<div class="retirar encamino">🏃 Retirado — va en camino a la mesa</div>' : '') +
         (esDig
-          ? '<button class="btn verde" onclick="marcar(\'' + esc(p.uuid) + '\',\'entregado\',this)">✓ DIGITADO ALOHA</button>'
+          ? '<button class="btn verde" onclick="marcar(\'' + esc(p.uuid) + '\',\'entregado\',this)">✓ ENTREGADO — servido a la mesa' +
+            '<small style="display:block;font-size:10px;opacity:.75;font-weight:400">solo cuando los platos ya están en la mesa</small></button>'
           : '<button class="btn" onclick="marcar(\'' + esc(p.uuid) + '\',\'digitado\',this)">⌨ DIGITADO EN ALOHA</button>' +
             // v1.10 · prima del digitado si può correggere (¿la mesa se equivocó?)
             '<button class="btn sec" style="margin-top:6px" onclick="abrirCorreccion(\'' + esc(p.uuid) + '\')">✎ Corregir pedido</button>') +
@@ -1531,7 +1539,8 @@ async function marcar(uuid, marca, btn) {
   try {
     const r = await gasPost('marcarPedido', { codigo: STATE.codigo, nombre: STATE.nombre, uuid, marca });
     if (r && r.ok) {
-      const msg = { atendido: '✓ Tuyo — el cliente ve que vas', digitado: '⌨ Digitado — cocina/barra en marcha', entregado: '✓ Digitado en ALOHA', cerrado: '✓ Mesa libre' };
+      // v2.9 · el toast decía «Digitado en ALOHA» mientras escribía ENTREGADO
+      const msg = { atendido: '✓ Tuyo — el cliente ve que vas', digitado: '⌨ Digitado — cocina/barra en marcha', entregado: '✓ Entregado — servido a la mesa', cerrado: '✓ Mesa libre' };
       toast('ok', msg[r.estado] || '✓');
     } else if (r && r.error === 'ya_tomado') {
       delete STATE.tomando[uuid];   // no es mío → que reaparezca correcto
