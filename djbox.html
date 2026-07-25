@@ -274,6 +274,10 @@
   .msg-frase{background:var(--panel);border:1.5px solid var(--vio);color:var(--t2);border-radius:12px;
     padding:12px 10px;font-size:13.5px;font-weight:700;cursor:pointer;text-align:left;line-height:1.3}
   .msg-frase.sel{border-color:var(--neon);color:var(--neon);background:rgba(0,255,200,.06)}
+  .msg-idioma{display:flex;gap:8px;margin:0 0 12px}
+  .msg-idioma button{flex:1;background:var(--panel);border:1.5px solid var(--bord);color:var(--t3);
+    border-radius:11px;padding:10px 8px;font-size:12.5px;font-weight:800;cursor:pointer}
+  .msg-idioma button.sel{border-color:var(--gold);color:var(--gold);background:rgba(255,207,107,.08)}
   #msgTxt{width:100%;background:var(--panel);border:2px solid var(--bord);border-radius:12px;color:var(--t1);
     padding:13px;font-size:15px;outline:none;font-family:inherit;resize:none;min-height:64px}
   #msgTxt:focus{border-color:var(--neon)}
@@ -423,6 +427,12 @@
       <p>Le llega al teléfono de la mesa — te pueden responder solo con un emoji.</p>
       <input id="msgMesa" inputmode="numeric" placeholder="MESA" maxlength="4" autocomplete="off">
       <div class="msg-frases" id="msgFrases"></div>
+      <!-- v1.6.0 · frase pronta: il telefono della mesa la mostra nella SUA
+           lingua (mesa tedesca → tedesco) — o la inchiodi allo spagnolo -->
+      <div class="msg-idioma" id="msgIdioma" style="display:none">
+        <button id="msgIdAuto" class="sel" onclick="msgIdioma(false)">🌐 en el idioma de la mesa</button>
+        <button id="msgIdEs" onclick="msgIdioma(true)">🇪🇸 en español</button>
+      </div>
       <textarea id="msgTxt" maxlength="120" placeholder="…o escribe el tuyo" oninput="msgCuenta()"></textarea>
       <div class="msg-cont" id="msgCont">0 / 120</div>
       <button class="cat-listo" id="msgSend" onclick="mandarMensaje()">💬 ENVIAR A LA MESA</button>
@@ -781,34 +791,58 @@ async function regalar(){
 }
 
 /* ── 💬 MENSAJE A LA MESA ── */
+/* v1.6.0 · frasi pronte CON id: l'id viaggia col mensaje e IL TELEFONO della
+   mesa traduce nella SUA lingua (il tavolo tedesco legge tedesco, e il tavolo
+   misto legge ognuno la sua — il telefono sa la lingua meglio di chiunque).
+   Il toggle 🇪🇸 la inchioda allo spagnolo. Il testo libero è sempre letterale. */
 const MSG_FRASES = [
-  '🔥 ¡Esta mesa tiene ritmo!',
-  '🥂 ¡Salud! Esta va por ustedes',
-  '💃 ¡Los quiero ver bailando!',
-  '🎶 La próxima va dedicada a ustedes',
+  { id:'ritmo',    tx:'🔥 ¡Esta mesa tiene ritmo!' },
+  { id:'salud',    tx:'🥂 ¡Salud! Esta va por ustedes' },
+  { id:'baile',    tx:'💃 ¡Los quiero ver bailando!' },
+  { id:'dedicada', tx:'🎶 La próxima va dedicada a ustedes' },
 ];
-let MSG_VUELO = false;
+let MSG_VUELO = false, MSG_FRASE_SEL = null, MSG_ES = false;
 function abrirMsg(){
   $('msgFrases').innerHTML = MSG_FRASES.map((f,i)=>
-    `<button class="msg-frase" onclick="msgFrase(${i})">${esc(f)}</button>`).join('');
-  $('msgMesa').value = ''; $('msgTxt').value = ''; msgCuenta();
+    `<button class="msg-frase" onclick="msgFrase(${i})">${esc(f.tx)}</button>`).join('');
+  $('msgMesa').value = ''; $('msgTxt').value = '';
+  MSG_FRASE_SEL = null; MSG_ES = false; msgPintaIdioma(); msgCuenta();
   $('ovMsg').style.display = 'flex';
 }
 function cerrarMsg(){ $('ovMsg').style.display = 'none'; }
 function msgFrase(i){
-  $('msgTxt').value = MSG_FRASES[i]; msgCuenta();
+  MSG_FRASE_SEL = i;
+  $('msgTxt').value = MSG_FRASES[i].tx; msgCuenta();
   document.querySelectorAll('#msgFrases .msg-frase').forEach((b,j)=>b.classList.toggle('sel', j===i));
+  msgPintaIdioma();
 }
-function msgCuenta(){ $('msgCont').textContent = ($('msgTxt').value||'').length + ' / 120'; }
+function msgCuenta(){
+  $('msgCont').textContent = ($('msgTxt').value||'').length + ' / 120';
+  // testo editato a mano = non è più la frase pronta → letterale, niente traduzione
+  if(MSG_FRASE_SEL !== null && $('msgTxt').value !== MSG_FRASES[MSG_FRASE_SEL].tx){
+    MSG_FRASE_SEL = null;
+    document.querySelectorAll('#msgFrases .msg-frase').forEach(b=>b.classList.remove('sel'));
+    msgPintaIdioma();
+  }
+}
+function msgPintaIdioma(){
+  const box = $('msgIdioma');
+  box.style.display = MSG_FRASE_SEL !== null ? 'flex' : 'none';
+  $('msgIdAuto').classList.toggle('sel', !MSG_ES);
+  $('msgIdEs').classList.toggle('sel', MSG_ES);
+}
+function msgIdioma(es){ MSG_ES = es; msgPintaIdioma(); }
 async function mandarMensaje(){
   if(MSG_VUELO) return;
   const mesa = ($('msgMesa').value||'').trim();
   const texto = ($('msgTxt').value||'').trim();
   if(!mesa){ toast('¿A qué mesa? Escribe el número'); $('msgMesa').focus(); return; }
   if(!texto){ toast('Elige una frase o escribe la tuya'); return; }
+  // frase pronta + modo auto → viaggia l'id e il telefono traduce; 🇪🇸 o testo libero → letterale
+  const fraseId = (MSG_FRASE_SEL !== null && !MSG_ES) ? MSG_FRASES[MSG_FRASE_SEL].id : '';
   MSG_VUELO = true; $('msgSend').disabled = true; $('msgSend').textContent = '📡 enviando…';
   try {
-    const r = await gasPost('djMensaje', { pwd: PWD, mesa: mesa, texto: texto,
+    const r = await gasPost('djMensaje', { pwd: PWD, mesa: mesa, texto: texto, frase_id: fraseId,
       uuid: 'djm-' + Date.now() + '-' + Math.random().toString(36).slice(2,8) });
     if(r.ok){ cerrarMsg(); toast('💬 Enviado a la mesa ' + mesa + ' — espera su emoji'); cargar(); }
     else if(r.error === 'sin_poder'){ toast('Este poder no es tuyo esta noche'); }
