@@ -259,7 +259,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v2.6 · canal pinsita · 24jul</span>
+    <span class="ver" id="ver">v2.7 · bebida del menú en la comandera · 25jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -665,6 +665,7 @@ async function agregarAbrir(uuid) {
     try {
       const r = await gasGet('getCatalogo', { codigo: STATE.codigo });
       STATE.catalogo = (r && r.ok && Array.isArray(r.productos)) ? r.productos : [];
+      STATE.menuOpciones = (r && r.ok && Array.isArray(r.menu_opciones)) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
       // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
       if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
     } catch (e) {
@@ -757,6 +758,7 @@ async function nuevoAbrir(mesaPre) {
     try {
       const r = await gasGet('getCatalogo', { codigo: STATE.codigo });
       STATE.catalogo = (r && r.ok && Array.isArray(r.productos)) ? r.productos : [];
+      STATE.menuOpciones = (r && r.ok && Array.isArray(r.menu_opciones)) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
       // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
       if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
     } catch (e) {
@@ -868,6 +870,7 @@ function otraRondaMesa(mesa){
   if (!catg.length) {
     gasGet('getCatalogo', { codigo: STATE.codigo }).then(function(r){
       STATE.catalogo = (r && r.ok && Array.isArray(r.productos)) ? r.productos : [];
+      STATE.menuOpciones = (r && r.ok && Array.isArray(r.menu_opciones)) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
       renderNuevo();
     }).catch(function(){});
   }
@@ -912,11 +915,16 @@ function _nuevoListaHtml() {
   // di tutto: la scelta crea la variante. Cancelar torna alla lista.
   if (n.preguntando) {
     const pg = n.preguntando;
+    // v2.7 · retro Alberto (Alfredo a $11.990 sin bebestible): il piatto in
+    // fascia MENÚ chiede la bebida — stesso mini-selettore dei mods, in catena
+    const _esBeb = !!pg.beb;
+    const _ops = _esBeb ? pg.opciones : pg.mods;
     return '<div style="background:rgba(245,196,81,.1);border:1px solid var(--acc,#f5c451);border-radius:12px;padding:12px">' +
       '<div style="font-size:14px;font-weight:700;margin-bottom:2px">' + esc(pg.nombre) + '</div>' +
-      '<div style="font-size:12px;opacity:.7;margin-bottom:10px">¿Cómo lo quiere?</div>' +
-      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + pg.mods.map(function(o){
-        return '<button onclick="nuevoElegirOp(\'' + esc(o) + '\')" style="flex:1;min-width:44%;border-radius:10px;padding:12px 8px;font-size:14px;font-weight:600;border:1.5px solid var(--acc,#f5c451);background:rgba(245,196,81,.12);color:inherit">' + esc(o) + '</button>';
+      '<div style="font-size:12px;opacity:.7;margin-bottom:10px">' + (_esBeb ? '🥤 ¿Bebida del menú?' : '¿Cómo lo quiere?') + '</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + _ops.map(function(o){
+        const fn = _esBeb ? 'nuevoElegirBebida' : 'nuevoElegirOp';
+        return '<button onclick="' + fn + '(\'' + esc(o) + '\')" style="flex:1;min-width:44%;border-radius:10px;padding:12px 8px;font-size:14px;font-weight:600;border:1.5px solid var(--acc,#f5c451);background:rgba(245,196,81,.12);color:inherit">' + esc(o) + '</button>';
       }).join('') + '</div>' +
       '<button onclick="nuevoCancelarPreg()" style="margin-top:10px;width:100%;border:none;background:none;color:inherit;opacity:.6;font-size:12px;padding:4px">← cancelar</button></div>';
   }
@@ -945,11 +953,16 @@ function nuevoFiltro(f){ const n = STATE.nuevo; if(!n) return; n.filtro = (n.fil
 // L'op si sceglie AL TAP (come il menù cliente) — l'unico modo che regge due
 // varianti dello stesso piatto. I prodotti con mods aprono il mini-selettore;
 // gli altri entrano diretti.
+// v2.7 · il piatto in fascia MENÚ (regla almuerzo) chiede la bebida in catena
+function _esMenuConBeb(p){
+  return p && p.regla === 'almuerzo' && (STATE.menuOpciones || []).length > 0;
+}
 function nuevoPick(id) {
   const n = STATE.nuevo; if (!n) return;
   const p = (STATE.catalogo || []).find(x => x.id === id); if (!p) return;
   const mods = _modsDe(p);
   if (mods) { n.preguntando = { id: id, mods: mods, nombre: p.nombre }; renderNuevo(); return; }
+  if (_esMenuConBeb(p)) { n.preguntando = { id: id, beb: true, opciones: (STATE.menuOpciones||[]).map(function(o){ return o.nombre; }), nombre: p.nombre, opPrev: '' }; renderNuevo(); return; }
   _nuevoAdd(p, '');
 }
 function _nuevoAdd(p, op) {
@@ -963,7 +976,30 @@ function _nuevoAdd(p, op) {
 function nuevoElegirOp(op) {
   const n = STATE.nuevo; if (!n || !n.preguntando) return;
   const p = (STATE.catalogo || []).find(x => x.id === n.preguntando.id); if (!p) return;
-  _nuevoAdd(p, op === 'Como viene' ? '' : op);   // «Como viene» = sin op, non si stampa
+  const opFinal = op === 'Como viene' ? '' : op;
+  // v2.7 · catena mods → bebida (piatto del menú coi modificadores)
+  if (_esMenuConBeb(p)) { n.preguntando = { id: p.id, beb: true, opciones: (STATE.menuOpciones||[]).map(function(o){ return o.nombre; }), nombre: p.nombre, opPrev: opFinal }; renderNuevo(); return; }
+  _nuevoAdd(p, opFinal);
+}
+// v2.7 · la bebida scelta: riga del piatto + riga bebida a $0 (contratto v2.17
+// del menù cliente: la bebida è una RIGA VERA — cat vera → chit alla barra)
+function nuevoElegirBebida(nom) {
+  const n = STATE.nuevo; if (!n || !n.preguntando || !n.preguntando.beb) return;
+  const pg = n.preguntando;
+  const p = (STATE.catalogo || []).find(x => x.id === pg.id); if (!p) return;
+  const opc = (STATE.menuOpciones || []).find(function(o){ return o.nombre === nom; });
+  // il piatto (con eventuali mods scelti prima)
+  const key = pg.opPrev ? (p.id + '##' + pg.opPrev) : p.id;
+  if (!n.datos[key]) n.datos[key] = { id: p.id, nombre: p.nombre, precio: p.precio, cat: p.cat || '', op: pg.opPrev || '' };
+  n.qty[key] = (n.qty[key] || 0) + 1;
+  // la bebida del menú, $0, riga propria
+  if (opc) {
+    const kb = 'MENUBEB##' + opc.id;
+    if (!n.datos[kb]) n.datos[kb] = { id: opc.id, nombre: 'Menú del Día · ' + opc.nombre, precio: 0, cat: opc.cat || 'bebidas', op: '', es_menu: true };
+    n.qty[kb] = (n.qty[kb] || 0) + 1;
+  }
+  n.preguntando = null;
+  renderNuevo();
 }
 function nuevoCancelarPreg(){ const n = STATE.nuevo; if(!n) return; n.preguntando = null; renderNuevo(); }
 function nuevoQty(key, d) {
