@@ -246,6 +246,8 @@
     La confirmación del bot puede tardar ~1 minuto.
     <button class="btn tg" id="campBtn" onclick="abrirTelegram()">Activar campanilla en Telegram</button>
   </div>
+  <!-- v2.12 · LA FRANJA VENCE: aviso antes de cortar — un tap extiende 1h -->
+  <div id="franjaBanner" class="camp-banner hide"></div>
   <div class="offline" id="offline">Sin conexión — mostrando lo último recibido. Reintento solo.</div>
 
   <!-- v2.0 · MIS MESAS: la griglia (richiesta mesera 17-lug, mockup validato) -->
@@ -259,7 +261,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v2.11 · la mesa no queda huérfana al cambio de turno · 26jul</span>
+    <span class="ver" id="ver">v2.12 · la franja vence: salgo fossilizado + sigo en sala · 27jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -630,6 +632,11 @@ async function entrar() {
 }
 
 function salir() {
+  // v2.12 · el «Salgo» se fossiliza: Hora_Salida en TURNOS_ASIGNACIONES.
+  // Con franja_expira ON la campanilla se apaga al instante y las mesas pasan
+  // a la plaza; con el interruptor OFF es solo el fósil RRHH. Best-effort:
+  // sin red la sesión se cierra igual (el fin de franja hace de red).
+  if (STATE.codigo && STATE.nombre) gasPost('salidaMesero', { codigo: STATE.codigo, nombre: STATE.nombre }).catch(() => {});
   // v1.20 · il battesimo si scioglie SOLO se lo chiedi (telefono prestato,
   // nome sbagliato): «Salgo» normale chiude la sessione, non il battesimo.
   if (deviceToken && confirm('¿Quitar también el bautismo de este teléfono?\n\nOK = este teléfono deja de entrar solo (para teléfonos prestados o nombre equivocado).\nCancelar = solo cerrar sesión: mañana entras solo igual.')) {
@@ -642,6 +649,21 @@ function salir() {
   STATE.codigo = ''; STATE.nombre = ''; STATE.sala = null;
   showEntrada('');
   toast('ok', 'Sesión cerrada — nada queda en este teléfono');
+}
+
+/* v2.12 · «Sigo en sala» — un tap = Hora_Fin := ahora + 1h (extenderFranja) */
+async function seguirEnSala(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Extendiendo…'; }
+  try {
+    const r = await gasPost('extenderFranja', { codigo: STATE.codigo, nombre: STATE.nombre });
+    if (!r || !r.ok) throw new Error((r && r.error) || 'no_ok');
+    $('franjaBanner').classList.add('hide');
+    toast('ok', 'Listo — sigues en sala 1 hora más');
+    refrescar(false);
+  } catch (e) {
+    toast('err', 'No pude extender — reintenta');
+    if (btn) { btn.disabled = false; btn.textContent = 'Sigo en sala · +1h'; }
+  }
 }
 
 /* ═════ v1.10 · CORRECCIÓN DEL PEDIDO (GAS corregirPedido, v3.3.8) ═════ */
@@ -1348,6 +1370,20 @@ function render(r) {
   sub += ' · campanilla ' + (r.campanilla ? '<span class="on">✓ activa</span>' : '<span class="off">apagada</span>');
   $('salaSub').innerHTML = sub;
   $('campBanner').classList.toggle('hide', !!r.campanilla || !STATE.tgLink);
+
+  // v2.12 · LA FRANJA VENCE (GAS v3.35.0, sólo con franja_expira ON): el aviso
+  // viaja en el poll de siempre. min_rest > 0 = por vencer · <= 0 = en gracia
+  // (después las plazas pasan solas). Un tap extiende 1h — nunca corta mudo.
+  const fb = $('franjaBanner'), fr = r.franja;
+  if (fb) {
+    if (fr && typeof fr.min_rest === 'number' && fr.min_rest <= 15) {
+      fb.innerHTML = (fr.min_rest > 0
+        ? '⏳ Tu turno termina en <b>' + fr.min_rest + ' min</b>. Si te quedas, dilo con un tap — si no, tus mesas pasan solas a la plaza.'
+        : '🌙 Tu turno terminó. En <b>' + Math.max(0, (fr.gracia_min || 30) + fr.min_rest) + ' min</b> tus mesas pasan a la plaza y la campanilla se apaga. La propina de lo tuyo sigue siendo tuya.')
+        + ' <button class="btn tg" onclick="seguirEnSala(this)">Sigo en sala · +1h</button>';
+      fb.classList.remove('hide');
+    } else fb.classList.add('hide');
+  }
 
   const umb = r.umbrales;
 
