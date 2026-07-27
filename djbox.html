@@ -8,7 +8,8 @@
 <title>DJ-BOX · BKS</title>
 <!-- DEVICE-CLASS: 2 · tablet in cabina (Galaxy Tab A11 Plus landscape · Swan 15.6") -->
 <!-- ════════════════════════════════════════════════════════════════════
-     djbox.html · v1.6.3 · 25-lug-2026 — salir pulisce il gate: la clave non resta scritta sul tablet di cabina
+     djbox.html · v1.7.0 · 26-lug-2026 — LAS DOS FUENTES: interruttore iTunes e «las mías» (VB Alberto)
+     v1.6.3 · 25-lug-2026 — salir pulisce il gate: la clave non resta scritta sul tablet di cabina
      v1.6.2 · 25-lug-2026 — la reazione si VEDE (emoji 52px in lista dx top · toast grande 4,4s)
      v1.6.1 · 25-lug-2026 — tutto in UNA schermata (oss. Alberto: niente scroll in cabina)
      v1.6.0 · 25-lug-2026 — I PODERES DEL COMANDANTE (GAS v3.27.0)
@@ -372,6 +373,10 @@
         <div class="estilos" id="estilos"></div>
         <button class="est-cat" onclick="abrirCatalogo()">＋ CATÁLOGO DE ESTILOS</button>
         <div class="est-nota">Encendido = se puede pedir desde el menú. Apagado = no existe.</div>
+        <!-- v1.7.0 · DE DÓNDE PUEDE PEDIR LA MESA (pedido Alberto 26-jul):
+             dos fuentes, dos interruptores. Apagadas las dos, nadie pide nada. -->
+        <div class="sec-t" style="margin-top:14px">🎚 De dónde pueden pedir</div>
+        <div class="estilos" id="fuentes"></div>
       </div>
       <!-- v1.6.0 · PODERES: si disegnano SOLO se il DJ della noche li ha -->
       <div id="podSec" style="display:none">
@@ -649,6 +654,9 @@ function render(){
     ? on.map(e=>`<button class="est on" onclick="toggleEstilo('${e.id}')">${esc(e.label)}</button>`).join('')
     : '<div style="grid-column:1/-1;color:var(--t3);font-size:13.5px;padding:8px 2px">Set vacío — abre el catálogo y enciende tus estilos 👇</div>';
   if($('ovCat').classList.contains('on')) pintaCatalogo();
+  // v1.7.0 · los dos interruptores de fuente (iTunes · tu repertorio)
+  FUENTES = s.fuentes || { itunes:true, propias:true };
+  pintaFuentes();
   // cola
   const cola = s.cola || [];
   $('colaN').textContent = cola.length;
@@ -700,6 +708,35 @@ function pintaCatalogo(){
   $('catGrid').innerHTML = ESTILOS.map(e=>
     `<button class="est${e.on?' on':''}" onclick="toggleEstilo('${e.id}')">${esc(e.label)}</button>`).join('');
 }
+/* ═ v1.7.0 · LAS DOS FUENTES (Alberto 26-jul) ═
+   La mesa pide desde el buscador de iTunes o desde TU repertorio. Cada una
+   con su interruptor: hay noches de sólo lo tuyo, y noches en que no quieres
+   que te pidan lo tuyo. El gate de verdad vive en el GAS — acá se manda. */
+let FUENTES = { itunes:true, propias:true };
+function pintaFuentes(){
+  const box = $('fuentes'); if(!box) return;
+  const puedeProp = puede('propias');
+  const b = (k,lbl) => `<button class="est${FUENTES[k]?' on':''}" onclick="toggleFuente('${k}')">${lbl}</button>`;
+  box.innerHTML = b('itunes','🔎 Buscador iTunes') +
+    (puedeProp ? b('propias','⚡ Las mías') :
+      '<button class="est" disabled style="opacity:.4">⚡ Las mías <small style="display:block;font-size:10px">sin poder</small></button>');
+}
+async function toggleFuente(k){
+  if(k === 'propias' && !puede('propias')) return;
+  FUENTES[k] = !FUENTES[k];
+  pintaFuentes();
+  const body = { pwd: PWD }; body[k] = FUENTES[k];
+  try {
+    const r = await gasPost('djSetFuentes', body);
+    if(!r || !r.ok){ FUENTES[k] = !FUENTES[k]; pintaFuentes(); toast('No se pudo guardar'); return; }
+    if(r.fuentes) FUENTES = r.fuentes;
+    pintaFuentes();
+    toast(k === 'itunes'
+      ? (FUENTES.itunes ? 'Buscador iTunes ENCENDIDO' : 'Buscador iTunes apagado — la mesa ya no busca')
+      : (FUENTES.propias ? 'Las tuyas ENCENDIDAS' : 'Las tuyas apagadas — no te las piden'));
+  } catch(err){ FUENTES[k] = !FUENTES[k]; pintaFuentes(); toast('Sin conexión'); }
+}
+
 async function toggleEstilo(id){
   const e = ESTILOS.find(x=>x.id===id); if(!e) return;
   e.on = !e.on;
