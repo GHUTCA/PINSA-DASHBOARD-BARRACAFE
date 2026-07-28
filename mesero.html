@@ -261,7 +261,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v2.13 · promos en la comandera: 2x1 + menu del dia + tkt · 27jul</span>
+    <span class="ver" id="ver">v2.14 · catalogo con TTL (fascia viva) + un poll a la vez + rojo a 2 strikes · 28jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -317,6 +317,9 @@ const STATE = {
   editQty: {},         // v1.10 · id → qty nuova durante la correzione
   editNuevos: {},      // v1.15 · id → {nombre,precio,cat} degli item AGGIUNTI
   catalogo: null,      // v1.15 · lista prodotti (getCatalogo, cache di sessione)
+  catalogoTs: 0,       // v2.14 · quando è stata scattata la foto (TTL: le fasce cambiano!)
+  pollEnVuelo: false,  // v2.14 · P1.3: un poll alla volta (via i poll sovrapposti)
+  pollFallos: 0,       // v2.14 · P1.3/R7: rosso solo al 2° fallimento consecutivo
   agregando: null,     // v1.15 · uuid con il picker AGREGAR aperto
   agregarQ: '',        // v1.15 · testo di ricerca del picker
   strikes: 0,          // v1.11 · errori-turno consecutivi (si esce solo a 3)
@@ -679,20 +682,33 @@ function abrirCorreccion(uuid) {
   render(STATE.sala);
 }
 
+/* v2.14 · il catálogo non è più «una volta per sessione»: le marche di fascia
+   (menú del día, promos, reglas) cambiano con l'ORA — la foto caduca dopo 2
+   minuti e l'apertura del picker la rinfresca. Caso Ray 28-lug: app aperta
+   prima delle 11:15, catálogo congelato senza marche menú per tutto il turno
+   (e il respaldo localStorage serviva quello di ieri sera). */
+const _CATALOGO_TTL_MS = 120000;
+function _catalogoViejo() { return !STATE.catalogo || !STATE.catalogoTs || (Date.now() - STATE.catalogoTs > _CATALOGO_TTL_MS); }
+
 /* ═════ v1.15 · AGREGAR items al pedido pre-digitado (upsell «¿otra copa?») ═════ */
 async function agregarAbrir(uuid) {
   STATE.agregando = uuid;
   STATE.agregarQ = '';
-  if (!STATE.catalogo) {       // fetch una sola volta per sessione
+  if (_catalogoViejo()) {      // v2.14 · TTL: la foto di fascia caduca, il picker la rinfresca
     try {
       const r = await gasGet('getCatalogo', { codigo: STATE.codigo });
-      STATE.catalogo = (r && r.ok && Array.isArray(r.productos)) ? r.productos : [];
-      STATE.menuOpciones = (r && r.ok && Array.isArray(r.menu_opciones)) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
-      // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
-      if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
+      if (r && r.ok && Array.isArray(r.productos)) {
+        STATE.catalogo = r.productos;
+        STATE.catalogoTs = Date.now();
+        STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
+        // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
+        if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
+      } else if (!STATE.catalogo) { STATE.catalogo = []; }
     } catch (e) {
-      // v2.2 · MODO PUENTE: catálogo de la última vez (respaldo local)
-      try { STATE.catalogo = JSON.parse(localStorage.getItem('mesero_catalogo_v1') || '[]'); } catch (e2) { STATE.catalogo = []; }
+      // v2.2 · MODO PUENTE — ma la foto in RAM, se c'è, vince sul respaldo vecchio
+      if (!STATE.catalogo || !STATE.catalogo.length) {
+        try { STATE.catalogo = JSON.parse(localStorage.getItem('mesero_catalogo_v1') || '[]'); } catch (e2) { STATE.catalogo = []; }
+      }
       toast(STATE.catalogo.length ? 'warn' : 'err',
         STATE.catalogo.length ? '📡 Sin señal — catálogo de respaldo' : 'No cargó el catálogo — reintenta');
     }
@@ -782,16 +798,21 @@ async function nuevoAbrir(mesaPre) {
   // v2.0 · dal sheet del tavolo arriva con la mesa già scritta
   STATE.nuevo = { mesa: (mesaPre || '').toString(), qty: {}, datos: {}, preguntando: null, q: '', filtro: '', uuid: '', enviando: false };
   renderNuevo();
-  if (!STATE.catalogo) {       // stessa cache di sessione di AGREGAR
+  if (_catalogoViejo()) {      // v2.14 · TTL: stessa cura di AGREGAR (la fascia cambia con l'ora)
     try {
       const r = await gasGet('getCatalogo', { codigo: STATE.codigo });
-      STATE.catalogo = (r && r.ok && Array.isArray(r.productos)) ? r.productos : [];
-      STATE.menuOpciones = (r && r.ok && Array.isArray(r.menu_opciones)) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
-      // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
-      if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
+      if (r && r.ok && Array.isArray(r.productos)) {
+        STATE.catalogo = r.productos;
+        STATE.catalogoTs = Date.now();
+        STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
+        // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
+        if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
+      } else if (!STATE.catalogo) { STATE.catalogo = []; }
     } catch (e) {
-      // v2.2 · MODO PUENTE: catálogo de la última vez (respaldo local)
-      try { STATE.catalogo = JSON.parse(localStorage.getItem('mesero_catalogo_v1') || '[]'); } catch (e2) { STATE.catalogo = []; }
+      // v2.2 · MODO PUENTE — ma la foto in RAM, se c'è, vince sul respaldo vecchio
+      if (!STATE.catalogo || !STATE.catalogo.length) {
+        try { STATE.catalogo = JSON.parse(localStorage.getItem('mesero_catalogo_v1') || '[]'); } catch (e2) { STATE.catalogo = []; }
+      }
       toast(STATE.catalogo.length ? 'warn' : 'err',
         STATE.catalogo.length ? '📡 Sin señal — catálogo de respaldo' : 'No cargó el catálogo — reintenta');
     }
@@ -1235,6 +1256,11 @@ async function _wakeLock() {
 
 async function refrescar(conSkeleton) {
   if (!STATE.codigo || !STATE.nombre) return;
+  // v2.14 · P1.3 (cantiere 13): guardia in-flight, pattern del KDS — con
+  // risposte >10s l'interval lanciava un secondo poll sopra il primo: due
+  // slot per telefono e il banner rosso restava incollato. Un poll alla volta.
+  if (STATE.pollEnVuelo) return;
+  STATE.pollEnVuelo = true;
   if (conSkeleton) $('secPend').innerHTML = '<div class="h">Cargando sala…</div><div class="card cargando" style="height:70px"></div>';
   try {
     const r = await gasGet('getSalaMesero', { codigo: STATE.codigo, nombre: STATE.nombre });
@@ -1253,11 +1279,17 @@ async function refrescar(conSkeleton) {
       const mine = (r.mios || []).some(p => p.uuid === u);
       if (mine || _tn - STATE.tomando[u] > 12000) delete STATE.tomando[u];
     });
+    STATE.pollFallos = 0;   // v2.14 · risposta buona = contatore azzerato
     $('offline').classList.remove('show');
     detectarNuevos(r);   // v1.4 · doble campana su arrivi nuovi
     render(r);
   } catch (e) {
-    $('offline').classList.add('show');
+    // v2.14 · P1.3/R7: un timeout non è un errore finché non fallisce DUE
+    // volte di fila — il singolo sforamento non urla più «sin conexión»
+    STATE.pollFallos = (STATE.pollFallos || 0) + 1;
+    if (STATE.pollFallos >= 2) $('offline').classList.add('show');
+  } finally {
+    STATE.pollEnVuelo = false;
   }
 }
 
