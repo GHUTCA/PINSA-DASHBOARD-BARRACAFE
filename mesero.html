@@ -261,7 +261,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v2.14 · catalogo con TTL (fascia viva) + un poll a la vez + rojo a 2 strikes · 28jul</span>
+    <span class="ver" id="ver">v2.15 · la ronda es de bebida (los sólidos no vuelven · el $0 no se regala) · 28jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -900,8 +900,9 @@ function otraRondaMesa(mesa){
   if (!m) return;
   const ult = m.pend.concat(m.mios).concat(m.limpiar).sort(function(a,b){ return (a.hace_s||9e9) - (b.hace_s||9e9); })[0];
   if (!ult || !ult.items_json) { toast('warn', 'Sin pedido previo en esta mesa'); return; }
-  let its = [];
-  try { its = JSON.parse(ult.items_json); } catch(e){ toast('err', 'No pude leer el pedido'); return; }
+  // v2.15 · sólo las bebidas de pago (los sólidos no se repiten · el $0 no se regala)
+  const its = _rondaItems(ult.items_json);
+  if (!its.length) { toast('warn', 'La última ronda no tenía bebidas para repetir'); return; }
   cerrarMesa();
   STATE.nuevo = { mesa: mesa, qty: {}, datos: {}, preguntando: null, q: '', filtro: '', uuid: '', enviando: false };
   const catg = STATE.catalogo || [];
@@ -947,6 +948,23 @@ function nuevoBuscar(v) {   // niente re-render completo: si perderebbe il focus
 var FAM_COCTELES = ['bar','sour','mojitos','spritz','cervezas','vinos','jarras','destilados','jugos','bebidas','mocktails'];
 var FAM_POSTRES  = ['postres','cafes'];
 function _famDe(c){ c=(c||'').toLowerCase(); if(FAM_POSTRES.indexOf(c)>=0) return 'postres'; if(FAM_COCTELES.indexOf(c)>=0) return 'cocteles'; return 'comida'; }
+/* v2.15 · LA RONDA ES DE BEBIDA — TAMBIÉN EN LA COMANDERA (retro Alberto 28-jul).
+   La lección es del 25-jul (caso maki mesa 88) pero vivía SOLO en el menú del
+   cliente (v2.32.2): la comandera repetía el pedido entero y los sólidos volvían
+   a cocina. Nadie pide «otra ronda» de ceviche.
+   Y una guardia que el cliente no necesitaba: **sólo se repite lo que se VENDE**.
+   La Copa del menú del día viaja a $0 (es_menu) — repetirla regalaría vino.
+   Sin bebidas de pago en la última ronda, el botón no se dibuja. */
+function _esRondaRepetible(it){
+  if (!it) return false;
+  if (_famDe(it.cat) !== 'cocteles') return false;          // sólo líquidos
+  if (it.es_menu) return false;                              // bebida del menú = $0
+  return (parseFloat(it.precio) || 0) > 0;                   // jamás repetir un regalo
+}
+function _rondaItems(itemsJson){
+  try { return (JSON.parse(itemsJson) || []).filter(_esRondaRepetible); }
+  catch(e){ return []; }
+}
 // v2.3 · chips modificadores: singola → «Como viene» implicito (non si stampa)
 function _modsDe(p){
   const m = (p.modificadores || '').toString().trim();
@@ -1385,8 +1403,12 @@ function renderMesaSheet(r) {
   // precuenta a un tap. L'ultimo pedido della mesa precompila, mods inclusi.
   const ultP = m.pend.concat(m.mios).concat(m.limpiar).sort(function(a,b){ return (a.hace_s||9e9) - (b.hace_s||9e9); })[0];
   if (ultP && ultP.items_json) {
-    let resU = '';
-    try { const its0 = JSON.parse(ultP.items_json); resU = its0.slice(0,2).map(function(i){ return (i.qty||1) + '× ' + (i.nombre||i.id); }).join(', ') + (its0.length > 2 ? '…' : ''); } catch(e){}
+    // v2.15 · la etiqueta dice lo que el botón HARÁ: sólo las bebidas de pago.
+    // Sin bebidas repetibles, el botón no se dibuja (antes prometía sólidos).
+    const its0 = _rondaItems(ultP.items_json);
+    const resU = its0.length
+      ? its0.slice(0,2).map(function(i){ return (i.qty||1) + '× ' + (i.nombre||i.id); }).join(', ') + (its0.length > 2 ? '…' : '')
+      : '';
     if (resU) h += '<div class="msh-row"><button class="btn" onclick="otraRondaMesa(\'' + esc(m.mesa) + '\')">🔁 Otra ronda — ' + esc(resU.slice(0,40)) + '</button></div>';
   }
   // v2.3 · il 🧾 è DATA-GATED (decisione Alberto): nasce spento, si accende da
