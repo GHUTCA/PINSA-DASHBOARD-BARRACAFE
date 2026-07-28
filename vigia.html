@@ -40,7 +40,7 @@
 </style>
 </head>
 <body>
-<h1>🦉 EL VIGÍA <small id="ver">v0.2 · 28-jul-2026 · conectado</small></h1>
+<h1>🦉 EL VIGÍA <small id="ver">v0.3 · 28-jul-2026 · conectado</small></h1>
 <div class="sub">Mira los números del sistema para que nadie tenga que acordarse. Si algo se acerca a un límite, avisa ANTES — con tiempo para arreglarlo.</div>
 
 <div class="grid" id="semaforos">
@@ -83,18 +83,27 @@ function pinta(data) {
   const meds = Object.values(data.mediciones || {});
   // ── semáforo Capacidad: el peor giorni-al-limite ──
   const caps = meds.filter(m => m.vedetta === 'Capacidad' && m.metrica !== 'error');
-  let peor = null;
-  caps.forEach(m => { const d = (m.dias === '' ? null : m.dias);
-    if (d != null && d < 9999 && (peor == null || d < peor)) peor = d; });
+  // banda por DOS caminos: la pendiente (días) Y el nivel absoluto (%) —
+  // lección del 28-jul: MAESTRO al 99,9% con una sola medición = «no crece» = verde falso
+  let peor = null, pctMax = 0, pctObj = '';
+  caps.forEach(m => {
+    const d = (m.dias === '' ? null : m.dias);
+    if (d != null && d < 9999 && (peor == null || d < peor)) peor = d;
+    const pc = m.umbral ? (parseFloat(m.valor) || 0) / parseFloat(m.umbral) * 100 : 0;
+    if (pc > pctMax) { pctMax = pc; pctObj = m.objeto; }
+  });
   const semCap = document.getElementById('sem-cap');
-  const capBanda = peor == null ? 'ok' : peor < 14 ? 'bad' : peor < 45 ? 'warn' : 'ok';
+  const capBanda = (pctMax >= 95 || (peor != null && peor < 14)) ? 'bad'
+                 : (pctMax >= 80 || (peor != null && peor < 45)) ? 'warn' : 'ok';
   semCap.className = 'sem ' + capBanda;
   semCap.querySelector('.estado').textContent = capBanda === 'ok' ? '🟢' : capBanda === 'warn' ? '🟡' : '🔴';
-  semCap.querySelector('.frase').textContent = peor == null
-    ? 'Ningún libro crece hacia su límite.'
-    : (capBanda === 'ok' ? 'El límite más cercano queda a ' + fmtDias(peor) + '. Hay aire.'
-      : capBanda === 'warn' ? 'El límite más cercano queda a ' + fmtDias(peor) + '. Conviene agendar la poda.'
-      : '¡Un límite queda a ' + fmtDias(peor) + '! Mirá el detalle y agendá la cura esta semana.');
+  semCap.querySelector('.frase').textContent =
+    pctMax >= 95 ? '¡' + pctObj + ' está al ' + Math.round(pctMax) + '% de su límite AHORA! La cura no espera a la curva.'
+    : capBanda === 'bad' ? '¡Un límite queda a ' + fmtDias(peor) + '! Mirá el detalle y agendá la cura esta semana.'
+    : pctMax >= 80 ? pctObj + ' pasó el 80% de su límite (' + Math.round(pctMax) + '%). Conviene agendar la poda.'
+    : capBanda === 'warn' ? 'El límite más cercano queda a ' + fmtDias(peor) + '. Conviene agendar la poda.'
+    : peor == null ? 'Ningún libro crece hacia su límite.'
+    : 'El límite más cercano queda a ' + fmtDias(peor) + '. Hay aire.';
   // ── semáforo Velocidad: sondas recientes + P95 escrituras ──
   const sondas = meds.filter(m => m.metrica === 'sonda_ms');
   const p95s = meds.filter(m => m.metrica === 'p95_ms');
