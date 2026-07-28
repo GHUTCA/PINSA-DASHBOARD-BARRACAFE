@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<!-- DEVICE-CLASS: 3 · visione/consulta (dual PC + telefono) -->
+<!-- 🦉 EL VIGÍA · el que mira los números para que nadie tenga que acordarse -->
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🦉 EL VIGÍA · ATALAYA</title>
+<style>
+  :root { --bg:#10131a; --card:#1a1f2b; --tx:#e8ebf2; --mut:#8a93a6; --ok:#3db876; --warn:#e8b23d; --bad:#e05252; }
+  * { margin:0; padding:0; box-sizing:border-box; font-family:system-ui,-apple-system,sans-serif; }
+  body { background:var(--bg); color:var(--tx); min-height:100vh; padding:16px; max-width:900px; margin:0 auto; }
+  h1 { font-size:1.3rem; display:flex; align-items:center; gap:8px; }
+  h1 small { color:var(--mut); font-weight:400; font-size:.75rem; margin-left:auto; }
+  .sub { color:var(--mut); font-size:.8rem; margin:4px 0 16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; margin-bottom:18px; }
+  .sem { background:var(--card); border-radius:14px; padding:14px; border-left:6px solid var(--mut); }
+  .sem.ok   { border-left-color:var(--ok); }
+  .sem.warn { border-left-color:var(--warn); }
+  .sem.bad  { border-left-color:var(--bad); }
+  .sem h2 { font-size:.95rem; margin-bottom:2px; }
+  .sem .estado { font-size:1.5rem; font-weight:700; }
+  .sem .frase { font-size:.78rem; color:var(--mut); margin-top:6px; line-height:1.35; }
+  .sem.proximamente { opacity:.45; }
+  h3 { font-size:.9rem; margin:18px 0 8px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; }
+  .fila { background:var(--card); border-radius:10px; padding:10px 12px; margin-bottom:6px; font-size:.82rem;
+          display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  .fila .obj { font-weight:600; min-width:150px; }
+  .fila .val { color:var(--mut); }
+  .fila .dias { margin-left:auto; font-weight:700; }
+  .dias.ok { color:var(--ok); } .dias.warn { color:var(--warn); } .dias.bad { color:var(--bad); }
+  .sus { border-left:4px solid var(--warn); background:var(--card); border-radius:8px; padding:9px 12px;
+         margin-bottom:6px; font-size:.8rem; line-height:1.4; }
+  .sus.rojo { border-left-color:var(--bad); }
+  .sus.ok { border-left-color:var(--ok); }
+  .sus .cuando { color:var(--mut); font-size:.7rem; }
+  #estado-carga { text-align:center; color:var(--mut); padding:40px 10px; font-size:.85rem; line-height:1.6; }
+  .refrescar { position:fixed; bottom:16px; right:16px; background:var(--card); color:var(--tx); border:1px solid #2a3040;
+               border-radius:50%; width:46px; height:46px; font-size:1.2rem; cursor:pointer; }
+</style>
+</head>
+<body>
+<h1>🦉 EL VIGÍA <small id="ver">v0.1 · 28-jul-2026</small></h1>
+<div class="sub">Mira los números del sistema para que nadie tenga que acordarse. Si algo se acerca a un límite, avisa ANTES — con tiempo para arreglarlo.</div>
+
+<div class="grid" id="semaforos">
+  <div class="sem" id="sem-vel"><h2>⚡ Velocidad</h2><div class="estado">…</div><div class="frase">midiendo…</div></div>
+  <div class="sem" id="sem-cap"><h2>📦 Capacidad</h2><div class="estado">…</div><div class="frase">midiendo…</div></div>
+  <div class="sem proximamente"><h2>🛡 Seguridad</h2><div class="estado">—</div><div class="frase">llega con la v1</div></div>
+  <div class="sem proximamente"><h2>🔁 Disciplina</h2><div class="estado">—</div><div class="frase">llega con la v1</div></div>
+</div>
+
+<div id="detalle" style="display:none">
+  <h3>📦 Cuánto falta para cada límite</h3>
+  <div id="capacidad"></div>
+  <h3>⚡ Qué tan rápido responde</h3>
+  <div id="velocidad"></div>
+  <h3>🗣 Los últimos susurros</h3>
+  <div id="susurros"></div>
+</div>
+
+<div id="estado-carga">cargando…</div>
+<button class="refrescar" onclick="cargar()" title="Refrescar">↻</button>
+
+<script>
+// ── conexión · la URL del web-app del VIGÍA se pega aquí tras el deploy ──
+const VIGIA_URL = '';   // ⚙️ POST-DEPLOY: https://script.google.com/macros/s/<ID>/exec
+const TOKEN = 'vigia-datos-2026';
+const DEMO = new URLSearchParams(location.search).get('demo') === '1';
+
+function fmtDias(d) {
+  if (d === '' || d == null) return '';
+  if (d >= 9999) return 'no crece';
+  return '~' + d + ' días';
+}
+function bandaDias(d) {
+  if (d === '' || d == null || d >= 9999) return 'ok';
+  return d < 14 ? 'bad' : d < 45 ? 'warn' : 'ok';
+}
+function pinta(data) {
+  document.getElementById('estado-carga').style.display = 'none';
+  document.getElementById('detalle').style.display = 'block';
+  const meds = Object.values(data.mediciones || {});
+  // ── semáforo Capacidad: el peor giorni-al-limite ──
+  const caps = meds.filter(m => m.vedetta === 'Capacidad' && m.metrica !== 'error');
+  let peor = null;
+  caps.forEach(m => { const d = (m.dias === '' ? null : m.dias);
+    if (d != null && d < 9999 && (peor == null || d < peor)) peor = d; });
+  const semCap = document.getElementById('sem-cap');
+  const capBanda = peor == null ? 'ok' : peor < 14 ? 'bad' : peor < 45 ? 'warn' : 'ok';
+  semCap.className = 'sem ' + capBanda;
+  semCap.querySelector('.estado').textContent = capBanda === 'ok' ? '🟢' : capBanda === 'warn' ? '🟡' : '🔴';
+  semCap.querySelector('.frase').textContent = peor == null
+    ? 'Ningún libro crece hacia su límite.'
+    : (capBanda === 'ok' ? 'El límite más cercano queda a ' + fmtDias(peor) + '. Hay aire.'
+      : capBanda === 'warn' ? 'El límite más cercano queda a ' + fmtDias(peor) + '. Conviene agendar la poda.'
+      : '¡Un límite queda a ' + fmtDias(peor) + '! Mirá el detalle y agendá la cura esta semana.');
+  // ── semáforo Velocidad: sondas recientes + P95 escrituras ──
+  const sondas = meds.filter(m => m.metrica === 'sonda_ms');
+  const p95s = meds.filter(m => m.metrica === 'p95_ms');
+  let velB = 'ok', velF = 'Lecturas y escrituras dentro de lo esperado.';
+  const lentas = sondas.filter(m => (parseFloat(m.valor) || 0) > 8000);
+  const p95mal = p95s.filter(m => (parseFloat(m.valor) || 0) > 2000);
+  if (lentas.length) { velB = 'bad'; velF = lentas.length + ' sistema(s) respondiendo sobre 8s ahora mismo — con servicio, la sala lo siente.'; }
+  else if (p95mal.length) { velB = 'warn'; velF = 'Ayer las escrituras más lentas pasaron el techo de 2s en ' + p95mal.length + ' sistema(s). La cura está en la lista P1.'; }
+  else if (sondas.some(m => (parseFloat(m.valor) || 0) > 3000)) { velB = 'warn'; velF = 'Alguna lectura anda sobre 3s (techo 1s). Sin drama, pero mirándola.'; }
+  const semVel = document.getElementById('sem-vel');
+  semVel.className = 'sem ' + (velB === 'bad' ? 'bad' : velB === 'warn' ? 'warn' : 'ok');
+  semVel.querySelector('.estado').textContent = velB === 'ok' ? '🟢' : velB === 'warn' ? '🟡' : '🔴';
+  semVel.querySelector('.frase').textContent = velF;
+  // ── detalle capacidad ──
+  const dc = document.getElementById('capacidad'); dc.innerHTML = '';
+  caps.sort((a, b) => ((a.dias === '' || a.dias == null ? 99999 : a.dias) - (b.dias === '' || b.dias == null ? 99999 : b.dias)));
+  caps.forEach(m => {
+    const d = document.createElement('div'); d.className = 'fila';
+    const pct = m.umbral ? Math.round((parseFloat(m.valor) || 0) / parseFloat(m.umbral) * 100) : '';
+    d.innerHTML = '<span class="obj">' + m.objeto + '</span><span class="val">' +
+      Number(m.valor).toLocaleString('es-CL') + (m.umbral ? ' de ' + Number(m.umbral).toLocaleString('es-CL') + ' (' + pct + '%)' : '') +
+      '</span><span class="dias ' + bandaDias(m.dias) + '">' + fmtDias(m.dias) + '</span>';
+    dc.appendChild(d);
+  });
+  // ── detalle velocidad ──
+  const dv = document.getElementById('velocidad'); dv.innerHTML = '';
+  [...sondas, ...meds.filter(m => m.metrica === 'p50_ms'), ...p95s].forEach(m => {
+    const d = document.createElement('div'); d.className = 'fila';
+    const v = Math.round(parseFloat(m.valor) || 0);
+    const b = v > (m.metrica === 'sonda_ms' ? 8000 : 5000) ? 'bad' : v > (m.metrica === 'sonda_ms' ? 3000 : 2000) ? 'warn' : 'ok';
+    d.innerHTML = '<span class="obj">' + m.objeto + '</span><span class="val">' +
+      (m.metrica === 'sonda_ms' ? 'respuesta' : m.metrica.replace('_ms', '').toUpperCase()) + '</span>' +
+      '<span class="dias ' + b + '">' + (v / 1000).toFixed(1).replace('.', ',') + 's</span>';
+    dv.appendChild(d);
+  });
+  // ── susurros ──
+  const ds = document.getElementById('susurros'); ds.innerHTML = '';
+  (data.susurros || []).filter(s => s.texto).forEach(s => {
+    const d = document.createElement('div'); d.className = 'sus ' + (s.banda === 'rojo' ? 'rojo' : s.banda === 'ok' ? 'ok' : '');
+    d.innerHTML = '<div class="cuando">' + (s.f ? new Date(s.f).toLocaleString('es-CL') : '') + '</div>' + s.texto;
+    ds.appendChild(d);
+  });
+  if (!ds.children.length) ds.innerHTML = '<div class="fila"><span class="val">Ningún susurro todavía — buena señal.</span></div>';
+}
+
+function demoData() {
+  return { ok: true, mediciones: {
+    'MENU_BKS|celdas': { vedetta: 'Capacidad', objeto: 'MENU_BKS', metrica: 'celdas', valor: 4200000, umbral: 10000000, dias: 63 },
+    'MAESTRO|celdas': { vedetta: 'Capacidad', objeto: 'MAESTRO', metrica: 'celdas', valor: 6700000, umbral: 10000000, dias: 9999 },
+    'MENU_BKS/STAMPA_LOG|filas': { vedetta: 'Capacidad', objeto: 'MENU_BKS/STAMPA_LOG', metrica: 'filas', valor: 41000, umbral: 60000, dias: 11 },
+    'CANDELARIA/Movimientos_BLocal|filas': { vedetta: 'Capacidad', objeto: 'CANDELARIA/Movimientos_BLocal', metrica: 'filas', valor: 3428, umbral: 40000, dias: 9999 },
+    'MENU getSalud|sonda_ms': { vedetta: 'Velocidad', objeto: 'MENU getSalud', metrica: 'sonda_ms', valor: 6900 },
+    'RIESCO getTab|sonda_ms': { vedetta: 'Velocidad', objeto: 'RIESCO getTab', metrica: 'sonda_ms', valor: 480 },
+    'MENU_BKS/escrituras|p95_ms': { vedetta: 'Velocidad', objeto: 'MENU_BKS/escrituras', metrica: 'p95_ms', valor: 4300 },
+    'MENU_BKS/escrituras|p50_ms': { vedetta: 'Velocidad', objeto: 'MENU_BKS/escrituras', metrica: 'p50_ms', valor: 1900 }
+  }, susurros: [
+    { f: Date.now() - 3600e3, banda: 'rojo', texto: '📦 MENU_BKS · la pestaña STAMPA_LOG llega a su techo (60000) en ~11 días (41.000 filas hoy). Toca rotar o podar — con calma, pero agendado.' },
+    { f: Date.now() - 7200e3, banda: 'amarillo', texto: '🟡 MENU_BKS: escrituras de ayer P95 = 4,3s (techo 2s, 214 gestos). P50 = 1,9s.' }
+  ] };
+}
+
+async function cargar() {
+  if (DEMO) { pinta(demoData()); return; }
+  if (!VIGIA_URL) {
+    document.getElementById('estado-carga').innerHTML =
+      '🦉 El VIGÍA todavía no está conectado.<br>Falta el deploy del web-app (ver runbook del cantiere 13).<br><br>Mientras tanto: <a href="?demo=1" style="color:#e8b23d">ver la demo</a>';
+    return;
+  }
+  try {
+    const r = await fetch(VIGIA_URL + '?action=getVigia&token=' + TOKEN);
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'sin datos');
+    pinta(data);
+  } catch (e) {
+    document.getElementById('estado-carga').textContent = 'No pude leer al VIGÍA (' + e.message + '). Probá refrescar.';
+  }
+}
+cargar();
+</script>
+</body>
+</html>
