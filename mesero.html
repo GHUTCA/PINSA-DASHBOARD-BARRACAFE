@@ -261,7 +261,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v2.12 · la franja vence: salgo fossilizado + sigo en sala · 27jul</span>
+    <span class="ver" id="ver">v2.13 · promos en la comandera: 2x1 + menu del dia + tkt · 27jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -747,7 +747,7 @@ async function guardarCorreccion(uuid, btn) {
       STATE.editando = null;
     } else if (r && r.error === 'comanda_ya_salio') {
       // v2.10 · el chit ya salió: no se borra plata ya producida (26-jul)
-      alert('El chit de la mesa ' + (r.mesa || '') + ' YA salió a cocina/barra.\n\n' +
+      alert('El tkt de la mesa ' + (r.mesa || '') + ' YA salió a cocina/barra.\n\n' +
             'Un pedido comandado no se puede borrar: lo que se produjo, se cobra.\n' +
             'Si hay que anularlo, llama al jefe de local.');
       STATE.editando = null;
@@ -969,12 +969,41 @@ function _nuevoListaHtml() {
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">' +
       frec.map(function(p){ return '<button class="agr-it" style="display:block;text-align:center;font-size:11.5px;padding:8px 4px" onclick="nuevoPick(\'' + esc(p.id) + '\')">' + esc(p.nombre.length > 26 ? p.nombre.slice(0, 25) + '…' : p.nombre) + '</button>'; }).join('') + '</div>';
   }
+  // v2.13 · PROMOS DE AHORA (VB Alberto 27-jul: el catálogo es UNO): la strip
+  // muestra lo que el cervello dice que está activo AHORA — misma fuente y
+  // filtros del menú cliente. Sin promos activas: cero píxeles.
+  if (!q) {
+    const _prs = {};
+    cat.forEach(function (p) { if (p.promo && !_prs[p.promo.nombre]) _prs[p.promo.nombre] = p.promo; });
+    const _pk = Object.keys(_prs);
+    if (_pk.length) {
+      h += '<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:6px">' +
+        _pk.map(function (k) {
+          const pr = _prs[k];
+          const es2 = pr.tipo === '2x1' || pr.tipo === 'multiplo';
+          return '<span style="flex:none;background:rgba(251,191,36,.12);border:1px solid #fbbf24;color:#fbbf24;font-size:11.5px;font-weight:800;border-radius:999px;padding:4px 10px">' +
+            esc(pr.badge || '🎁') + ' ' + esc(pr.nombre) +
+            '<small style="display:block;font-weight:400;font-size:9.5px;opacity:.8">' + (es2 ? 'pagas 1 · llevas 2' : 'precio promo') + '</small></span>';
+        }).join('') + '</div>';
+    }
+  }
   const filt = (q ? cat.filter(p => (p.nombre || '').toLowerCase().includes(q)) : cat).filter(porFam).slice(0, 40);
   if (!filt.length) return h + '<div class="agr-vacio">nada con «' + esc(q) + '»</div>';
-  return h + filt.map(p =>
-    '<button class="agr-it" onclick="nuevoPick(\'' + esc(p.id) + '\')">' +
-    '<span>' + esc(p.nombre) + '</span><span class="agr-pre">' + fmtPrice(p.precio) + ' ＋</span></button>'
-  ).join('');
+  return h + filt.map(p => {
+    // v2.13 · badges: el mesero VE lo que hay esta noche sin que se lo cuenten
+    const es2 = p.promo && (p.promo.tipo === '2x1' || p.promo.tipo === 'multiplo');
+    const badge = p.regla === 'almuerzo'
+      ? ' <span style="font-size:9.5px;font-weight:800;border:1px solid #3db876;color:#3db876;border-radius:5px;padding:1px 5px;vertical-align:1px">MENÚ</span>'
+      : es2 ? ' <span style="font-size:9.5px;font-weight:800;background:#fbbf24;color:#1d0f05;border-radius:5px;padding:1px 5px;vertical-align:1px">🎁 2x1</span>'
+      : (p.promo ? ' <span style="font-size:9.5px;font-weight:800;border:1px solid #ef7a90;color:#ef7a90;border-radius:5px;padding:1px 5px;vertical-align:1px">' + esc(p.promo.badge || '🔥') + ' PROMO</span>' : '');
+    const precioH = (p.precio_base != null && p.precio_base !== p.precio)
+      ? '<s style="opacity:.55;font-weight:400;font-size:11px">' + fmtPrice(p.precio_base) + '</s> ' + fmtPrice(p.precio)
+      : fmtPrice(p.precio);
+    return '<button class="agr-it" onclick="nuevoPick(\'' + esc(p.id) + '\')">' +
+      '<span>' + esc(p.nombre) + badge +
+      (es2 ? '<br><small style="opacity:.65;font-size:10.5px">pagas 1 · llevas 2 — lo hace solo</small>' : '') +
+      '</span><span class="agr-pre">' + precioH + ' ＋</span></button>';
+  }).join('');
 }
 function nuevoFiltro(f){ const n = STATE.nuevo; if(!n) return; n.filtro = (n.filtro === f ? '' : f); const el = $('nuevoLista'); if(el) el.innerHTML = _nuevoListaHtml(); }
 // v2.3.1 · chiave COMPOSTA id##op: «con queso» e «sin queso» sono due righe.
@@ -995,11 +1024,20 @@ function nuevoPick(id) {
 }
 function _nuevoAdd(p, op) {
   const n = STATE.nuevo; if (!n) return;
-  const key = op ? (p.id + '##' + op) : p.id;
-  if (!n.datos[key]) n.datos[key] = { id: p.id, nombre: p.nombre, precio: p.precio, cat: p.cat || '', op: op };
-  n.qty[key] = (n.qty[key] || 0) + 1;
+  // v2.13 · contrato del cliente (v1.41): el plato del menú se DECLARA
+  // (prefijo + es_menu) y el 2x1 viaja como campo máquina — el fossile no
+  // distingue quién capturó. La matemática (llevar = qty×2) vive en el envío.
+  const _es2 = p.promo && (p.promo.tipo === '2x1' || p.promo.tipo === 'multiplo');
+  const _esMenu = p.regla === 'almuerzo';
+  const key0 = p.id + (op ? ('##' + op) : '');
+  if (!n.datos[key0]) n.datos[key0] = {
+    id: p.id, nombre: (_esMenu ? 'Menú del Día · ' : '') + p.nombre,
+    precio: p.precio, cat: p.cat || '', op: op || '',
+    es_menu: _esMenu, promo: _es2 ? '2x1' : '' };
+  n.qty[key0] = (n.qty[key0] || 0) + 1;
   n.preguntando = null;
   renderNuevo();
+  return;
 }
 function nuevoElegirOp(op) {
   const n = STATE.nuevo; if (!n || !n.preguntando) return;
@@ -1018,7 +1056,8 @@ function nuevoElegirBebida(nom) {
   const opc = (STATE.menuOpciones || []).find(function(o){ return o.nombre === nom; });
   // il piatto (con eventuali mods scelti prima)
   const key = pg.opPrev ? (p.id + '##' + pg.opPrev) : p.id;
-  if (!n.datos[key]) n.datos[key] = { id: p.id, nombre: p.nombre, precio: p.precio, cat: p.cat || '', op: pg.opPrev || '' };
+  // v2.13 · el plato del menu se declara (prefijo + es_menu) — como el cliente
+  if (!n.datos[key]) n.datos[key] = { id: p.id, nombre: 'Menú del Día · ' + p.nombre, precio: p.precio, cat: p.cat || '', op: pg.opPrev || '', es_menu: true };
   n.qty[key] = (n.qty[key] || 0) + 1;
   // la bebida del menú, $0, riga propria
   if (opc) {
@@ -1060,6 +1099,8 @@ function renderNuevo() {
     // v2.3.1 · l'op è FISSA nella riga (scelta al tap): label, non chip. Due
     // varianti dello stesso piatto = due righe distinte, mai sovrascritte.
     return '<div class="corr-it' + (d.pri ? ' pri' : '') + '"><span class="nom">' + esc(d.nombre) +
+      (d.promo === '2x1' ? '<br><small style="color:#fbbf24;font-weight:700">🎁 2x1 · pagas ' + n.qty[key] + ' · llevas ' + (n.qty[key]*2) + '</small>' : '') +
+      (d.es_menu && !d.precio ? '<br><small style="color:#3db876">bebida del menú · $0 · tkt a la barra</small>' : '') +
       (d.op ? '<br><small style="opacity:.7;color:var(--acc,#f5c451)">· ' + esc(d.op) + '</small>' : '') +
       (d.pri ? '<br><small style="color:#f5c451">⬆ primero — sale ya · el resto marcha solo</small>' : '') + '</span>' +
       '<button class="pri-btn' + (d.pri ? ' on' : '') + '" onclick="nuevoPri(\'' + esc(key) + '\')" title="va primero">⬆</button>' +
@@ -1089,7 +1130,10 @@ async function nuevoEnviar(btn) {
   if (!n.uuid) n.uuid = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   const items = ids.map(function(key){
     const d = n.datos[key];
-    return { id: d.id, nombre: d.nombre, precio: d.precio, qty: n.qty[key], llevar: n.qty[key], cat: d.cat || '', op: d.op || '', pri: d.pri ? 1 : 0 };   // v2.4 · ES ENTRADA
+    const q2 = n.qty[key];
+    const es2 = d.promo === '2x1';
+    // v2.13 · contrato v1.41 del cliente: qty=pagadas · llevar=a producir
+    return { id: d.id, nombre: d.nombre + (es2 ? ' · 2x1 (llevar ' + (q2*2) + ')' : ''), precio: d.precio, qty: q2, llevar: es2 ? q2*2 : q2, cat: d.cat || '', op: d.op || '', es_menu: !!d.es_menu, promo: es2 ? '2x1' : '', pri: d.pri ? 1 : 0 };   // v2.4 · ES ENTRADA
   });
   const total = _nuevoTotal();
   const body = { codigo: STATE.codigo, nombre: STATE.nombre, uuid: n.uuid, mesa: mesa, total: total, items_json: JSON.stringify(items) };
@@ -1489,7 +1533,7 @@ function cardMio(p, umb) {
         // v2.8 · anti doble-comanda (caso Aloha tardío 25-jul): el pedido directo
         // YA está en cocina/barra — el color lo dice ANTES de que Aloha repita
         (p.directo && !esListo && !esRet
-          ? '<div style="background:rgba(245,166,35,.14);border:1.5px solid #f5a623;border-radius:10px;padding:8px 10px;margin:6px 0;font-size:13.5px;font-weight:700;color:#f5a623">🔥 YA EN PRODUCCIÓN — pedido directo, el chit ya salió.<br><span style="font-weight:400;opacity:.9">Al digitarlo en Aloha: NO repetir en cocina.</span></div>'
+          ? '<div style="background:rgba(245,166,35,.14);border:1.5px solid #f5a623;border-radius:10px;padding:8px 10px;margin:6px 0;font-size:13.5px;font-weight:700;color:#f5a623">🔥 YA EN PRODUCCIÓN — pedido directo, el tkt ya salió.<br><span style="font-weight:400;opacity:.9">Al digitarlo en Aloha: NO repetir en cocina.</span></div>'
           : '') +
         (p.directo && esListo
           ? '<div style="background:rgba(34,197,94,.12);border:1.5px solid #22c55e;border-radius:10px;padding:8px 10px;margin:6px 0;font-size:13.5px;font-weight:800;color:#22c55e">✅ PRODUCIDO — cocina/barra ya lo terminó</div>'
