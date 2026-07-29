@@ -517,7 +517,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v67 · 29jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v68 · 29jul</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -734,7 +734,30 @@ function _parseCSV(txt){
     return o;
   }).filter(function(r){ return Object.values(r).some(function(v){return v!=='';}); });
 }
+// v68 · VELOCITÀ (invariante 9, stesso pattern del bordo): la FOTO apre, la RED
+// rinfresca. Prima ogni apertura aspettava il CSV pubblicato INTERO (secondi)
+// anche con una cache buona in tasca — la cache si usava solo se il fetch moriva.
+// Ora: cache subito (catálogo istantaneo) + CSV fresco dietro, in silenzio.
+// Prima visita (senza foto): si aspetta la rete come sempre.
 async function cargarVocabDesdeBD(){
+  try{
+    var cch=JSON.parse(localStorage.getItem('pinsita_vocab_cache_'+CTX_CODE)||'null');
+    if(cch && cch.v && cch.v.length){
+      VOCAB=cch.v; rebuildNameIdx();
+      var edadH=Math.round((Date.now()-cch.ts)/3600000);
+      _vocabDesdeRed().then(function(res){
+        if(res && res.ok && !res.cache){
+          window.__vocabRes=res;
+          var ve=document.getElementById('ver');
+          if(ve){ var base=(ve.textContent||'').split(' · BD')[0].trim(); ve.textContent=base+' · BD✓ '+res.n; }
+        }
+      }).catch(function(){});
+      return {ok:true, n:VOCAB.length, fuente:'BD cache '+(edadH<1?'<1h':edadH+'h')+' · refresca detrás', cache:true};
+    }
+  }catch(e){}
+  return _vocabDesdeRed();
+}
+async function _vocabDesdeRed(){
   try{
     var rBD=await fetch(_csvMaestro(GID_BD),{cache:'no-store'});
     if(!rBD.ok) throw new Error('BD '+rBD.status);
@@ -1949,6 +1972,10 @@ function cargarCodigos(){
   flushCodigosCola();
   callGAS({action:'getCodigos'}, 12000).then(function(r){
     if(r&&r.ok&&r.codigos){
+      // v68 · una foto vacía-pero-ok NO pisa una tabla buena (clase v58): un
+      // vaciado real de BD_CODIGOS de un día para otro es imposible; un read
+      // roto que devuelve [] no lo es. Si llega vacío y tenemos códigos, se queda.
+      if(!r.codigos.length && Object.keys(CODIGOS_MAP).length) return;
       var m={};
       r.codigos.forEach(function(c){
         if(!c||!c.codigo) return;
@@ -1976,6 +2003,32 @@ function cargarCodigos(){
 // fetchearía contra 'undefined' y los códigos no llegarían nunca (bug de los
 // pesos medios, 11-jul: la misma trampa, ya pagada una vez).
 setTimeout(cargarCodigos, 0);
+
+// v68 · consulta VIVA de un código antes de declararlo nuevo (caso leche entera,
+// 29-jul: código enseñado el 22 + tabla local vacía por el único fetch del
+// arranque muerto = casilla vacía injusta delante de la gente). Reusa getCodigos,
+// que desde v66 pasa por el bordo (~150ms con foto); tope 5s; lista vacía o sin
+// red → null y el flujo sigue como siempre. Nunca bloquea: sólo evita la mentira.
+function codVerificarVivo(cod){
+  if(!navigator.onLine) return Promise.resolve(null);
+  return callGAS({action:'getCodigos'}, 5000).then(function(r){
+    if(!(r&&r.ok&&r.codigos&&r.codigos.length)) return null;
+    var m={};
+    r.codigos.forEach(function(c){
+      if(!c||!c.codigo) return;
+      m[String(c.codigo).trim()]={ sku:String(c.sku||'').trim(),
+        q:(parseFloat(c.q)>0?parseFloat(c.q):1), formato:c.formato||'', desc:c.desc||'' };
+    });
+    try{
+      JSON.parse(localStorage.getItem(COD_COLA_KEY)||'[]').forEach(function(p){
+        if(p&&p.codigo) m[p.codigo]={ sku:String(p.sku), q:p.q||1, formato:p.formato||'', desc:p.desc||'' };
+      });
+    }catch(e){}
+    CODIGOS_MAP=m;
+    try{ localStorage.setItem('pinsita_codigos_cache', JSON.stringify({ts:Date.now(),m:m})); }catch(e){}
+    return CODIGOS_MAP[cod]||null;
+  }).catch(function(){ return null; });
+}
 
 // ── el código de lote se explica solo ───────────────────────────────────────
 // Tolerante a propósito con el separador de la madre: las etiquetas viejas
@@ -2193,6 +2246,14 @@ function _crearLector(){
 var _scanCerrar=null;
 function abrirEscaner(){
   if(!_verboElegido()) return;
+  // v68 · el lector se reabastece SOLO al abrirse (caso leche entera, 29-jul):
+  // antes la tabla se cargaba UNA vez al arrancar la página, y si ese fetch
+  // moría (pavimento GAS 2-20s vs timeout 12s) el escáner quedaba ciego hasta
+  // un reload. Vacía o con más de 6h → se recarga; nunca espera: es en fondo.
+  try{
+    var cchC=JSON.parse(localStorage.getItem('pinsita_codigos_cache')||'null');
+    if(!Object.keys(CODIGOS_MAP).length || !cchC || (Date.now()-(cchC.ts||0)) > 6*3600*1000) cargarCodigos();
+  }catch(e){ cargarCodigos(); }
   var ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;background:#000;z-index:9500;display:flex;flex-direction:column';
   ov.innerHTML=
@@ -2277,7 +2338,7 @@ function abrirEscaner(){
     }
     var r=codResolver(cod);
     r.tipoDet=formato||r.tipo;
-    cerrar();
+    if(!r.nuevo) cerrar();   // v68: el desconocido se verifica en vivo antes (④)
     // ① NUESTRO lote y el producto está en el catálogo → directo al picker
     if(r.nuestro && r.conocido){
       abrirPickerAdd(false, { sku:r.sku, codigo:r.codigo, tipo:r.tipoDet });
@@ -2298,8 +2359,18 @@ function abrirEscaner(){
       abrirPickerAdd(false, { sku:r.sku, q:r.q, codigo:r.codigo, tipo:r.tipoDet, formato:r.formato });
       return;
     }
-    // ④ desconocido → NO bloquea: picker normal, y al confirmar se ofrece aprenderlo
-    abrirPickerAdd(false, { codigo:r.codigo, tipo:r.tipoDet, aprender:true });
+    // ④ desconocido → ANTES de declararlo nuevo se consulta el vivo UNA vez
+    //    (caso leche entera 29-jul). Desde v66 getCodigos pasa por el bordo
+    //    (~150ms con foto); tope 5s; sin respuesta → picker de siempre.
+    if(msg) msg.textContent='▦ '+cod+' · verificando…';
+    codVerificarVivo(r.codigo).then(function(c2){
+      cerrar();
+      if(c2 && c2.sku && skuItem(c2.sku)){
+        abrirPickerAdd(false, { sku:c2.sku, q:c2.q||1, codigo:r.codigo, tipo:r.tipoDet, formato:c2.formato||'' });
+      } else {
+        abrirPickerAdd(false, { codigo:r.codigo, tipo:r.tipoDet, aprender:true });
+      }
+    });
   }
 }
 
@@ -5137,13 +5208,16 @@ function _relevoSeguro(){
 async function _relevoCheck(){
   try{
     if (location.protocol==='file:') return;
-    var mio = (document.getElementById('ver')||{}).textContent || '';
+    // v68 · confronto sulla BASE del marcador: a runtime il badge diventa
+    // «vNN · fecha · BD✓ 213» e col testo intero il RELEVO si sarebbe creduto
+    // vecchio a ogni giro → ciclo di reload ogni 10 min sul kiosk fermo.
+    var mio = ((document.getElementById('ver')||{}).textContent || '').split(' · BD')[0].trim();
     if (!mio) return;
     var r = await fetch(location.pathname, {headers:{'Range':'bytes=0-131071'}, cache:'no-store'});
     if (!r.ok && r.status!==206) return;
     var t = await r.text();
     var m = t.match(/id="ver">([^<]+)</);
-    if (m && m[1] && m[1] !== mio && _relevoSeguro()){
+    if (m && m[1] && m[1].split(' · BD')[0].trim() !== mio && _relevoSeguro()){
       try{ await fetch(location.pathname, {cache:'reload'}); }catch(e){}   // scalda la cache HTTP
       location.reload();
     }
