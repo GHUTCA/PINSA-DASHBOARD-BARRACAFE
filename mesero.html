@@ -395,7 +395,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v3.0 · LA COMANDERA: la libreta a pantalla completa · la carta en el cajón · cuenta por persona · 28jul</span>
+    <span class="ver" id="ver">v3.1 · el borde: la sala en ~150ms (Cantiere 14) · 29jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -580,6 +580,53 @@ function detectarNuevos(r){
 }
 
 /* ═════ NETWORK (pattern menu_admin: text/plain, no preflight) ═════ */
+/* ═════ v3.1 · EL BORDE · Cantiere 14 (29-jul) ═════
+   La riga rossa «Sin conexión» che i meseros vedevano da settimane era il GAS
+   che sforava il timeout — non la loro rete. Il poll della sala ora prova
+   PRIMA il bordo (~150ms): il GAS calcola la sala INTERA a ogni scrittura
+   («una passata, tutte le viste») e ognuno prende la sua chiave per nombre.
+   Freschezza: una foto più vecchia di 45s non si serve (i contatori hace_s
+   sono congelati allo scatto) → si va al GAS. Vacío ≠ fallo (lezione kds
+   v1.16: all'apertura del turno il bordo è vuoto). Si spegne con ?borde=0.
+   ⚠️ Le SCRITTURE (MÍO, digitado, pedido) restano sul GAS fino alla Fase 2:
+   se la riga rossa ricompare lì, è quella la cura che manca — e si dice. */
+const BORDE_SALA = {
+  URL: 'https://pinsita-borde.alberto-agostini.workers.dev',
+  T: '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ',
+  ON: new URLSearchParams(location.search).get('borde') !== '0',
+  MAX_EDAD_MS: 45000,
+  fallos: 0,
+};
+function _slugSalaJS(s) {
+  let t = (s || '').toString().trim().toLowerCase();
+  try { t = t.normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (e) {}
+  return t.replace(/[^a-z0-9]/g, '');
+}
+async function leerSala(codigo, nombre) {
+  if (BORDE_SALA.ON && BORDE_SALA.fallos < 3) {
+    try {
+      const u = BORDE_SALA.URL + '/estado/' + encodeURIComponent(CFG.LOCAL || 'BKS')
+        + '?t=' + encodeURIComponent(BORDE_SALA.T)
+        + '&seccion=sala_vista&codigo=' + encodeURIComponent(codigo);
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(u, { signal: ctrl.signal, cache: 'no-store' });
+      clearTimeout(to);
+      const j = await r.json();
+      // codigo sbagliato = risposta VALIDA: il giro dei 3-strikes resta quello di sempre
+      if (j && j.error === 'codigo_invalid') return { ok: false, error: 'codigo_invalid' };
+      if (r.ok && j && j.ok && j.datos && j.datos.datos && j.datos.datos.ok
+          && j.datos.edad_ms < BORDE_SALA.MAX_EDAD_MS) {
+        const mia = (j.datos.datos.meseros || {})[_slugSalaJS(nombre)];
+        if (mia && mia.ok) { BORDE_SALA.fallos = 0; return mia; }
+        // il mio nombre non c'è nella foto (appena entrato, fila non ancora
+        // scritta): non è un guasto del bordo — si chiede al GAS e basta
+      } else if (!r.ok) { BORDE_SALA.fallos++; }
+    } catch (e) { BORDE_SALA.fallos++; }
+  }
+  return await gasGet('getSalaMesero', { codigo: codigo, nombre: nombre });
+}
+
 async function gasGet(action, params) {
   const url = new URL(CFG.GAS_URL);
   url.searchParams.set('action', action);
@@ -1588,7 +1635,7 @@ async function refrescar(conSkeleton) {
   STATE.pollEnVuelo = true;
   if (conSkeleton) $('secPend').innerHTML = '<div class="h">Cargando sala…</div><div class="card cargando" style="height:70px"></div>';
   try {
-    const r = await gasGet('getSalaMesero', { codigo: STATE.codigo, nombre: STATE.nombre });
+    const r = await leerSala(STATE.codigo, STATE.nombre);
     if (!r || !r.ok) {
       if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) {
         _strikeTurno(); return;   // v1.11 · si esce solo al 3° consecutivo
