@@ -517,7 +517,7 @@
   <!-- HEADER · verbo + contexto -->
   <div class="top">
     <div class="top-row">
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v65 · 29jul</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" aria-label="ATALAYA" role="img"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v66 · 29jul</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -3097,7 +3097,58 @@ var GAS_RIESCO=CTX.gas;   // multilocal: el endpoint lo decide el CONTEXTO (rsc/
 // captura sigue. _gasDownHasta = memo "red caída": tras un fallo, por 25s los
 // confirmes NO esperan nada (encolan y siguen).
 var _gasDownHasta=0;
+
+/* ═════ v66 · EL BORDE · Cantiere 14 (29-jul) ═════
+   «Oggi ero a Riesco e il registro era eterno» (Alberto, sul terreno).
+   Le SCRITTURE non c'entrano: passano dalla coda offline e non bloccano.
+   L'eternità vive nelle LETTURE di apertura — mapa, códigos, mis-movimientos —
+   ognuna in fila sul pavimento 2-20s di Apps Script.
+   Queste tre ora provano PRIMA il bordo (~150ms): il GAS le pubblica a ogni
+   scrittura, il telefono le legge già pronte. Qualsiasi dubbio → al GAS come
+   sempre, in silenzio. Si spegne con ?borde=0.
+   registro_hoy arriva con TUTTI i responsables (il GAS pubblica una volta
+   sola): il filtro per operador lo fa il telefono — il cervello decide,
+   il bordo sceglie. */
+var BORDE_REG = {
+  URL: 'https://pinsita-borde.alberto-agostini.workers.dev',
+  T: '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ',
+  ON: (new URLSearchParams(location.search)).get('borde') !== '0',
+  MAX_EDAD_MS: 10*60*1000,   // una foto più vecchia di 10' non si serve: al GAS
+  fallos: 0,
+  SECS: { getMapaOrden:'registro_mapa', getCodigos:'registro_codigos', getMisMovimientosHoy:'registro_hoy' },
+};
+async function _bordeLee(payload){
+  var sec = BORDE_REG.SECS[payload.action];
+  if (!sec || !BORDE_REG.ON || BORDE_REG.fallos >= 3) return null;
+  try {
+    var ctl = (typeof AbortController!=='undefined') ? new AbortController() : null;
+    var tid = ctl ? setTimeout(function(){ try{ctl.abort();}catch(e){} }, 4000) : null;
+    var r = await fetch(BORDE_REG.URL + '/estado/' + encodeURIComponent(CTX_CODE.toUpperCase())
+      + '?t=' + encodeURIComponent(BORDE_REG.T) + '&seccion=' + sec,
+      { signal: ctl ? ctl.signal : undefined, cache: 'no-store' });
+    if (tid) clearTimeout(tid);
+    var j = await r.json();
+    if (!r.ok || !j || !j.ok || !j.datos || !j.datos.datos || !j.datos.datos.ok) return null;  // vuoto ≠ guasto (lezione kds v1.16)
+    if (j.datos.edad_ms >= BORDE_REG.MAX_EDAD_MS) return null;         // ranci → al GAS
+    BORDE_REG.fallos = 0;
+    var d = j.datos.datos;
+    if (payload.action === 'getMisMovimientosHoy') {
+      var resp = String(payload.responsable||'').trim();
+      var miei = (d.movimientos||[]).filter(function(m){ return m.responsable === resp; })
+        .map(function(m){ var o={}; for(var k in m){ if(k!=='responsable') o[k]=m[k]; } return o; })
+        .slice(0, 60);
+      return { ok: true, movimientos: miei };
+    }
+    return d;
+  } catch(e) { BORDE_REG.fallos++; return null; }
+}
+
 async function callGAS(payload, timeoutMs, urlOverride){
+  // v66 · le tre letture dell'apertura provano prima il bordo; null → GAS di sempre
+  if (!urlOverride && payload && BORDE_REG.SECS[payload.action]) {
+    var deBorde = await _bordeLee(payload);
+    if (deBorde) return deBorde;
+  }
   var ctl=(typeof AbortController!=='undefined')?new AbortController():null;
   var tid=ctl?setTimeout(function(){ try{ctl.abort();}catch(e){} }, timeoutMs||12000):null;
   try{
