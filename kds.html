@@ -56,6 +56,12 @@
      tap per errore) · il pass diventa BARRA FISSA in fondo allo schermo
      (riga rossa, piastrelle quadrate col numero mesa enorme, scroll
      orizzontale): il runner guarda sempre nello stesso punto.
+     v1.17 (29-jul · EL TREN, VB Alberto 27-jul «un tren = un papel = una
+     card = un buzz»): i pedidos della stessa ventana della mesa (chiave
+     mesa+t_ventana, arriva dal cervello via borde E via GAS v3.42.0) si
+     fondono in UNA card 🚂×N — items sommati, un ✓ LISTO solo che manda
+     'uuid1+uuid2': il GAS marca ogni fossile e suona UN buzz al runner.
+     Senza ventana nessuna fusione (uno=uno) — demo invariata.
      Kitchen Display System: una página, dos sombreros — ?st=cocina / ?st=barra.
      Entra con el código del turno (una vez, localStorage) → cola de producción
      (pedidos DIGITADOS, solo los items de la estación, llevar = unidades a
@@ -137,6 +143,9 @@
   /* v1.13 · ⚡ VIA DIRECTA: pedido del cliente entrato in cola SENZA passare
      da ALOHA — si produce subito, la contabilità arriva dopo dal mesero */
   .c-directo{font-size:13px;font-weight:900;color:var(--ok);border:1.5px solid var(--ok);
+    border-radius:9px;padding:2px 8px;white-space:nowrap;align-self:center}
+  /* v1.17 · 🚂 EL TREN: N pedidos della stessa ventana = UNA card, un LISTO */
+  .c-tren{font-size:13px;font-weight:900;color:var(--t1);border:1.5px solid var(--t3);
     border-radius:9px;padding:2px 8px;white-space:nowrap;align-self:center}
   .c-timer{font-size:26px;font-weight:900;font-variant-numeric:tabular-nums;color:var(--ok)}
   .card.warn .c-timer{color:var(--warn)}
@@ -239,7 +248,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.16 · 29jul</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.17 · 29jul</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -554,12 +563,60 @@ async function poll(){
   }
 }
 function aplicar(r){
+  // v1.17 · EL TREN si fonde PRIMA di tutto: vistos/alarma/pins/render
+  // vedono già le card fuse (uuid sintetico 'u1+u2').
+  if (r && r.cola) r.cola = fundeTrenes(r.cola, false);
+  if (r && r.listos) r.listos = fundeTrenes(r.listos, true);
   STATE.kds = r;
   STATE.fetchAt = Date.now();
   let hayNuevo = false;
   (r.cola || []).forEach(p => { if (p.uuid && !STATE.vistos.has(p.uuid)) { STATE.vistos.add(p.uuid); hayNuevo = true; } });
   if (hayNuevo && STATE.vistosInit) alarmaNueva();
   STATE.vistosInit = true;
+}
+
+/* ═════ v1.17 · EL TREN (VB Alberto 27-jul: «un tren = un papel = una card
+   = un buzz») ═════
+   I pedidos che hanno viaggiato nella stessa ventana della mesa (chiave:
+   mesa + t_ventana IDENTICO — la manda il cervello, via borde e via GAS)
+   diventano UNA card: items sommati, un solo ✓ LISTO che spedisce
+   'uuid1+uuid2' — il GAS marca OGNI fossile (forense intatta) e suona UN
+   solo buzz al runner. Senza t_ventana (ventana spenta · comandera) nessuna
+   fusione: uno=uno come sempre. La demo non ne ha → demo invariata. */
+function fundeTrenes(arr, esListos){
+  const out = [], porKey = {};
+  (arr || []).forEach(p => {
+    const k = (p.t_ventana && p.mesa) ? (p.mesa + '|' + p.t_ventana) : null;
+    if (!k) { out.push(p); return; }
+    const f = porKey[k];
+    if (!f) { const c = Object.assign({}, p); c.uuids = [p.uuid]; porKey[k] = c; out.push(c); return; }
+    f.uuids.push(p.uuid);
+    f.uuid = f.uuids.join('+');
+    f.tren = f.uuids.length;
+    f.items = (f.items || []).concat(p.items || []);
+    // l'urgenza del treno è quella del membro più vecchio
+    if (esListos) f.listo_hace_s = Math.max(f.listo_hace_s, p.listo_hace_s);
+    else f.hace_s = Math.max(f.hace_s, p.hace_s);
+    if (p.nota && (f.nota || '') !== p.nota) f.nota = (f.nota ? f.nota + ' · ' : '') + p.nota;
+    if (p.mesero && (f.mesero || '').indexOf(p.mesero) < 0) f.mesero = f.mesero ? f.mesero + ', ' + p.mesero : p.mesero;
+    if (p.directo) f.directo = true;
+  });
+  // due telefoni, stesso piatto → «2×», non due righe uguali
+  out.forEach(f => { if (f.tren > 1) f.items = agrupaTren(f.items); });
+  return out;
+}
+function agrupaTren(items){
+  const out = [], ix = {};
+  (items || []).forEach(it => {
+    const k = [it.nombre || '', it.op || '', it.termino || '', it.promo || '', it.pri ? 1 : 0].join('|');
+    if (ix[k] != null) {
+      const prev = out[ix[k]];
+      out[ix[k]] = Object.assign({}, prev, { llevar: (parseInt(prev.llevar, 10) || 1) + (parseInt(it.llevar, 10) || 1) });
+      return;
+    }
+    ix[k] = out.length; out.push(it);
+  });
+  return out;
 }
 function haceLocal(base_s){        // corre el timer entre polls sin pedir red
   return base_s + Math.floor((Date.now() - STATE.fetchAt) / 1000);
@@ -653,6 +710,7 @@ function cardHTML(p, multiBadge, espera){
     '<div class="c-head"><div class="c-mesa"><small>MESA</small> ' + esc(p.mesa || '?') + '</div>' +
     (p.regalo_destino ? '<span class="c-regalo">→ mesa ' + esc(p.regalo_destino) + ' 🎁</span>' : '') +   // v1.12 · dove si porta il regalo
     (p.directo ? '<span class="c-directo">⚡ DIRECTO</span>' : '') +   // v1.13 · via directa, sin ALOHA todavía
+    (p.tren > 1 ? '<span class="c-tren">🚂 ×' + p.tren + '</span>' : '') +   // v1.17 · el tren: N pedidos, una card
     multiBadge(p) +
     (pinned ? '<span class="c-pin" onclick="bajar(\'' + esc(p.uuid) + '\')">📌 urgente ✕</span>' : '') +
     '<div class="c-sp"></div><div class="c-timer" data-base="' + p.hace_s + '">' + fmtHace(s) + '</div>' +
