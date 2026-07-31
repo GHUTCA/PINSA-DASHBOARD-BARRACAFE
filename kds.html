@@ -248,7 +248,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.17 · 29jul</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.18 · FASE 2C: tap al borde (nace apagado · bw/?bordew) · 31jul</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -503,6 +503,41 @@ const BORDE = {
   MAX_EDAD_MS: 120000,   // una foto más vieja que esto no se sirve: se va al GAS
   fallos: 0,
 };
+/* ═════ v1.18 · FASE 2C · IL TAP AL BORDO (31-jul) ═════
+   LISTO e RETIRADO provano PRIMA il bordo (~200ms): il DO valida col digesto
+   del turno che già possiede (gate di kds_<estacion>), deduplica, accetta —
+   e il GAS fossilizza dietro, INVARIATO (buzz runner compreso, +2-5s).
+   NASCE SPENTO: si accende con `kds_borde_write_on=TRUE` in PARAMETROS
+   (arriva col poll di sempre, campo `bw`) — o per tablet con ?bordew=1
+   (0 = spento forzato). Fallback GAS SEMPRE: solo una risposta timbrata
+   `borde:true` è definitiva. */
+const BORDE_W = { QS: (QS.get('bordew') || '').trim() };
+function bordeWriteOn() {
+  if (BORDE_W.QS === '0') return false;
+  if (BORDE_W.QS === '1') return true;
+  return !!(STATE.kds && STATE.kds.bw);
+}
+async function staffPost(action, body) {
+  if (BORDE.ON && bordeWriteOn()) {
+    try {
+      const u = BORDE.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL)
+        + '?t=' + encodeURIComponent(BORDE.T);
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(u, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {})),
+        signal: ctrl.signal, cache: 'no-store',
+      });
+      clearTimeout(to);
+      const j = await r.json();
+      if (j && j.borde === true) return j;   // definitiva; il resto → GAS
+    } catch (e) { /* bordo muto → la via di sempre */ }
+  }
+  return await gasPost(action, body);
+}
+
 async function leerKds(codigo, estacion) {
   if (BORDE.ON && BORDE.fallos < 3) {
     try {
@@ -789,7 +824,7 @@ async function marcarRetirado(uuid){
   STATE.retEnVuelo = uuid;
   render();                        // "…" al instante
   try {
-    const r = await gasPost('marcarKdsRetirado', { codigo: STATE.codigo, estacion: STATE.estacion, uuid });
+    const r = await staffPost('marcarKdsRetirado', { codigo: STATE.codigo, estacion: STATE.estacion, uuid });
     if (r.ok) {
       toast('', r.ya_retirado ? 'Ya estaba retirado ✓' : '🏃 Retirado — en camino a la mesa');
       if (STATE.kds) STATE.kds.listos = (STATE.kds.listos || []).filter(p => p.uuid !== uuid);
@@ -809,7 +844,7 @@ async function marcarListo(uuid){
   STATE.enVuelo[uuid] = true;
   render();
   try {
-    const r = await gasPost('marcarKdsListo', { codigo: STATE.codigo, estacion: STATE.estacion, uuid });
+    const r = await staffPost('marcarKdsListo', { codigo: STATE.codigo, estacion: STATE.estacion, uuid });
     if (r.ok) {
       toast('', r.ya_listo ? 'Ya estaba listo ✓' : '✓ Listo — el mesero fue avisado');
       // saca la card al instante (el poll confirma después)
