@@ -395,7 +395,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v3.2 · el borde respira: frescura 120s + reintento 90s (caso Ray) · 30jul</span>
+    <span class="ver" id="ver">v3.3 · FASE 2B: escrituras al borde (nace apagado · bw/?bordew) · 31jul</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -611,6 +611,50 @@ function _slugSalaJS(s) {
   try { t = t.normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (e) {}
   return t.replace(/[^a-z0-9]/g, '');
 }
+/* ═════ v3.3 · FASE 2B · LE SCRITTURE AL BORDO (31-jul) ═════
+   MÍO/digitado/entregado/limpia/llamada e il pedido a voce provano PRIMA il
+   bordo (~200ms percepiti): il DO valida col digesto del codigo turno,
+   deduplica, accetta — e il GAS fossilizza dietro, INVARIATO, unico
+   scrittore. NASCE SPENTO: si accende con `mesero_borde_write_on=TRUE` in
+   PARAMETROS (arriva col poll della sala, campo `bw`) — o per telefono con
+   ?bordew=1 (0 = spento forzato). Fallback GAS SEMPRE: qualsiasi risposta
+   senza il timbro `borde:true` (sin_gate, rate, rete) → si va al GAS come
+   oggi. La cola offline resta puntata al GAS (cintura, come menu v2.40.0). */
+const BORDE_W = {
+  QS: (QS.get('bordew') || '').trim(),   // '1' accende · '0' spegne · '' = flag
+  ok: {},   // uuid → ts · gesti accettati dal bordo (safety MÍO lunga)
+};
+function bordeWriteOn() {
+  if (BORDE_W.QS === '0') return false;
+  if (BORDE_W.QS === '1') return true;
+  return !!(STATE.sala && STATE.sala.bw);
+}
+async function staffPost(action, body) {
+  if (BORDE_SALA.ON && bordeWriteOn()) {
+    try {
+      const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS')
+        + '?t=' + encodeURIComponent(BORDE_SALA.T);
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(u, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {})),
+        signal: ctrl.signal, cache: 'no-store',
+      });
+      clearTimeout(to);
+      const j = await r.json();
+      // solo una risposta TIMBRATA dal DO è definitiva; tutto il resto
+      // (sin_gate 503, rate_limit 429, token, rete) → la via di sempre.
+      if (j && j.borde === true) {
+        if (j.ok && body && body.uuid) BORDE_W.ok[body.uuid] = Date.now();
+        return j;
+      }
+    } catch (e) { /* il bordo non risponde → GAS, come oggi */ }
+  }
+  return await gasPost(action, body);
+}
+
 async function leerSala(codigo, nombre) {
   // v3.2 · lockout con respiro: 3 fallos = pausa di 90s, non una condanna
   if (BORDE_SALA.fallos >= 3 && Date.now() - BORDE_SALA.fallosTs > 90000) BORDE_SALA.fallos = 0;
@@ -1543,7 +1587,7 @@ async function nuevoEnviar(btn) {
   const body = { codigo: STATE.codigo, nombre: STATE.nombre, uuid: n.uuid, mesa: mesa, total: total, items_json: JSON.stringify(items) };
   n.enviando = true; if (btn) btn.disabled = true;
   try {
-    const r = await gasPost('crearPedidoMesero', body);
+    const r = await staffPost('crearPedidoMesero', body);
     if (r && r.ok) {
       toast('ok', '✓ ' + (r.id_pedido || 'Pedido') + ' — Mesa ' + mesa + (r.plaza ? ' · ' + r.plaza : '') + ' · en tus MÍOS');
       STATE.nuevo = null; renderNuevo();
@@ -1658,9 +1702,13 @@ async function refrescar(conSkeleton) {
     novActualizar(r.novedades || []);   // v2.6 · canale Pinsita (viaggia nel poll)
     // v1.16 · rilascia i MÍO ottimistici confermati (ora nei mios) o scaduti (safety 12s)
     const _tn = Date.now();
+    /* v3.3 · FASE 2B: un MÍO accettato dal BORDO diventa visibile nella foto
+       della sala solo dopo fossile + push (~60-120s) — la safety di 12s lo
+       farebbe RIAPPARIRE col bottone MÍO (il caso Ruth del 29-lug, ma
+       sistematico). Sui gesti timbrati dal bordo la safety è 180s. */
     Object.keys(STATE.tomando).forEach(u => {
       const mine = (r.mios || []).some(p => p.uuid === u);
-      if (mine || _tn - STATE.tomando[u] > 12000) delete STATE.tomando[u];
+      if (mine || _tn - STATE.tomando[u] > (BORDE_W.ok[u] ? 180000 : 12000)) delete STATE.tomando[u];
     });
     STATE.pollFallos = 0;   // v2.14 · risposta buona = contatore azzerato
     $('offline').classList.remove('show');
@@ -2052,7 +2100,7 @@ async function marcar(uuid, marca, btn) {
   if (marca === 'mio') { STATE.tomando[uuid] = Date.now(); render(STATE.sala); }
   if (btn) { btn.disabled = true; btn.classList.add('cargando'); }
   try {
-    const r = await gasPost('marcarPedido', { codigo: STATE.codigo, nombre: STATE.nombre, uuid, marca });
+    const r = await staffPost('marcarPedido', { codigo: STATE.codigo, nombre: STATE.nombre, uuid, marca });
     if (r && r.ok) {
       // v2.9 · el toast decía «Digitado en ALOHA» mientras escribía ENTREGADO
       const msg = { atendido: '✓ Tuyo — el cliente ve que vas', digitado: '⌨ Digitado — cocina/barra en marcha', entregado: '✓ Entregado — servido a la mesa', cerrado: '✓ Mesa libre' };
@@ -2080,7 +2128,7 @@ async function marcar(uuid, marca, btn) {
 async function marcarLlamada(idLlamada, btn) {
   if (btn) { btn.disabled = true; btn.classList.add('cargando'); }
   try {
-    const r = await gasPost('marcarPedido', { codigo: STATE.codigo, nombre: STATE.nombre, marca: 'llamada_mia', id_llamada: idLlamada });
+    const r = await staffPost('marcarPedido', { codigo: STATE.codigo, nombre: STATE.nombre, marca: 'llamada_mia', id_llamada: idLlamada });
     if (r && r.ok) toast('ok', '✓ Tuya — anda a la mesa');
     else toast('err', 'No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
