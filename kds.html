@@ -228,6 +228,43 @@
   .rbtn:active{transform:scale(.90);filter:brightness(.80)}
   .rbtn:disabled{opacity:.5;cursor:default;transform:none}
   .rbtn.cargando{opacity:.7}
+  /* ═ v1.19 · LA FICHA DEL PASS (Alberto, 01-ago) ═
+     El chip del pass mostraba los items cortados a 150px: la información
+     estaba y no se podía leer. Ahora el chip tiene DOS botones — «Ver» abre
+     esta ficha, «Despachado» cierra sin abrir nada.
+     ⚠️ Se abre ENCIMA, no vuelve a la cola: consultar no es trabajar. Una card
+     devuelta a la lista se convierte en trabajo para el cocinero, que no pidió
+     nada. */
+  .lbtns{display:flex;gap:6px;margin-top:6px}
+  .lbtn{flex:1;border:0;border-radius:9px;padding:8px 6px;font-size:13px;font-weight:900;
+    cursor:pointer;font-family:inherit;letter-spacing:.02em}
+  .lbtn.ver{background:transparent;border:1.5px solid var(--bord);color:var(--t2)}
+  .lbtn.desp{background:var(--ok);color:#0c1710}
+  .lbtn:active{transform:scale(.92);filter:brightness(.85)}
+  .lbtn:disabled{opacity:.5;cursor:default;transform:none}
+  .vov{position:fixed;inset:0;background:rgba(0,0,0,.74);z-index:60;
+    display:flex;align-items:center;justify-content:center;padding:16px}
+  .vov .box{background:var(--card);border:2px solid var(--ok);border-radius:20px;
+    width:100%;max-width:600px;max-height:88vh;overflow:auto;padding:18px 20px 20px;
+    box-shadow:0 24px 70px rgba(0,0,0,.6)}
+  .vov .hd{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+    border-bottom:1px solid var(--bord);padding-bottom:12px}
+  .vov .hd b{font-size:46px;line-height:1;color:var(--t1)}
+  .vov .hd .pl{font-size:15px;font-weight:800;color:var(--warn)}
+  .vov .hd .h{margin-left:auto;font-size:14px;font-weight:800;color:var(--ok);
+    font-variant-numeric:tabular-nums}
+  .vov .its{margin:12px 0 2px}
+  .vov .its .vit{font-size:21px;font-weight:800;color:var(--t1);padding:9px 0;
+    border-bottom:1px dashed var(--bord)}
+  .vov .its .vit:last-child{border-bottom:0}
+  .vov .its .vop{display:block;font-size:14px;font-weight:600;color:var(--t3);margin-top:3px}
+  .vov .nota{margin-top:10px;font-size:15px;font-weight:700;color:var(--warn)}
+  /* Una tavolata de 15 renglones hace scroll: los botones NO pueden irse al
+     fondo del scroll. El runner tiene las manos ocupadas — despachar tiene que
+     estar donde estaba cuando abrió. (Visto en la prueba a seco, 01-ago.) */
+  .vov .ft{display:flex;gap:10px;margin-top:18px;position:sticky;bottom:-20px;
+    background:var(--card);padding:12px 0 4px;box-shadow:0 -14px 18px -6px var(--card)}
+  .vov .ft .rbtn{flex:1}
   /* v1.1 · nadie retira: la piastrella protesta */
   .lchip.warn{border-color:var(--warn)}
   .lchip.warn .h{color:var(--warn)}
@@ -248,7 +285,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.18 · FASE 2C: tap al borde (nace apagado · bw/?bordew) · 31jul</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.19 · la ficha del pass: Ver / Despachado en el chip del runner · 01ago</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -282,6 +319,9 @@
     <div id="listos"></div>
   </div>
 </section>
+
+<!-- v1.19 · LA FICHA DEL PASS: se abre sobre todo, no toca la cola -->
+<div id="verBox"></div>
 
 <div class="toast" id="toast"></div>
 
@@ -346,6 +386,7 @@ const STATE = {
   abiertos: new Set(),
   pins: (function(){ try { return JSON.parse(localStorage.getItem('kds_pins') || '[]'); } catch (e) { return []; } })(),
   confirmRet: null,     // v1.5 · chip listo in attesa di conferma "¿retirado?"
+  verListo: null,       // v1.19 · uuid del listo con la ficha abierta (vive fuera de las listas)
 };
 function _savePins(){ try { localStorage.setItem('kds_pins', JSON.stringify(STATE.pins)); } catch (e) {} }
 
@@ -726,13 +767,73 @@ function render(){
               ' onclick="marcarRetirado(\'' + esc(p.uuid) + '\')">' + (env ? '…' : '✓ Sí') + '</button>' +
             '<button class="rbtn no"' + (env ? ' disabled' : '') + ' onclick="STATE.confirmRet=null;render()">✕</button></div></div>';
         }
-        return '<div class="lchip' + cls + '" onclick="STATE.confirmRet=\'' + esc(p.uuid) + '\';render()"><b>' + esc(p.mesa || '?') + '</b>' +
+        // v1.19 · DOS BOTONES (Alberto, 01-ago): «Ver» abre la ficha encima,
+        // «Despachado» cierra sin abrir nada — «si no lo quiero ver lo despacho
+        // y se cierra, chao». El chip entero ya no es un botón: se toca lo que
+        // se quiere hacer, no se adivina.
+        const envD = STATE.retEnVuelo === p.uuid;
+        return '<div class="lchip' + cls + '"><b>' + esc(p.mesa || '?') + '</b>' +
           ((p.plaza || p.mesero) ? '<span class="det" style="color:var(--warn);font-weight:800">📍 ' +
             esc([p.plaza, p.mesero].filter(Boolean).join(' · ')) + '</span>' : '') +
           '<span class="det">' + esc(p.items.map(it => (parseInt(it.llevar, 10) || 1) + '× ' + it.nombre).join(' · ')) + '</span>' +
-          '<span class="h" data-lbase="' + p.listo_hace_s + '">hace ' + fmtHace(ls) + '</span></div>';
+          '<span class="h" data-lbase="' + p.listo_hace_s + '">hace ' + fmtHace(ls) + '</span>' +
+          '<div class="lbtns">' +
+            '<button class="lbtn ver" onclick="verListo(\'' + esc(p.uuid) + '\')">👁 Ver</button>' +
+            '<button class="lbtn desp"' + (envD ? ' disabled' : '') + ' onclick="marcarRetirado(\'' + esc(p.uuid) + '\')">' +
+              (envD ? '…' : '✓ Despachado') + '</button>' +
+          '</div></div>';
       }).join('')
     : '<div class="lvacio">— nada esperando retiro —</div>';
+
+  renderVer();   // v1.19 · la ficha vive fuera de las listas
+}
+
+/* ═══ v1.19 · LA FICHA DEL PASS (pedido de Alberto, 01-ago) ═══
+   «Cuando se toca LISTO el pedido se cierra y aparece abajo en la barra del
+   runner. Pero si se quiere ver qué contenía ese pedido, no se puede.»
+   La ficha se abre ENCIMA y se cierra con la ✕. NO devuelve la card a la cola:
+   consultar no es trabajar — una card de vuelta en la lista se convierte en
+   trabajo para el cocinero, que no pidió nada.
+   Cero red: los items ya viajan en la entry del listo. */
+function verListo(uuid){
+  STATE.verListo = uuid;
+  render();
+}
+function cerrarVer(){
+  STATE.verListo = null;
+  renderVer();
+}
+function renderVer(){
+  const cont = $('verBox');
+  if (!cont) return;
+  const uuid = STATE.verListo;
+  if (!uuid){ cont.innerHTML = ''; return; }
+  const p = ((STATE.kds && STATE.kds.listos) || []).find(x => x.uuid === uuid);
+  // el pedido ya no está (lo despachó otro, o cambió el turno): la ficha se va sola
+  if (!p){ STATE.verListo = null; cont.innerHTML = ''; return; }
+  const env = STATE.retEnVuelo === p.uuid;
+  const ls  = haceLocal(p.listo_hace_s);
+  const its = (p.items || []).map(it => {
+    const q = parseInt(it.llevar, 10) || 1;
+    const extra = [it.termino, it.op].filter(Boolean).join(' · ');
+    return '<div class="vit">' + q + '× ' + esc(it.nombre || '?') +
+      (extra ? '<span class="vop">' + esc(extra) + '</span>' : '') + '</div>';
+  }).join('');
+  cont.innerHTML =
+    '<div class="vov" onclick="if(event.target===this)cerrarVer()">' +
+      '<div class="box">' +
+        '<div class="hd"><b>' + esc(p.mesa || '?') + '</b>' +
+          ((p.plaza || p.mesero) ? '<span class="pl">📍 ' + esc([p.plaza, p.mesero].filter(Boolean).join(' · ')) + '</span>' : '') +
+          '<span class="h">listo hace ' + fmtHace(ls) + '</span></div>' +
+        '<div class="its">' + (its || '<div class="vit">— sin items —</div>') + '</div>' +
+        (p.nota ? '<div class="nota">📝 ' + esc(p.nota) + '</div>' : '') +
+        '<div class="ft">' +
+          '<button class="rbtn no" onclick="cerrarVer()">✕ Cerrar</button>' +
+          '<button class="rbtn si' + (env ? ' cargando' : '') + '"' + (env ? ' disabled' : '') +
+            ' onclick="marcarRetirado(\'' + esc(p.uuid) + '\')">' + (env ? '…' : '✓ Despachado') + '</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
 }
 
 // v1.4 · la card del pedido — usata dalla griglia E dai chip aperti in espera
@@ -836,6 +937,7 @@ async function marcarRetirado(uuid){
   }
   STATE.confirmRet = null;
   STATE.retEnVuelo = null;
+  STATE.verListo = null;   // v1.19 · despachado = la ficha se va con él
   render();
 }
 
