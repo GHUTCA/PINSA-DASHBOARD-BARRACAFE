@@ -395,7 +395,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v3.5 · tolerancia foto 6 min (el eco mantiene fresco lo que se mueve) · 31jul</span>
+    <span class="ver" id="ver">v3.6 · tu gesto manda hasta que la foto lo confirme (mesa 103) · 02ago</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -443,6 +443,7 @@ const STATE = {
   sala: null,          // último payload getSalaMesero
   enVuelo: {},         // uuid → true (tap in flight)
   tomando: {},         // v1.16 · uuid → ts · MÍO ottimistico: soppresso da pendientes finché il poll conferma (anti-flicker)
+  marcado: {},         // v3.6 · uuid → {marca,mesa,ts} · digitado/entregado/limpia ottimistici (v. _aplicarMarcados)
   pollTimer: null,
   vistos: new Set(),   // v1.4 · uuid/llamadas già visti (per la doppia campana)
   vistosInit: false,   // il primo poll riempie senza suonare
@@ -1683,6 +1684,103 @@ async function _wakeLock() {
   } catch (e) { WLOCK = null; }
 }
 
+/* ═════ v3.6 · LA MANO DEL MESERO BATTE LA FOTO (02-ago · caso Jura) ═════
+   Sul telefono di Jura la mesa 103 tornava indietro: ⌨ digitado → «falta
+   digitado» → digitado, con periodo di un beat. La radice era al bordo
+   (l'eco si zittiva guardando l'orologio sbagliato: curata in borde v0.9.0),
+   ma qui c'era la nostra metà del problema: **la soppressione ottimistica
+   esisteva SOLO per il MÍO**. Su digitado/entregado/limpia lo schermo era in
+   balia della foto — e una foto è sempre più vecchia della mano che ha
+   appena toccato.
+   Regola: il gesto accettato COMANDA finché la foto non lo conferma. Si
+   molla **per conferma** (la foto mostra uno stato pari o più avanti), non
+   a timer: il timer è l'errore del caso Ruth (12s di safety contro una
+   scrittura di 45-80s), e non si ripete. La safety lunga resta solo come
+   ultima rete, perché una bugia di 5 minuti è meglio di una per sempre.
+   L'eco non va MAI indietro: non riscrive `digitado` sopra un `entregado`. */
+const MARCA_ORDEN = ['pendiente', 'atendido', 'digitado', 'entregado', 'cerrado'];
+const MARCA_ESTADO = { digitado: 'digitado', entregado: 'entregado' };
+const MARCA_SAFETY_MS = 5 * 60 * 1000;
+
+function _mesaDeUuid(uuid) {
+  const r = STATE.sala || {};
+  const arrs = ['mios', 'pendientes', 'por_limpiar', 'sin_dueno'];
+  for (const k of arrs) {
+    const it = (r[k] || []).find(function (x) { return x && x.uuid === uuid; });
+    if (it) return (it.mesa || '').toString();
+  }
+  return '';
+}
+
+function _marcarLocal(uuid, marca, mesa) {
+  if (!uuid || (!MARCA_ESTADO[marca] && marca !== 'limpia')) return;
+  STATE.marcado[uuid] = { marca: marca, mesa: (mesa || '').toString(), ts: Date.now() };
+}
+
+/* Patcha la foto in arrivo con i gesti che il mesero ha già fatto.
+   Un solo punto di passaggio: tutto ciò che disegna (tessere, sheet, card)
+   legge da qui in poi una verità sola. */
+function _aplicarMarcados(r) {
+  if (!r) return;
+  const us = Object.keys(STATE.marcado);
+  if (!us.length) return;
+  const now = Date.now();
+  const arrs = ['mios', 'pendientes', 'por_limpiar', 'sin_dueno'];
+  us.forEach(function (u) {
+    const m = STATE.marcado[u];
+    if (!m || now - m.ts > MARCA_SAFETY_MS) { delete STATE.marcado[u]; return; }
+
+    if (m.marca === 'limpia') {
+      // la mesa liberata non deve tornare: si tolgono i suoi entregados
+      let restava = false;
+      arrs.forEach(function (k) {
+        if (!Array.isArray(r[k])) return;
+        for (let i = r[k].length - 1; i >= 0; i--) {
+          const it = r[k][i];
+          if (it && String(it.mesa) === m.mesa && it.estado === 'entregado') { r[k].splice(i, 1); restava = true; }
+        }
+      });
+      if (!restava) delete STATE.marcado[u];   // la foto l'ha assorbita: si molla
+      return;
+    }
+
+    const meta = MARCA_ESTADO[m.marca];
+    /* `patchato` esiste per un motivo preciso: l'entregado che spostiamo in
+       `por_limpiar` verrebbe poi ritrovato dal giro stesso e letto come
+       «la foto me l'ha confermato» — si mollerebbe la mano un attimo prima
+       che la foto arrivi davvero, e lo sfarfallio tornerebbe da qui. */
+    let trovato = false, confermato = false, patchato = false;
+    arrs.forEach(function (k) {
+      const v = r[k];
+      if (!Array.isArray(v)) return;
+      for (let i = v.length - 1; i >= 0; i--) {
+        const it = v[i];
+        if (!it || it.uuid !== u) continue;
+        trovato = true;
+        if (MARCA_ORDEN.indexOf(it.estado) >= MARCA_ORDEN.indexOf(meta)) {
+          if (!patchato) confermato = true;   // conferma VERA, non il nostro eco
+          continue;
+        }
+        it.estado = meta;   // la foto è indietro: comanda la mano
+        patchato = true;
+        /* un entregado vive in `por_limpiar`, non nei `mios` — e la card
+           legge lo stato dalla lista in cui sta: lasciarlo nei mios lo
+           farebbe tornare «⌨ falta digitarlo». Si sposta, come farebbe
+           la foto vera. */
+        if (meta === 'entregado' && k !== 'por_limpiar') {
+          if (!Array.isArray(r.por_limpiar)) r.por_limpiar = [];
+          if (!r.por_limpiar.some(function (x) { return x && x.uuid === u; })) {
+            v.splice(i, 1);
+            r.por_limpiar.unshift(it);
+          }
+        }
+      }
+    });
+    // confermato = la foto ci è arrivata · non trovato = non è più affar mio
+    if ((confermato && !patchato) || !trovato) delete STATE.marcado[u];
+  });
+}
+
 async function refrescar(conSkeleton) {
   if (!STATE.codigo || !STATE.nombre) return;
   // v2.14 · P1.3 (cantiere 13): guardia in-flight, pattern del KDS — con
@@ -1701,6 +1799,7 @@ async function refrescar(conSkeleton) {
     }
     STATE.strikes = 0;   // v1.11 · risposta buona = si riparte da zero
     STATE.sala = r;
+    _aplicarMarcados(r);   // v3.6 · i miei gesti comandano finché la foto non li conferma
     novActualizar(r.novedades || []);   // v2.6 · canale Pinsita (viaggia nel poll)
     // v1.16 · rilascia i MÍO ottimistici confermati (ora nei mios) o scaduti (safety 12s)
     const _tn = Date.now();
@@ -2100,6 +2199,12 @@ async function marcar(uuid, marca, btn) {
   // finché il poll conferma che è nei MÍOS (o safety 12s). Basta col flicker MÍO→riappare
   // quando la rete balla e il poll rilegge lo stato vecchio.
   if (marca === 'mio') { STATE.tomando[uuid] = Date.now(); render(STATE.sala); }
+  /* v3.6 · lo stesso rispetto per gli ALTRI gesti: digitado/entregado/limpia
+     si vedono SUBITO e restano finché la foto non li conferma. */
+  if (MARCA_ESTADO[marca] || marca === 'limpia') {
+    _marcarLocal(uuid, marca, _mesaDeUuid(uuid));
+    if (STATE.sala) { _aplicarMarcados(STATE.sala); render(STATE.sala); }
+  }
   if (btn) { btn.disabled = true; btn.classList.add('cargando'); }
   try {
     const r = await staffPost('marcarPedido', { codigo: STATE.codigo, nombre: STATE.nombre, uuid, marca });
@@ -2109,13 +2214,16 @@ async function marcar(uuid, marca, btn) {
       toast('ok', msg[r.estado] || '✓');
     } else if (r && r.error === 'ya_tomado') {
       delete STATE.tomando[uuid];   // no es mío → que reaparezca correcto
+      delete STATE.marcado[uuid];   // v3.6 · un NO del server scioglie la mano
       toast('warn', 'Lo tomó ' + (r.mesero || 'otro') + ' primero');
     } else if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) {
       delete STATE.tomando[uuid];
+      delete STATE.marcado[uuid];
       if (_strikeTurno()) return;   // v1.11 · tre strike, non uno
       toast('warn', 'No se pudo verificar el turno — reintenta');
     } else {
       delete STATE.tomando[uuid];
+      delete STATE.marcado[uuid];
       toast('err', 'No se pudo: ' + (r && r.error || '?'));
     }
   } catch (e) {
