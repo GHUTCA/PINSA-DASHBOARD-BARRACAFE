@@ -193,6 +193,15 @@
   .mtile .cnt{position:absolute;top:3px;left:6px;font-size:9px;color:var(--t3);font-weight:700}
   .mt-nuevo{border-color:var(--warn);background:rgba(245,166,35,.15);animation:mtpulse 1.1s infinite}
   .mt-nuevo small{color:var(--warn)}
+  /* v3.7 · POR DIGITAR: l'obbligo di cassa pulsa come un nuevo — perché LO È
+     (con l'auto-asignación il pedido nuovo della tua mesa nasce già qui) */
+  .mt-digitar{border-color:var(--warn);background:rgba(245,166,35,.22);animation:mtpulse 1.4s infinite}
+  .mt-digitar small{color:var(--warn);font-weight:800}
+  /* v3.7 · la campanella del cliente: GRANDE, non una card qualunque */
+  .llam-big{border:2px solid var(--warn)!important;background:rgba(245,166,35,.13);animation:mtpulse 1.1s infinite;text-align:center;padding:14px 12px}
+  .llam-big .campana{font-size:34px;line-height:1;display:block;margin-bottom:4px}
+  .llam-big .quien{font-size:21px;font-weight:900;letter-spacing:.5px}
+  .llam-big .desde{font-size:12px;color:var(--t2);margin:2px 0 10px}
   .mt-listo{border-color:var(--ok);background:rgba(61,184,118,.15);animation:mtpulse 2s infinite}
   .mt-listo small{color:var(--ok)}
   .mt-prep{border-color:#4aa3c0;background:rgba(74,163,192,.10)} .mt-prep small{color:#6fc3de}
@@ -395,7 +404,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v3.6 · tu gesto manda hasta que la foto lo confirme (mesa 103) · 02ago</span>
+    <span class="ver" id="ver">v3.7 · menos taps: auto-asignación · POR DIGITAR · todo-en-uno · campana grande · 02ago</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1855,11 +1864,17 @@ function _mesasModel(r) {
   const list = Object.keys(map).map(function (k) {
     const m = map[k];
     const hayListo = m.mios.some(function (p) { return p.estado === 'digitado' && p.listo && !p.retirado; });
-    m.st = m.pend.length ? 'nuevo' : hayListo ? 'listo' : m.mios.length ? 'prep' : 'ok';
+    /* v3.7 · POR DIGITAR (decisione Alberto 02-ago): con l'auto-asignación i
+       pedidos nuovi di una mesa già tua NASCONO atendido — niente più card
+       MÍO, quindi la tessera deve URLARE l'obbligo vero: la cassa. Un
+       atendido non digitado è plata fuori da Aloha finché non lo tocchi. */
+    const hayDigitar = m.mios.some(function (p) { return p.estado === 'atendido'; });
+    m.hayListo = hayListo;
+    m.st = m.pend.length ? 'nuevo' : hayDigitar ? 'digitar' : hayListo ? 'listo' : m.mios.length ? 'prep' : 'ok';
     m.n = m.pend.length + m.mios.length + m.limpiar.length;
     return m;
   });
-  const ord = { nuevo: 0, listo: 1, prep: 2, ok: 3 };
+  const ord = { nuevo: 0, digitar: 1, listo: 2, prep: 3, ok: 4 };
   list.sort(function (a, b) {
     return ord[a.st] - ord[b.st] || (parseInt(a.mesa, 10) || 0) - (parseInt(b.mesa, 10) || 0);
   });
@@ -1873,8 +1888,10 @@ function renderMesas(r) {
   if (list.length) {
     h += '<div class="h">Mis mesas — ' + list.length + '</div><div class="mesa-grid">';
     list.forEach(function (m) {
-      const lbl = { nuevo: 'NUEVO', listo: 'LISTO', prep: 'en prep.', ok: 'ok' }[m.st];
-      const bdg = m.st === 'nuevo' ? '🔔' : m.st === 'listo' ? '🍸'
+      const lbl = { nuevo: 'NUEVO', digitar: 'DIGITAR ⌨', listo: 'LISTO', prep: 'en prep.', ok: 'ok' }[m.st];
+      // v3.7 · sulla tessera POR DIGITAR il badge dice se c'è ANCHE roba al
+      // pass (🍸): due verità in un colpo d'occhio, mai una sopra l'altra
+      const bdg = m.st === 'nuevo' ? '🔔' : m.st === 'digitar' ? (m.hayListo ? '🍸' : '⌨') : m.st === 'listo' ? '🍸'
         : (m.grupo && m.grupo !== m.mesa) ? '🔗' : m.regalo ? '🎁' : '';
       h += '<button class="mtile mt-' + m.st + '" onclick="abrirMesa(\'' + esc(m.mesa) + '\')">' +
         (m.n > 1 ? '<span class="cnt">' + m.n + '</span>' : '') +
@@ -1910,6 +1927,18 @@ function renderMesaSheet(r) {
     ((m.grupo && m.grupo !== m.mesa) ? ' <span style="font-size:14px;color:var(--acc)">🔗' + esc(m.grupo) + '</span>' : '') +
     '</h2><button class="msh-x" onclick="cerrarMesa()">✕</button></div>';
   h += '<div class="msh-sub">' + m.n + ' pedido' + (m.n === 1 ? '' : 's') + ' · total ' + fmtPrice(tot) + '</div>';
+  /* v3.7 · IL GESTO DI MESA (decisione Alberto 02-ago): alla cassa digiti
+     tutto il tavolo in un colpo — qui confermi in un colpo. Il bottone nasce
+     solo con ≥2 pedidos nello stesso passo: con uno, la card di sempre. */
+  const porDig = m.mios.filter(function (p) { return p.estado === 'atendido'; });
+  const porEnt = m.mios.filter(function (p) { return p.estado === 'digitado'; });
+  if (porDig.length >= 2) {
+    h += '<div class="msh-row"><button class="btn" onclick="marcarLote(\'' + esc(m.mesa) + '\',\'digitado\',this)">⌨ DIGITADO TODO — ' + porDig.length + ' pedidos en Aloha</button></div>';
+  }
+  if (porEnt.length >= 2) {
+    h += '<div class="msh-row"><button class="btn verde" onclick="marcarLote(\'' + esc(m.mesa) + '\',\'entregado\',this)">✓ ENTREGADO TODO — ' + porEnt.length + ' pedidos' +
+      '<small style="display:block;font-size:10px;opacity:.75;font-weight:400">solo cuando TODO ya está en la mesa</small></button></div>';
+  }
   m.pend.forEach(function (p) { h += cardPedido(p, umb, '✋ MÍO — lo tomo yo', 'mio'); });
   m.mios.forEach(function (p) { h += cardMio(p, umb); });
   m.limpiar.forEach(function (p) { h += cardLiberar(p); });
@@ -2019,11 +2048,14 @@ function render(r) {
     // ti dice quanti aspettano sotto senza dover scrollare
     h += '<div class="h">Pendientes · tu plaza — ' + (pend.length + llam.length) + '</div>';
     pend.forEach(p => { h += cardPedido(p, umb, 'MÍO — voy a la ' + esc(p.mesa), 'mio'); });
+    /* v3.7 · la campanella si VEDE (richiesta Alberto 02-ago): «MESA 1 llama,
+       tap, vado». Grande, che pulsa, un solo bottone. Niente da leggere. */
     llam.forEach(l => {
-      h += '<div class="card"><div class="mesa-row"><span class="mesa">MESA ' + esc(l.mesa) + '</span>' +
-        '<span class="plaza">' + esc(l.plaza || '—') + ' · 🙋 llama (sin pedido)</span>' +
-        '<span class="espera ' + esperaClass(l.hace_s, umb) + '">⏱ ' + fmtHace(l.hace_s) + '</span></div>' +
-        '<button class="btn" onclick="marcarLlamada(\'' + esc(l.id_llamada) + '\',this)">MÍO — voy a la ' + esc(l.mesa) + '</button></div>';
+      h += '<div class="card llam-big">' +
+        '<span class="campana">🔔</span>' +
+        '<span class="quien">MESA ' + esc(l.mesa) + ' LLAMA</span>' +
+        '<div class="desde">' + esc(l.plaza || '—') + ' · sin pedido · ⏱ ' + fmtHace(l.hace_s) + '</div>' +
+        '<button class="btn" onclick="marcarLlamada(\'' + esc(l.id_llamada) + '\',this)">VOY — mesa ' + esc(l.mesa) + '</button></div>';
     });
   } else {
     const mesasTxt = det.filter(p => p.mesas).map(p => p.mesas).join(' · ');
@@ -2233,6 +2265,37 @@ async function marcar(uuid, marca, btn) {
     delete STATE.enVuelo[uuid];
     refrescar(false);
   }
+}
+
+/* v3.7 · marcarLote · il DIGITADO/ENTREGADO di tutta la mesa in un tap.
+   Sequenziale, non raffica: il bordo risponde in ~200ms l'uno e il fallback
+   GAS non regge N lock simultanei. La mano ottimistica (v3.6) si applica a
+   TUTTI subito — lo schermo non torna indietro; il poll conferma come sempre.
+   Un NO esplicito del server scioglie la mano di QUEL pedido; un errore di
+   rete no (può essere arrivato lo stesso — decide il poll, dottrina v3.6). */
+async function marcarLote(mesa, marca, btn) {
+  const md = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
+  if (!md) return;
+  const desde = marca === 'digitado' ? 'atendido' : 'digitado';
+  const uuids = md.mios.filter(function (p) { return p.estado === desde && !STATE.enVuelo[p.uuid]; })
+    .map(function (p) { return p.uuid; });
+  if (!uuids.length) return;
+  if (btn) { btn.disabled = true; btn.classList.add('cargando'); }
+  uuids.forEach(function (u) { STATE.enVuelo[u] = true; _marcarLocal(u, marca, mesa); });
+  if (STATE.sala) { _aplicarMarcados(STATE.sala); render(STATE.sala); }
+  let okN = 0, koN = 0;
+  for (const u of uuids) {
+    try {
+      const r = await staffPost('marcarPedido', { codigo: STATE.codigo, nombre: STATE.nombre, uuid: u, marca: marca });
+      if (r && r.ok) okN++;
+      else { koN++; delete STATE.marcado[u]; }
+    } catch (e) { koN++; }
+    delete STATE.enVuelo[u];
+  }
+  toast(koN ? 'warn' : 'ok',
+    (marca === 'digitado' ? '⌨ Digitados ' : '✓ Entregados ') + okN + '/' + uuids.length +
+    (koN ? ' — revisa las cards de la mesa' : ''));
+  refrescar(false);
 }
 
 async function marcarLlamada(idLlamada, btn) {
