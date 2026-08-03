@@ -1,5 +1,11 @@
 /* ════════════════════════════════════════════════════════════════════
- *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.10
+ *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.11
+ *  v1.11 (03-ago-2026) · LA TORRE CHIEDE «CHI SEI» PRIMA DI «DOVE VAI».
+ *           Scope 'todos': lista intera (ogni utente porta il suo `local` dal
+ *           foglio) · al login/set_pin si manda IL LOCALE DELL'UTENTE, non
+ *           'todos' · leerSesion accetta qualsiasi locale in questa modalità.
+ *           Tre tocchi, tutti additivi: nessuna via esistente cambia.
+ *           ⚠️ NON tocca il meccanismo di sessione (coordinamento CANCELLO).
  *  v1.10 (23-jul-2026) · FIX PAINT iOS: la lista «¿Quién eres?» era nel DOM ma
  *    Safari non la dipingeva (scroller vh + figli async) — appariva solo con lo
  *    zoom. Cura: translateZ(0) sul contenitore + reflow forzato post-inject.
@@ -65,6 +71,17 @@
   var CFG = { local:'cdl', accent:'#C4622D' };
   var USERS = [];          // [{nombre, cargo, foto}]
   var seleccion = null;    // utente scelto nella lista
+
+  // ── v1.11 (03-ago) · LA TORRE CHIEDE «CHI SEI» PRIMA DI «DOVE VAI» ──────
+  // Con CFG.local='todos' la lista è quella intera e ogni utente porta il suo
+  // `local` dal foglio. Al login si manda QUELLO, non 'todos': la casa la dice
+  // il foglio usuarios, non il frente cliccato. Se manca (nome digitato a mano)
+  // si manda 'todos' e il GAS AUTH risolve per nome (ramo aggiunto lo stesso
+  // giorno). Additivo: con un locale preciso non cambia nulla.
+  function localParaGAS() {
+    if (CFG.local === 'todos' && seleccion && seleccion.local) return seleccion.local;
+    return CFG.local;
+  }
   var pinBuffer = '';      // cifre PIN digitate
   var modo = 'login';      // 'login' | 'set_pin'
   var pinTmp = '';         // primo PIN durante set_pin (per la conferma)
@@ -282,7 +299,10 @@
       // negli hub locali, accettiamo sessione del locale O sessione corporate (*)
       // v1.8: un'app trasversale (CFG.local='*') accetta sessioni di QUALSIASI scope —
       // il "chi vede cosa" lo applica l'app; qui si valida solo l'identità.
-      if (!modoPortal && CFG.local !== '*' && s.local !== '*' && s.local !== CFG.local) return null;
+      // v1.11 · 'todos' (la torre) accetta la sessione di QUALSIASI locale: è la
+      // pagina che chiede solo CHI SEI — il «dove puoi andare» lo applica la torre.
+      if (!modoPortal && CFG.local !== '*' && CFG.local !== 'todos' &&
+          s.local !== '*' && s.local !== CFG.local) return null;
       if (!s.expiresAt || s.expiresAt < Date.now()) {   // scaduta
         localStorage.removeItem(SESSION_KEY);
         return null;
@@ -578,7 +598,7 @@
     if (modo === 'set_pin') return manejarSetPin();
     bloquear(true);
     llamarGAS({
-      accion: 'login', local: CFG.local, nombre: seleccion.nombre,
+      accion: 'login', local: localParaGAS(), nombre: seleccion.nombre,
       pin: pinBuffer, dispositivo: navigator.userAgent.slice(0, 60)
     }).then(function (res) {
       bloquear(false);
@@ -632,7 +652,7 @@
     modo = 'login';                       // esce dalla modalita' set_pin subito
     pinBuffer = ''; pinTmp = '';
     llamarGAS({
-      accion: 'set_pin', local: CFG.local,
+      accion: 'set_pin', local: localParaGAS(),
       nombre: seleccion.nombre, pin_nuevo: pinElegido
     }).then(function (res) {
       bloquear(false);
