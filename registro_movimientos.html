@@ -538,7 +538,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v74 · 04ago</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v75 · 04ago</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -3427,6 +3427,122 @@ function mapaUOaUTM(sku, qUO){
 // ============================================================================
 function _mapaItemKey(it){ return (it && it.sku!=null ? String(it.sku) : '') + '||' + ((it && (it.label||it.nombre)) || ''); }
 function _mapaContKey(estCode, casilla){ return estCode + '|' + (casilla||''); }
+
+// ════════════════════════════════════════════════════════════════════════
+//  ＋ FALTA ALGO AQUÍ  ·  v75 (04-ago · decisión de Alberto)
+//  El giro dice qué buscar. Hasta hoy, lo que estaba en la barra y NO estaba
+//  en la lista no se contaba **y nadie se enteraba**: ni un rastro de que
+//  alguien lo vio. Con Riesco, tras meses, era raro; con un giro recién
+//  nacido (CDL hoy, EXO y BKS esta semana) es lo normal las primeras semanas.
+//
+//  Por qué esto y NO el lector de códigos: en el Mapa nunca hay que preguntar
+//  «¿qué producto es?» — el Mapa ya lo dice. Y lo que más se sale del giro en
+//  un café es justo lo que NUNCA tendrá código: 45 de las 114 filas de CDL son
+//  granel (fruta, verdura, polvos), recetas 5xxx hechas en casa, o aún sin
+//  ficha. El lector contestaría por los envases sellados — la mitad que ya
+//  está en la lista.
+//
+//  Lo añadido es COMPARTIDO por local: viaja dentro del mismo blob JSON de
+//  MAPA_ORDEN (el GAS lo guarda opaco) → lo que encuentra el OP en su turno
+//  lo ve el Jefe en su teléfono. Así el giro deja de ser una lista escrita
+//  una vez y aprende: el Jefe abre el candado, mira lo que aparecieron y
+//  decide si se queda.
+// ════════════════════════════════════════════════════════════════════════
+var MAPA_EXTRAS = [];   // [{est, cont, sku, label, por, ts}]
+
+// idempotente: mete en el giro vivo lo añadido que aún no esté. Se llama al
+// pintar, así sobrevive a repintados, a reordenar y al blob que llega del GAS.
+function mapaInyectarExtras(){
+  if (!MAPA_EXTRAS || !MAPA_EXTRAS.length) return;
+  MAPA_EXTRAS.forEach(function(x){
+    var est = GIRO_RIESCO.filter(function(e){ return e.code === x.est; })[0];
+    if (!est) return;
+    var arr = null;
+    if (!x.cont) { est.items = est.items || []; arr = est.items; }
+    else if (est.sub) {
+      var k = parseInt(String(x.cont).slice(1), 10);
+      if (est.sub[k]) { est.sub[k].items = est.sub[k].items || []; arr = est.sub[k].items; }
+    }
+    if (!arr) return;
+    if (arr.some(function(it){ return String(it.sku) === String(x.sku); })) return;   // ya está
+    var v = (typeof skuItem === 'function') ? skuItem(x.sku) : null;
+    arr.push({ sku: String(x.sku), label: x.label,
+               nombre: (v && v.nombre) || x.label, extra: true });
+  });
+}
+
+function mapaExtraAgregar(estCode, cont, sku, label){
+  if (!sku) return;
+  var ya = MAPA_EXTRAS.some(function(x){
+    return x.est===estCode && (x.cont||'')===(cont||'') && String(x.sku)===String(sku); });
+  if (!ya) {
+    MAPA_EXTRAS.push({ est:estCode, cont:cont||'', sku:String(sku), label:label||'',
+                       por: (OPERADOR||''), ts: new Date().toISOString().slice(0,10) });
+    mapaGuardarOrden();          // mismo camino que el orden: local + GAS compartido
+  }
+  pintarMapa();
+}
+
+function mapaExtraQuitar(estCode, cont, sku){
+  MAPA_EXTRAS = MAPA_EXTRAS.filter(function(x){
+    return !(x.est===estCode && (x.cont||'')===(cont||'') && String(x.sku)===String(sku)); });
+  // lo saca también del giro vivo (el inyector no borra, solo añade)
+  var est = GIRO_RIESCO.filter(function(e){ return e.code === estCode; })[0];
+  if (est) {
+    var arr = !cont ? est.items : (est.sub && est.sub[parseInt(String(cont).slice(1),10)] || {}).items;
+    if (arr) {
+      for (var i = arr.length - 1; i >= 0; i--)
+        if (arr[i].extra && String(arr[i].sku) === String(sku)) arr.splice(i, 1);
+    }
+  }
+  try { delete MAPA_CONTEO[String(sku)]; mapaConteoGuardar(); } catch(e){}
+  mapaGuardarOrden();
+  pintarMapa();
+}
+
+// el buscador: sobre el catálogo ya cargado en el aparato (el «BD✓ nnn» de arriba)
+function abrirPickerExtra(estCode, cont, donde){
+  var old = document.getElementById('pickerExtra'); if (old) old.remove();
+  var d = document.createElement('div'); d.id = 'pickerExtra';
+  d.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:95;display:flex;align-items:flex-end;justify-content:center';
+  d.innerHTML =
+    '<div style="background:var(--panel);width:100%;max-width:560px;border-radius:16px 16px 0 0;padding:16px 14px 18px;max-height:82vh;display:flex;flex-direction:column">'+
+      '<div style="font-weight:800;color:var(--ink);font-size:17px">¿Qué encontraste aquí?</div>'+
+      '<div style="font-size:12px;color:var(--ink-soft);margin:2px 0 12px">'+esc(donde)+' · búscalo y tócalo. Si no está, avísale a tu Jefe de Local.</div>'+
+      '<input id="pkExtraQ" placeholder="Escribe el nombre…" autocomplete="off" '+
+        'style="width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:16px;margin-bottom:10px">'+
+      '<div id="pkExtraLista" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>'+
+      '<button id="pkExtraCanc" style="width:100%;padding:11px;margin-top:10px;border:none;background:none;color:var(--ink-soft);font-size:14px;cursor:pointer">Cancelar</button>'+
+    '</div>';
+  document.body.appendChild(d);
+  d.onclick = function(e){ if (e.target === d) d.remove(); };
+  document.getElementById('pkExtraCanc').onclick = function(){ d.remove(); };
+
+  var inp = document.getElementById('pkExtraQ'), lista = document.getElementById('pkExtraLista');
+  function nrm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); }
+  function pinta(){
+    var q = nrm(inp.value).trim();
+    var base = (typeof VOCAB !== 'undefined' && VOCAB.length) ? VOCAB : [];
+    var res = (q.length < 2) ? [] : base.filter(function(v){
+      if (!v.sku) return false;
+      if (nrm(v.nombre).indexOf(q) >= 0) return true;
+      return (v.alias||[]).some(function(a){ return nrm(a).indexOf(q) >= 0; });
+    }).slice(0, 25);
+    if (q.length < 2) { lista.innerHTML = '<div style="padding:18px 4px;color:var(--ink-soft);font-size:13px">Escribe al menos dos letras.</div>'; return; }
+    if (!res.length) { lista.innerHTML = '<div style="padding:18px 4px;color:var(--ink-soft);font-size:13px">No encontré nada con «'+esc(inp.value)+'».<br>Cuéntaselo a tu Jefe de Local: puede que aún no esté fichado.</div>'; return; }
+    lista.innerHTML = res.map(function(v){
+      return '<button class="pkx" data-sku="'+esc(v.sku)+'" data-nom="'+esc(v.nombre)+'" '+
+        'style="width:100%;text-align:left;padding:12px 10px;margin-bottom:6px;border:1px solid var(--line);border-radius:10px;background:var(--bg);cursor:pointer">'+
+        '<div style="color:var(--ink);font-size:14.5px;font-weight:500">'+esc(v.nombre)+'</div>'+
+        '<div style="color:var(--ink-soft);font-size:11.5px;margin-top:2px">#'+esc(v.sku)+(v.uo?(' · '+esc(v.uo)):'')+'</div></button>';
+    }).join('');
+    lista.querySelectorAll('.pkx').forEach(function(b){
+      b.onclick = function(){ mapaExtraAgregar(estCode, cont, b.dataset.sku, b.dataset.nom); d.remove(); };
+    });
+  }
+  inp.oninput = pinta; pinta();
+  setTimeout(function(){ try{ inp.focus(); }catch(e){} }, 60);
+}
 function _mapaSwap(arr,i,j){ var t=arr[i]; arr[i]=arr[j]; arr[j]=t; }
 
 // contenedor de items de una estación: ''→est.items ; 's'+k→est.sub[k].items
@@ -3438,7 +3554,7 @@ function _mapaContArr(est, contKey){
 
 // snapshot del orden actual → objeto persistible
 function mapaOrdenActual(){
-  var o = { v:1, estaciones:[], items:{} };
+  var o = { v:1, estaciones:[], items:{}, extras: MAPA_EXTRAS };   // v75 · lo añadido viaja con el orden
   GIRO_RIESCO.forEach(function(est){
     o.estaciones.push(est.code);
     if (est.items) o.items[_mapaContKey(est.code,'')] = est.items.map(_mapaItemKey);
@@ -3463,6 +3579,8 @@ function _mapaOrdArr(arr, keyList){
 // aplica un orden guardado sobre GIRO_RIESCO (in place)
 function mapaAplicarOrden(o){
   if (!o) return;
+  // v75 · lo añadido llega antes de ordenar, así entra en el orden como uno más
+  if (o.extras && o.extras.length) { MAPA_EXTRAS = o.extras; mapaInyectarExtras(); }
   if (o.estaciones && o.estaciones.length){
     var ep={}; o.estaciones.forEach(function(c,i){ if(ep[c]===undefined) ep[c]=i; });
     GIRO_RIESCO.forEach(function(est,i){ est.__i=i; });
@@ -3621,6 +3739,7 @@ function cerrarMapa(){
 
 function pintarMapa(){
   var body=document.getElementById('mapaBody'); if(!body) return;
+  mapaInyectarExtras();   // v75 · idempotente: lo añadido entra antes de dibujar
   var html='';
   // v67 · CODICE VISIVO (PATTERN_CODICE_VISIVO_CONTEO_29JUL2026): la lezione dei
   // due colori vive UNA volta, in testa al giro — non si ripete per fila.
@@ -3658,6 +3777,16 @@ function pintarMapa(){
   });
   body.innerHTML = html;
 
+  // v75 · «＋ falta algo aquí» y la ✕ del Jefe sobre lo añadido
+  body.querySelectorAll('.mapa-falta').forEach(function(b){
+    b.onclick=function(e){ e.stopPropagation();
+      abrirPickerExtra(b.dataset.est, b.dataset.cont, b.dataset.donde); };
+  });
+  body.querySelectorAll('.mapa-extra-x').forEach(function(b){
+    b.onclick=function(e){ e.stopPropagation();
+      if (confirm('¿Quitar este producto del giro?\n\nSe quita solo de la lista; lo ya registrado no se toca.'))
+        mapaExtraQuitar(b.dataset.est, b.dataset.cont, b.dataset.sku); };
+  });
   // toggle acordeón
   body.querySelectorAll('.mapa-est-head').forEach(function(b){
     b.onclick=function(){
@@ -3791,7 +3920,11 @@ function pintarItemsEstacion(est, estIdx){
       : '<input class="mapa-q" data-sku="'+esc(sku)+'" type="number" inputmode="decimal" step="'+step+'" value="'+esc(cur!=null?String(cur):'')+'" style="width:76px;'+stS+inpSt+'" placeholder="0">';
     html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line-soft,rgba(0,0,0,.05));'+(i%2?'background:rgba(26,29,35,.035);':'')+'">'+
       '<div style="flex:1;min-width:0">'+
-        '<div style="font-size:14px;color:var(--ink);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nombre)+'</div>'+
+        '<div style="font-size:14px;color:var(--ink);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nombre)+
+          // v75 · lo añadido se ve: el Jefe abre el candado y decide si se queda
+          (it.extra ? '<span style="margin-left:7px;font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);border-radius:20px;padding:1px 6px;vertical-align:middle">añadido</span>' : '')+
+          (it.extra && MAPA_EDIT ? '<span class="mapa-extra-x" data-est="'+esc(est.code)+'" data-cont="'+esc(contKey)+'" data-sku="'+esc(sku)+'" title="Quitar del giro" style="margin-left:8px;color:#C0392B;font-weight:800;cursor:pointer;padding:0 4px">✕</span>' : '')+
+        '</div>'+
         '<div style="font-size:11px;color:var(--ink-soft)">'+(uo?esc(uo)+' · ':'')+esc(hint)+(casilla?(' · '+esc(casilla)):'')+'</div>'+
       '</div>'+
       (MAPA_EDIT
@@ -3808,11 +3941,24 @@ function pintarItemsEstacion(est, estIdx){
             '</div>'))+
     '</div>';
   }
+  // v75 · «＋ falta algo aquí» al final de CADA contenedor: así no hay que
+  // preguntar a qué cajón pertenece — lo dice el sitio donde se tocó.
+  // En modo reordenar no aparece: ahí se mueve, no se cuenta.
+  function btnFalta(cont, donde){
+    if (MAPA_EDIT) return '';
+    return '<div style="padding:6px 14px 12px">'+
+      '<button class="mapa-falta" data-est="'+esc(est.code)+'" data-cont="'+esc(cont)+'" data-donde="'+esc(donde)+'" '+
+      'style="width:100%;padding:11px;border:1px dashed var(--line);border-radius:10px;background:transparent;'+
+      'color:var(--ink-soft);font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit">'+
+      '＋ Falta algo aquí</button></div>';
+  }
   if (est.items){ est.items.forEach(function(it,i){ fila(it, null, '', i); }); }
+  html += btnFalta('', est.nom);
   if (est.sub){
     est.sub.forEach(function(c,k){
       html += '<div style="padding:6px 14px;background:var(--bg);font-size:11px;font-weight:600;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.3px">'+esc(c.casilla)+'</div>';
       (c.items||[]).forEach(function(it,i){ fila(it, null, 's'+k, i); });
+      html += btnFalta('s'+k, est.nom+' · '+c.casilla);
     });
   }
   return html;
