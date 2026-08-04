@@ -16,7 +16,8 @@
 <link rel="apple-touch-icon" sizes="120x120" href="atalaya_icon_120.png">
 <link rel="manifest" href="manifest.webmanifest">
 <title>ATALAYA</title>
-<!-- ver: atalaya v3.2 · 03ago · vuelve la puerta del mesero (sin sesión, sobre el overlay del PIN):
+<!-- ver: atalaya v3.3 · 03ago · la puerta de Backstage: su equipo no esta en usuarios, sus apps tienen cerradura propia ·
+     v3.2 · 03ago · vuelve la puerta del mesero (sin sesión, sobre el overlay del PIN):
      los meseros no están en usuarios y se quedaban delante de un PIN imposible — regresión de v3.0 ·
      v3.1 · el chip negro dice UNA cosa: «existe y no es tuyo» ·
      el placeholder de local futuro ya no se pinta negro (mentía a quien ve todo) ·
@@ -127,6 +128,10 @@
   .mesero-top a:active{opacity:.9}
   .mesero-top .sub{max-width:560px;margin:6px auto 0;text-align:center;
     font-size:11.5px;color:var(--ink3)}
+  /* v3.3 · la segunda puerta sin PIN: el equipo de Backstage (JL/Bar Manager,
+     anfitriona) tampoco está en `usuarios` — sus apps tienen cerradura propia. */
+  .mesero-top a.alt{background:transparent;color:var(--oro);border:1px solid var(--oro);
+    margin-top:8px;font-size:13.5px;font-weight:600;padding:10px 14px}
 
   .foot{text-align:center;color:var(--ink3);font-size:11px;letter-spacing:1px;margin-top:32px}
   .foot .owl{color:var(--oro)}
@@ -159,6 +164,7 @@
   <div class="mesero-top" id="puertaMesero">
     <a href="mesero.html">🛎 ¿Eres mesero? · Entra aquí</a>
     <div class="sub">Tu app de sala. Entras con el código del turno, sin PIN.</div>
+    <a class="alt" href="#" id="puertaBks">🍸 ¿Trabajas en Backstage? · Sala y menú</a>
   </div>
 
   <!-- la barra vive fuera de los pasos: siempre hay salida -->
@@ -249,8 +255,11 @@
           d:'Donde nacen las recetas: crear, costear, activar. Mejor en PC o tablet.', roles:'CC,GO,GC,GG' }
       ];
       if (f.tipo === 'bks') return [
+        // soloConSesion: escribe en el libro mastro → necesita una firma. El resto
+        // de las puertas de BKS traen su propia cerradura (código de turno o PIN
+        // del panel) y por eso se abren sin el PIN del portal (v3.3).
         { g:'Operación', href:'registro_movimientos.html'+loc, t:'Registro de movimientos',
-          d:'Entregas, ingresos, ajustes e inventario de la barra.', roles:TODOS_OPERACION },
+          d:'Entregas, ingresos, ajustes e inventario de la barra.', roles:TODOS_OPERACION, soloConSesion:true },
         { g:'La sala', href:'mesero.html', t:'🛎 Mesero',
           d:'Tu plaza, tus pedidos, tu campanilla. Entras con el código del turno.', roles:'JL,GO,GC,GG' },
         { g:'La sala', href:'anfitriona.html', t:'👋 Anfitriona · Puerta',
@@ -307,6 +316,11 @@
     }
     function puertasAbiertas(f, rol) {
       return puertasDe(f).filter(function(p){ return rolPuede(p.roles, rol); });
+    }
+    // v3.3 · sin sesión (equipo de Backstage, que no está en `usuarios`): se
+    // muestran las puertas con cerradura propia. Nada que escriba en el libro.
+    function puertasSinSesion(f) {
+      return puertasDe(f).filter(function(p){ return !p.soloConSesion; });
     }
     // 🔑 REGLA: NINGÚN CHIP SIN CUARTO. Un chip encendido que abre una sala
     // vacía es otro callejón sin salida — el bug B con otra cara. Un sitio es
@@ -395,8 +409,8 @@
 
     // ── PINTAR LAS PUERTAS DE UN FRENTE ──────────────────────────────
     function entrar(f, ses, esUnico) {
-      var rol = String(ses.role || '').toUpperCase();
-      var abiertas = puertasAbiertas(f, rol);
+      var rol = ses ? String(ses.role || '').toUpperCase() : '';
+      var abiertas = ses ? puertasAbiertas(f, rol) : puertasSinSesion(f);
 
       var html = '', grupo = '';
       abiertas.forEach(function(p){
@@ -424,8 +438,10 @@
       try { localStorage.setItem('pinsita_ident', f.scope); } catch(e) {}
 
       ver('paso-login', false); ver('paso-chips', false); ver('paso-salas', true);
-      // «Cambiar local» sólo tiene sentido si de verdad tienes más de uno
-      gid('btnCambiar').classList.toggle('hidden', !!esUnico);
+      // sin sesión (Backstage) no hay chips detrás: sólo se vuelve a la portada
+      var pm = gid('puertaMesero'); if (pm) pm.style.display = 'none';
+      gid('barra').classList.toggle('hidden', !ses);
+      gid('btnCambiar').classList.toggle('hidden', !ses || !!esUnico);
       gid('btnVolver').classList.toggle('hidden', !!esUnico);
     }
 
@@ -444,8 +460,27 @@
       var s = sesion(); if (s) pintarChips(s);
     });
     gid('btnVolver').addEventListener('click', function(){
-      var s = sesion(); if (s) pintarChips(s);
+      var s = sesion();
+      if (s) { pintarChips(s); return; }
+      // v3.3 · sin sesión se vuelve a la portada, no a una grilla que no es suya
+      ver('paso-salas', false); ver('paso-chips', false); ver('paso-login', true);
+      var pm = gid('puertaMesero'); if (pm) pm.style.display = 'block';
     });
+
+    // v3.3 · LA PUERTA DE BACKSTAGE (sin PIN del portal)
+    // El equipo de sala de BKS —JL/Bar Manager incluido— NO está en `usuarios`:
+    // el foglio sólo tiene los 6 corporate. Hasta la v3.0 ese frente era
+    // `linksOnly` y sus puertas se abrían sin login, porque cada app trae su
+    // cerradura (código de turno o PIN del panel). Al invertir el orden lo dejé
+    // fuera. Esto lo devuelve.
+    (function(){
+      var b = gid('puertaBks'); if (!b) return;
+      b.addEventListener('click', function(ev){
+        ev.preventDefault();
+        var fb = FRENTES.filter(function(f){ return f.scope === 'bks'; })[0];
+        if (fb) entrar(fb, null);
+      });
+    })();
 
     function sesion(){
       try { return (window.PinsitaAuth && PinsitaAuth.sesion) ? PinsitaAuth.sesion() : null; }
