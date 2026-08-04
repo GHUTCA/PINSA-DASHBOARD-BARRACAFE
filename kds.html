@@ -285,7 +285,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.19 · la ficha del pass: Ver / Despachado en el chip del runner · 01ago</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.20 · el último peldaño: la foto vieja del borde cuando Google no abre · 04ago</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -580,6 +580,12 @@ async function staffPost(action, body) {
 }
 
 async function leerKds(codigo, estacion) {
+  /* v1.20 · L'ULTIMO GRADINO (caso Ray, 04-ago, stessa cura di mesero v3.8):
+     durante una raffica di Google la foto invecchia oltre MAX_EDAD e veniva
+     scartata — e il ripiego GAS moriva sulla stessa raffica. La foto vecchia
+     ora è la riserva: la cucina vede la sala di qualche minuto fa (con i tap
+     del bordo già dentro, via eco) invece di uno schermo cieco. */
+  let fotoVieja = null;
   if (BORDE.ON && BORDE.fallos < 3) {
     try {
       const u = BORDE.URL + '/estado/' + encodeURIComponent(CFG.LOCAL)
@@ -594,21 +600,28 @@ async function leerKds(codigo, estacion) {
       // Un código equivocado es una respuesta VÁLIDA del borde: se devuelve
       // tal cual, para que el tablet renueve el código como siempre.
       if (j && j.error === 'codigo_invalid') return { ok: false, error: 'codigo_invalid' };
-      if (r.ok && j && j.ok && j.datos && j.datos.datos && j.datos.datos.ok
-          && j.datos.edad_ms < BORDE.MAX_EDAD_MS) {
-        BORDE.fallos = 0;
-        return j.datos.datos;
+      if (r.ok && j && j.ok && j.datos && j.datos.datos && j.datos.datos.ok) {
+        if (j.datos.edad_ms < BORDE.MAX_EDAD_MS) {
+          BORDE.fallos = 0;
+          return j.datos.datos;
+        }
+        fotoVieja = j.datos.datos;
+        try { fotoVieja._vieja_s = Math.round(j.datos.edad_ms / 1000); } catch (e) {}
       }
       // ⚠️ VACÍO NO ES FALLO (bug encontrado antes de que doliera):
       // al abrir el turno el borde está vacío hasta la PRIMERA escritura.
       // Contándolo como fallo, tres polls en 20 segundos apagaban el borde
       // para todo el turno de esa tablet — justo cuando iba a servir.
-      // Vacío o viejo → esta vez al GAS, y se vuelve a intentar al siguiente.
-      if (r.ok) return await gasGet('getKds', { codigo, estacion });
-      BORDE.fallos++;   // esto sí es un fallo de verdad: HTTP roto
+      // Vacío o viejo → esta vez al GAS (aquí abajo), y se reintenta al siguiente.
+      else if (!r.ok) BORDE.fallos++;   // esto sí es un fallo de verdad: HTTP roto
     } catch (e) { BORDE.fallos++; }
   }
-  return await gasGet('getKds', { codigo, estacion });
+  try {
+    return await gasGet('getKds', { codigo, estacion });
+  } catch (e) {
+    if (fotoVieja) return fotoVieja;   // l'ultimo gradino: un fallo del GAS non è del bordo
+    throw e;
+  }
 }
 
 async function poll(){
