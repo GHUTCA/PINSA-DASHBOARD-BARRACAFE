@@ -80,6 +80,8 @@
   .offline{background:rgba(224,82,82,.12);border:1px solid var(--bad);color:var(--bad);
     border-radius:10px;padding:8px 12px;font-size:12px;margin:8px 0;display:none}
   .offline.show{display:block}
+  /* v3.8 · ultimo gradino: foto vecchia = ambra (si vede), non rosso (cieco) */
+  .offline.vieja{background:rgba(224,164,32,.14);border-color:#d29a22;color:#d29a22}
   .camp-banner{background:rgba(46,166,218,.10);border:1px solid rgba(46,166,218,.4);border-radius:14px;
     padding:12px 14px;margin:10px 0;font-size:13px;color:var(--t2);line-height:1.5}
   .h{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin:18px 2px 8px}
@@ -404,7 +406,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v3.7 · menos taps: auto-asignación · POR DIGITAR · todo-en-uno · campana grande · 02ago</span>
+    <span class="ver" id="ver">v3.8 · el último peldaño: la foto vieja del borde cuando Google no abre (caso Ray) · 04ago</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -670,6 +672,13 @@ async function staffPost(action, body) {
 async function leerSala(codigo, nombre) {
   // v3.2 · lockout con respiro: 3 fallos = pausa di 90s, non una condanna
   if (BORDE_SALA.fallos >= 3 && Date.now() - BORDE_SALA.fallosTs > 90000) BORDE_SALA.fallos = 0;
+  /* v3.8 · L'ULTIMO GRADINO (caso Ray, 04-ago 15:40-15:47): durante una
+     raffica di Google la foto del bordo invecchia oltre MAX_EDAD e veniva
+     SCARTATA — e il ripiego GAS moriva sulla stessa raffica. Risultato:
+     l'app teneva in mano una sala buona-ma-vecchia e mostrava il rosso.
+     Ora la foto vecchia si CONSERVA e, se anche il GAS non risponde, si
+     usa lei con l'età dichiarata: vecchio ma vivo batte fresco ma morto. */
+  let fotoVieja = null;
   if (BORDE_SALA.ON && BORDE_SALA.fallos < 3) {
     try {
       const u = BORDE_SALA.URL + '/estado/' + encodeURIComponent(CFG.LOCAL || 'BKS')
@@ -682,16 +691,23 @@ async function leerSala(codigo, nombre) {
       const j = await r.json();
       // codigo sbagliato = risposta VALIDA: il giro dei 3-strikes resta quello di sempre
       if (j && j.error === 'codigo_invalid') return { ok: false, error: 'codigo_invalid' };
-      if (r.ok && j && j.ok && j.datos && j.datos.datos && j.datos.datos.ok
-          && j.datos.edad_ms < BORDE_SALA.MAX_EDAD_MS) {
+      if (r.ok && j && j.ok && j.datos && j.datos.datos && j.datos.datos.ok) {
         const mia = (j.datos.datos.meseros || {})[_slugSalaJS(nombre)];
-        if (mia && mia.ok) { BORDE_SALA.fallos = 0; return mia; }
+        if (mia && mia.ok) {
+          if (j.datos.edad_ms < BORDE_SALA.MAX_EDAD_MS) { BORDE_SALA.fallos = 0; return mia; }
+          fotoVieja = mia; fotoVieja._vieja_s = Math.round(j.datos.edad_ms / 1000);
+        }
         // il mio nombre non c'è nella foto (appena entrato, fila non ancora
         // scritta): non è un guasto del bordo — si chiede al GAS e basta
       } else if (!r.ok) { BORDE_SALA.fallos++; }
     } catch (e) { BORDE_SALA.fallos++; }
   }
-  return await gasGet('getSalaMesero', { codigo: codigo, nombre: nombre });
+  try {
+    return await gasGet('getSalaMesero', { codigo: codigo, nombre: nombre });
+  } catch (e) {
+    if (fotoVieja) { BORDE_SALA.fallos = 0; return fotoVieja; }   // l'ultimo gradino
+    throw e;
+  }
 }
 
 async function gasGet(action, params) {
@@ -1821,7 +1837,19 @@ async function refrescar(conSkeleton) {
       if (mine || _tn - STATE.tomando[u] > (BORDE_W.ok[u] ? 180000 : 12000)) delete STATE.tomando[u];
     });
     STATE.pollFallos = 0;   // v2.14 · risposta buona = contatore azzerato
-    $('offline').classList.remove('show');
+    // v3.8 · ultimo gradino: la foto è vecchia ma la sala si vede — banner
+    // ambra con l'età, non il rosso (il rosso dice «non vedo», questo dice
+    // «vedo com'era X minuti fa e i tuoi gestos igual quedan guardados»)
+    if (r._vieja_s) {
+      const _of = $('offline');
+      _of.textContent = '📷 Sala de hace ' + Math.max(1, Math.round(r._vieja_s / 60)) +
+        ' min — Google no contesta. Tus gestos igual quedan guardados.';
+      _of.classList.add('show', 'vieja');
+    } else {
+      const _of = $('offline');
+      _of.classList.remove('show', 'vieja');
+      _of.textContent = 'Sin conexión — mostrando lo último recibido. Reintento solo.';
+    }
     detectarNuevos(r);   // v1.4 · doble campana su arrivi nuovi
     render(r);
   } catch (e) {

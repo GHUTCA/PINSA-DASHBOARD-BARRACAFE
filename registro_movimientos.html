@@ -538,7 +538,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v75 · 03ago</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v76 · el último peldaño del borde (caso Ray) · 04ago</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -3249,25 +3249,35 @@ async function _bordeLee(payload){
     if (tid) clearTimeout(tid);
     var j = await r.json();
     if (!r.ok || !j || !j.ok || !j.datos || !j.datos.datos || !j.datos.datos.ok) return null;  // vuoto ≠ guasto (lezione kds v1.16)
-    if (j.datos.edad_ms >= BORDE_REG.MAX_EDAD_MS) return null;         // ranci → al GAS
     BORDE_REG.fallos = 0;
-    var d = j.datos.datos;
+    var d = j.datos.datos, res;
     if (payload.action === 'getMisMovimientosHoy') {
       var resp = String(payload.responsable||'').trim();
       var miei = (d.movimientos||[]).filter(function(m){ return m.responsable === resp; })
         .map(function(m){ var o={}; for(var k in m){ if(k!=='responsable') o[k]=m[k]; } return o; })
         .slice(0, 60);
-      return { ok: true, movimientos: miei };
+      res = { ok: true, movimientos: miei };
+    } else { res = d; }
+    /* v76 · l'ultimo gradino (caso Ray, 04-ago): la foto vecchia non si butta
+       più — si consegna a callGAS come riserva. Se il GAS poi risponde, vince
+       lui come sempre; se muore nella stessa raffica, meglio la sala di 10
+       minuti fa che l'errore. */
+    if (j.datos.edad_ms >= BORDE_REG.MAX_EDAD_MS) {
+      try { res._vieja_s = Math.round(j.datos.edad_ms/1000); } catch(e){}
+      return { vieja: res };
     }
-    return d;
+    return { fresca: res };
   } catch(e) { BORDE_REG.fallos++; return null; }
 }
 
 async function callGAS(payload, timeoutMs, urlOverride){
   // v66 · le tre letture dell'apertura provano prima il bordo; null → GAS di sempre
+  // v76 · e la foto vecchia del bordo è la riserva se il GAS muore (ultimo gradino)
+  var _vieja = null;
   if (!urlOverride && payload && BORDE_REG.SECS[payload.action]) {
     var deBorde = await _bordeLee(payload);
-    if (deBorde) return deBorde;
+    if (deBorde && deBorde.fresca) return deBorde.fresca;
+    if (deBorde && deBorde.vieja) _vieja = deBorde.vieja;
   }
   var ctl=(typeof AbortController!=='undefined')?new AbortController():null;
   var tid=ctl?setTimeout(function(){ try{ctl.abort();}catch(e){} }, timeoutMs||12000):null;
@@ -3278,9 +3288,10 @@ async function callGAS(payload, timeoutMs, urlOverride){
     // v46: respuesta no-JSON = endpoint roto (login Google, error HTML…) →
     // ok:false y el lote QUEDA EN COLA. El viejo fallback {ok:true} marcaba
     // lotes como enviados sin haber escrito nada (footgun descubierto 10-jul).
-    try{return JSON.parse(t);}catch(e){return {ok:false,error:'respuesta no-JSON del endpoint'};}
+    try{return JSON.parse(t);}catch(e){ if(_vieja) return _vieja; return {ok:false,error:'respuesta no-JSON del endpoint'};}
   }catch(e){
     _gasDownHasta=Date.now()+25000;
+    if(_vieja) return _vieja;   // vecchio ma vivo batte fresco ma morto
     return {ok:false,error:e.toString()};
   }finally{ if(tid)clearTimeout(tid); }
 }
