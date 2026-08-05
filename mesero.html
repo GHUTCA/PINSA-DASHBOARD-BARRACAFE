@@ -406,7 +406,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v3.10 · MODS2 en la comandera: el modificador con PRECIO que suma (flag ?mods2=1, apagado) · el peldaño sin espera: la sombra en mano, sin fila ante una puerta muerta · 05ago</span>
+    <span class="ver" id="ver">v3.11 · la PAREJA del 2x1: la segunda unidad es una COSA (pagada + regalo, cada una con su preparación y su extra cobrado) · MODS2 en la comandera: el modificador con PRECIO que suma (flag ?mods2=1, apagado) · 05ago</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1450,7 +1450,9 @@ function _cmLinea(l){
       return m.o + (m.d ? ' +'+fmtPrice(m.d) : ''); }).join(' · '))+'</span>');
   } else if(l.op) notas.push('<span class="mk">'+esc(l.op)+'</span>');
   if(l.es_menu && !l.precio) notas.push('<span class="mk">bebida del menú · $0 · tkt a barra</span>');
-  if(l.promo==='2x1') notas.push('<span class="pm">🎁 pagas '+l.qty+' · llevas '+(l.qty*2)+'</span>');
+  // v3.11 · la pareja si dice per quello che è: pagata e regalo, ognuna col suo
+  if(l.dupla) notas.push('<span class="pm">'+(l.regalo2x1 ? '🎁 2x1 · unidad de REGALO · se cobra sólo el extra' : '🎁 2x1 · unidad pagada')+'</span>');
+  else if(l.promo==='2x1') notas.push('<span class="pm">🎁 pagas '+l.qty+' · llevas '+(l.qty*2)+'</span>');
   if(l.pri) notas.push('<span class="pm">⬆ primero — sale ya</span>');
   const borra = l.qty===1 ? '1' : '0';
   return '<div class="cm-ln'+(l.k===n.ultima?' nueva':'')+'">'+
@@ -1503,6 +1505,15 @@ function _cmPregHtml(){
    PRIMA di confermare. Raggiunto il tetto di classe, i chip di quella classe
    si SPENGONO e la scheda dice perché (mai un alert dopo il tocco). */
 function _cmPregG2Html(e){
+  // v3.11 · la domanda della PAREJA: chiusa la 1ª unità del 2x1, la 2ª parla
+  if(e.pareja){
+    return '<div class="cm-preg"><div class="cm-preg-h"><b>'+esc(e.nombre)+' · 🎁 2ª unidad (regalo)</b>'+
+      '<span class="q">¿igual?</span>'+
+      '<button class="no" onclick="nuevoCancelarPreg()" aria-label="dejarlo">✕</button></div>'+
+      '<div class="cm-preg-o">'+
+        '<button style="font-weight:800" onclick="mods2Pareja(true)">Igual ✓</button>'+
+        '<button onclick="mods2Pareja(false)">Distinta…</button></div></div>';
+  }
   const gr = e.g2[e.gi];
   const p  = (STATE.catalogo||[]).find(function(x){ return x.id===e.id; });
   const base = p ? p.precio : 0;
@@ -1555,8 +1566,52 @@ function _mods2Avanza(elegidos){
   e.sel = {}; e.gi++;
   if(e.gi < e.g2.length){ _cmRedibujar(); return; }
   const p = (STATE.catalogo||[]).find(function(x){ return x.id===e.id; });
-  if(p) _cmPoner(p, e.mods.map(function(m){ return m.o; }).join(' · '), e.n, null, e.mods);
+  /* v3.11 · LA PAREJA DEL 2x1 (Alberto, 05-ago sera): «un 2x1 NON è uno
+     sconto del 50%» — e perché resti vero, la seconda unità deve essere una
+     COSA, non un numero dentro `llevar`. Su un prodotto 2x1 (q=1) le domande
+     chiudono la 1ª unità e la scheda chiede: ¿la 2ª igual o distinta?
+     → DUE righe: la pagata (base+extra) e il regalo ($0 + il SUO extra —
+     «certo che si paga un extra su un 2x1», risposta §10.1 della spec).
+     Con q>1 il giro resta quello di oggi (una prep per tutte): il caso
+     «2 schop, 4 unità, preparazioni miste» si fa un paio alla volta. */
+  if(p && _cmEs2(p) && e.n === 1 && !e.pareja2){
+    if(!e.u1){ e.u1 = e.mods; e.mods = []; e.pareja = true; _cmRedibujar(); return; }
+  }
+  if(p && e.u1){ _cmPonerPareja(p, e.u1, e.mods); }
+  else if(p) _cmPoner(p, e.mods.map(function(m){ return m.o; }).join(' · '), e.n, null, e.mods);
   n.eligiendo = null; _cmRedibujar(); if(!n.cajon) _cmFoco('nuevoQ');
+}
+// la 2ª unità: igual = stessa preparazione copiata · distinta = si richiede
+function mods2Pareja(igual){
+  const n = STATE.nuevo, e = n && n.eligiendo; if(!e || !e.pareja) return;
+  e.pareja = false;
+  if(igual){
+    const p = (STATE.catalogo||[]).find(function(x){ return x.id===e.id; });
+    if(p) _cmPonerPareja(p, e.u1, e.u1.map(function(m){ return Object.assign({}, m); }));
+    n.eligiendo = null; _cmRedibujar(); if(!n.cajon) _cmFoco('nuevoQ');
+    return;
+  }
+  e.pareja2 = true; e.gi = 0; e.sel = {}; e.mods = [];   // secondo giro di domande
+  _cmRedibujar();
+}
+/* le due righe della pareja · agganciate da `dupla` (stesso id di coppia):
+   A = l'unità PAGATA (prezzo pieno + i suoi extra) · B = il REGALO ($0 di
+   base + i SUOI extra). Σ precio×qty resta vero, e il KDS produce due cose
+   distinte perché SONO due cose distinte. */
+function _cmPonerPareja(p, m1, m2){
+  const n = STATE.nuevo;
+  const d1 = (m1||[]).reduce(function(s,m){ return s+(m.d||0); },0);
+  const d2 = (m2||[]).reduce(function(s,m){ return s+(m.d||0); },0);
+  const par = 'd' + (++n.seq);
+  const A = { k:++n.seq, id:p.id, nombre:p.nombre, precio:p.precio + d1, qty:1,
+    cat:p.cat||'', op:(m1||[]).map(function(m){ return m.o; }).join(' · '), es_menu:false,
+    promo:'2x1', persona:n.pAct, pri:0, dupla:par, precio_base:p.precio };
+  if(m1 && m1.length) A.mods = m1;
+  const B = { k:++n.seq, id:p.id, nombre:p.nombre + ' · regalo 2x1', precio:d2, qty:1,
+    cat:p.cat||'', op:(m2||[]).map(function(m){ return m.o; }).join(' · '), es_menu:false,
+    promo:'2x1', persona:n.pAct, pri:0, dupla:par, regalo2x1:1, precio_base:0 };
+  if(m2 && m2.length) B.mods = m2;
+  n.lineas.push(A); n.lineas.push(B); n.ultima = B.k;
 }
 function mods2Elegir(i){ _mods2Avanza([i]); }
 function mods2Saltar(){ _mods2Avanza([]); }
@@ -1774,10 +1829,24 @@ function _cmPoner(p, op, q, bebNombre, mods){
   }
 }
 function nuevoMas(k){ const n=STATE.nuevo; if(!n) return;
-  const l=n.lineas.find(function(x){ return x.k===k; }); if(l){ l.qty++; n.ultima=k; _cmRedibujar(); } }
+  const l=n.lineas.find(function(x){ return x.k===k; }); if(!l) return;
+  // v3.11 · una pareja 2x1 è indivisibile: per averne un'altra si ripete il
+  // prodotto (altrimenti «pagas 2 · regalo 1» nasce da un + distratto)
+  if(l.dupla){ toast('warn','Es una pareja 2x1 — para otra, pide el producto de nuevo'); return; }
+  l.qty++; n.ultima=k; _cmRedibujar(); }
 function nuevoMenos(k){ const n=STATE.nuevo; if(!n) return;
   const i=n.lineas.findIndex(function(x){ return x.k===k; }); if(i<0) return;
-  n.lineas[i].qty--; if(n.lineas[i].qty<=0) n.lineas.splice(i,1);
+  const l=n.lineas[i];
+  // v3.11 · il − sulla PAGATA porta via la pareja intera (senza pagata non
+  // c'è regalo); il − sul REGALO toglie solo il regalo (il cliente ne vuole
+  // uno solo: paga la sua e rinuncia — v0 della «renuncia», si fossilizza col
+  // timer del sussurro, domani)
+  if(l.dupla && !l.regalo2x1){
+    const par=l.dupla;
+    n.lineas=n.lineas.filter(function(x){ return x.dupla!==par; });
+    _cmRedibujar(); return;
+  }
+  l.qty--; if(l.qty<=0) n.lineas.splice(i,1);
   _cmRedibujar(); }
 // v2.4 · ES ENTRADA: el ⬆ marca la línea que sale primero — hecho de la mesa
 function nuevoPri(k){ const n=STATE.nuevo; if(!n) return;
@@ -1820,7 +1889,8 @@ async function nuevoEnviar(btn) {
   // uuid FISSO dal primo intento: il retry non può mai duplicare (dedup GAS)
   if (!n.uuid) n.uuid = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   const items = n.lineas.map(function(l){
-    const es2 = l.promo === '2x1';
+    // v3.11 · la pareja è GIÀ due righe: niente «llevar doble» (sarebbero 4)
+    const es2 = l.promo === '2x1' && !l.dupla;
     // v2.13 · contrato v1.41 del cliente: qty=pagadas · llevar=a producir
     // v3 · `persona` es aditivo: Items_Json se guarda verbatim en el GAS, así
     // que la división de la cuenta se fossiliza desde hoy sin tocar el server
@@ -1833,7 +1903,11 @@ async function nuevoEnviar(btn) {
       // Fossile: i delta sono i vigenti AL MOMENTO della scrittura.
       mods: (l.mods && l.mods.length) ? l.mods.map(function(m){
         return { g:m.g, gn:m.gn, oid:m.oid, o:m.o, d:m.d, cl:m.cl }; }) : undefined,
-      precio_base: (l.mods && l.mods.length) ? l.precio_base : undefined };
+      precio_base: ((l.mods && l.mods.length) || l.dupla) ? l.precio_base : undefined,
+      // v3.11 · la pareja del 2x1 (ADDITIVO): `dupla` lega le due righe,
+      // `regalo2x1` marca l'unità regalata ($0 di base + il SUO extra).
+      // Domani il timer del sussurro leggerà da qui chi è ancora pendiente.
+      dupla: l.dupla || undefined, regalo2x1: l.regalo2x1 || undefined };
   });
   const total = _nuevoTotal();
   const body = { codigo: STATE.codigo, nombre: STATE.nombre, uuid: n.uuid, mesa: mesa, total: total, items_json: JSON.stringify(items) };
