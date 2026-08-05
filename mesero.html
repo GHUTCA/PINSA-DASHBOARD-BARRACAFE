@@ -406,7 +406,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v3.9 · el peldaño sin espera: la sombra en mano, sin fila ante una puerta muerta · 05ago</span>
+    <span class="ver" id="ver">v3.10 · MODS2 en la comandera: el modificador con PRECIO que suma (flag ?mods2=1, apagado) · el peldaño sin espera: la sombra en mano, sin fila ante una puerta muerta · 05ago</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -974,6 +974,7 @@ async function agregarAbrir(uuid) {
         STATE.catalogo = r.productos;
         STATE.catalogoTs = Date.now();
         STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
+        mods2Cargar();   // v3.10 · MODS2 · una lettura accanto al catalogo, mai un poll (no-op a flag spento)
         // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
         if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
       } else if (!STATE.catalogo) { STATE.catalogo = []; }
@@ -1081,6 +1082,7 @@ async function nuevoAbrir(mesaPre) {
         STATE.catalogo = r.productos;
         STATE.catalogoTs = Date.now();
         STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
+        mods2Cargar();   // v3.10 · MODS2 · una lettura accanto al catalogo, mai un poll (no-op a flag spento)
         // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
         if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
       } else if (!STATE.catalogo) { STATE.catalogo = []; }
@@ -1245,6 +1247,117 @@ function _modsDe(p){
   if (o.length === 1) o = ['Como viene'].concat(o);
   return o.length >= 2 ? o : null;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   v3.10 · MODS2 · IL MODIFICADOR È UN FATTO ECONOMICO (tappa ⑥ · 05-ago)
+   Spec: ATALAYA/4_CANTIERE_MENU/SPEC_MODIFICADORES_v2_05AGO2026.md §7
+   ───────────────────────────────────────────────────────────────────────
+   Fino a ieri l'opzione era una STRINGA e il «+$1.500» era testo dentro
+   un'etichetta: il mesero non poteva vendere un extra perché il conto non
+   lo contava. Qui il delta diventa un NUMERO che entra in `precio`.
+
+   Le regole del disegno (spec §7, decise col cappello CODICE):
+   ① il DEFAULT è già acceso → un gruppo `unica` con Es_Default non blocca:
+      si conferma senza toccare (⚡ ZERO GESTI)
+   ② `unica` = radio · `multiple` = toggle, e si vede dalla forma
+   ③ il prezzo è SUL chip, ed è il VIGENTE (ricarico notturno già dentro)
+   ④ il totale è VIVO in fondo: il mesero deve poter dire il prezzo al
+      tavolo PRIMA di confermare — è metà del suo mestiere
+   ⑤ il tetto anti-tilt è per CLASSE, non per gruppo (Alberto 05-ago:
+      «se è un side sono pronte; sin salsa, bacon a parte — non più di uno»)
+   ⑥ stessa grammatica delle due porte: menu e comandera leggono LE STESSE
+      due tab e calcolano il delta con la stessa formula. Numeri diversi
+      = bug, non configurazione.
+
+   ⚡ Invariante 9: UNA lettura, insieme al catálogo. Nessun poll nuovo.
+   🔒 Dietro flag `?mods2=1` (default SPENTO): a flag spento il giro è
+      identico a v3.9, byte per byte.
+   ═══════════════════════════════════════════════════════════════════════ */
+var MODS2_ON = (function(){
+  var on = false, q = null;
+  try { q = new URLSearchParams(location.search).get('mods2'); } catch(e){}
+  if (q === '1') on = true; else if (q === '0') on = false;
+  try {
+    if (q === '1' || q === '0') localStorage.setItem('mesero_mods2', q);
+    else if (localStorage.getItem('mesero_mods2') === '1') on = true;
+  } catch(e){}
+  return on;
+})();
+var MODS2_VOC = null;          // {grupos:[{g,gn,aplica,tipo,min,max,est,ops:[...]}]}
+var MODS2_RECARGO = null;      // {f,d,g:{gid:{f,d}}} · dal cancello prezzi (GAS v3.66.0)
+// i tetti anti-tilt · default della casa finché non vivono in PARAMETROS
+var MODS2_MAX = { ajuste: 1, side: 5 };
+
+async function mods2Cargar(){
+  if (!MODS2_ON) return;
+  try {
+    const r = await gasGet('getModificadores', {});
+    if (r && r.ok) {
+      MODS2_VOC = r;
+      try { localStorage.setItem('mesero_mods2_voc', JSON.stringify(r)); } catch(e){}
+    }
+  } catch(e){
+    // MODO PUENTE: senza rete si lavora con l'ultima foto del vocabolario
+    try { MODS2_VOC = JSON.parse(localStorage.getItem('mesero_mods2_voc') || 'null'); } catch(e2){}
+  }
+}
+// i gruppi di UN prodotto · grammatica Alcance (specchio di _auroraParse):
+// `cat:xxx` = l'ÀMBITO · `BKS-X` = quel prodotto · `-BKS-X` = fuori
+function mods2GruposDe(p){
+  if (!MODS2_ON || !MODS2_VOC || !p) return [];
+  const cat = (p.cat || '').toString().toLowerCase();
+  return (MODS2_VOC.grupos || []).filter(function(gr){
+    let dentro = false;
+    for (const a of (gr.aplica || [])) {
+      if (!a) continue;
+      if (a.charAt(0) === '-') {
+        const s = a.slice(1).trim();
+        if (s === p.id || (s.toLowerCase().indexOf('cat:') === 0 && s.slice(4).trim().toLowerCase() === cat)) return false;
+        continue;
+      }
+      if (a.toLowerCase().indexOf('cat:') === 0) { if (a.slice(4).trim().toLowerCase() === cat) dentro = true; }
+      else if (a === p.id) dentro = true;
+    }
+    return dentro;
+  });
+}
+// il delta VIGENTE: (d0 + delta_recargo) × factor, UN solo arrotondamento ai
+// 10 pesos — stessa formula del cancello server e del menù del cliente.
+// Ref_Producto → il delta è il prezzo vigente di QUEL prodotto (una verità).
+// null = prezzo non deciso ⇒ l'opzione non si vende (vuoto ≠ zero).
+function mods2Delta(op, gid){
+  let d0 = op.d;
+  if (op.ref) {
+    const rp = (STATE.catalogo||[]).find(function(x){ return x.id === op.ref; });
+    d0 = rp ? rp.precio : null;
+  }
+  if (d0 === null || d0 === undefined) return null;
+  let f = 1, dd = 0;
+  if (MODS2_RECARGO) {
+    const g = (MODS2_RECARGO.g || {})[gid];
+    if (g) { f = g.f || 1; dd = g.d || 0; }
+    else { f = MODS2_RECARGO.f || 1; dd = MODS2_RECARGO.d || 0; }
+  }
+  return Math.round(((d0 + dd) * f) / 10) * 10;
+}
+/* quante AGGIUNTE di questa classe sono già in mano (tetto per piatto, §2.3).
+   ⚠️ Una risposta OBBLIGATORIA non è un ajuste: al «¿chelada o michelada?»
+   devi rispondere comunque, e non è lavoro in più per la cucina — è il piatto.
+   Si contano solo le AGGIUNTE (gruppi `multiple`/`opcional`), altrimenti la
+   prima domanda forzata brucia da sola l'unico ajuste del piatto e nessun
+   agregado sarebbe più selezionabile. (Trovato nella prova a secco, 05-ago,
+   prima che arrivasse in sala.) */
+function _mods2NClase(fl, clase){
+  let n = 0;
+  (fl.mods || []).forEach(function(m){ if (m.cl === clase && m.add) n++; });
+  const gr = fl.g2[fl.gi];
+  if (gr && gr.tipo !== 'unica') {
+    Object.keys(fl.sel || {}).forEach(function(i){
+      if (fl.sel[i] && gr.ops[i] && gr.ops[i].cl === clase) n++;
+    });
+  }
+  return n;
+}
 /* ═══════════════════════════════════════════════════════════════════════
    LA COMANDERA v3 · el pedido a voz (28-jul · mockup validado por Alberto)
    ───────────────────────────────────────────────────────────────────────
@@ -1330,7 +1443,12 @@ function _cmLinea(l){
   const n = STATE.nuevo;
   const p = (STATE.catalogo||[]).find(function(x){ return x.id===l.id; });
   const notas = [];
-  if(l.op) notas.push('<span class="mk">'+esc(l.op)+'</span>');
+  // v3.10 · MODS2: i mods si dicono UNO A UNO col loro importo — e l'importo
+  // È già nel totale della riga. `op` resta per tutto il resto (chit, KDS).
+  if(l.mods && l.mods.length){
+    notas.push('<span class="mk">🧩 '+esc(l.mods.map(function(m){
+      return m.o + (m.d ? ' +'+fmtPrice(m.d) : ''); }).join(' · '))+'</span>');
+  } else if(l.op) notas.push('<span class="mk">'+esc(l.op)+'</span>');
   if(l.es_menu && !l.precio) notas.push('<span class="mk">bebida del menú · $0 · tkt a barra</span>');
   if(l.promo==='2x1') notas.push('<span class="pm">🎁 pagas '+l.qty+' · llevas '+(l.qty*2)+'</span>');
   if(l.pri) notas.push('<span class="pm">⬆ primero — sale ya</span>');
@@ -1371,11 +1489,85 @@ function _cmPromos(){
 }
 function _cmPregHtml(){
   const e = STATE.nuevo.eligiendo; if(!e) return '';
+  if(e.g2) return _cmPregG2Html(e);
   return '<div class="cm-preg"><div class="cm-preg-h"><b>'+(e.n>1?e.n+'× ':'')+esc(e.nombre)+'</b>'+
     '<span class="q">'+(e.beb?'🥤 ¿bebida?':'¿cómo?')+'</span>'+
     '<button class="no" onclick="nuevoCancelarPreg()" aria-label="dejarlo">✕</button></div>'+
     '<div class="cm-preg-o">'+e.opciones.map(function(o,i){
       return '<button onclick="nuevoResponder('+i+')">'+esc(o)+'</button>'; }).join('')+'</div></div>';
+}
+/* v3.10 · MODS2 · la scheda della domanda-GRUPPO.
+   Il default è già ACCESO (● pieno) e il chip «Listo» conferma senza toccare
+   nulla; i prezzi stanno sui chip col loro delta VIGENTE; il totale in fondo è
+   vivo e cresce mentre si tocca — così il mesero dice il prezzo al tavolo
+   PRIMA di confermare. Raggiunto il tetto di classe, i chip di quella classe
+   si SPENGONO e la scheda dice perché (mai un alert dopo il tocco). */
+function _cmPregG2Html(e){
+  const gr = e.g2[e.gi];
+  const p  = (STATE.catalogo||[]).find(function(x){ return x.id===e.id; });
+  const base = p ? p.precio : 0;
+  const multi = gr.tipo === 'multiple';
+  const paso = e.g2.length > 1 ? ' ('+(e.gi+1)+'/'+e.g2.length+')' : '';
+  const yaAj = _mods2NClase(e, 'ajuste'), yaSi = _mods2NClase(e, 'side');
+  let sumaSel = 0;
+  (e.mods||[]).forEach(function(m){ sumaSel += (m.d||0); });
+  const chips = gr.ops.map(function(op,i){
+    const d = mods2Delta(op, gr.g);
+    if(d === null) return '';                       // vuoto ≠ zero: senza prezzo non si vende
+    const on = !!(e.sel||{})[i];
+    if(on) sumaSel += d;
+    const tope = op.cl === 'side' ? MODS2_MAX.side : MODS2_MAX.ajuste;
+    const lleno = multi && !on && ((op.cl==='side' ? yaSi : yaAj) >= tope);
+    const est = on ? 'background:var(--cm-acc);color:#fff;font-weight:800'
+              : (!multi && op.def ? 'font-weight:800' : '');
+    return '<button style="'+est+(lleno?';opacity:.32;pointer-events:none':'')+'" '+
+      'onclick="'+(multi?'mods2Toggle('+i+')':'mods2Elegir('+i+')')+'">'+
+      (multi ? (on?'✓ ':'') : (op.def?'● ':''))+esc(op.o)+
+      (d ? ' <b>+'+fmtPrice(d)+'</b>' : '')+'</button>';
+  }).join('');
+  const cierre = multi
+    ? '<button style="border-style:dashed;font-weight:800" onclick="mods2Listo()">Listo ✓</button>'
+    : (gr.tipo === 'opcional' ? '<button style="opacity:.7" onclick="mods2Saltar()">Sin ajustes ›</button>' : '');
+  const tope = multi && ((yaAj >= MODS2_MAX.ajuste) || (yaSi >= MODS2_MAX.side))
+    ? '<div class="cm-m" style="margin-top:7px;opacity:.75">la cocina toma '+MODS2_MAX.ajuste+' ajuste por plato</div>' : '';
+  const unit = base + sumaSel;
+  return '<div class="cm-preg"><div class="cm-preg-h"><b>'+(e.n>1?e.n+'× ':'')+esc(e.nombre)+'</b>'+
+    '<span class="q">'+esc(gr.gn||'¿cómo?')+paso+(multi&&gr.max?' · máx '+gr.max:'')+'</span>'+
+    '<button class="no" onclick="nuevoCancelarPreg()" aria-label="dejarlo">✕</button></div>'+
+    '<div class="cm-preg-o">'+chips+cierre+'</div>'+tope+
+    '<div class="cm-tot" style="margin-top:9px">'+
+      (sumaSel ? fmtPrice(base)+' + '+fmtPrice(sumaSel)+' c/u' : 'c/u')+
+      '<b>'+fmtPrice(unit*(e.n||1))+(e.n>1?' · '+e.n+'×':'')+'</b></div></div>';
+}
+/* le risposte del gruppo · il DELTA si fossilizza al valore vigente di ADESSO.
+   Il default a $0 non si registra: è il «Como viene», il chit resta pulito. */
+function _mods2Avanza(elegidos){
+  const n = STATE.nuevo, e = n && n.eligiendo; if(!e || !e.g2) return;
+  const gr = e.g2[e.gi];
+  (elegidos||[]).forEach(function(i){
+    const op = gr.ops[i]; if(!op) return;
+    const d = mods2Delta(op, gr.g);
+    if(d === null) return;
+    if(op.def && d === 0) return;
+    // `add` = è un'AGGIUNTA (non una risposta obbligatoria) → conta nel tetto
+    e.mods.push({ g: gr.g, gn: gr.gn, oid: op.oid, o: op.o, d: d, cl: op.cl, add: gr.tipo !== 'unica' });
+  });
+  e.sel = {}; e.gi++;
+  if(e.gi < e.g2.length){ _cmRedibujar(); return; }
+  const p = (STATE.catalogo||[]).find(function(x){ return x.id===e.id; });
+  if(p) _cmPoner(p, e.mods.map(function(m){ return m.o; }).join(' · '), e.n, null, e.mods);
+  n.eligiendo = null; _cmRedibujar(); if(!n.cajon) _cmFoco('nuevoQ');
+}
+function mods2Elegir(i){ _mods2Avanza([i]); }
+function mods2Saltar(){ _mods2Avanza([]); }
+function mods2Toggle(i){
+  const e = STATE.nuevo && STATE.nuevo.eligiendo; if(!e) return;
+  e.sel = e.sel || {}; e.sel[i] = !e.sel[i]; _cmRedibujar();
+}
+function mods2Listo(){
+  const e = STATE.nuevo && STATE.nuevo.eligiendo; if(!e) return;
+  const s = e.sel || {};
+  _mods2Avanza(Object.keys(s).filter(function(k){ return s[k]; }).map(Number));
 }
 function _cmSlotHtml(){
   const n = STATE.nuevo;
@@ -1514,6 +1706,14 @@ function nuevoPick(id){
   const n=STATE.nuevo; if(!n) return;
   const p=(STATE.catalogo||[]).find(function(x){ return x.id===id; }); if(!p) return;
   const q=_cmParseQ(n.q).n;
+  // v3.10 · MODS2 (tappa ⑥): se il vocabolario nuovo parla per questo prodotto,
+  // la stringa vecchia TACE — una sola sorgente di verità (lezione del 04-ago:
+  // due sorgenti per la stessa domanda si scavalcano in silenzio).
+  const g2 = mods2GruposDe(p);
+  if(g2.length){
+    n.eligiendo={ id:p.id, nombre:p.nombre, n:q, g2:g2, gi:0, sel:{}, mods:[] };
+    n.q=''; _cmRedibujar(); return;
+  }
   const mods=_modsDe(p);
   if(mods){ n.eligiendo={ id:p.id, nombre:p.nombre, n:q, opciones:mods }; n.q=''; _cmRedibujar(); return; }
   if(_cmEsMenuConBeb(p)){
@@ -1544,14 +1744,22 @@ function nuevoResponder(i){
 }
 function nuevoCancelarPreg(){ const n=STATE.nuevo; if(!n) return; n.eligiendo=null; _cmRedibujar(); if(!n.cajon) _cmFoco('nuevoQ'); }
 /* la línea (ya terminada) entra en la libreta */
-function _cmPoner(p, op, q, bebNombre){
+function _cmPoner(p, op, q, bebNombre, mods){
   const n=STATE.nuevo;
   const esMenu = p.regla==='almuerzo';
+  // v3.10 · MODS2 · IL PREZZO CHE SOMMA: i delta entrano DENTRO precio, così
+  // Σ precio×qty resta vero in tutti i posti che lo calcolano (libreta, server,
+  // comanda, precuenta) senza toccarne nessuno. Il «+$1.500» smette di essere
+  // un'etichetta. Il merge guarda `op`, che porta i nomi dei mods: due schop
+  // con preparazioni diverse restano DUE righe — per unità, per costruzione.
+  mods = mods || null;
+  const dTot = mods ? mods.reduce(function(s,m){ return s + (m.d||0); }, 0) : 0;
   const igual = n.lineas.find(function(l){ return l.id===p.id && l.persona===n.pAct && (l.op||'')===(op||''); });
   if(igual){ igual.qty += q; n.ultima=igual.k; }
   else {
-    const l = { k:++n.seq, id:p.id, nombre:(esMenu?'Menú del Día · ':'')+p.nombre, precio:p.precio, qty:q,
+    const l = { k:++n.seq, id:p.id, nombre:(esMenu?'Menú del Día · ':'')+p.nombre, precio:p.precio + dTot, qty:q,
       cat:p.cat||'', op:op||'', es_menu:esMenu, promo:_cmEs2(p)?'2x1':'', persona:n.pAct, pri:0 };
+    if(mods && mods.length){ l.mods = mods; l.precio_base = p.precio; }
     n.lineas.push(l); n.ultima=l.k;
   }
   // v2.7/v2.17 · la bebida del menú es una RIGA VERA con su id (chit a la barra)
@@ -1618,7 +1826,14 @@ async function nuevoEnviar(btn) {
     // que la división de la cuenta se fossiliza desde hoy sin tocar el server
     return { id: l.id, nombre: l.nombre + (es2 ? ' · 2x1 (llevar ' + (l.qty*2) + ')' : ''),
       precio: l.precio, qty: l.qty, llevar: es2 ? l.qty*2 : l.qty, cat: l.cat || '', op: l.op || '',
-      es_menu: !!l.es_menu, promo: es2 ? '2x1' : '', pri: l.pri ? 1 : 0, persona: l.persona || 1 };   // v2.4 · ES ENTRADA
+      es_menu: !!l.es_menu, promo: es2 ? '2x1' : '', pri: l.pri ? 1 : 0, persona: l.persona || 1,   // v2.4 · ES ENTRADA
+      // v3.10 · MODS2 (contratto §4, ADDITIVO): `precio` porta già i delta
+      // dentro; `mods[]` è il dettaglio per le macchine (cucina per estación,
+      // boleta, cervello) e `precio_base` separa il piatto dall'extra.
+      // Fossile: i delta sono i vigenti AL MOMENTO della scrittura.
+      mods: (l.mods && l.mods.length) ? l.mods.map(function(m){
+        return { g:m.g, gn:m.gn, oid:m.oid, o:m.o, d:m.d, cl:m.cl }; }) : undefined,
+      precio_base: (l.mods && l.mods.length) ? l.precio_base : undefined };
   });
   const total = _nuevoTotal();
   const body = { codigo: STATE.codigo, nombre: STATE.nombre, uuid: n.uuid, mesa: mesa, total: total, items_json: JSON.stringify(items) };
