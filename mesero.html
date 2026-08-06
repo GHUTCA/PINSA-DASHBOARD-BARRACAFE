@@ -406,7 +406,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v3.11 · la PAREJA del 2x1: la segunda unidad es una COSA (pagada + regalo, cada una con su preparación y su extra cobrado) · MODS2 en la comandera: el modificador con PRECIO que suma (flag ?mods2=1, apagado) · 05ago</span>
+    <span class="ver" id="ver">v3.12 · la pareja che ASPETTA: regalo 2x1 en espera (¿ahora o después?) + soltar + timer al cierre · v3.11 · la PAREJA del 2x1: la segunda unidad es una COSA (pagada + regalo, cada una con su preparación y su extra cobrado) · MODS2 en la comandera: el modificador con PRECIO que suma (flag ?mods2=1, apagado) · 05ago</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1452,6 +1452,7 @@ function _cmLinea(l){
   if(l.es_menu && !l.precio) notas.push('<span class="mk">bebida del menú · $0 · tkt a barra</span>');
   // v3.11 · la pareja si dice per quello che è: pagata e regalo, ognuna col suo
   if(l.dupla) notas.push('<span class="pm">'+(l.regalo2x1 ? '🎁 2x1 · unidad de REGALO · se cobra sólo el extra' : '🎁 2x1 · unidad pagada')+'</span>');
+  if(l.espera) notas.push('<span class="pm">⏸ sale DESPUÉS — la sueltas tú, o sola al cierre del 2x1</span>');   // v3.12
   else if(l.promo==='2x1') notas.push('<span class="pm">🎁 pagas '+l.qty+' · llevas '+(l.qty*2)+'</span>');
   if(l.pri) notas.push('<span class="pm">⬆ primero — sale ya</span>');
   const borra = l.qty===1 ? '1' : '0';
@@ -1513,6 +1514,19 @@ function _cmPregG2Html(e){
       '<div class="cm-preg-o">'+
         '<button style="font-weight:800" onclick="mods2Pareja(true)">Igual ✓</button>'+
         '<button onclick="mods2Pareja(false)">Distinta…</button></div></div>';
+  }
+  /* v3.12 · «¿se puede mandar uno ahora y el otro después?» — SÍ, così:
+     il regalo può NASCERE in attesa. Va nel conto subito (un 2x1, non uno
+     sconto), ma non produce: parte quando il tavolo lo chiede, o da solo
+     a fine finestra (timer GAS, solo tavoli vivi, scaglionato). */
+  if(e.timingQ){
+    return '<div class="cm-preg"><div class="cm-preg-h"><b>'+esc(e.nombre)+' · 🎁 la 2ª</b>'+
+      '<span class="q">¿cuándo sale?</span>'+
+      '<button class="no" onclick="nuevoCancelarPreg()" aria-label="dejarlo">✕</button></div>'+
+      '<div class="cm-preg-o">'+
+        '<button style="font-weight:800" onclick="mods2Timing(false)">Ahora, juntas ✓</button>'+
+        '<button onclick="mods2Timing(true)">⏸ Después</button></div>'+
+      '<div class="cm-m" style="margin-top:7px;opacity:.75">«después» = la mandas tú desde el pedido, o sale sola al cierre del 2x1</div></div>';
   }
   const gr = e.g2[e.gi];
   const p  = (STATE.catalogo||[]).find(function(x){ return x.id===e.id; });
@@ -1577,7 +1591,7 @@ function _mods2Avanza(elegidos){
   if(p && _cmEs2(p) && e.n === 1 && !e.pareja2){
     if(!e.u1){ e.u1 = e.mods; e.mods = []; e.pareja = true; _cmRedibujar(); return; }
   }
-  if(p && e.u1){ _cmPonerPareja(p, e.u1, e.mods); }
+  if(p && e.u1){ e.u2 = e.mods; e.timingQ = true; _cmRedibujar(); return; }   // v3.12 · manca il ¿cuándo?
   else if(p) _cmPoner(p, e.mods.map(function(m){ return m.o; }).join(' · '), e.n, null, e.mods);
   n.eligiendo = null; _cmRedibujar(); if(!n.cajon) _cmFoco('nuevoQ');
 }
@@ -1586,19 +1600,25 @@ function mods2Pareja(igual){
   const n = STATE.nuevo, e = n && n.eligiendo; if(!e || !e.pareja) return;
   e.pareja = false;
   if(igual){
-    const p = (STATE.catalogo||[]).find(function(x){ return x.id===e.id; });
-    if(p) _cmPonerPareja(p, e.u1, e.u1.map(function(m){ return Object.assign({}, m); }));
-    n.eligiendo = null; _cmRedibujar(); if(!n.cajon) _cmFoco('nuevoQ');
+    e.u2 = e.u1.map(function(m){ return Object.assign({}, m); });
+    e.timingQ = true; _cmRedibujar();   // v3.12 · anche «iguales» sceglie il quando
     return;
   }
   e.pareja2 = true; e.gi = 0; e.sel = {}; e.mods = [];   // secondo giro di domande
   _cmRedibujar();
 }
+// v3.12 · il QUANDO della 2ª: adesso insieme, o in attesa (espera:1)
+function mods2Timing(despues){
+  const n = STATE.nuevo, e = n && n.eligiendo; if(!e || !e.timingQ) return;
+  const p = (STATE.catalogo||[]).find(function(x){ return x.id===e.id; });
+  if(p) _cmPonerPareja(p, e.u1, e.u2 || [], !!despues);
+  n.eligiendo = null; _cmRedibujar(); if(!n.cajon) _cmFoco('nuevoQ');
+}
 /* le due righe della pareja · agganciate da `dupla` (stesso id di coppia):
    A = l'unità PAGATA (prezzo pieno + i suoi extra) · B = il REGALO ($0 di
    base + i SUOI extra). Σ precio×qty resta vero, e il KDS produce due cose
    distinte perché SONO due cose distinte. */
-function _cmPonerPareja(p, m1, m2){
+function _cmPonerPareja(p, m1, m2, espera){
   const n = STATE.nuevo;
   const d1 = (m1||[]).reduce(function(s,m){ return s+(m.d||0); },0);
   const d2 = (m2||[]).reduce(function(s,m){ return s+(m.d||0); },0);
@@ -1611,6 +1631,8 @@ function _cmPonerPareja(p, m1, m2){
     cat:p.cat||'', op:(m2||[]).map(function(m){ return m.o; }).join(' · '), es_menu:false,
     promo:'2x1', persona:n.pAct, pri:0, dupla:par, regalo2x1:1, precio_base:0 };
   if(m2 && m2.length) B.mods = m2;
+  // v3.12 · in attesa: nel conto SUBITO, in produzione DOPO (soltar o timer)
+  if(espera) B.espera = 1;
   n.lineas.push(A); n.lineas.push(B); n.ultima = B.k;
 }
 function mods2Elegir(i){ _mods2Avanza([i]); }
@@ -1907,7 +1929,8 @@ async function nuevoEnviar(btn) {
       // v3.11 · la pareja del 2x1 (ADDITIVO): `dupla` lega le due righe,
       // `regalo2x1` marca l'unità regalata ($0 di base + il SUO extra).
       // Domani il timer del sussurro leggerà da qui chi è ancora pendiente.
-      dupla: l.dupla || undefined, regalo2x1: l.regalo2x1 || undefined };
+      dupla: l.dupla || undefined, regalo2x1: l.regalo2x1 || undefined,
+      espera: l.espera || undefined };   // v3.12 · il regalo in attesa: conto sì, produzione dopo
   });
   const total = _nuevoTotal();
   const body = { codigo: STATE.codigo, nombre: STATE.nombre, uuid: n.uuid, mesa: mesa, total: total, items_json: JSON.stringify(items) };
@@ -2468,6 +2491,13 @@ function cardMio(p, umb) {
         (p.directo && esListo
           ? '<div style="background:rgba(34,197,94,.12);border:1.5px solid #22c55e;border-radius:10px;padding:8px 10px;margin:6px 0;font-size:13.5px;font-weight:800;color:#22c55e">✅ PRODUCIDO — cocina/barra ya lo terminó</div>'
           : '') +
+        // v3.12 · il regalo 2x1 in ATTESA si vede sulla card, col bottone che
+        // lo suelta — o parte da solo al cierre della finestra (timer GAS)
+        (itemsDe(p).some(function(it){ return it.espera; })
+          ? '<div style="background:rgba(251,191,36,.12);border:1.5px solid #fbbf24;border-radius:10px;padding:8px 10px;margin:6px 0;font-size:13px;color:#fbbf24">⏸ <b>Regalo 2x1 en espera</b> — no está en producción.<br>' +
+            '<button class="btn sec" style="margin-top:6px" onclick="soltarRegalo(\'' + esc(p.uuid) + '\',this)">🎁 Soltarlo ahora → producción</button>' +
+            '<span style="display:block;font-size:10.5px;opacity:.8;margin-top:4px">si no, sale solo al cierre del 2x1 (mesa viva)</span></div>'
+          : '') +
         '<div class="mio-meta">' + resumenCorto(p) + (esDig ? '' : ' · <b class="warn">falta digitarlo</b>') + '</div>' +
         (esListo ? '<div class="retirar">🍳 LISTO · retirar de cocina/barra</div>' : '') +
         (esRet ? '<div class="retirar encamino">🏃 Retirado — va en camino a la mesa</div>' : '') +
@@ -2482,6 +2512,17 @@ function cardMio(p, umb) {
   }
 }
 
+/* v3.12 · suelta il regalo 2x1 in attesa → produzione ADESSO (GAS soltar2x1) */
+async function soltarRegalo(uuid, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await gasPost('soltar2x1', { codigo: STATE.codigo, nombre: STATE.nombre, uuid: uuid });
+    if (r && r.ok) {
+      toast('ok', r.sin_pendientes ? 'Ya estaba en producción' : '🎁 Regalo soltado — tkt en camino');
+      try { refrescar(false); } catch (e2) {}
+    } else { toast('err', (r && r.error) || 'No se pudo'); if (btn) btn.disabled = false; }
+  } catch (e) { toast('err', 'Sin señal — reintenta'); if (btn) btn.disabled = false; }
+}
 function itemsDe(p) {
   try { const a = JSON.parse(p.items_json || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
 }
