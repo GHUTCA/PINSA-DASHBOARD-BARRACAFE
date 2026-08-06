@@ -1,5 +1,16 @@
 /* ════════════════════════════════════════════════════════════════════
- *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.11
+ *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.12
+ *  v1.12 (06-ago-2026) · LA SERRATURA DICE LA VERITÀ (mappa 06-ago: il login
+ *           era il punto singolo di rottura più grave — fetch senza timeout,
+ *           lista che degradava a testo libero IN SILENZIO, «Sin conexión»
+ *           uguale per un PIN mai valutato e per una rete morta).
+ *           Quattro tocchi, tutti additivi, SOLO client: ① timeout+abort 12s
+ *           su llamarGAS ② la lista utenti si dipinge SUBITO dalla cache
+ *           locale e la rete rinfresca dietro (solo nomi/cargo/foto — nessun
+ *           segreto in localStorage) ③ 1 ritentativo sulla lista (un rimbalzo
+ *           non è un no) ④ i messaggi distinguono «Google non contesta» da
+ *           «sin señal». ⚠️ La validazione del PIN resta INTERAMENTE
+ *           server-side: qui non si decide nessun accesso.
  *  v1.11 (03-ago-2026) · LA TORRE CHIEDE «CHI SEI» PRIMA DI «DOVE VAI».
  *           Scope 'todos': lista intera (ogni utente porta il suo `local` dal
  *           foglio) · al login/set_pin si manda IL LOCALE DELL'UTENTE, non
@@ -380,24 +391,75 @@
   //  Content-Type text/plain → niente preflight CORS su Apps Script.
   //  Il body resta JSON, il GAS lo legge con JSON.parse(e.postData.contents).
   // ════════════════════════════════════════════════════════════════
-  function llamarGAS(payload) {
+  // v1.12 · il fetch aveva ZERO timeout: al cold-start di Google la promise
+  // restava appesa e il login sembrava morto senza dirlo. 12s = una porta che
+  // non si apre (il pavimento del bound AUTH è ~1-1,5s), non una lenta.
+  function llamarGAS(payload, timeoutMs) {
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var tid = ctrl ? setTimeout(function () { ctrl.abort(); }, timeoutMs || 12000) : null;
     return fetch(GAS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload)
-    }).then(function (r) { return r.json(); });
+      body: JSON.stringify(payload),
+      signal: ctrl ? ctrl.signal : undefined
+    }).then(function (r) {
+      if (tid) clearTimeout(tid);
+      return r.json();
+    }).catch(function (e) {
+      if (tid) clearTimeout(tid);
+      throw e;
+    });
+  }
+
+  // v1.12 · un fallimento di RETE non è un «no» del server: il messaggio deve
+  // dire di chi è la colpa, o l'operatore incolpa se stesso (o il suo PIN).
+  function _msgRed(e) {
+    var ab = e && (e.name === 'AbortError' || String(e.message || '').toLowerCase().indexOf('abort') >= 0);
+    return ab ? 'El sistema no contesta — no es tu PIN ni tu señal. Reintenta en un momento'
+              : 'Sin conexión — revisa tu señal y reintenta';
   }
 
   // ════════════════════════════════════════════════════════════════
   //  CARICAMENTO LISTA UTENTI (dal GAS · azione lista_usuarios)
   // ════════════════════════════════════════════════════════════════
+  // v1.12 · LA LISTA SI RICORDA (mappa 06-ago): prima, un buco di Google al
+  // boot degradava la lista a campo di testo libero IN SILENZIO — sembrava
+  // una schermata normale. Ora: ① il picker si dipinge SUBITO dalla cache
+  // locale (boot veloce anche col GAS freddo) ② la rete rinfresca dietro e
+  // riscrive la cache ③ rete morta + cache in mano = si resta sulla cache,
+  // nessun degrado ④ il testo libero resta SOLO per la prima visita assoluta
+  // senza rete — e lo DICE. In cache solo nombre/cargo/foto: nessun segreto
+  // in localStorage, il PIN resta interamente server-side.
+  function usersCacheKey() { return 'pinsita_auth_usuarios_' + (CFG.local || 'todos'); }
   function cargarUsuarios() {
-    llamarGAS({ accion: 'lista_usuarios', local: CFG.local })
-      .then(function (res) {
-        USERS = (res && res.ok && res.usuarios) ? res.usuarios : [];
+    try {
+      var cc = JSON.parse(localStorage.getItem(usersCacheKey()) || 'null');
+      if (cc && Array.isArray(cc.usuarios) && cc.usuarios.length) {
+        USERS = cc.usuarios;
         renderListaUsuarios();
-      })
-      .catch(function () { USERS = []; renderListaUsuarios(); });
+      }
+    } catch (e) {}
+    var intento = function (quedan) {
+      llamarGAS({ accion: 'lista_usuarios', local: CFG.local })
+        .then(function (res) {
+          if (res && res.ok && res.usuarios && res.usuarios.length) {
+            USERS = res.usuarios;
+            try { localStorage.setItem(usersCacheKey(), JSON.stringify({ usuarios: USERS, ts: Date.now() })); } catch (e) {}
+            renderListaUsuarios();
+          } else if (!USERS.length) {
+            renderListaUsuarios();          // risposta vuota e niente cache: testo libero
+          }
+        })
+        .catch(function () {
+          if (quedan > 0) { setTimeout(function () { intento(quedan - 1); }, 1200); return; }
+          if (!USERS.length) {
+            renderListaUsuarios();          // prima visita assoluta senza rete
+            toast('Sin conexión — la lista no cargó. Puedes escribir tu nombre.');
+          }
+          // con la cache in mano: nessun degrado, nessun rumore
+        });
+    };
+    intento(1);
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -626,9 +688,9 @@
       else if (res && res.error === 'inactivo') toast('Usuario inactivo');
       else if (res && res.error === 'no_existe') toast('Usuario no encontrado');
       else toast('No se pudo iniciar sesión');
-    }).catch(function () {
+    }).catch(function (e) {
       bloquear(false); pinBuffer = ''; pintarPin();
-      toast('Sin conexión · reintenta');
+      toast(_msgRed(e));   // v1.12 · la verità: non è il PIN, è la porta
     });
   }
 
@@ -670,9 +732,9 @@
       // PIN rifiutato dal GAS → ricomincia la creazione
       setPinPaso('Crea tu PIN', 'Elige 4 dígitos que puedas recordar.', 'Paso 1 de 2'); pintarPin();
       toast('PIN no válido · usa 4 dígitos');
-    }).catch(function () {
+    }).catch(function (e) {
       bloquear(false); pintarPin();
-      toast('Sin conexión · reintenta');
+      toast(_msgRed(e));   // v1.12 · idem: mai incolpare l'operatore per Google
     });
   }
 
