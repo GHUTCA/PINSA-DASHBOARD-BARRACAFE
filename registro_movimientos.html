@@ -551,7 +551,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v81 · manda el cargo, no el aparato · 08ago</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#C8902F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#C8902F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#C8902F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v82 · el error dice su nombre · 09ago</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -3828,6 +3828,7 @@ function abrirMapa(){
   mapaConteoCargar();  // recupera el conteo en curso (si cerró la app a mitad de giro)
   mapaCargarOrden();   // cache local al vuelo + orden compartido del GAS (repinta al volver)
   pintarMapa();
+  try{ pintarBadge(); }catch(e){}   // v82 · lo que quedó sin subir se ve TAMBIÉN aquí dentro
 }
 function cerrarMapa(){
   var ov=document.getElementById('mapaOverlay'); if(ov) ov.style.display='none';
@@ -4232,13 +4233,62 @@ async function flushCola(){
 }
 function colaPend(){ return colaLeer().filter(function(x){return x.estado==='pending';}).length; }
 function colaFail(){ return colaLeer().filter(function(x){return x.estado==='fail';}).length; }
+// ── v82 (09-ago) · EL ERROR VERDADERO LLEGA A QUIEN REGISTRA ─────────────
+// La mañana del 09-ago: Alberto registra en el -6, sube con señal, y el badge
+// dice «SIN ENVIAR» durante media hora. La causa real estaba a un clic de
+// distancia — el mastro de Riesco había agotado las filas físicas y el GAS
+// contestaba «coordinates outside the dimensions of the sheet» — pero ese
+// texto vivía en la cola, invisible, y nadie podía leerlo.
+// 🎓 Un error que el sistema conoce y no dice, es un error que se paga dos
+// veces: una en el fallo y otra en el rato buscándolo a ciegas.
+// El badge ahora se toca y cuenta lo que sabe, sin traducirlo a nada bonito.
+function _colaMotivos(){
+  var m={}, c=colaLeer();
+  for(var i=0;i<c.length;i++){ if(c[i].estado==='fail'){ var e=String(c[i].error||'sin detalle'); m[e]=(m[e]||0)+1; } }
+  return m;
+}
+function _colaContar(){
+  var mot=_colaMotivos(), c=colaLeer(), lin=[];
+  for(var k in mot){ if(mot.hasOwnProperty(k)) lin.push('· '+mot[k]+'× '+k); }
+  var viejo=null;
+  for(var i=0;i<c.length;i++){ if(c[i].estado!=='ok'){ var t=new Date(c[i].ts).getTime(); if(!viejo||t<viejo) viejo=t; } }
+  var edad = viejo ? Math.round((Date.now()-viejo)/60000) : 0;
+  alert('QUÉ FALTA POR SUBIR\n\n'+
+        colaPend()+' esperando · '+colaFail()+' con error\n'+
+        (edad?('el más viejo: hace '+(edad<60?(edad+' min'):(Math.round(edad/60)+' h'))+'\n'):'')+
+        (lin.length?('\nPor qué no sube:\n'+lin.join('\n')+'\n'):'')+
+        '\nSi dice algo de «sheet» o «dimensions», avisa a Alberto:\n'+
+        'no es tu teléfono ni tu señal, es el libro.\n\n'+
+        'Con señal reintenta solo cada 20 segundos.');
+}
 function pintarBadge(){
   var el=document.getElementById('syncBadge'); if(!el) return;
   var p=colaPend(), f=colaFail();
   if(p===0 && f===0){ el.style.display='none'; return; }
   el.style.display='inline-flex';
+  el.style.cursor='pointer'; el.onclick=_colaContar;   // v82 · se toca y cuenta
   if(f>0){ el.className='syncbadge bad'; el.textContent='⚠ '+f+' sin enviar'+(p?(' · ⏳'+p):''); }
   else   { el.className='syncbadge wait'; el.textContent='⏳ '+p+' enviando…'; }
+  // v82 · EN MODO MAPA la barra de arriba está tapada: el aviso vive DENTRO
+  // del Mapa o no existe para quien cuenta. Es la misma lección de la salida
+  // (v80): lo que no se ve, para quien lo usa no está.
+  _pintarBadgeMapa(p,f);
+}
+function _pintarBadgeMapa(p,f){
+  var ov=document.getElementById('mapaOverlay'); if(!ov) return;
+  var b=document.getElementById('mapaPend');
+  if(p===0 && f===0){ if(b) b.style.display='none'; return; }
+  if(!b){
+    b=document.createElement('button'); b.id='mapaPend';
+    b.style.cssText='margin:0 12px 8px;padding:9px 12px;border-radius:10px;border:1px solid var(--line);'+
+      'background:var(--panel);font-size:12.5px;text-align:left;cursor:pointer;width:calc(100% - 24px)';
+    b.onclick=_colaContar;
+    var body=document.getElementById('mapaBody');
+    if(body && body.parentNode) body.parentNode.insertBefore(b, body);
+  }
+  b.style.display='block';
+  b.style.color = f>0 ? 'var(--bad,#C0504D)' : 'var(--ink-soft)';
+  b.textContent = (f>0 ? '⚠ '+f+' conteo(s) sin subir — tócame' : '⏳ '+p+' subiendo… quédate con señal');
 }
 window.addEventListener('online', function(){ flushCola(); flushAliasCola(); flushPendCola(); });
 // ── FLUSH al VOLVER AL FRENTE (7-jul) ────────────────────────────────────
