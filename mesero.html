@@ -406,7 +406,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v3.12 · la pareja che ASPETTA: regalo 2x1 en espera (¿ahora o después?) + soltar + timer al cierre · v3.11 · la PAREJA del 2x1: la segunda unidad es una COSA (pagada + regalo, cada una con su preparación y su extra cobrado) · MODS2 en la comandera: el modificador con PRECIO que suma (flag ?mods2=1, apagado) · 05ago</span>
+    <span class="ver" id="ver">v3.13 · el guardián de la limpia mira TODA la mesa (caso mesa 44: lista lo que cierra, avisa si hay más de un pedido o uno fresco <15min) · v3.12 · la pareja che ASPETTA: regalo 2x1 en espera (¿ahora o después?) + soltar + timer al cierre · v3.11 · la PAREJA del 2x1: la segunda unidad es una COSA (pagada + regalo, cada una con su preparación y su extra cobrado) · MODS2 en la comandera: el modificador con PRECIO que suma (flag ?mods2=1, apagado) · 05ago</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -2339,12 +2339,48 @@ function cardLiberar(p) {
     esc(p.ts_entregado_iso || '') + '\',this)">🚪 Se fue — liberar mesa' +
     '<small style="display:block;font-size:10px;opacity:.75;font-weight:400">esto cierra la cuenta de la mesa</small></button></div>';
 }
+/* v3.13 · IL GUARDIANO GUARDAVA IL PEDIDO SBAGLIATO (caso Diego-V, mesa 44,
+   08-ago). `limpia` chiude TUTTI los entregados de la mesa, pero el control de
+   los 10 minutos leía SOLO la card tocada: Diego liberó un tavolo del turno
+   anterior (52 min → ninguna pregunta) y con él cayeron 3 Schop entregados
+   2m44s antes. Su cabeza tenía dos mesas (dos servicios); nuestro modelo una.
+   Ahora el guardián mira el MÁS RECIENTE de la mesa, y la confirmación LISTA
+   lo que va a cerrar. Regla: si la acción es de la MESA, la pregunta es de la
+   MESA. */
+function _entregadosDeMesa(mesa) {
+  var out = [], seen = {};
+  var r = STATE.sala || {};
+  ['mios', 'por_limpiar', 'pendientes', 'sin_dueno'].forEach(function (k) {
+    (Array.isArray(r[k]) ? r[k] : []).forEach(function (p) {
+      if (!p || String(p.mesa) !== String(mesa)) return;
+      if (p.estado !== 'entregado') return;
+      if (seen[p.uuid]) return;
+      seen[p.uuid] = 1; out.push(p);
+    });
+  });
+  return out;
+}
 function liberarMesa(uuid, mesa, tsEnt, btn) {
-  var min = null;
-  if (tsEnt) { var t = new Date(tsEnt).getTime(); if (t > 0) min = Math.round((Date.now() - t) / 60000); }
-  if (min != null && min >= 0 && min < 10 &&
-      !confirm('¿Ya se fue la mesa ' + mesa + '?\nEl pedido salió hace ' + min + ' min.\n\nOK = mesa libre (cierra la cuenta)')) {
-    return;
+  var ents = _entregadosDeMesa(mesa);
+  if (!ents.length && tsEnt) ents = [{ uuid: uuid, mesa: mesa, ts_entregado_iso: tsEnt, total: 0 }];
+  var ahora = Date.now(), reciente = null, lineas = [];
+  ents.forEach(function (p) {
+    var t = p.ts_entregado_iso ? new Date(p.ts_entregado_iso).getTime() : 0;
+    var m = t > 0 ? Math.round((ahora - t) / 60000) : null;
+    if (m != null && (reciente === null || m < reciente)) reciente = m;
+    lineas.push('  · ' + (m == null ? 'entregado' : 'hace ' + m + ' min') +
+                (p.total ? ' — ' + fmtPrice(p.total) : ''));
+  });
+  var fresco = (reciente != null && reciente >= 0 && reciente < 15);
+  var varios = ents.length > 1;
+  if (fresco || varios) {
+    var msg = '¿Ya se fue la mesa ' + mesa + '?\n\n' +
+      'Vas a CERRAR ' + ents.length + (ents.length === 1 ? ' pedido:' : ' pedidos:') + '\n' +
+      lineas.join('\n') + '\n\n' +
+      (varios ? '⚠️ Hay más de un pedido en esta mesa (puede ser de otro turno).\n' : '') +
+      (fresco ? '⚠️ El último salió hace ' + reciente + ' min.\n' : '') +
+      '\nOK = mesa libre (cierra la cuenta de TODA la mesa)';
+    if (!confirm(msg)) return;
   }
   marcar(uuid, 'limpia', btn);
 }
