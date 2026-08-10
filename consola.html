@@ -597,7 +597,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.16</span>
+    <span class="ver" id="ver">consola v1.17</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -2610,9 +2610,17 @@ async function fintocRegistrar(mesa) {
     if (r && r.ok) {
       const ent = _entregadosDeMesa(mesa)[0];
       if (ent) { _marcarLocal(ent.uuid, 'limpia', mesa); if (STATE.sala) _aplicarMarcados(STATE.sala); }
+      /* v1.17 · stessa dottrina del tap PAGADO (A3, 10-ago): il fossile torna
+         subito, il DTE si chiede dietro con lo stesso helper — una funzione
+         sola, così la cura non può curare metà delle porte. Qui la mesa non
+         l'ha toccata nessuno (il pago è entrato da Fintoc), ma l'attesa la
+         pagava lo stesso chi guardava lo schermo. Col GAS vecchio il folio
+         arriva già in r.boleta: si mostra e non si chiede niente. */
+      const yaFolioF = (r.boleta && r.boleta.of_folio) ? r.boleta.of_folio : '';
       toast('ok', '💚 Pago Fintoc ✓ mesa ' + mesa + ' · $' + _fmtMiles(pagFin.monto) +
-        (r.boleta && r.boleta.ok ? ' · 🧾 boleta ' + (r.boleta.of_folio || '') : ''));
+        (yaFolioF ? ' · 🧾 boleta ' + yaFolioF : ''));
       cerrarMesa(); refrescar(false);
+      if (!yaFolioF) _pedirBoleta(r.pago_id || '', mesa);
     } else {
       toast('err', 'No se pudo: ' + (r && r.error || '?'));
     }
@@ -2958,6 +2966,47 @@ function renderPago() {
     '<button class="btn sec" style="margin-top:8px" onclick="pagoCerrar()">Cancelar</button>' +
     '</div></div>';
 }
+
+/* ═════ v1.17 · A3 — LA BOLETA VA DIETRO (10-ago-2026) ═════
+   Mesa 49, stamattina: 5 boletas fiscali per UN consumo solo, $47.600
+   dichiarati in più al SII. La catena era questa — il GAS emetteva il DTE
+   DENTRO registrarPago (18-24 s di muro, misurati), la consola mollava a
+   CFG.TIMEOUT_MS = 25 s, e il mesero, che sullo schermo non aveva visto
+   NIENTE, ritoccava. Ogni tocco un pago, ogni pago una boleta.
+   La cura non è un timeout più lungo: l'attesa resterebbe, e chi aspetta
+   ritocca. Il tap PAGADO torna appena il FOSSILE è scritto, e la boleta si
+   chiede da qui — dopo, senza che nessuno la aspetti. Quando il numero
+   arriva il mesero è già a un'altra mesa, ed è esattamente dove deve stare.
+   Perché possiamo insistere senza riaprire la ferita: emitirBoletaPago è
+   idempotente per pago_id — due chiamate, un DTE solo. E se anche il retry
+   muore non si urla: il cobro è già fossile, e la rete server-side raccoglie
+   le boletas rimaste indietro. La sala non deve fare niente.
+   La chiamano il tap PAGADO (pagoConfirmar) e il pago Fintoc. */
+async function _pedirBoleta(pagoId, mesa) {
+  /* senza la chiave non si chiede niente: un'emissione senza pago_id sarebbe
+     un DTE orfano — cioè il fatto che stiamo curando, da un'altra porta */
+  if (!pagoId) return;
+  for (let intento = 1; intento <= 2; intento++) {
+    let mudo = false;
+    try {
+      const b = await gasPost('emitirBoletaPago', { codigo: STATE.codigo, pago_id: pagoId });
+      if (b && b.ok) {
+        toast('ok', (b.of_folio ? '🧾 Boleta N° ' + b.of_folio : '🧾 Boleta emitida') +
+          ' · mesa ' + mesa + (b.mail === 'enviado' ? ' · al correo' : ''));
+        return;
+      }
+      /* il server HA risposto, e ha detto di no: riprovare non cambierebbe la
+         risposta, la cambia solo la rete server-side. Si esce piano. */
+    } catch (e) { mudo = true; }
+    /* un silenzio non è un «no» (R9 del 03-ago): il silenzio si riprova — UNA
+       volta. Un ciclo qui sarebbe la spirale del 27-lug, l'umano ripete, il
+       carico cresce, e rallenta ancora. Una volta, e basta. */
+    if (mudo && intento === 1) { await new Promise(function (ok) { setTimeout(ok, 4000); }); continue; }
+    toast('warn', '🧾 La boleta de la mesa ' + mesa + ' va en camino — el sistema la emite solo, no la pidas de nuevo.');
+    return;
+  }
+}
+
 async function pagoConfirmar(btn) {
   const pg = STATE.pago; if (!pg || pg.enviando) return;
   pg.enviando = true; renderPago();
@@ -2996,21 +3045,50 @@ async function pagoConfirmar(btn) {
          non è un errore ed è la risposta giusta — la mesa si chiude, e il
          mesero legge che NON ha cobrato due volte. */
       if (r.ya_registrado) {
+        const yaEmitida = (r.boleta_estado || '').indexOf('emitida') === 0;
         toast('ok', '✓ Ya estaba cobrada la mesa ' + pg.mesa + ' · ' + fmtPrice(r.monto || 0) +
           (r.hace_s != null ? ' (hace ' + fmtHace(r.hace_s) + ')' : '') +
           ' — no se cobró de nuevo' +
-          ((r.boleta_estado || '').indexOf('emitida') === 0 ? ' · 🧾 ' + r.boleta_estado.split(':')[1] : ''));
+          (yaEmitida ? ' · 🧾 ' + r.boleta_estado.split(':')[1] : ''));
+        /* v1.17 · QUESTO è mesa 49 in persona: primo tocco andato in timeout,
+           il mesero ritocca, il server risponde «esisteva già» — e il pago_id
+           che manda è quello della riga ORIGINALE (v3.88.0 legge l'ID dalla
+           fila trovata, non ne conia uno nuovo). Il cobro c'è, ma la boleta di
+           quel primo tocco non l'ha chiesta MAI nessuno: senza questa riga il
+           cliente resta lì ad aspettare il cron, fino a due minuti.
+           Chiederla di nuovo è sicuro: l'idempotenza del GAS v3.89.0 è a tre
+           livelli (stato `emitida:*` · Folio_PC · cintura mesa+monto+finestra),
+           tutto sotto LockService. E se il folio c'era già non si disturba il
+           server: è scritto qui sopra, nel toast. */
+        const pagoIdYa = r.pago_id || '', mesaYa = pg.mesa;
         STATE.pago = null; renderPago(); cerrarMesa(); refrescar(false);
+        if (!esCort && !yaEmitida) _pedirBoleta(pagoIdYa, mesaYa);
         return;
       }
+      /* v1.17 · il numero della boleta non si promette più qui: dalla A3 il
+         server risponde `boleta:'por_emitir'` (una stringa) e il DTE nasce
+         dopo, in _pedirBoleta. Se però il vivo fosse ancora il GAS vecchio —
+         i due deploy sono separati e l'ordine non ce lo sceglie nessuno — il
+         folio arriva già dentro r.boleta: allora si mostra QUELLO e non si
+         chiede una seconda emissione. Un ramo solo, onesto nei due sensi;
+         senza questa guardia il toast diceva «boleta undefined». */
+      const yaFolio = (r.boleta && r.boleta.of_folio) ? r.boleta.of_folio : '';
       toast('ok', (esCort ? '🎁 Cortesía ✓ mesa ' + pg.mesa + ' · $0'
           : '💳 Pago ✓ mesa ' + pg.mesa + ' · ' + fmtPrice(r.monto != null ? r.monto : pg.tot)) +
         (propina ? ' · propina ' + fmtPrice(propina) : '') +
         (r.en_vuelo ? ' · ' + r.en_vuelo + ' cerrado' + (r.en_vuelo > 1 ? 's' : '') + ' sin marcar entrega' : '') +
-        (r.boleta && r.boleta.ok ? ' · 🧾 boleta ' + (r.boleta.of_folio || '') + (r.boleta.mail === 'enviado' ? ' al correo' : '') : ''));
+        (yaFolio ? ' · 🧾 boleta ' + yaFolio + (r.boleta.mail === 'enviado' ? ' al correo' : '') : ''));
+      /* la chiave si prende PRIMA dell'azzeramento: una riga più giù STATE.pago
+         non esiste più, e chi torna dalla boleta non saprebbe più di quale
+         mesa stava parlando. */
+      const pagoIdBol = r.pago_id || '', mesaBol = pg.mesa;
       STATE.pago = null; renderPago();
       cerrarMesa();
       refrescar(false);
+      /* e ora la boleta, dietro, senza che nessuno la aspetti. La cortesía non
+         entra qui: una invitación non è una vendita e non ha mai portato
+         boleta:1 — chiederle un DTE sarebbe inventare una vendita. */
+      if (!esCort && !yaFolio) _pedirBoleta(pagoIdBol, mesaBol);
       return;
     }
     /* v1.4 · gli errori del PIN parlano chiaro e riaprono la serratura */
