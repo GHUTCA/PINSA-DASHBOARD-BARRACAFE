@@ -593,7 +593,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.8 · ✋ tetto sconto JL (server: DESC_MAX_PCT, default 30% — sopra: solo cortesía; toast dice il minimo cobrable) · v1.7: 📱 celular davanti + 🖨 Imprimir igual · v1.6: campanella col motivo · v1.5: 💚 Fintoc + HERO · v1.4: 🔐 JL · v1.3: 4 medios · v1.2: carta piena · v1.1: comandera sulla CARTA · v1.0: vestido notte · fork mesero v3.13, rollback = mesero.html · 10ago</span>
+    <span class="ver" id="ver">consola v1.9 · 👨‍👩‍👧 MESA FAM: chiude in $0 col codice FAM (porta sua — PIN_FAM dal GAS v3.82.0, sin boleta, fossile medio=fam) · tetto sconto a 20% · v1.8: tetto sconto server · v1.7: 📱 celular + 🖨 · v1.6: campanella col motivo · v1.5: 💚 Fintoc + HERO · v1.4: 🔐 JL · v1.3: 4 medios · v1.2: carta piena · v1.1: comandera sulla CARTA · v1.0: vestido notte · fork mesero v3.13, rollback = mesero.html · 10ago</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -2773,10 +2773,40 @@ function abrirPago(mesa) {
     otro: '', correo: '', celular: '', enviando: false,
     montoOn: false, montoCustom: '',     // v1.1 · sconto manuale di cassa: il fossile porta il monto VERO
     jl: false, pinJL: '', pinAsk: false, // v1.4 · le mosse del JL, dietro il PIN (verità: la valida il GAS)
-    imprimir: false };                   // v1.7 · «la quiero en la mano» anche con la mail
+    imprimir: false,                     // v1.7 · «la quiero en la mano» anche con la mail
+    famAsk: false, pinFam: '' };         // v1.9 · mesa FAM: chiude in $0 col SUO codice
   renderPago();
 }
 function pagoImprimirToggle() { if (STATE.pago) { STATE.pago.imprimir = !STATE.pago.imprimir; renderPago(); } }
+/* v1.9 · MESA FAM — il familiare digita il suo codice, la mesa chiude in $0
+   senza boleta. La verità la dice il GAS (PIN_FAM property, freno 5×10min). */
+function pagoFamAsk() { if (STATE.pago) { STATE.pago.famAsk = !STATE.pago.famAsk; renderPago(); } }
+async function pagoFamConfirmar() {
+  const pg = STATE.pago; if (!pg || pg.enviando) return;
+  if (!String(pg.pinFam || '').trim()) { toast('err', 'Escribe el código FAM'); return; }
+  pg.enviando = true; renderPago();
+  try {
+    const r = await gasPost('registrarPago', {
+      codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: STATE.nombre,
+      mesa: pg.mesa, medio: 'fam', fam: 1, pin_fam: (pg.pinFam || '').trim() });
+    if (r && r.ok) {
+      const ent = _entregadosDeMesa(pg.mesa)[0];
+      if (ent) { _marcarLocal(ent.uuid, 'limpia', pg.mesa); if (STATE.sala) _aplicarMarcados(STATE.sala); }
+      toast('ok', '👨‍👩‍👧 Mesa FAM ✓ mesa ' + pg.mesa + ' · $0' +
+        (r.en_vuelo ? ' · ⚠ ' + r.en_vuelo + ' en vuelo' : ''));
+      STATE.pago = null; renderPago(); cerrarMesa(); refrescar(false); return;
+    }
+    const errFam = { pin_fam_requerido: 'Falta el código FAM', pin_fam_invalido: 'Código FAM incorrecto',
+      pin_fam_bloqueado: 'Código bloqueado 10 min (5 intentos)', pin_fam_no_configurado: 'Código FAM no configurado — avisa a Alberto' };
+    if (r && errFam[r.error]) { pg.pinFam = ''; toast('err', '👨‍👩‍👧 ' + errFam[r.error]); }
+    else toast('err', 'No se pudo: ' + (r && r.error || '?'));
+  } catch (e) {
+    toast('err', e.message === 'timeout'
+      ? 'Sin respuesta — PUEDE haber entrado igual. Verifica antes de repetir.'
+      : 'Sin conexión — reintenta');
+  }
+  pg.enviando = false; renderPago();
+}
 /* v1.4 · la serratura del JL: il PIN si chiede QUI ma si valida nel GAS
    (Script Property PIN_JL_BKS, 5 falliti = 10 min di blocco). Sbloccare la
    UI mostra le opzioni; la porta vera resta il server — un PIN sbagliato
@@ -2832,7 +2862,16 @@ function renderPago() {
       '<input class="cs-pin" id="pinJLInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" value="' + esc(pg.pinJL) + '" oninput="pagoInput(\'pinJL\',this.value)">' +
       '<button class="btn sec" style="margin-top:8px" onclick="pagoJLOk()">Abrir opciones del JL</button>';
   } else {
-    jlHtml = '<div style="text-align:right;margin-top:10px"><span style="color:var(--t3);font-size:12px;cursor:pointer;text-decoration:underline" onclick="pagoJLAsk()">🔐 Opciones del JL</span></div>';
+    jlHtml = '<div style="display:flex;justify-content:space-between;margin-top:10px">' +
+      '<span style="color:var(--t3);font-size:12px;cursor:pointer;text-decoration:underline" onclick="pagoFamAsk()">👨‍👩‍👧 Mesa FAM</span>' +
+      '<span style="color:var(--t3);font-size:12px;cursor:pointer;text-decoration:underline" onclick="pagoJLAsk()">🔐 Opciones del JL</span></div>';
+  }
+  /* v1.9 · la porta FAM: codice suo, chiusura in $0, sin boleta */
+  if (pg.famAsk && !pg.jl && !pg.pinAsk) {
+    jlHtml += '<div class="cs-psec">Código FAM — la mesa cierra en $0</div>' +
+      '<input class="cs-pin" id="pinFamInput" type="password" inputmode="numeric" autocomplete="off" placeholder="Código" value="' + esc(pg.pinFam) + '" oninput="pagoInput(\'pinFam\',this.value)">' +
+      '<button class="btn sec" style="margin-top:8px" ' + (pg.enviando ? 'disabled' : '') + ' onclick="pagoFamConfirmar()">' +
+      (pg.enviando ? 'Registrando…' : 'Cerrar mesa FAM — $0 ✓') + '</button>';
   }
   w.innerHTML = '<div class="cs-pago" onclick="if(event.target===this)pagoCerrar()"><div class="cs-pcard">' +
     '<div class="cs-asa"></div>' +
