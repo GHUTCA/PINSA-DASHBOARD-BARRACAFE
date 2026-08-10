@@ -597,7 +597,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.18</span>
+    <span class="ver" id="ver">consola v1.20</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -2556,7 +2556,13 @@ function renderMesas(r) {
       /* v1.5 \u00b7 l'avviso Fintoc VINCE su ogni altro badge: plata gi\u00e0 entrata
          che aspetta solo il registro \u2014 \u00e8 la cosa pi\u00f9 urgente della tessera */
       const pagFin = _fintocDeMesa(m.mesa);
-      const extra = pagFin ? '\ud83d\udc9a' : (m.grupo && m.grupo !== m.mesa) ? '\ud83d\udd17' : m.regalo ? '\ud83c\udf81'
+      /* v1.20 \u00b7 \ud83e\uddfe = questa mesa ha gi\u00e0 un pago di oggi. Sta subito dopo il
+         \ud83d\udc9a Fintoc (plata entrata che aspetta il registro) e prima di tutto
+         il resto: al cambio turno \u00e8 l'unica cosa che conta sapere prima di
+         toccare il tavolo. */
+      const yaPag = _pagadaDeMesa(m.mesa);
+      const extra = pagFin ? '\ud83d\udc9a' : yaPag ? '\ud83e\uddfe'
+        : (m.grupo && m.grupo !== m.mesa) ? '\ud83d\udd17' : m.regalo ? '\ud83c\udf81'
         : (m.st === 'digitar' && m.hayListo) ? '\ud83c\udf78' : '';
       h += '<button class="mtile mt-' + m.st + '" onclick="abrirMesa(\'' + esc(m.mesa) + '\')">' +
         (m.n > 1 ? '<span class="cnt">' + m.n + '</span>' : '') +
@@ -2592,6 +2598,23 @@ function _fintocDeMesa(mesa) {
   const av = (STATE.sala && STATE.sala.pagos_fintoc) || [];
   for (let i = 0; i < av.length; i++) if (av[i].mesa === mesa) return av[i];
   return null;
+}
+/* ═════ v1.20 · LA MESA DICE SE HA GIÀ UNA BOLETA (10-ago sera) ═════
+   Pagata al terzo cambio turno della giornata. Chi entra apre la consola,
+   trova la lista «por cobrar» e la svuota — è il suo mestiere. Ma dentro
+   c'erano tavoli GIÀ pagati (il pago non riusciva a chiuderli), e ogni
+   tavolo cobrado due volte è un DTE in più al SII: 10 boletas di troppo,
+   $149.770 dichiarati due volte in un giorno solo.
+   Non era «non leggono»: sullo schermo non esisteva NIENTE che dicesse
+   «questa ha già la boleta 405013 delle 13:29». Ora il fatto viaggia col
+   tavolo (`mesas_pagadas`, GAS v3.97.0) e si vede in due posti: il marchio
+   🧾 sulla tessera, e una fascia rossa nel pannello del pago.
+   🔴 CHIEDE, NON BLOCCA. Una guardia cieca sulla mesa ha mangiato 13
+      vendite vere il 10-ago: un secondo cliente allo stesso tavolo esiste,
+      ed è la norma. Qui la mano si ferma un istante e poi decide lei. */
+function _pagadaDeMesa(mesa) {
+  const mp = (STATE.sala && STATE.sala.mesas_pagadas) || null;
+  return (mp && mp[mesa]) ? mp[mesa] : null;
 }
 /* v1.5 · un tocco: il fossile del pago Fintoc + la mesa si libera.
    Niente doppio tap: guardia enviando come nel pannello pago. */
@@ -2827,9 +2850,14 @@ function abrirPago(mesa) {
     /* v1.16 · LA CHIAVE DEL PAGO (caso mesa 49, 10-ago): un uid per apertura
        del pannello, identico su OGNI ritocco — il server riconosce lo stesso
        fatto e non conia una seconda vendita. Stessa dottrina del loteId. */
-    uid: 'PU-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7) };
+    uid: 'PU-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
+    /* v1.20 · il pago che questa mesa ha GIÀ oggi (null = nessuno). Si legge
+       all'apertura del pannello, non al confirm: chi sta per cobrar deve
+       saperlo PRIMA di scegliere il medio e battere la tarjeta. */
+    ya: _pagadaDeMesa(mesa), okDoble: false };
   renderPago();
 }
+function pagoDobleOk() { if (STATE.pago) { STATE.pago.okDoble = true; renderPago(); } }
 function pagoImprimirToggle() { if (STATE.pago) { STATE.pago.imprimir = !STATE.pago.imprimir; renderPago(); } }
 /* v1.9 · MESA FAM — il familiare digita il suo codice, la mesa chiude in $0
    senza boleta. La verità la dice il GAS (PIN_FAM property, freno 5×10min). */
@@ -2929,9 +2957,25 @@ function renderPago() {
       '<button class="btn sec" style="margin-top:8px" ' + (pg.enviando ? 'disabled' : '') + ' onclick="pagoFamConfirmar()">' +
       (pg.enviando ? 'Registrando…' : 'Cerrar mesa FAM — $0 ✓') + '</button>';
   }
+  /* v1.20 · LA FASCIA ROSSA — il fatto prima della scelta. Sta in CIMA, sopra
+     propina e medio: chi sta per battere la tarjeta deve saperlo prima, non
+     dopo. E dice il perché in parole, non con un divieto: se è un cliente
+     nuovo si continua, se è la stessa cuenta no. La decisione resta sua. */
+  const ya = pg.ya;
+  const avisoYa = (ya && !esCort)
+    ? '<div style="margin:10px 0 2px;padding:10px 12px;border-radius:12px;' +
+        'background:rgba(226,75,74,.13);border:1px solid #e24b4a;color:#ffd9d8;font-size:13px;line-height:1.45">' +
+        '<b>⚠️ Esta mesa ya se cobró hoy</b><br>' +
+        esc(ya.hora) + ' · <b>' + fmtPrice(ya.monto) + '</b> · ' + esc(ya.medio) + ' · ' + esc(ya.quien) +
+        (ya.boleta ? '<br>🧾 boleta <b>' + esc(ya.boleta) + '</b> — ya está en el SII' : '') +
+        (ya.n > 1 ? '<br><b>' + ya.n + ' veces</b> hoy' : '') +
+        '<br><span style="opacity:.85">Si es un cliente <b>nuevo</b>, sigue tranquilo. ' +
+        'Si es la <b>misma cuenta</b>, no cobres de nuevo: saldría una segunda boleta.</span></div>'
+    : '';
   w.innerHTML = '<div class="cs-pago" onclick="if(event.target===this)pagoCerrar()"><div class="cs-pcard">' +
     '<div class="cs-asa"></div>' +
     '<h3>Mesa ' + esc(pg.mesa) + ' — pagado</h3>' +
+    avisoYa +
     '<div class="cs-psub">Consumo <b class="tab" style="color:var(--cs-ink)">' + fmtPrice(pg.tot) + '</b></div>' +
     '<div class="cs-psec">Propina (sugerida)</div>' +
     '<div class="cs-chips">' +
@@ -2961,9 +3005,15 @@ function renderPago() {
       ? '<div class="cs-chips" style="margin-top:6px"><div class="cs-chip' + (pg.imprimir ? ' sel' : '') + '" onclick="pagoImprimirToggle()">🖨 Imprimir igual<small>' + (pg.imprimir ? 'saldrá en barra' : 'solo si la pide en la mano') + '</small></div></div>'
       : '') +
     jlHtml +
-    '<button class="btn verde" style="margin-top:16px" ' + (pg.enviando ? 'disabled' : '') + ' onclick="pagoConfirmar(this)">' +
-      (pg.enviando ? 'Registrando…'
-        : (esCort ? 'Confirmar cortesía — $0 ✓' : 'Confirmar pago — ' + fmtPrice(_pagoMonto()) + ' ✓')) + '</button>' +
+    /* v1.20 · un tap in mezzo, non un muro: finché non dice «l'ho visto», il
+       bottone verde non c'è. Un secondo di attrito sul caso raro, zero
+       attrito su tutti gli altri — e nessuna vendita persa. */
+    ((ya && !esCort && !pg.okDoble)
+      ? '<button class="btn" style="margin-top:16px;background:#e24b4a;color:#fff;font-weight:800" onclick="pagoDobleOk()">' +
+          'Lo vi — es otro cliente, cobrar igual</button>'
+      : '<button class="btn verde" style="margin-top:16px" ' + (pg.enviando ? 'disabled' : '') + ' onclick="pagoConfirmar(this)">' +
+          (pg.enviando ? 'Registrando…'
+            : (esCort ? 'Confirmar cortesía — $0 ✓' : 'Confirmar pago — ' + fmtPrice(_pagoMonto()) + ' ✓')) + '</button>') +
     '<button class="btn sec" style="margin-top:8px" onclick="pagoCerrar()">Cancelar</button>' +
     '</div></div>';
 }
