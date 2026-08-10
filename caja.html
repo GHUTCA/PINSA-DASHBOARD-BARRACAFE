@@ -102,7 +102,7 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<span class="ver" id="ver">caja v1.1</span>
+<span class="ver" id="ver">caja v1.2</span>
 
 <script>
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzZkS3bBaYc34uJ6wXP9FG13i58-NT0FJp964vqkUYbRObUxryeRb9l_Fz24kb42f5t/exec';
@@ -174,27 +174,42 @@ function render() {
     hm += '<tr><td>' + esc(MEDIO_NOMBRE[k] || k) + ' <span class="mut">(' + c.por_medio[k].n + ')</span></td>' +
       '<td class="der">' + fmt(c.por_medio[k].monto) + '</td></tr>';
   });
-  if (c.cortesias && c.cortesias.n) hm += '<tr><td class="mut">🎁 Cortesías (' + c.cortesias.n + ')</td><td class="der mut">—</td></tr>';
-  if (c.fam && c.fam.n) hm += '<tr><td class="mut">👨‍👩‍👧 FAM (' + c.fam.n + ')</td><td class="der mut">—</td></tr>';
+  /* v1.2 · le invitate NON sumano en la venta, pero se VEN (VB Alberto):
+     mesa por mesa y con su consumo real — es plata regalada, no plata perdida */
+  const inv = [];
+  if (c.fam && c.fam.n) inv.push(['👨‍👩‍👧 FAM', c.fam]);
+  if (c.cortesias && c.cortesias.n) inv.push(['🎁 Cortesías', c.cortesias]);
+  inv.forEach(([tit, d]) => {
+    hm += '<tr><td colspan="2" style="padding-top:8px;border-top:1px solid var(--linea)"></td></tr>' +
+      '<tr><td class="mut">' + tit + ' (' + d.n + ') <span style="font-size:11px">— fuera de la venta</span></td>' +
+      '<td class="der mut">' + fmt(d.consumo) + '</td></tr>';
+    (d.mesas || []).forEach(x => {
+      hm += '<tr><td class="mut" style="padding-left:14px;font-size:12.5px">mesa ' + esc(x.mesa) + ' <span style="opacity:.7">· ' + esc(x.quien) + '</span></td>' +
+        '<td class="der mut" style="font-size:12.5px">' + fmt(x.consumo) + '</td></tr>';
+    });
+  });
   $('sMedios').innerHTML = hm || '<tr><td class="mut">Sin cobros aún</td></tr>';
 
-  // MESEROS — dropdown con el efectivo y su propina declarada
-  const nombres = Object.keys(c.por_mesero).sort((a, b) => c.por_mesero[b].venta - c.por_mesero[a].venta);
+  // MESEROS — venta servida (libro) + lo que cobró él (dropdown completo)
+  const nombres = Object.keys(c.por_mesero).sort((a, b) => (c.por_mesero[b].venta || 0) - (c.por_mesero[a].venta || 0));
   $('sMeseros').innerHTML = nombres.map(n => {
     const m = c.por_mesero[n];
-    const det = (m.pagos_ef || []).map(p =>
-      '<div class="r"><span>' + esc(p.hh) + ' · mesa ' + esc(p.mesa) + '</span>' +
-      '<span>' + fmt(p.monto) + (p.propina ? ' <span class="mut">+ prop ' + fmt(p.propina) + '</span>' : ' <span class="mut">sin prop</span>') + '</span></div>'
+    const MED = { efectivo: '💵', debito: '💳', credito: '💳', transfer: '🏦', mpago: '📲', fintoc: '📲' };
+    const det = (m.pagos || []).map(p =>
+      '<div class="r"><span>' + esc(p.hh) + ' · mesa ' + esc(p.mesa) + ' · ' + (MED[p.medio] || '') + ' ' + esc(MEDIO_NOMBRE[p.medio] || p.medio) + '</span>' +
+      '<span>' + fmt(p.monto) + (p.propina ? ' <span class="mut">+ prop ' + fmt(p.propina) + '</span>' : '') + '</span></div>'
     ).join('');
-    return '<div class="mes" id="mes-' + esc(n) + '"><div class="mes-h" onclick="this.parentNode.classList.toggle(\'open\')">' +
-      '<span><b>' + esc(n) + '</b> <span class="mut" style="font-size:12px">· ' + m.n + ' cuentas · ' + fmt(m.venta) + '</span></span>' +
-      '<span class="efec">💵 ' + fmt(m.efectivo) + ' ▾</span></div>' +
+    return '<div class="mes"><div class="mes-h" onclick="this.parentNode.classList.toggle(&quot;open&quot;)">' +
+      '<span><b>' + esc(n) + '</b> <span class="mut" style="font-size:12px">· ' + (m.n || 0) + ' pedidos</span></span>' +
+      '<span><b style="font-size:15px">' + fmt(m.venta) + '</b> ' +
+      (m.efectivo ? '<span class="efec">· 💵 ' + fmt(m.efectivo) + '</span>' : '') + ' ▾</span></div>' +
       '<div class="mes-det">' +
-      (det || '<div class="r mut">Sin cobros en efectivo</div>') +
-      '<div class="r tot"><span>Efectivo por rendir</span><span>' + fmt(m.efectivo) + '</span></div>' +
-      '<div class="r tot" style="border:none;padding-top:0"><span>Propina declarada (efectivo)</span><span>' + fmt(m.prop_efectivo) + '</span></div>' +
+      '<div class="r mut" style="font-size:11.5px">vendió ' + fmt(m.venta) + ' · cobró ' + fmt(m.cobrado || 0) + ' (' + (m.n_cobros || 0) + ' cuentas)</div>' +
+      (det || '<div class="r mut">No cobró ninguna cuenta él</div>') +
+      (m.efectivo ? '<div class="r tot"><span>💵 Efectivo por rendir</span><span>' + fmt(m.efectivo) + '</span></div>' +
+        '<div class="r tot" style="border:none;padding-top:0"><span>Propina declarada (efectivo)</span><span>' + fmt(m.prop_efectivo) + '</span></div>' : '') +
       '</div></div>';
-  }).join('') || '<div class="mut" style="font-size:13px">Sin meseros con cobros aún</div>';
+  }).join('') || '<div class="mut" style="font-size:13px">Sin ventas aún</div>';
 
   // PROPINAS — la cuenta a la vista
   const p = c.propinas;
