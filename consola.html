@@ -590,7 +590,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.3 · collaudo vivo Felipe/8960: FAB nascosto con lo sheet aperto · i 4 medios VERI (Efectivo · T.débito · T.crédito · Transferencia — tassonomia Fintoc; questo pannello = tarjeta física, il pago Fintoc avviserà dal poll) · v1.2: carta a pagina piena · cortesía/otro-monto solo JL (PIN dal GAS, domani) · v1.1: comandera sulla CARTA (chips mesas ● viva) · v1.0: vestido notte · aviso pass · tracker · stepper · 💳 registrarPago · fork mesero v3.13, rollback = mesero.html · 10ago</span>
+    <span class="ver" id="ver">consola v1.4 · 🔐 Opciones del JL: cortesía + «¿cobraste otro monto?» dietro il PIN (valida il GAS v3.75.0 @175 — 5 falliti = 10 min) · la boleta esce dal monto COBRADO, cortesía sin boleta · v1.3: FAB giù con lo sheet · 4 medios veri (Fintoc) · v1.2: carta a pagina piena · v1.1: comandera sulla CARTA · v1.0: vestido notte · aviso pass · tracker · stepper · 💳 registrarPago · fork mesero v3.13, rollback = mesero.html · 10ago</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -2700,8 +2700,19 @@ function abrirPago(mesa) {
     .reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0) : 0;
   STATE.pago = { mesa: mesa, tot: tot, prop: 'sug', medio: 'debito',
     otro: '', correo: '', celular: '', enviando: false,
-    montoOn: false, montoCustom: '' };   // v1.1 · sconto manuale di cassa: il fossile porta il monto VERO
+    montoOn: false, montoCustom: '',     // v1.1 · sconto manuale di cassa: il fossile porta il monto VERO
+    jl: false, pinJL: '', pinAsk: false }; // v1.4 · le mosse del JL, dietro il PIN (verità: la valida il GAS)
   renderPago();
+}
+/* v1.4 · la serratura del JL: il PIN si chiede QUI ma si valida nel GAS
+   (Script Property PIN_JL_BKS, 5 falliti = 10 min di blocco). Sbloccare la
+   UI mostra le opzioni; la porta vera resta il server — un PIN sbagliato
+   muore in registrarPago con l'errore parlante. */
+function pagoJLAsk() { if (STATE.pago) { STATE.pago.pinAsk = true; renderPago(); } }
+function pagoJLOk() {
+  const pg = STATE.pago; if (!pg) return;
+  if (!String(pg.pinJL || '').trim()) { toast('err', 'Escribe el PIN del JL'); return; }
+  pg.jl = true; pg.pinAsk = false; renderPago();
 }
 /* v1.1 · il monto davvero incassato: cortesía → 0 · «otro monto» → quello · sennò il consumo */
 function _pagoMonto() {
@@ -2729,11 +2740,27 @@ function renderPago() {
     return '<div class="cs-chip' + (pg[grp] === val ? ' sel' : '') + '" onclick="pagoSet(\'' + grp + '\',\'' + val + '\')">' +
       lbl + (sub ? '<small>' + sub + '</small>' : '') + '</div>';
   };
-  /* v1.2 · ORDINE ALBERTO (10-ago): cortesía e «otro monto» NON sono del
-     garzón — spariscono dalla UI finché non c'è la serratura vera (PIN del
-     JL validato dal GAS contro una Script Property, col giro boleta di
-     domani). Le funzioni restano sotto, inerti: si riaccendono col PIN. */
+  /* v1.4 · la serratura è montata (GAS v3.75.0 @175): cortesía e «otro monto»
+     vivono dietro «Opciones del JL» — PIN chiesto qui, validato dal server.
+     Per il garzón il pannello resta identico a prima. */
   const esCort = pg.medio === 'cortesia';
+  let jlHtml = '';
+  if (pg.jl) {
+    jlHtml = '<div class="cs-psec" style="color:var(--cs-cyan,#22d3ee)">🔐 Opciones del JL</div>' +
+      '<div class="cs-chips">' +
+        '<div class="cs-chip' + (esCort ? ' sel' : '') + '" onclick="pagoSet(\'medio\',\'' + (esCort ? 'debito' : 'cortesia') + '\')">🎁 Cortesía<small>invitación $0 · sin boleta</small></div>' +
+        (esCort ? '' : '<div class="cs-chip' + (pg.montoOn ? ' sel' : '') + '" onclick="pagoMontoToggle()">¿Cobraste otro monto?<small>el fósil lleva lo cobrado</small></div>') +
+      '</div>' +
+      (!esCort && pg.montoOn
+        ? '<input class="cs-pin" inputmode="numeric" placeholder="Monto cobrado $" value="' + esc(pg.montoCustom) + '" oninput="pagoInput(\'montoCustom\',this.value)" onchange="renderPago()">'
+        : '');
+  } else if (pg.pinAsk) {
+    jlHtml = '<div class="cs-psec">PIN del JL</div>' +
+      '<input class="cs-pin" id="pinJLInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" value="' + esc(pg.pinJL) + '" oninput="pagoInput(\'pinJL\',this.value)">' +
+      '<button class="btn sec" style="margin-top:8px" onclick="pagoJLOk()">Abrir opciones del JL</button>';
+  } else {
+    jlHtml = '<div style="text-align:right;margin-top:10px"><span style="color:var(--t3);font-size:12px;cursor:pointer;text-decoration:underline" onclick="pagoJLAsk()">🔐 Opciones del JL</span></div>';
+  }
   w.innerHTML = '<div class="cs-pago" onclick="if(event.target===this)pagoCerrar()"><div class="cs-pcard">' +
     '<div class="cs-asa"></div>' +
     '<h3>Mesa ' + esc(pg.mesa) + ' — pagado</h3>' +
@@ -2759,6 +2786,7 @@ function renderPago() {
     '<div class="cs-psec">«¿Me das tu correo? Te mando la boleta»</div>' +
     '<input class="cs-pin" type="email" autocomplete="off" placeholder="Correo (opcional)" value="' + esc(pg.correo) + '" oninput="pagoInput(\'correo\',this.value)">' +
     '<input class="cs-pin" inputmode="tel" autocomplete="off" placeholder="Celular (opcional)" value="' + esc(pg.celular) + '" oninput="pagoInput(\'celular\',this.value)">' +
+    jlHtml +
     '<button class="btn verde" style="margin-top:16px" ' + (pg.enviando ? 'disabled' : '') + ' onclick="pagoConfirmar(this)">' +
       (pg.enviando ? 'Registrando…'
         : (esCort ? 'Confirmar cortesía — $0 ✓' : 'Confirmar pago — ' + fmtPrice(_pagoMonto()) + ' ✓')) + '</button>' +
@@ -2778,9 +2806,14 @@ async function pagoConfirmar(btn) {
     codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: STATE.nombre,
     mesa: pg.mesa, medio: pg.medio, propina: propina,
     correo: (pg.correo || '').trim(), celular: (pg.celular || '').trim() };
-  if (esCort) { body.monto = 0; }
+  /* v1.4 · le mosse del JL viaggiano DICHIARATE + col PIN (GAS v3.75.0):
+     cortesía → cortesia:1 (il server forza $0 e non emette) · otro monto →
+     monto_manual:1 + monto (la boleta esce dal cobrado, riga unica). */
+  if (esCort) { body.cortesia = 1; body.pin_jl = (pg.pinJL || '').trim(); }
   else {
-    if (pg.montoOn && _pagoMonto() !== pg.tot) body.monto = _pagoMonto();
+    if (pg.montoOn && _pagoMonto() !== pg.tot) {
+      body.monto = _pagoMonto(); body.monto_manual = 1; body.pin_jl = (pg.pinJL || '').trim();
+    }
     body.boleta = 1;
   }
   try {
@@ -2800,7 +2833,11 @@ async function pagoConfirmar(btn) {
       refrescar(false);
       return;
     }
-    toast('err', 'No se pudo: ' + (r && r.error || '?'));
+    /* v1.4 · gli errori del PIN parlano chiaro e riaprono la serratura */
+    const errPin = { pin_jl_requerido: 'Falta el PIN del JL', pin_jl_invalido: 'PIN del JL incorrecto',
+      pin_jl_bloqueado: 'PIN bloqueado 10 min (5 intentos fallidos)', pin_jl_no_configurado: 'PIN del JL no configurado — avisa a Alberto' };
+    if (r && errPin[r.error]) { pg.jl = false; pg.pinAsk = true; pg.pinJL = ''; toast('err', '🔐 ' + errPin[r.error]); }
+    else toast('err', 'No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
     /* ⚠ niente retry cieco: registrarPago NON deduplica per uuid — un pago
        doppio è un fossile doppio. Dopo un timeout si verifica, non si insiste. */
