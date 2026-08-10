@@ -597,7 +597,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.15</span>
+    <span class="ver" id="ver">consola v1.16</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1403,6 +1403,15 @@ function otraRondaMesa(mesa){
 // v2.3 · F1 · la precuenta del tavolo a un tap: papel in barra col QR —
 // l'evento entra nel libro (PRECUENTAS + seme LEGGE 2). GAS @83 la aspettava.
 async function precuentaMesa(mesa, btn){
+  /* v1.16 · il freno delle 3 pergamene (mesa 49, due a 11 s di distanza):
+     ristampa entro 2 min = domanda esplicita, mai un dito che rimbalza. */
+  STATE.pcUlt = STATE.pcUlt || {};
+  const antes = STATE.pcUlt[mesa] || 0;
+  if (Date.now() - antes < 120000) {
+    if (!window.confirm('Ya se pidió la precuenta de la mesa ' + mesa + ' hace ' +
+      Math.round((Date.now() - antes) / 1000) + ' s.\n\n¿Imprimir OTRA copia?')) return;
+  }
+  STATE.pcUlt[mesa] = Date.now();
   if (btn) { btn.disabled = true; btn.classList.add('cargando'); }
   try {
     const r = await gasPost('emitirPreCuenta', { codigo: STATE.codigo, nombre: STATE.nombre, emitida_por: STATE.nombre, mesa: mesa, canal: 'papel' });
@@ -2805,7 +2814,11 @@ function abrirPago(mesa) {
     montoOn: false, montoCustom: '',     // v1.1 · sconto manuale di cassa: il fossile porta il monto VERO
     jl: false, pinJL: '', pinAsk: false, // v1.4 · le mosse del JL, dietro il PIN (verità: la valida il GAS)
     imprimir: false,                     // v1.7 · «la quiero en la mano» anche con la mail
-    famAsk: false, pinFam: '' };         // v1.9 · mesa FAM: chiude in $0 col SUO codice
+    famAsk: false, pinFam: '',           // v1.9 · mesa FAM: chiude in $0 col SUO codice
+    /* v1.16 · LA CHIAVE DEL PAGO (caso mesa 49, 10-ago): un uid per apertura
+       del pannello, identico su OGNI ritocco — il server riconosce lo stesso
+       fatto e non conia una seconda vendita. Stessa dottrina del loteId. */
+    uid: 'PU-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7) };
   renderPago();
 }
 function pagoImprimirToggle() { if (STATE.pago) { STATE.pago.imprimir = !STATE.pago.imprimir; renderPago(); } }
@@ -2956,7 +2969,7 @@ async function pagoConfirmar(btn) {
      si fossilizzano scontati alla presa del pedido. */
   const body = {
     codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: STATE.nombre,
-    mesa: pg.mesa, medio: pg.medio, propina: propina,
+    mesa: pg.mesa, medio: pg.medio, propina: propina, pago_uid: pg.uid,   // v1.16
     correo: (pg.correo || '').trim(), celular: (pg.celular || '').trim() };
   /* v1.4 · le mosse del JL viaggiano DICHIARATE + col PIN (GAS v3.75.0):
      cortesía → cortesia:1 (il server forza $0 e non emette) · otro monto →
@@ -2978,6 +2991,17 @@ async function pagoConfirmar(btn) {
       if (mm) {
         mm.pend.concat(mm.mios, mm.limpiar).forEach(function (p) { _marcarLocal(p.uuid, 'limpia', pg.mesa); });
         if (STATE.sala) _aplicarMarcados(STATE.sala);
+      }
+      /* v1.16 · il server dice «questo pago esisteva già» (guardia mesa 49):
+         non è un errore ed è la risposta giusta — la mesa si chiude, e il
+         mesero legge che NON ha cobrato due volte. */
+      if (r.ya_registrado) {
+        toast('ok', '✓ Ya estaba cobrada la mesa ' + pg.mesa + ' · ' + fmtPrice(r.monto || 0) +
+          (r.hace_s != null ? ' (hace ' + fmtHace(r.hace_s) + ')' : '') +
+          ' — no se cobró de nuevo' +
+          ((r.boleta_estado || '').indexOf('emitida') === 0 ? ' · 🧾 ' + r.boleta_estado.split(':')[1] : ''));
+        STATE.pago = null; renderPago(); cerrarMesa(); refrescar(false);
+        return;
       }
       toast('ok', (esCort ? '🎁 Cortesía ✓ mesa ' + pg.mesa + ' · $0'
           : '💳 Pago ✓ mesa ' + pg.mesa + ' · ' + fmtPrice(r.monto != null ? r.monto : pg.tot)) +
@@ -3004,7 +3028,9 @@ async function pagoConfirmar(btn) {
     /* ⚠ niente retry cieco: registrarPago NON deduplica per uuid — un pago
        doppio è un fossile doppio. Dopo un timeout si verifica, non si insiste. */
     toast('err', e.message === 'timeout'
-      ? 'Sin respuesta — PUEDE haber entrado igual. Verifica con el JL antes de repetir.'
+      /* v1.16 · il messaggio dice il VERO: dalla v3.88 del server, ritocar es
+         seguro — el mismo pago no se cobra dos veces (guardia por uid+mesa). */
+      ? 'El servidor va lento. Puedes tocar de nuevo: es seguro, no se cobra dos veces.'
       : 'Sin conexión — reintenta');
   }
   pg.enviando = false; renderPago();
