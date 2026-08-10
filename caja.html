@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>BKS Caja</title>
+<!-- DEVICE-CLASS: 3 · visione/consulta (dual: telefono JL oggi, tablet cassa domani) -->
+<!-- La vista del JL sul fossile PAGOS: caja + reporte ventas + reparto propinas.
+     Legge a domanda (getCaja, PIN JL) + refresh 60s SOLO a pagina aperta e visibile.
+     Scrive UNA cosa sola: cerrarReparto (il rito di chiusura, fossile REPARTO_PROPINA). -->
+<style>
+  :root{ --bg:#0d1117; --card:#161d27; --card2:#1c2532; --ink:#f2f6fa; --ink2:#aab8c6;
+    --mut:#5f7183; --linea:#26313f; --oro:#d4a842; --cyan:#22d3ee; --verde:#3db876;
+    --naranja:#f5a623; --rojo:#e24b4a; }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+  body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    font-size:15px;line-height:1.45;padding:0 0 40px}
+  .wrap{max-width:640px;margin:0 auto;padding:0 12px}
+  header{display:flex;justify-content:space-between;align-items:baseline;padding:16px 2px 10px}
+  header h1{font-size:20px;font-weight:800}
+  header small{color:var(--mut);font-size:11.5px}
+  .card{background:var(--card);border:1px solid var(--linea);border-radius:14px;padding:12px;margin-bottom:12px}
+  .tit{font-size:12px;font-weight:800;letter-spacing:.04em;margin-bottom:8px}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  .kpi{background:var(--card);border:1px solid var(--linea);border-radius:12px;padding:10px 6px;text-align:center}
+  .kpi small{display:block;font-size:10.5px;color:var(--mut);font-weight:700}
+  .kpi b{font-size:20px;font-variant-numeric:tabular-nums}
+  table{width:100%;border-spacing:0;font-size:13.5px;font-variant-numeric:tabular-nums}
+  td{padding:3px 0}
+  .der{text-align:right;font-weight:700}
+  .mut{color:var(--mut)}
+  .fila-ahora{padding:4px 0;font-size:13px}
+  .fila-ahora b{font-variant-numeric:tabular-nums}
+  /* il dropdown del mesero */
+  .mes{border:1px solid var(--linea);border-radius:10px;margin:6px 0;overflow:hidden}
+  .mes-h{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;cursor:pointer;background:var(--card2)}
+  .mes-h b{font-size:14px}
+  .mes-h .efec{color:var(--verde);font-size:12.5px;font-weight:700}
+  .mes-det{padding:8px 10px;border-top:1px solid var(--linea);display:none}
+  .mes.open .mes-det{display:block}
+  .mes-det .r{display:flex;justify-content:space-between;font-size:12.5px;padding:2px 0;color:var(--ink2)}
+  .mes-det .tot{border-top:1px solid var(--linea);margin-top:4px;padding-top:4px;color:var(--ink);font-weight:800}
+  /* propinas */
+  .oro{border-color:var(--oro)}
+  .oro .tit{color:var(--oro)}
+  .pto{display:flex;justify-content:space-between;align-items:center;padding:5px 0}
+  .chips{display:inline-flex;gap:4px}
+  .chip{border:1px solid var(--linea);color:var(--mut);border-radius:12px;padding:2px 10px;font-size:12px;cursor:pointer}
+  .chip.sel{border-color:var(--cyan);color:var(--cyan);font-weight:800}
+  .btnv{display:block;width:100%;background:var(--verde);color:#04250f;font-weight:800;font-size:15px;
+    border:none;border-radius:12px;padding:12px;margin-top:10px;cursor:pointer}
+  .btnv:disabled{opacity:.5}
+  input.pin{width:100%;background:var(--card2);border:1px solid var(--linea);border-radius:10px;color:var(--ink);
+    font-size:16px;padding:11px;text-align:center;letter-spacing:.3em}
+  #vPin{max-width:340px;margin:18vh auto 0;text-align:center;padding:0 16px}
+  #vPin h1{font-size:22px;margin-bottom:4px}
+  #vPin p{color:var(--mut);font-size:13px;margin-bottom:16px}
+  .err{color:var(--rojo);font-size:13px;margin-top:8px;min-height:18px}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:var(--card2);
+    border:1px solid var(--verde);color:var(--ink);border-radius:12px;padding:10px 16px;font-size:13.5px;
+    max-width:92vw;display:none;z-index:9}
+  .hide{display:none}
+  .ver{position:fixed;right:8px;bottom:4px;font-size:9px;color:var(--mut)}
+</style>
+</head>
+<body>
+
+<div id="vPin">
+  <h1>💰 Caja · BKS</h1>
+  <p>Solo JL — la vista del turno</p>
+  <input class="pin" id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN del JL"
+    onkeydown="if(event.key==='Enter')entrar()">
+  <button class="btnv" id="btnEntrar" onclick="entrar()">Abrir la caja</button>
+  <div class="err" id="pinErr"></div>
+</div>
+
+<div class="wrap hide" id="vCaja">
+  <header>
+    <h1>💰 Caja · BKS</h1>
+    <small id="hFecha">—</small>
+  </header>
+  <div class="kpis">
+    <div class="kpi"><small>VENDIDO HOY</small><b id="kVenta">—</b></div>
+    <div class="kpi"><small>CUENTAS</small><b id="kCuentas">—</b></div>
+    <div class="kpi"><small>🧾 BOLETAS</small><b id="kBoletas">—</b></div>
+  </div>
+  <div class="card"><div class="tit" style="color:var(--naranja)">⚡ AHORA — los últimos cobros</div><div id="sAhora"></div></div>
+  <div class="card"><div class="tit" style="color:var(--cyan)">CUADRATURA POR MEDIO</div><table id="sMedios"></table></div>
+  <div class="card"><div class="tit" style="color:var(--cyan)">VENTAS POR MESERO <span class="mut" style="font-weight:400">— toca para ver su efectivo</span></div><div id="sMeseros"></div></div>
+  <div class="card oro">
+    <div class="tit">🪙 PROPINAS — el reparto, con la cuenta a la vista</div>
+    <table id="sPropCta"></table>
+    <div id="sPuntos" style="margin-top:8px"></div>
+    <div id="sRepartoHecho" class="mut" style="font-size:12px;margin-top:6px"></div>
+    <input class="pin" id="pinCierre" type="password" inputmode="numeric" autocomplete="off"
+      placeholder="PIN del JL para cerrar" style="margin-top:10px;letter-spacing:.2em">
+    <button class="btnv" id="btnCerrar" onclick="cerrar()">🔐 Cerrar reparto del turno</button>
+    <div class="mut" style="font-size:11px;text-align:center;margin-top:6px">
+      queda fossilizado en REPARTO_PROPINA — se corrige con una fila nueva, jamás borrando</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<span class="ver" id="ver">caja v1.0</span>
+
+<script>
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzZkS3bBaYc34uJ6wXP9FG13i58-NT0FJp964vqkUYbRObUxryeRb9l_Fz24kb42f5t/exec';
+const S = { pin: '', caja: null, puntos: {}, timer: null, enviando: false };
+const $ = id => document.getElementById(id);
+const fmt = n => '$' + Math.round(n || 0).toLocaleString('es-CL');
+const esc = s => (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => { t.style.display = 'none'; }, 4200); }
+
+async function gas(body) {
+  body.local = 'BKS';
+  const r = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(body), redirect: 'follow' });
+  return r.json();
+}
+
+async function entrar() {
+  const pin = $('pin').value.trim();
+  if (!pin) { $('pinErr').textContent = 'Escribe el PIN'; return; }
+  $('btnEntrar').disabled = true; $('pinErr').textContent = 'Abriendo…';
+  try {
+    const r = await gas({ action: 'getCaja', pin_jl: pin });
+    if (r && r.ok) {
+      S.pin = pin; S.caja = r;
+      $('vPin').classList.add('hide'); $('vCaja').classList.remove('hide');
+      render();
+      // refresh 60s SOLO con la pagina aperta e visibile (costo dichiarato: 1 exec/min)
+      S.timer = setInterval(() => { if (document.visibilityState === 'visible') refrescar(); }, 60000);
+    } else {
+      const e = { pin_jl_invalido: 'PIN incorrecto', pin_jl_bloqueado: 'Bloqueado 10 min (5 intentos)',
+        pin_jl_requerido: 'Escribe el PIN', pin_jl_no_configurado: 'PIN no configurado — avisa a Alberto' };
+      $('pinErr').textContent = (r && e[r.error]) || 'No se pudo: ' + (r && r.error || 'sin respuesta');
+    }
+  } catch (err) { $('pinErr').textContent = 'Sin conexión o servidor lento — reintenta'; }
+  $('btnEntrar').disabled = false;
+}
+
+async function refrescar() {
+  try { const r = await gas({ action: 'getCaja', pin_jl: S.pin }); if (r && r.ok) { S.caja = r; render(); } }
+  catch (e) { /* il prossimo giro riprova */ }
+}
+
+const MEDIO_NOMBRE = { efectivo: 'Efectivo', debito: 'T. débito', credito: 'T. crédito',
+  transfer: 'Transfer', mpago: 'MercadoPago', fintoc: 'Fintoc (teléfono)' };
+
+function render() {
+  const c = S.caja; if (!c) return;
+  $('hFecha').textContent = c.fecha_op + ' · 🔄 ' + new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+  $('kVenta').textContent = fmt(c.venta);
+  $('kCuentas').textContent = c.cuentas;
+  $('kBoletas').textContent = c.boletas;
+
+  // ⚡ AHORA
+  $('sAhora').innerHTML = (c.ahora && c.ahora.length) ? c.ahora.map(a => {
+    const min = Math.max(0, Math.round((Date.now() - a.ts) / 60000));
+    return '<div class="fila-ahora"><b>Mesa ' + esc(a.mesa) + '</b> · <b>' + fmt(a.monto) + '</b> · ' +
+      esc(MEDIO_NOMBRE[a.medio] || a.medio) + ' · ' + esc(a.quien) +
+      ' · <span class="mut">hace ' + min + ' min</span>' +
+      ((a.boleta || '').indexOf('emitida') === 0 ? ' 🧾' : '') + '</div>';
+  }).join('') : '<div class="mut" style="font-size:13px">Todavía nada — el primer cobro aparece acá.</div>';
+
+  // CUADRATURA
+  let hm = '';
+  Object.keys(c.por_medio).forEach(k => {
+    hm += '<tr><td>' + esc(MEDIO_NOMBRE[k] || k) + ' <span class="mut">(' + c.por_medio[k].n + ')</span></td>' +
+      '<td class="der">' + fmt(c.por_medio[k].monto) + '</td></tr>';
+  });
+  if (c.cortesias && c.cortesias.n) hm += '<tr><td class="mut">🎁 Cortesías (' + c.cortesias.n + ')</td><td class="der mut">—</td></tr>';
+  if (c.fam && c.fam.n) hm += '<tr><td class="mut">👨‍👩‍👧 FAM (' + c.fam.n + ')</td><td class="der mut">—</td></tr>';
+  $('sMedios').innerHTML = hm || '<tr><td class="mut">Sin cobros aún</td></tr>';
+
+  // MESEROS — dropdown con el efectivo y su propina declarada
+  const nombres = Object.keys(c.por_mesero).sort((a, b) => c.por_mesero[b].venta - c.por_mesero[a].venta);
+  $('sMeseros').innerHTML = nombres.map(n => {
+    const m = c.por_mesero[n];
+    const det = (m.pagos_ef || []).map(p =>
+      '<div class="r"><span>' + esc(p.hh) + ' · mesa ' + esc(p.mesa) + '</span>' +
+      '<span>' + fmt(p.monto) + (p.propina ? ' <span class="mut">+ prop ' + fmt(p.propina) + '</span>' : ' <span class="mut">sin prop</span>') + '</span></div>'
+    ).join('');
+    return '<div class="mes" id="mes-' + esc(n) + '"><div class="mes-h" onclick="this.parentNode.classList.toggle(\'open\')">' +
+      '<span><b>' + esc(n) + '</b> <span class="mut" style="font-size:12px">· ' + m.n + ' cuentas · ' + fmt(m.venta) + '</span></span>' +
+      '<span class="efec">💵 ' + fmt(m.efectivo) + ' ▾</span></div>' +
+      '<div class="mes-det">' +
+      (det || '<div class="r mut">Sin cobros en efectivo</div>') +
+      '<div class="r tot"><span>Efectivo por rendir</span><span>' + fmt(m.efectivo) + '</span></div>' +
+      '<div class="r tot" style="border:none;padding-top:0"><span>Propina declarada (efectivo)</span><span>' + fmt(m.prop_efectivo) + '</span></div>' +
+      '</div></div>';
+  }).join('') || '<div class="mut" style="font-size:13px">Sin meseros con cobros aún</div>';
+
+  // PROPINAS — la cuenta a la vista
+  const p = c.propinas;
+  $('sPropCta').innerHTML =
+    '<tr><td>Propina tarjeta</td><td class="der">' + fmt(p.tarjeta) + '</td><td class="der" style="color:var(--rojo)">−' + p.desc_pct + '% = −' + fmt(p.desc_tarjeta) + '</td></tr>' +
+    '<tr><td>Propina efectivo/otros</td><td class="der">' + fmt(p.efectivo) + '</td><td class="der mut">entera</td></tr>' +
+    '<tr><td style="font-weight:800;border-top:1px solid var(--linea)">POZO</td><td class="der" style="font-weight:800;border-top:1px solid var(--linea)">' + fmt(p.pozo) + '</td><td style="border-top:1px solid var(--linea)"></td></tr>' +
+    '<tr><td style="padding-left:12px">' + p.meseros_pct + '% meseros</td><td class="der">' + fmt(p.monto_meseros) + '</td><td class="der mut" id="ptosTot"></td></tr>' +
+    '<tr><td style="padding-left:12px">' + (100 - p.meseros_pct) + '% fondo común</td><td class="der">' + fmt(p.monto_fondo) + '</td><td></td></tr>';
+
+  // puntos: precompilati da chi ha cobrado oggi (default 1), il JL ritocca
+  nombres.forEach(n => { if (!(n in S.puntos)) S.puntos[n] = 1; });
+  renderPuntos();
+
+  $('sRepartoHecho').textContent = c.reparto_hoy
+    ? '✓ Hoy ya se cerró un reparto (' + c.reparto_hoy.id + ', pozo ' + fmt(c.reparto_hoy.pozo) + ') — cerrar de nuevo crea una fila NUEVA.'
+    : '';
+}
+
+function renderPuntos() {
+  const p = (S.caja && S.caja.propinas) || { monto_meseros: 0 };
+  const nombres = Object.keys(S.puntos);
+  let suma = 0; nombres.forEach(n => { suma += S.puntos[n]; });
+  const vp = suma > 0 ? p.monto_meseros / suma : 0;
+  $('sPuntos').innerHTML = nombres.map(n =>
+    '<div class="pto"><span>' + esc(n) + '</span><span>' +
+    '<span class="chips">' +
+    '<span class="chip' + (S.puntos[n] === 1 ? ' sel' : '') + '" onclick="setPto(\'' + esc(n) + '\',1)">● 1</span>' +
+    '<span class="chip' + (S.puntos[n] === 0.5 ? ' sel' : '') + '" onclick="setPto(\'' + esc(n) + '\',0.5)">◐ ½</span>' +
+    '<span class="chip' + (S.puntos[n] === 0 ? ' sel' : '') + '" onclick="setPto(\'' + esc(n) + '\',0)">✕ 0</span>' +
+    '</span> <b style="min-width:74px;display:inline-block;text-align:right">' + fmt(vp * S.puntos[n]) + '</b></span></div>'
+  ).join('');
+  const t = $('ptosTot'); if (t) t.textContent = '÷ ' + suma + ' punto' + (suma === 1 ? '' : 's');
+}
+function setPto(n, v) { S.puntos[n] = v; renderPuntos(); }
+
+async function cerrar() {
+  if (S.enviando) return;
+  const pin = $('pinCierre').value.trim();
+  if (!pin) { toast('Escribe el PIN para cerrar'); return; }
+  const activos = {}; Object.keys(S.puntos).forEach(n => { if (S.puntos[n] > 0) activos[n] = S.puntos[n]; });
+  if (!Object.keys(activos).length) { toast('Nadie con puntos — revisa'); return; }
+  S.enviando = true; $('btnCerrar').disabled = true; $('btnCerrar').textContent = 'Cerrando…';
+  try {
+    const r = await gas({ action: 'cerrarReparto', pin_jl: pin, puntos: activos, cerrado_por: 'JL' });
+    if (r && r.ok) {
+      toast('✓ Reparto cerrado · pozo ' + fmt(r.pozo) + ' · punto entero = ' + fmt(r.valor_punto));
+      $('pinCierre').value = '';
+      refrescar();
+    } else toast('No se pudo: ' + (r && r.error || 'sin respuesta'));
+  } catch (e) { toast('Servidor lento — el cierre PUEDE haber entrado. Refresca antes de repetir.'); }
+  S.enviando = false; $('btnCerrar').disabled = false; $('btnCerrar').textContent = '🔐 Cerrar reparto del turno';
+}
+</script>
+</body>
+</html>
