@@ -593,7 +593,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.11 · 💰 la plata in testa allo sheet: Cuenta + 🧾 Precuenta + 💳 Pagado sotto l'intestazione (in fondo resta ➕ Agregar) · v1.10:⌨→✓ ALOHA NON ESISTE PIÙ nel vocabolario: «Digitado en Aloha»→«Confirmar pedido», tessera «digitar»→«confirmar» (lo stato interno resta digitado — solo il nome dice il vero; ridisegno flusso = task col capo) · v1.9:👨‍👩‍👧 MESA FAM: chiude in $0 col codice FAM (porta sua — PIN_FAM dal GAS v3.82.0, sin boleta, fossile medio=fam) · tetto sconto a 20% · v1.8: tetto sconto server · v1.7: 📱 celular + 🖨 · v1.6: campanella col motivo · v1.5: 💚 Fintoc + HERO · v1.4: 🔐 JL · v1.3: 4 medios · v1.2: carta piena · v1.1: comandera sulla CARTA · v1.0: vestido notte · fork mesero v3.13, rollback = mesero.html · 10ago</span>
+    <span class="ver" id="ver">consola v1.12 · 💰 sheet mesa: blocco azione UNICO in testa (Cuenta · Precuenta · Pagado · ➕ Agregar) + riga di separo + storia INVERTITA (l'ultimo arrivato in alto) · v1.10:⌨→✓ ALOHA NON ESISTE PIÙ nel vocabolario: «Digitado en Aloha»→«Confirmar pedido», tessera «digitar»→«confirmar» (lo stato interno resta digitado — solo il nome dice il vero; ridisegno flusso = task col capo) · v1.9:👨‍👩‍👧 MESA FAM: chiude in $0 col codice FAM (porta sua — PIN_FAM dal GAS v3.82.0, sin boleta, fossile medio=fam) · tetto sconto a 20% · v1.8: tetto sconto server · v1.7: 📱 celular + 🖨 · v1.6: campanella col motivo · v1.5: 💚 Fintoc + HERO · v1.4: 🔐 JL · v1.3: 4 medios · v1.2: carta piena · v1.1: comandera sulla CARTA · v1.0: vestido notte · fork mesero v3.13, rollback = mesero.html · 10ago</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -2636,6 +2636,10 @@ function renderMesaSheet(r) {
       (r.precuenta_on ? '<button class="btn sec" style="flex:1" onclick="precuentaMesa(\'' + esc(m.mesa) + '\',this)">🧾 Precuenta</button>' : '') +
       '<button class="btn verde" style="flex:1.4" onclick="abrirPago(\'' + esc(m.mesa) + '\')">💳 Pagado</button></div>';
   }
+  /* v1.12 · anche l'Agregar in testa (VB Alberto) — il blocco azione è UNO:
+     cuenta · precuenta · pagado · agregar. Sotto la riga, la storia. */
+  h += '<div class="msh-row"><button class="btn sec" style="width:100%;border-color:var(--acc);color:var(--acc)" onclick="cerrarMesa();nuevoAbrir(\'' + esc(m.mesa) + '\')">➕ Agregar pedido</button></div>';
+  h += '<div style="border-top:1px solid rgba(255,255,255,.14);margin:14px 0 10px"></div>';
   /* v1.5 · LA MESA GIÀ PAGATA DAL TELEFONO (webhook Fintoc → poll): il banner
      dice il fatto e il bottone chiude il giro — registrarPago medio 'fintoc',
      ref = payment intent, propina = l'eccedenza sul consumo (mai un PIN:
@@ -2661,9 +2665,18 @@ function renderMesaSheet(r) {
     h += '<div class="msh-row"><button class="btn verde" onclick="marcarLote(\'' + esc(m.mesa) + '\',\'entregado\',this)">✓ Entregado todo — ' + porEnt.length + ' pedidos' +
       '<small style="display:block;font-size:10px;opacity:.75;font-weight:400">solo cuando TODO ya está en la mesa</small></button></div>';
   }
-  m.pend.forEach(function (p) { h += cardPedido(p, umb, '✋ Mío — lo tomo yo', 'mio'); });
-  m.mios.forEach(function (p) { h += cardMio(p, umb); });
-  m.limpiar.forEach(function (p) { h += cardLiberar(p); });
+  /* v1.12 · LA STORIA INVERTITA (VB Alberto): il primo che vedi è l'ULTIMO
+     arrivato — hace_s piccolo in alto. Ogni card conserva il suo mestiere
+     (pend/mio/liberar); cambia solo l'ordine di lettura. */
+  m.pend.map(function (p) { return { p: p, t: 'pend' }; })
+    .concat(m.mios.map(function (p) { return { p: p, t: 'mio' }; }),
+            m.limpiar.map(function (p) { return { p: p, t: 'lib' }; }))
+    .sort(function (a, b) { return (a.p.hace_s || 0) - (b.p.hace_s || 0); })
+    .forEach(function (c) {
+      h += c.t === 'pend' ? cardPedido(c.p, umb, '✋ Mío — lo tomo yo', 'mio')
+         : c.t === 'mio' ? cardMio(c.p, umb)
+         : cardLiberar(c.p);
+    });
   // v2.3 · F1 comandera: la mesa parla — otra ronda (73% dei pedidos) e
   // precuenta a un tap. L'ultimo pedido della mesa precompila, mods inclusi.
   const ultP = m.pend.concat(m.mios).concat(m.limpiar).sort(function(a,b){ return (a.hace_s||9e9) - (b.hace_s||9e9); })[0];
@@ -2679,12 +2692,7 @@ function renderMesaSheet(r) {
   // v2.3 · il 🧾 è DATA-GATED (decisione Alberto): nasce spento, si accende da
   // PARAMETROS (`precuenta_mesero_activa`) quando il cantiere CUENTA sarà
   // completo. Spento non si disegna: un bottone morto fa solo domande.
-  /* v1.11 · Cuenta/Precuenta/Pagado vivono IN TESTA (VB Alberto) — qui in
-     fondo resta solo l'Agregar. La legge del tavolo non cambia: la mesa si
-     chiude col PAGO, non con la scopa. */
-  h += '<div class="msh-row" style="display:flex;gap:8px">' +
-    '<button class="btn sec" style="flex:1;border-color:var(--acc);color:var(--acc)" onclick="cerrarMesa();nuevoAbrir(\'' + esc(m.mesa) + '\')">➕ Agregar</button>' +
-    '</div>';
+  /* v1.12 · tutto il blocco azione vive in testa; qui resta solo il mover. */
   // v2.5 · 🔀 MOVER MESA (caso 86→82 del 23-jul): el traslado es un EVENTO con
   // fósil, nunca un edit a mano. El GAS mueve SOLO el consumo abierto (los
   // cerrados no se mueven jamás) y si hay precuenta emitida susurra a la
