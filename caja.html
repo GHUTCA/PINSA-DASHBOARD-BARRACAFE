@@ -5,10 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0d1117">
 <title>BKS Caja</title>
-<!-- DEVICE-CLASS: 3 · visione/consulta (dual: telefono JL oggi, tablet cassa domani) -->
-<!-- La vista del JL sul fossile PAGOS: caja + reporte ventas + reparto propinas.
-     Legge a domanda (getCaja, PIN JL) + refresh 60s SOLO a pagina aperta e visibile.
-     Scrive UNA cosa sola: cerrarReparto (il rito di chiusura, fossile REPARTO_PROPINA). -->
+<!-- DEVICE-CLASS: 3 · visione/consulta (dual: telefono della cajera oggi, tablet cassa domani) -->
+<!-- La vista della CAJA sul fossile PAGOS: caja + reporte ventas + reparto propinas.
+     Legge a domanda (getCaja, PIN) + refresh 60s SOLO a pagina aperta e visibile.
+     Scrive UNA cosa sola: cerrarReparto (il rito di chiusura, fossile REPARTO_PROPINA).
+
+     v1.3 (11-ago) · IL RUOLO CAMBIA NOME, LA SERRATURA NO.
+     Questa pagina non è più «del JL»: è della CAJA, e oggi la tiene la cajera.
+     Perciò cambia SOLO ciò che si legge. Le chiavi tecniche restano
+     `pin_jl` / `PIN_JL1|2|3` / `PIN_GG`: il giorno che il ruolo torna al JL non
+     si tocca una riga di codice — cambia chi conosce il PIN.
+     🎓 Un ruolo è chi fa la cosa, non il nome della variabile che ci passa. -->
 <style>
   :root{ --bg:#0d1117; --card:#161d27; --card2:#1c2532; --ink:#f2f6fa; --ink2:#aab8c6;
     --mut:#5f7183; --linea:#26313f; --oro:#d4a842; --cyan:#22d3ee; --verde:#3db876;
@@ -22,7 +29,7 @@
   header small{color:var(--mut);font-size:11.5px}
   .card{background:var(--card);border:1px solid var(--linea);border-radius:14px;padding:12px;margin-bottom:12px}
   .tit{font-size:12px;font-weight:800;letter-spacing:.04em;margin-bottom:8px}
-  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:8px;margin-bottom:12px}
   .kpi{background:var(--card);border:1px solid var(--linea);border-radius:12px;padding:10px 6px;text-align:center}
   .kpi small{display:block;font-size:10.5px;color:var(--mut);font-weight:700}
   .kpi b{font-size:20px;font-variant-numeric:tabular-nums}
@@ -68,8 +75,8 @@
 
 <div id="vPin">
   <h1>💰 Caja · BKS</h1>
-  <p>Solo JL — la vista del turno</p>
-  <input class="pin" id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN del JL"
+  <p>La vista del turno — Caja</p>
+  <input class="pin" id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN de la cajera"
     onkeydown="if(event.key==='Enter')entrar()">
   <button class="btnv" id="btnEntrar" onclick="entrar()">Abrir la caja</button>
   <div class="err" id="pinErr"></div>
@@ -84,17 +91,32 @@
     <div class="kpi"><small>VENDIDO HOY</small><b id="kVenta">—</b></div>
     <div class="kpi"><small>CUENTAS</small><b id="kCuentas">—</b></div>
     <div class="kpi"><small>🧾 BOLETAS</small><b id="kBoletas">—</b></div>
+    <div class="kpi"><small>🍽 EN SALA</small><b id="kAbierto">—</b></div>
   </div>
+  <!-- v1.3 · i due pannelli che il GAS calcolava già e nessuno leggeva.
+       Il primo dice quanta plata è ancora sui tavoli; il secondo elenca i
+       tavoli cobrados più di una volta — il dato che il 10-ago avrebbe fatto
+       vedere le boletas doppie dal primo minuto invece che a mezzanotte. -->
+  <div class="card hide" id="cDobles"><div class="tit" style="color:var(--rojo)">⚠️ MESAS COBRADAS MÁS DE UNA VEZ HOY</div><div id="sDobles"></div>
+    <div class="mut" style="font-size:11px;margin-top:6px">Puede ser normal (la mesa se desocupó y llegó gente nueva). Mira la hora y quién cobró.</div></div>
   <div class="card"><div class="tit" style="color:var(--naranja)">⚡ AHORA — los últimos cobros</div><div id="sAhora"></div></div>
+  <div class="card"><div class="tit" style="color:var(--verde)">🍽 MESAS ABIERTAS — consumo que todavía está en la sala</div><div id="sAbiertas"></div></div>
   <div class="card"><div class="tit" style="color:var(--cyan)">CUADRATURA POR MEDIO</div><table id="sMedios"></table></div>
   <div class="card"><div class="tit" style="color:var(--cyan)">VENTAS POR MESERO <span class="mut" style="font-weight:400">— toca para ver su efectivo</span></div><div id="sMeseros"></div></div>
+  <!-- v1.3 · il rapporto che sale dai meseros: chi ha chiuso, quanto consegna,
+       quanto scarto e QUALI MESE HA LASCIATO. È la metà che mancava. -->
+  <div class="card"><div class="tit" style="color:var(--oro)">🧾 CIERRES DE MESEROS</div><div id="sCierres"></div></div>
   <div class="card oro">
     <div class="tit">🪙 PROPINAS — el reparto, con la cuenta a la vista</div>
+    <!-- v1.3 · il regime non è più un ramo di codice: è un dato, e si cambia
+         da qui. Default della casa: viernes y sábado NOCHE = individual. -->
+    <div id="sRegimen" style="display:flex;justify-content:space-between;align-items:center;
+      gap:8px;padding:6px 0 10px;border-bottom:1px solid var(--linea);margin-bottom:8px"></div>
     <table id="sPropCta"></table>
     <div id="sPuntos" style="margin-top:8px"></div>
     <div id="sRepartoHecho" class="mut" style="font-size:12px;margin-top:6px"></div>
     <input class="pin" id="pinCierre" type="password" inputmode="numeric" autocomplete="off"
-      placeholder="PIN del JL para cerrar" style="margin-top:10px;letter-spacing:.2em">
+      placeholder="PIN de la cajera para cerrar" style="margin-top:10px;letter-spacing:.2em">
     <button class="btnv" id="btnCerrar" onclick="cerrar()">🔐 Cerrar reparto del turno</button>
     <div class="mut" style="font-size:11px;text-align:center;margin-top:6px">
       queda fossilizado en REPARTO_PROPINA — se corrige con una fila nueva, jamás borrando</div>
@@ -102,7 +124,7 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<span class="ver" id="ver">caja v1.2</span>
+<span class="ver" id="ver">caja v1.3</span>
 
 <script>
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzZkS3bBaYc34uJ6wXP9FG13i58-NT0FJp964vqkUYbRObUxryeRb9l_Fz24kb42f5t/exec';
@@ -158,6 +180,30 @@ function render() {
   $('kVenta').textContent = fmt(c.venta);
   $('kCuentas').textContent = c.cuentas;
   $('kBoletas').textContent = c.boletas;
+  $('kAbierto').textContent = fmt(c.abierto);
+
+  /* v1.3 · MESAS COBRADAS DOS VECES — se muestra sólo si las hay, y NO acusa
+     a nadie: dos cobros en la misma mesa muchas veces son dos clientes. */
+  const dbl = c.dobles || [];
+  $('cDobles').classList.toggle('hide', !dbl.length);
+  if (dbl.length) {
+    $('sDobles').innerHTML = dbl.map(d =>
+      '<div class="fila-ahora"><b>Mesa ' + esc(d.mesa) + '</b> · ' + d.n + ' cobros · <b>' + fmt(d.total) + '</b>' +
+      (d.cobros || []).map(x => '<div class="mut" style="font-size:12px;padding-left:12px">' + esc(x.hh) + ' · ' +
+        fmt(x.monto) + ' · ' + esc(MEDIO_NOMBRE[x.medio] || x.medio) + ' · ' + esc(x.quien) +
+        (x.boleta ? ' · 🧾 ' + esc(x.boleta) : '') + '</div>').join('') + '</div>').join('');
+  }
+
+  /* v1.3 · LA PLATA QUE TODAVÍA ESTÁ EN LA SALA. El GAS ya la calculaba con
+     la MISMA función de la pre-cuenta (el número que vería el cliente) y no
+     la miraba nadie. `arrastre` = parte del consumo que venía de antes de la
+     última limpieza: se avisa, no se esconde. */
+  const ab = c.mesas_abiertas || [];
+  $('sAbiertas').innerHTML = ab.length ? ab.map(m =>
+    '<div class="fila-ahora"><b>Mesa ' + esc(m.mesa) + '</b> · <b>' + fmt(m.consumo) + '</b> · ' +
+    '<span class="mut">' + (m.pedidos || 0) + ' pedidos' + (m.min != null ? ' · último hace ' + m.min + ' min' : '') + '</span>' +
+    (m.arrastre ? ' <span style="color:var(--naranja)">⚠️ ' + fmt(m.arrastre_monto) + ' viene de antes de la limpieza</span>' : '') +
+    '</div>').join('') : '<div class="mut" style="font-size:13px">Ninguna mesa con consumo abierto.</div>';
 
   // ⚡ AHORA
   $('sAhora').innerHTML = (c.ahora && c.ahora.length) ? c.ahora.map(a => {
@@ -211,7 +257,25 @@ function render() {
       '</div></div>';
   }).join('') || '<div class="mut" style="font-size:13px">Sin ventas aún</div>';
 
+  /* v1.3 · CIERRES DE MESEROS. Lo scarto si mostra sempre, anche quando è
+     dentro tolleranza: mille scarti piccoli tutti dallo stesso lato sono un
+     fatto, e non lo si vede se si stampa solo quando è grande. */
+  const cie = c.cierres || [];
+  $('sCierres').innerHTML = cie.length ? cie.map(x => {
+    const d = Math.round(x.diferencia || 0);
+    const col = Math.abs(d) > 2000 ? 'var(--rojo)' : 'var(--mut)';
+    return '<div class="fila-ahora"><b>' + esc(x.mesero) + '</b> · entrega <b>' + fmt(x.declarado) + '</b>' +
+      ' <span style="color:' + col + '">' + (d === 0 ? '· cuadra' : '· ' + (d > 0 ? '+' : '−') + fmt(Math.abs(d))) + '</span>' +
+      ((x.n_declaraciones || 1) > 1 ? ' <span style="color:var(--naranja);font-size:11.5px">· ' + x.n_declaraciones + 'ª declaración</span>' : '') +
+      (x.motivo ? ' <span class="mut">(' + esc(x.motivo) + ')</span>' : '') +
+      (x.mesas_abiertas ? '<div style="color:var(--naranja);font-size:12.5px;padding-left:12px">🍽 dejó ' +
+        x.mesas_abiertas + ' mesa(s) · ' + fmt(x.monto_abierto) + ' — ' +
+        (x.mesas || []).map(m => 'mesa ' + esc(m.mesa)).join(', ') + '</div>' : '') +
+      '</div>';
+  }).join('') : '<div class="mut" style="font-size:13px">Todavía nadie cerró su turno.</div>';
+
   // PROPINAS — la cuenta a la vista
+  renderRegimen();
   const p = c.propinas;
   $('sPropCta').innerHTML =
     '<tr><td>Propina tarjeta</td><td class="der">' + fmt(p.tarjeta) + '</td><td class="der" style="color:var(--rojo)">−' + p.desc_pct + '% = −' + fmt(p.desc_tarjeta) + '</td></tr>' +
@@ -220,13 +284,37 @@ function render() {
     '<tr><td style="padding-left:12px">' + p.meseros_pct + '% meseros</td><td class="der">' + fmt(p.monto_meseros) + '</td><td class="der mut" id="ptosTot"></td></tr>' +
     '<tr><td style="padding-left:12px">' + (100 - p.meseros_pct) + '% fondo común</td><td class="der">' + fmt(p.monto_fondo) + '</td><td></td></tr>';
 
-  // puntos: precompilati da chi ha cobrado oggi (default 1), il JL ritocca
+  // puntos: precompilati da chi ha cobrado oggi (default 1), la caja ritocca
   nombres.forEach(n => { if (!(n in S.puntos)) S.puntos[n] = 1; });
   renderPuntos();
 
   $('sRepartoHecho').textContent = c.reparto_hoy
     ? '✓ Hoy ya se cerró un reparto (' + c.reparto_hoy.id + ', pozo ' + fmt(c.reparto_hoy.pozo) + ') — cerrar de nuevo crea una fila NUEVA.'
     : '';
+}
+
+/* v1.3 · IL REGIME DELLA PROPINA — pozo o individual, per giorno e turno.
+   Si mostra sempre da dov'è venuto: `regla` = la regola della casa (viernes y
+   sábado noche), `fijado` = qualcuno l'ha deciso oggi. Un dato che non dice
+   la sua provenienza si finisce per non credergli. */
+function renderRegimen() {
+  const c = S.caja; if (!c) return;
+  const r = c.regimen || 'pozo';
+  const fu = { fijado: 'fijado hoy', regla: 'regla de la casa', default: 'por defecto' }[c.regimen_fuente] || '';
+  const chip = (v, txt) => '<span class="chip' + (r === v ? ' sel' : '') + '" onclick="setRegimen(\'' + v + '\')">' + txt + '</span>';
+  $('sRegimen').innerHTML =
+    '<span style="font-size:12.5px">Propina de este turno<br><span class="mut" style="font-size:11px">' +
+    esc(c.turno === 'noche' ? 'noche' : 'día') + ' · ' + esc(fu) + '</span></span>' +
+    '<span class="chips">' + chip('pozo', '🪙 Pozo') + chip('individual', '👤 Individual') + '</span>';
+}
+async function setRegimen(v) {
+  if (!S.caja || S.caja.regimen === v) return;
+  try {
+    const r = await gas({ action: 'setPropinaRegimen', pin_jl: S.pin, regimen: v, turno: S.caja.turno });
+    if (r && r.ok) { S.caja.regimen = r.regimen; S.caja.regimen_fuente = 'fijado'; renderRegimen();
+      toast('✓ Propina de este turno: ' + (v === 'pozo' ? 'pozo común' : 'individual')); }
+    else toast('No se pudo: ' + (r && r.error || 'sin respuesta'));
+  } catch (e) { toast('Sin conexión — reintenta'); }
 }
 
 function renderPuntos() {
@@ -254,7 +342,9 @@ async function cerrar() {
   if (!Object.keys(activos).length) { toast('Nadie con puntos — revisa'); return; }
   S.enviando = true; $('btnCerrar').disabled = true; $('btnCerrar').textContent = 'Cerrando…';
   try {
-    const r = await gas({ action: 'cerrarReparto', pin_jl: pin, puntos: activos, cerrado_por: 'JL' });
+    // v1.3 · il fossile dice CHI ha chiuso davvero. La chiave del payload
+    // resta `pin_jl` (è la serratura del server, non il nome del ruolo).
+    const r = await gas({ action: 'cerrarReparto', pin_jl: pin, puntos: activos, cerrado_por: 'Caja' });
     if (r && r.ok) {
       toast('✓ Reparto cerrado · pozo ' + fmt(r.pozo) + ' · punto entero = ' + fmt(r.valor_punto));
       $('pinCierre').value = '';

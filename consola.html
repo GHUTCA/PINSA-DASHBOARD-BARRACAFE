@@ -473,6 +473,31 @@
     border-top:1px solid var(--cs-line-hi);padding:10px 20px calc(26px + env(safe-area-inset-bottom,0));
     max-height:92dvh;overflow-y:auto}
   .cs-pcard h3{font-size:17px;margin:6px 0 2px}
+
+  /* v1.24 · EL CIERRE DEL MESERO — una superficie por vez, como la comandera.
+     Lo que se LEE arriba, lo que se TOCA abajo (zona del pulgar). */
+  .cie-card .btn{margin-top:10px}
+  .cie-h{font-size:21px;font-weight:900;letter-spacing:-.01em;margin:2px 0 2px}
+  .cie-sub{color:var(--cs-mut);font-size:13px;margin-bottom:12px}
+  .cie-box{background:rgba(255,255,255,.035);border:1px solid var(--cs-line);
+    border-radius:14px;padding:11px 13px;margin-bottom:10px;font-size:14.5px}
+  .cie-box.ok{border-color:var(--cs-ok)}
+  .cie-tot{font-size:23px;font-weight:900;margin:2px 0 6px}
+  .cie-row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;
+    font-variant-numeric:tabular-nums}
+  .cie-nota{color:var(--cs-mut);font-size:12px;line-height:1.5;margin-top:8px}
+  .cie-warn{background:rgba(255,122,47,.10);border:1px solid rgba(255,122,47,.45);
+    border-radius:12px;padding:10px 12px;font-size:13px;margin-bottom:10px}
+  .cie-msg{font-size:15px;padding:18px 2px;text-align:center;color:var(--cs-ink2)}
+  .cie-input{width:100%;background:var(--cs-bg);border:1.5px solid var(--cs-line-hi);
+    border-radius:14px;color:inherit;font-size:34px;font-weight:900;text-align:center;
+    padding:14px 10px;margin:2px 0 4px;font-variant-numeric:tabular-nums}
+  .cie-motivos{display:flex;flex-direction:column;gap:7px;margin-bottom:6px}
+  .cie-chip{border:1.5px solid var(--cs-line-hi);border-radius:12px;padding:11px 13px;
+    font-size:14px;color:var(--cs-ink2)}
+  .cie-chip.sel{border-color:var(--cs-accion);color:#fff;background:rgba(255,122,47,.12);font-weight:700}
+  .cie-out{text-align:center;color:var(--cs-mut);font-size:13px;padding:14px 0 2px;
+    text-decoration:underline}
   .cs-psub{color:var(--cs-mut);font-size:13px;margin-bottom:4px}
   .cs-psec{color:var(--cs-mut);font-size:11px;font-weight:800;letter-spacing:.08em;
     margin:15px 0 8px;text-transform:uppercase}
@@ -597,14 +622,18 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.23</span>
+    <span class="ver" id="ver">consola v1.24</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
     <span style="display:flex;gap:8px">
       <button id="btnAvisos" onclick="pushToggle()">🔔 Activar avisos</button>
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
-      <button onclick="salir()">Salgo · cerrar</button>
+      <!-- v1.24 · IL BOTTONE CHE MANDA A CASA. Era «Salgo · cerrar» e chiudeva
+           la sessione e basta: nessuno sapeva se avevi lasciato tavoli vivi né
+           quanto efectivo avevi in mano. Adesso la stessa mano fa il cierre —
+           per questo sta QUI e non in un menu: è il gesto che uno cerca già. -->
+      <button onclick="cierreAbrir()">🧾 Cerrar mi turno</button>
     </span>
   </div>
 </section>
@@ -612,6 +641,8 @@
 <!-- v1.17 · #15 · FAB + panel NUEVO pedido (a voce) -->
 <button id="fabNuevo" class="fab-nuevo hide" onclick="nuevoAbrir()">➕ PEDIDO</button>
 <div id="nuevoWrap"></div>
+<!-- v1.24 · EL CIERRE DEL MESERO — 4 tap, e il conteggio è CIECO -->
+<div id="cierreWrap"></div>
 
 <div class="toast" id="toast"></div>
 
@@ -1201,6 +1232,219 @@ function salir() {
   STATE.codigo = ''; STATE.nombre = ''; STATE.sala = null;
   showEntrada('');
   toast('ok', 'Sesión cerrada — nada queda en este teléfono');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   v1.24 · EL CIERRE DEL MESERO — «cada mesero es el cajero de su sector»
+   ═══════════════════════════════════════════════════════════════════════════
+   Quattro tap: le mie mese aperte → quanto efectivo ho in mano → la
+   rivelazione → firmo e vado a casa.
+
+   🔴 EL CONTEO ES A CIEGAS, E LA CECITÀ NON È QUI. Il server non manda
+   l'atteso: `getCierreMesero` non contiene nessun numero di cassa. Se
+   arrivasse fin qui — anche solo per restare nascosto in una variabile —
+   basterebbe guardare la risposta per copiarlo. Questa pagina non può
+   rivelare ciò che non ha ricevuto, ed è l'unico modo in cui una
+   dichiarazione vale qualcosa.
+
+   🔑 LA CHIAVE D'IDEMPOTENZA LA CONIA CHI RIPETE, cioè questo telefono
+   (`uid`): sopravvive al timeout e al ritocco, e il server con lo stesso uid
+   restituisce la riga che c'è invece di scriverne un'altra. Se cambia il
+   monto dichiarato è una dichiarazione NUOVA → uid nuovo. È la lezione della
+   mesa 49: una guardia appesa a una chiave che il retry rigenera è teatro.
+
+   🛟 E LA VALVOLA: «Salir sin cerrar» resta sempre lì. Se il cierre non
+   funziona, un mesero non può restare prigioniero della sua app a mezzanotte
+   — se ne va, e chi non ha chiuso semplicemente non compare nella lista
+   della caja, che è un fatto visibile e non un silenzio. */
+const CIERRE_MOTIVOS_TXT = {
+  propina_no_declarada: 'Propina que no declaré en el sistema',
+  vuelto_mal_dado: 'Di mal un vuelto',
+  pago_en_otra_mesa: 'Cobré y quedó anotado en otra mesa',
+  cuenta_no_cobrada: 'Una cuenta que no alcancé a cobrar',
+  error_al_contar: 'Me equivoqué al contar',
+  otro: 'Otro'
+};
+const CIE = { paso: 0, data: null, uid: '', uidMonto: null, motivo: '', enviando: false, res: null, tol: 2000 };
+
+function _cieUid(monto) {
+  if (CIE.uid && CIE.uidMonto === monto) return CIE.uid;
+  CIE.uid = 'CM-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+  CIE.uidMonto = monto;
+  return CIE.uid;
+}
+function _cieCerrar() { CIE.paso = 0; CIE.res = null; CIE.motivo = ''; $('cierreWrap').innerHTML = ''; }
+
+async function cierreAbrir() {
+  if (!STATE.codigo || !STATE.nombre) { salir(); return; }
+  CIE.paso = 1; CIE.data = null; CIE.res = null; CIE.motivo = '';
+  /* l'uid vive UN flusso: dentro (retry compresi) resta lo stesso — il server
+     risponde `dedup` invece di sdoppiare; un cierre nuovo (es. turno noche
+     dopo il turno día, stesso monto) riparte da zero e ne conia un altro. */
+  CIE.uid = ''; CIE.uidMonto = null;
+  _cieRender('<div class="cie-msg">Mirando tus mesas…</div>');
+  try {
+    const r = await gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre });
+    if (!r || !r.ok) throw new Error((r && r.error) || 'no_ok');
+    CIE.data = r; CIE.tol = r.tolerancia || 2000;
+    _ciePaso1();
+  } catch (e) {
+    /* niente scorciatoie: se non si sa quali mese sono aperte, non si finge
+       che non ce ne siano. Si dice cosa è successo e si lascia l'uscita. */
+    _cieRender('<div class="cie-msg">No pude leer tus mesas (' + esc(e.message) + ').<br>' +
+      'Reintenta en un momento — si sigue igual, avísale al JL antes de irte.</div>' +
+      '<button class="btn" onclick="cierreAbrir()">Reintentar</button>' +
+      '<div class="cie-out" onclick="_cieSalirSinCerrar()">Salir sin cerrar</div>');
+  }
+}
+
+function _ciePaso1() {
+  const d = CIE.data;
+  const n = d.n_abiertas || 0;
+  let h = '<div class="cie-h">🧾 Cerrar mi turno</div><div class="cie-sub">' + esc(d.mesero) + ' · ' +
+    (d.turno === 'noche' ? 'noche' : 'día') + ' · propina ' +
+    (d.regimen === 'individual' ? 'individual' : 'al pozo') + '</div>';
+  if (d.ya_cerrado) {
+    h += '<div class="cie-warn">Ya cerraste hoy (entregaste ' + fmtPrice(d.ya_cerrado.declarado) +
+      '). Si vuelves a cerrar se guarda una declaración NUEVA — la anterior no se borra.</div>';
+  }
+  if (n) {
+    h += '<div class="cie-box"><b>Tienes ' + n + ' mesa' + (n > 1 ? 's' : '') + ' abierta' + (n > 1 ? 's' : '') + '</b>' +
+      '<div class="cie-tot">' + fmtPrice(d.monto_abierto) + ' sin cobrar</div>' +
+      d.mesas_abiertas.map(m => '<div class="cie-row"><span>Mesa ' + esc(m.mesa) + '</span><b>' + fmtPrice(m.consumo) + '</b></div>').join('') +
+      '</div>' +
+      '<button class="btn" onclick="_cieCerrar()">Voy a cobrarlas</button>' +
+      '<button class="btn sec" onclick="_ciePaso2()">Las dejo así — quedan a nombre mío</button>' +
+      '<div class="cie-nota">Si las dejas, el JL las va a ver con tu nombre y el monto. Nadie las está cobrando.</div>';
+  } else {
+    h += '<div class="cie-box ok"><b>No tienes mesas abiertas</b><div class="cie-nota" style="margin:2px 0 0">Todo cobrado ✅</div></div>' +
+      '<button class="btn" onclick="_ciePaso2()">Seguir</button>';
+  }
+  h += '<div class="cie-out" onclick="_cieSalirSinCerrar()">Salir sin cerrar</div>';
+  _cieRender(h);
+}
+
+function _ciePaso2() {
+  CIE.paso = 2;
+  // chi torna a contare riparte pulito: un motivo scelto per il conteggio di
+  // prima non deve appiccicarsi a una dichiarazione nuova
+  CIE.motivo = ''; CIE.res = null;
+  _cieRender(
+    '<div class="cie-h">💵 ¿Cuánto efectivo tienes?</div>' +
+    '<div class="cie-sub">Cuenta los billetes y las monedas que tienes en la mano ahora.</div>' +
+    '<div class="cie-box"><b>Todo el efectivo del turno</b>' +
+    '<div class="cie-nota" style="margin-top:4px">Las ventas que cobraste en efectivo <b>más</b> las propinas en efectivo. Todo junto, como está en tu bolsillo.</div></div>' +
+    '<input id="cieMonto" class="cie-input" type="text" inputmode="numeric" autocomplete="off" placeholder="0" ' +
+    'oninput="_cieMontoInput(this)">' +
+    '<button class="btn" id="cieBtn" onclick="cierreEnviar()" disabled>Confirmar</button>' +
+    '<div class="cie-nota">El sistema no te dice cuánto debería haber: cuenta tú, y después lo comparamos juntos.</div>' +
+    '<div class="cie-out" onclick="_ciePaso1()">← Volver</div>');
+  setTimeout(() => { const i = $('cieMonto'); if (i) i.focus(); }, 120);
+}
+
+/* «vacío» y «cero» no son lo mismo: el botón se habilita cuando hay ALGO
+   escrito, aunque sea 0 — un turno sin un solo pago en efectivo es una
+   declaración legítima, y tiene que poder decirse. */
+function _cieMontoInput(el) {
+  const limpio = el.value.replace(/[^\d]/g, '');
+  el.value = limpio ? parseInt(limpio, 10).toLocaleString('es-CL') : '';
+  const b = $('cieBtn'); if (b) b.disabled = (limpio === '');
+}
+function _cieMontoValor() {
+  const el = $('cieMonto'); if (!el) return null;
+  const limpio = el.value.replace(/[^\d]/g, '');
+  return limpio === '' ? null : parseInt(limpio, 10);
+}
+
+async function cierreEnviar() {
+  if (CIE.enviando) return;
+  const monto = CIE.paso === 2 ? _cieMontoValor() : CIE.uidMonto;
+  if (monto == null) { toast('err', 'Escribe cuánto efectivo tienes'); return; }
+  if (CIE.res && CIE.res.exige === 'motivo' && !CIE.motivo) { toast('err', 'Elige el motivo'); return; }
+  CIE.enviando = true;
+  const b = $('cieBtn'); if (b) { b.disabled = true; b.textContent = 'Cerrando…'; }
+  try {
+    const r = await gasPost('cerrarMesero', { codigo: STATE.codigo, nombre: STATE.nombre,
+      uid: _cieUid(monto), efectivo_declarado: monto, motivo: CIE.motivo || '' });
+    if (r && r.ok) { CIE.res = r; _ciePaso4(r); }
+    else if (r && r.exige === 'motivo') { CIE.res = r; _ciePaso3Motivo(r); }
+    else throw new Error((r && r.error) || 'no_ok');
+  } catch (e) {
+    /* il retry riusa lo STESSO uid: se il cierre era già entrato, il server
+       risponde `dedup` invece di scriverne un altro. Per questo qui si può
+       dire «reintenta» senza paura di sdoppiare la dichiarazione. */
+    toast('err', 'No entró — reintenta (no se duplica)');
+    if (b) { b.disabled = false; b.textContent = 'Confirmar'; }
+  }
+  CIE.enviando = false;
+}
+
+/* il server qui NON manda i numeri esatti (solo direzione + «sopra la
+   tolleranza»): l'atteso si rivela dopo la firma, quando la dichiarazione è
+   già un fossile. Se arrivasse adesso, contare non servirebbe più a niente. */
+function _ciePaso3Motivo(r) {
+  CIE.paso = 3;
+  CIE.res = r;   // la vista possiede il suo dato: _cieMotivo ridisegna da qui
+  const falta = !!r.falta;
+  _cieRender(
+    '<div class="cie-h">' + (falta ? '🔻 Falta plata' : '🔺 Sobra plata') + '</div>' +
+    '<div class="cie-sub">Contaste ' + fmtPrice(r.declarado) + ' — no cuadra por más de ' + fmtPrice(r.tolerancia) + '</div>' +
+    '<div class="cie-nota" style="margin:0 0 10px">Pasa. El número exacto lo ves después de firmar — ' +
+    'ahora di qué fue, así se puede arreglar y no queda como un misterio tuyo.</div>' +
+    '<div class="cie-motivos">' + (r.motivos || []).map(m =>
+      '<span class="cie-chip' + (CIE.motivo === m ? ' sel' : '') + '" onclick="_cieMotivo(\'' + m + '\')">' +
+      esc(CIERRE_MOTIVOS_TXT[m] || m) + '</span>').join('') + '</div>' +
+    '<button class="btn" id="cieBtn" onclick="cierreEnviar()"' + (CIE.motivo ? '' : ' disabled') + '>Firmar y cerrar</button>' +
+    '<div class="cie-out" onclick="_ciePaso2()">← Volver a contar</div>');
+}
+function _cieMotivo(m) { CIE.motivo = m; _ciePaso3Motivo(CIE.res); }
+
+function _ciePaso4(r) {
+  CIE.paso = 4;
+  const d = Math.round(r.diferencia || 0);
+  const MED = { efectivo: '💵 Efectivo', debito: '💳 Débito', credito: '💳 Crédito',
+    transfer: '🏦 Transfer', mpago: '📲 MercadoPago', fintoc: '📲 Fintoc' };
+  let medios = '';
+  Object.keys(r.por_medio || {}).forEach(k => {
+    medios += '<div class="cie-row"><span>' + esc(MED[k] || k) + ' <span style="opacity:.6">(' + r.por_medio[k].n + ')</span></span>' +
+      '<b>' + fmtPrice(r.por_medio[k].monto) + '</b></div>';
+  });
+  let h = '<div class="cie-h">✅ Turno cerrado</div>' +
+    '<div class="cie-sub">' + esc(r.mesero) + ' · ' + esc(r.id) + '</div>' +
+    '<div class="cie-box"><b>Lo que cobraste</b>' + (medios || '<div class="cie-nota">Ningún cobro hoy</div>') +
+    '<div class="cie-row" style="border-top:1px solid rgba(255,255,255,.12);margin-top:6px;padding-top:6px">' +
+    '<span>🧾 Boletas</span><b>' + (r.boletas || 0) + '</b></div></div>' +
+    '<div class="cie-box"><b>El efectivo</b>' +
+    '<div class="cie-row"><span>Ventas en efectivo</span><b>' + fmtPrice(r.efectivo_ventas) + '</b></div>' +
+    '<div class="cie-row"><span>Propinas en efectivo</span><b>' + fmtPrice(r.propina_efectivo) + '</b></div>' +
+    '<div class="cie-row" style="border-top:1px solid rgba(255,255,255,.12);margin-top:6px;padding-top:6px">' +
+    '<span>Debería haber</span><b>' + fmtPrice(r.esperado) + '</b></div>' +
+    '<div class="cie-row"><span>Contaste</span><b>' + fmtPrice(r.declarado) + '</b></div>' +
+    '<div class="cie-row" style="color:' + (Math.abs(d) > (r.tolerancia || 2000) ? '#ff6b6b' : '#8fd694') + '">' +
+    '<span>' + (d === 0 ? 'Cuadra exacto' : (d < 0 ? 'Faltan' : 'Sobran')) + '</span><b>' +
+    (d === 0 ? '✓' : fmtPrice(Math.abs(d))) + '</b></div></div>' +
+    '<div class="cie-box"><b>Tu propina</b>' +
+    '<div class="cie-row"><span>En tarjeta</span><b>' + fmtPrice(r.propina_tarjeta) + '</b></div>' +
+    '<div class="cie-row"><span>En efectivo</span><b>' + fmtPrice(r.propina_efectivo) + '</b></div>' +
+    '<div class="cie-nota" style="margin-top:4px">' + (r.regimen === 'individual'
+      ? 'Hoy la propina es <b>individual</b>: esta noche es tuya.'
+      : 'Hoy la propina va al <b>pozo común</b>: el JL la reparte al cerrar el turno.') + '</div></div>';
+  if (r.mesas_abiertas && r.mesas_abiertas.length) {
+    h += '<div class="cie-warn">Dejaste ' + r.mesas_abiertas.length + ' mesa(s) abiertas por ' +
+      fmtPrice(r.monto_abierto) + ': ' + r.mesas_abiertas.map(m => 'mesa ' + esc(m.mesa)).join(', ') +
+      '. El JL ya lo sabe.</div>';
+  }
+  h += '<button class="btn" onclick="_cieListo()">Listo — me voy</button>' +
+    '<div class="cie-nota">Quedó firmado a tu nombre. Si contaste mal, vuelve a cerrar: se guarda una declaración nueva, no se borra nada.</div>';
+  _cieRender(h);
+}
+function _cieListo() { _cieCerrar(); salir(); }
+function _cieSalirSinCerrar() { _cieCerrar(); salir(); }
+
+function _cieRender(inner) {
+  $('cierreWrap').innerHTML =
+    '<div class="cs-pago" onclick="if(event.target===this)_cieCerrar()"><div class="cs-pcard cie-card">' +
+    '<div class="cs-asa"></div>' + inner + '</div></div>';
 }
 
 /* v2.12 · «Sigo en sala» — un tap = Hora_Fin := ahora + 1h (extenderFranja) */
