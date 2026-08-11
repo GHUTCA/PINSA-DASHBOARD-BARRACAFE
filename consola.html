@@ -597,7 +597,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.22</span>
+    <span class="ver" id="ver">consola v1.23</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -860,6 +860,89 @@ async function staffPost(action, body) {
     } catch (e) { /* il bordo non risponde → GAS, come oggi */ }
   }
   return await gasPost(action, body);
+}
+
+/* ═════ v1.19 · FASE B · IL PAGO AL BORDO (11-ago-2026) ═════
+   La Fase A ha tolto la BOLETA dall'attesa; restava il pedaggio. Il tap PAGADO
+   di ieri viaggiava sul GAS, dove il pavimento misurato è 1,05 s per un'azione
+   che nemmeno esiste (03-ago): l'invariante «lettura ≤ 1 s» lì non è
+   raggiungibile per costruzione. Al bordo sì — 178 ms misurati. Il Worker
+   risponde l'ACK in ~200 ms e il libro lo scrive lui, dietro, chiamando lo
+   STESSO `registrarPago` di sempre: Google resta il libro mastro, scritto con
+   calma. La consola non cambia mestiere, cambia solo a chi bussa per prima.
+
+   🔴 QUESTA È UNA STRADA IN PIÙ, NON UNA STRADA NUOVA. Il bordo può dire di no
+   in cinque modi (spento · una porta nel payload · il monto che non combacia ·
+   il cancello del turno stantio · la rete morta) e in TUTTI e cinque si torna
+   sulla via del GAS senza che in sala nessuno se ne accorga. Al deploy sarà
+   spento: `PAGO_BORDE_ON` non esiste ancora su Cloudflare, e questo file, con
+   l'interruttore giù, si comporta esattamente come la v1.18 di ieri.
+
+   Le porte le elenchiamo per NOME, con gli stessi nomi che legge il Worker
+   (`PAGO_CAMPI_CON_PORTA`): dove c'è un permesso — il PIN del JL, la cortesía,
+   il codice FAM, il monto scritto a mano, la carta chiesta in mano — il gesto
+   NON è nostro, e non ci si prova nemmeno. Due liste che divergono sarebbero
+   un bug che nessuno vede finché non incassa. */
+const BORDE_PAGO = {
+  QS: (QS.get('bordep') || '').trim(),   // '1' prova sempre (telefono di prova) · '0' spegne qui
+  PORTAS: ['pin_jl', 'pin_fam', 'cortesia', 'fam', 'monto_manual', 'forzar_nuevo_pago', 'imprimir'],
+  /* Il bordo nasce spento e lo dirà a ogni mesa: chiederglielo ogni volta
+     sarebbe pagare 200 ms per sentirsi dire «no». Ci si ferma un momento e si
+     riprova da soli — e se Alberto accende l'interruttore a metà servizio, la
+     sala se ne accorge da sola senza ricaricare niente. Una pausa è tutto ciò
+     che questo campo sa fare: nel dubbio si va al GAS, cioè a oggi. */
+  pausaHasta: 0,
+  APAGADO_MS: 300000,   // «sono spento» è una decisione: 5 min
+  /* la rete morta è un'altra cosa (R9 del 03-ago: un fallimento non è una
+     latenza). Un singhiozzo non condanna il telefono per mezz'ora — 60 s, la
+     stessa clemenza che il poll della sala si è dato nella v3.2. */
+  RETE_MS: 60000,
+  MS: 3500,   // ⏱ timeout SUO: se il bordo non risponde in 3,5 s non è il bordo.
+              // CFG.TIMEOUT_MS (25 s) qui sarebbe il ritorno della ferita di
+              // mesa 49 — chi aspetta ritocca, e ogni tocco era una boleta.
+};
+/* Ritorna la risposta del bordo se il pago è ACCETTATO, `null` in ogni altro
+   caso — e `null` significa una cosa sola: fai quello che facevi ieri. */
+async function _pagoAlBorde(body, consumo) {
+  if (!BORDE_SALA.ON || BORDE_PAGO.QS === '0') return null;
+  if (BORDE_PAGO.QS !== '1' && Date.now() < BORDE_PAGO.pausaHasta) return null;
+  /* la porta si guarda sul payload GIÀ COSTRUITO, non sullo stato del pannello:
+     è il payload che parte, ed è di lui che stiamo dicendo «è semplice». */
+  for (let i = 0; i < BORDE_PAGO.PORTAS.length; i++) {
+    const v = body[BORDE_PAGO.PORTAS[i]];
+    if (v === 1 || v === '1' || v === true || (typeof v === 'string' && v.trim() !== '')) return null;
+  }
+  /* senza la chiave del pago non si passa: è la guardia di mesa 49 in persona,
+     e un ACK senza di lei non saprebbe riconoscere il ritocco. Senza consumo
+     non c'è niente da confrontare, e un pago di $0 non è un pago semplice. */
+  if (!body.pago_uid || !(consumo > 0)) return null;
+  try {
+    const u = BORDE_SALA.URL + '/pago/' + encodeURIComponent(CFG.LOCAL || 'BKS')
+      + '?t=' + encodeURIComponent(BORDE_SALA.T);
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), BORDE_PAGO.MS);
+    const r = await fetch(u, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      /* lo STESSO vestito di gasPost — action + local davanti, il body verbatim
+         dietro — più il `consumo` che il Worker chiede per rifiutare da solo un
+         monto che non combacia. Il payload lo conserva com'è e lo rigioca al
+         GAS: il fossile che nascerà è quello di sempre. */
+      body: JSON.stringify(Object.assign({ action: 'registrarPago', local: CFG.LOCAL },
+        body, { consumo: Math.round(consumo) })),
+      signal: ctrl.signal, cache: 'no-store',
+    });
+    clearTimeout(to);
+    const j = await r.json();
+    /* definitiva è SOLO una risposta timbrata `borde:true` e con l'ok dentro
+       (stessa regola di staffPost). `need:'gas'`, un errore senza need, un 403
+       sul token, un 503 sin_gate: tutto quanto è la via di sempre. */
+    if (j && j.ok === true && j.borde === true) return j;
+    if (j && j.motivo === 'apagado') BORDE_PAGO.pausaHasta = Date.now() + BORDE_PAGO.APAGADO_MS;
+  } catch (e) {
+    BORDE_PAGO.pausaHasta = Date.now() + BORDE_PAGO.RETE_MS;
+  }
+  return null;
 }
 
 async function leerSala(codigo, nombre) {
@@ -2829,10 +2912,10 @@ function cardLiberar(p) {
         chi ci passava sopra — è la stessa lezione del 03-ago con BKS, e me la
         sono ripetuta addosso a un'ora di distanza.
      La fuga vera resta senza scorciatoia: si avvisa il JL, e il gesto giusto
-     («mesa perdida», perdita col nome del mesero) è ancora da costruire.
-     In correzione la card diventa il pannello degli steppers — lo STESSO di
-     `cardMio`, non una copia: due pannelli gemelli divergono al primo ritocco,
-     e il secondo lo scopri in servizio. */
+     («mesa perdida», perdita col nome del mesero) è ancora da costruire. */
+  /* v1.22 · in correzione la card diventa il pannello degli steppers — è lo
+     stesso di `cardMio`, non una copia: due pannelli gemelli divergono al
+     primo ritocco, e il secondo lo scopri in servizio. */
   if (STATE.editando === p.uuid) return cardMio(p, null);
   return '<div class="card" style="display:block">' +
     '<div class="cs-fila"><div class="cs-ico pass">✓</div>' +
@@ -3155,6 +3238,41 @@ async function pagoConfirmar(btn) {
     if (pg.imprimir) body.imprimir = 1;   // v1.7 · la vuole in mano anche con la mail
   }
   try {
+    /* ═ v1.19 · FASE B · SI BUSSA PRIMA AL BORDO ════════════════════════════
+       Il pago semplice — nessun permesso, nessun monto scritto a mano, la carta
+       che non si chiede in mano — torna da qui in ~200 ms invece che dal GAS.
+       Tutto il resto (cortesía, FAM, sconto di cassa, PIN del JL) non passa
+       nemmeno da questa riga: `_pagoAlBorde` guarda le porte sul payload e
+       ritorna `null`, cioè «vai di là». E `null` è anche la risposta quando il
+       bordo è spento, quando il monto non gli combacia, quando il cancello del
+       turno è vecchio e quando la rete è morta: cinque no, una sola via
+       d'uscita, ed è quella che la sala conosce da ieri.
+       ⚠️ Sotto, dalla riga del gasPost in giù, NON è cambiato niente. */
+    const rB = await _pagoAlBorde(body, pg.tot);
+    if (rB) {
+      /* la mesa si chiude ottimisticamente come sempre (v1.13): il GAS chiude
+         TUTTA la mesa al pago, e lo farà anche stavolta — solo, lo fa dietro,
+         chiamato dal bordo. La mano che fa sparire i pedidos è la stessa. */
+      const mmB = (STATE.mesasModel || []).find(function (x) { return x.mesa === pg.mesa; });
+      if (mmB) {
+        mmB.pend.concat(mmB.mios, mmB.limpiar).forEach(function (p) { _marcarLocal(p.uuid, 'limpia', pg.mesa); });
+        if (STATE.sala) _aplicarMarcados(STATE.sala);
+      }
+      /* `dedup:true` — il ritocco di un pago già accettato — non fa rumore: è
+         lo stesso fatto, e la risposta del bordo è identica alla prima. Il
+         mesero non deve imparare una parola nuova per un gesto che ha già
+         fatto bene. Qui non si promette nessun folio: il `pago_id` nasce nel
+         GAS, dopo, e la boleta la chiede il BORDO al posto nostro — per questo
+         `_pedirBoleta` NON si chiama in questo ramo. Chiamarla senza pago_id
+         sarebbe un DTE orfano, cioè la ferita di mesa 49 da un'altra porta. */
+      toast('ok', '💳 Pago ✓ mesa ' + pg.mesa + ' · ' + fmtPrice(rB.monto != null ? rB.monto : pg.tot) +
+        (propina ? ' · propina ' + fmtPrice(propina) : '') +
+        ' · 🧾 la boleta sale sola');
+      STATE.pago = null; renderPago();
+      cerrarMesa();
+      refrescar(false);
+      return;
+    }
     const r = await gasPost('registrarPago', body);
     if (r && r.ok) {
       /* v1.13 · il GAS v3.85 chiude TUTTA la mesa al pago (anche gli in-volo):
