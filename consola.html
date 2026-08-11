@@ -622,7 +622,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.24</span>
+    <span class="ver" id="ver">consola v1.25</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1281,7 +1281,7 @@ async function cierreAbrir() {
   /* l'uid vive UN flusso: dentro (retry compresi) resta lo stesso — il server
      risponde `dedup` invece di sdoppiare; un cierre nuovo (es. turno noche
      dopo il turno día, stesso monto) riparte da zero e ne conia un altro. */
-  CIE.uid = ''; CIE.uidMonto = null;
+  CIE.uid = ''; CIE.uidMonto = null; CIE.pasarMesas = false;
   _cieRender('<div class="cie-msg">Mirando tus mesas…</div>');
   try {
     const r = await gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre });
@@ -1309,13 +1309,29 @@ function _ciePaso1() {
       '). Si vuelves a cerrar se guarda una declaración NUEVA — la anterior no se borra.</div>';
   }
   if (n) {
+    /* v1.25 · EL TRASPASO: cada mesa muestra a QUIÉN pasaría — un botón que
+       dice «al turno siguiente» sin nombrar a nadie es una promesa vaga, y
+       una mesa pasada a nadie no está pasada. Las que no tienen heredero se
+       marcan aparte: esas quedan de verdad en el aire, y hay que decirlo. */
+    const conD = (d.mesas_abiertas || []).filter(m => m.pasa_a);
+    const sinD = (d.mesas_abiertas || []).filter(m => !m.pasa_a);
     h += '<div class="cie-box"><b>Tienes ' + n + ' mesa' + (n > 1 ? 's' : '') + ' abierta' + (n > 1 ? 's' : '') + '</b>' +
       '<div class="cie-tot">' + fmtPrice(d.monto_abierto) + ' sin cobrar</div>' +
-      d.mesas_abiertas.map(m => '<div class="cie-row"><span>Mesa ' + esc(m.mesa) + '</span><b>' + fmtPrice(m.consumo) + '</b></div>').join('') +
+      d.mesas_abiertas.map(m => '<div class="cie-row"><span>Mesa ' + esc(m.mesa) +
+        (m.pasa_a ? ' <span style="opacity:.65;font-size:12px">→ ' + esc(m.pasa_a) + '</span>'
+                  : ' <span style="color:#f5a623;font-size:12px">· sin nadie en esa plaza</span>') +
+        '</span><b>' + fmtPrice(m.consumo) + '</b></div>').join('') +
       '</div>' +
-      '<button class="btn" onclick="_cieCerrar()">Voy a cobrarlas</button>' +
-      '<button class="btn sec" onclick="_ciePaso2()">Las dejo así — quedan a nombre mío</button>' +
-      '<div class="cie-nota">Si las dejas, el JL las va a ver con tu nombre y el monto. Nadie las está cobrando.</div>';
+      '<button class="btn" onclick="_cieCerrar()">Las cobro ahora</button>';
+    if (conD.length) {
+      h += '<button class="btn sec" onclick="_ciePasar()">Las paso al turno siguiente</button>' +
+        (sinD.length ? '<div class="cie-nota">⚠️ ' + sinD.length + ' no tiene' + (sinD.length > 1 ? 'n' : '') +
+          ' a quién pasar (nadie en esa plaza): queda' + (sinD.length > 1 ? 'n' : '') +
+          ' a tu nombre y el JL lo va a ver.</div>' : '');
+    } else {
+      h += '<button class="btn sec" onclick="_ciePasar()">Las dejo así — quedan a nombre mío</button>' +
+        '<div class="cie-nota">Ahora no hay nadie en esas plazas, así que no hay a quién pasarlas. El JL las va a ver con tu nombre y el monto.</div>';
+    }
   } else {
     h += '<div class="cie-box ok"><b>No tienes mesas abiertas</b><div class="cie-nota" style="margin:2px 0 0">Todo cobrado ✅</div></div>' +
       '<button class="btn" onclick="_ciePaso2()">Seguir</button>';
@@ -1323,6 +1339,12 @@ function _ciePaso1() {
   h += '<div class="cie-out" onclick="_cieSalirSinCerrar()">Salir sin cerrar</div>';
   _cieRender(h);
 }
+
+/* v1.25 · l'intenzione di passare le mese si prende QUI e viaggia col cierre:
+   il traspaso e la dichiarazione sono lo stesso gesto, non due — se fossero
+   due chiamate, una potrebbe entrare e l'altra no, e resterebbero mese passate
+   a metà. Il server fa entrambe le cose sotto lo stesso `uid`. */
+function _ciePasar() { CIE.pasarMesas = true; _ciePaso2(); }
 
 function _ciePaso2() {
   CIE.paso = 2;
@@ -1365,7 +1387,8 @@ async function cierreEnviar() {
   const b = $('cieBtn'); if (b) { b.disabled = true; b.textContent = 'Cerrando…'; }
   try {
     const r = await gasPost('cerrarMesero', { codigo: STATE.codigo, nombre: STATE.nombre,
-      uid: _cieUid(monto), efectivo_declarado: monto, motivo: CIE.motivo || '' });
+      uid: _cieUid(monto), efectivo_declarado: monto, motivo: CIE.motivo || '',
+      pasar_mesas: !!CIE.pasarMesas });
     if (r && r.ok) { CIE.res = r; _ciePaso4(r); }
     else if (r && r.exige === 'motivo') { CIE.res = r; _ciePaso3Motivo(r); }
     else throw new Error((r && r.error) || 'no_ok');
@@ -1429,10 +1452,16 @@ function _ciePaso4(r) {
     '<div class="cie-nota" style="margin-top:4px">' + (r.regimen === 'individual'
       ? 'Hoy la propina es <b>individual</b>: esta noche es tuya.'
       : 'Hoy la propina va al <b>pozo común</b>: el JL la reparte al cerrar el turno.') + '</div></div>';
+  if (r.traspasos && r.traspasos.length) {
+    h += '<div class="cie-box ok"><b>🔄 Pasaste ' + r.traspasos.length + ' mesa(s)</b>' +
+      r.traspasos.map(t => '<div class="cie-row"><span>Mesa ' + esc(t.mesa) + ' → <b>' + esc(t.a) + '</b></span><b>' +
+        fmtPrice(t.consumo) + '</b></div>').join('') +
+      '<div class="cie-nota" style="margin-top:4px">Ya le aparecen en su Consola. La propina es de quien cobra.</div></div>';
+  }
   if (r.mesas_abiertas && r.mesas_abiertas.length) {
-    h += '<div class="cie-warn">Dejaste ' + r.mesas_abiertas.length + ' mesa(s) abiertas por ' +
+    h += '<div class="cie-warn">Quedaron ' + r.mesas_abiertas.length + ' mesa(s) abiertas a tu nombre por ' +
       fmtPrice(r.monto_abierto) + ': ' + r.mesas_abiertas.map(m => 'mesa ' + esc(m.mesa)).join(', ') +
-      '. El JL ya lo sabe.</div>';
+      ' — no había nadie en esa plaza. El JL ya lo sabe.</div>';
   }
   h += '<button class="btn" onclick="_cieListo()">Listo — me voy</button>' +
     '<div class="cie-nota">Quedó firmado a tu nombre. Si contaste mal, vuelve a cerrar: se guarda una declaración nueva, no se borra nada.</div>';
