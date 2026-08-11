@@ -597,7 +597,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.20</span>
+    <span class="ver" id="ver">consola v1.21</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1144,9 +1144,28 @@ function abrirCorreccion(uuid) {
   STATE.editNuevos = {};        // v1.15
   STATE.agregando = null;
   STATE.agregarQ = '';
+  /* ═════ v1.21 · IL CAMBIO DOPO LA CONSEGNA (regola di Alberto, 10-ago) ═════
+     «Dopo la consegna con autorizzazione JL, prima libero.» Prima che il
+     pedido parta è una correzione e non la vede nessuno; dopo, qualcosa si è
+     mosso davvero — una bottiglia è uscita dalla barra — e allora vuole un
+     MOTIVO e la firma di chi ha il grado. È la stessa distinzione che fanno
+     tutti i POS seri fra *correggere* e *anullare*.
+     Il motivo esce da una lista chiusa perché un motivo si deve poter
+     CONTARE: quale prodotto torna indietro, da quale mano, a che ora. */
+  STATE.editVoid = (p.estado === 'digitado' || p.estado === 'entregado');
+  STATE.editMotivo = '';
+  STATE.editPinJL = '';
   itemsDe(p).forEach(it => { STATE.editQty[it.id] = parseInt(it.qty, 10) || 1; });
   render(STATE.sala);
 }
+const CORR_MOTIVOS = [
+  ['cambio_producto', '🔄 Cambió de producto'],
+  ['no_le_gusto',     '😕 No le gustó'],
+  ['mal_estado',      '🚫 En mal estado'],
+  ['error_mesero',    '✋ Error mío'],
+];
+function corrMotivo(m) { STATE.editMotivo = m; render(STATE.sala); }
+function corrPin(v) { STATE.editPinJL = v; }   /* niente re-render: perderebbe il focus */
 
 /* v2.14 · il catálogo non è più «una volta per sessione»: le marche di fascia
    (menú del día, promos, reglas) cambiano con l'ORA — la foto caduca dopo 2
@@ -1224,9 +1243,29 @@ async function guardarCorreccion(uuid, btn) {
               : { id: id, qty: STATE.editQty[id] };
   });
   try {
-    const r = await gasPost('corregirPedido', { codigo: STATE.codigo, nombre: STATE.nombre, uuid: uuid, items: items });
+    const r = await gasPost('corregirPedido', Object.assign(
+      { codigo: STATE.codigo, nombre: STATE.nombre, uuid: uuid, items: items },
+      /* v1.21 · motivo e PIN viaggiano SOLO quando servono: un pedido non
+         ancora uscito resta il gesto libero di sempre, senza attrito. */
+      STATE.editVoid ? { motivo: STATE.editMotivo, pin_jl: (STATE.editPinJL || '').trim() } : {}));
     if (r && r.ok) {
-      toast('ok', r.cancelado ? 'Pedido cancelado — la mesa se arrepintió' : (r.sin_cambios ? 'Sin cambios' : '✓ Corregido — queda en el registro'));
+      toast('ok', r.void_jl
+        ? '✓ Cambiado — «' + (r.motivo || '') + '», autorizó ' + r.void_jl
+        : (r.cancelado ? 'Pedido cancelado — la mesa se arrepintió' : (r.sin_cambios ? 'Sin cambios' : '✓ Corregido — queda en el registro')));
+      STATE.editando = null;
+    } else if (r && (r.error === 'pin_jl_requerido' || r.error === 'pin_jl_invalido' || r.error === 'pin_jl_bloqueado')) {
+      /* v1.21 · il pannello NON si chiude: il JL è lì accanto, riscrive e basta */
+      toast('warn', r.error === 'pin_jl_bloqueado'
+        ? 'PIN bloqueado 10 min — demasiados intentos'
+        : (r.error === 'pin_jl_invalido' ? 'PIN incorrecto — que lo escriba el JL de nuevo' : 'Falta el PIN del JL'));
+      if (btn) btn.disabled = false;
+      return;
+    } else if (r && r.error === 'motivo_requerido') {
+      toast('warn', 'Elige por qué se cambia');
+      if (btn) btn.disabled = false;
+      return;
+    } else if (r && r.error === 'estado_no_corregible') {
+      toast('warn', 'Esta cuenta ya está cerrada — no se toca');
       STATE.editando = null;
     } else if (r && r.error === 'comanda_ya_salio') {
       // v2.10 · el chit ya salió: no se borra plata ya producida (26-jul)
@@ -2933,10 +2972,19 @@ function renderPago() {
   const esCort = pg.medio === 'cortesia';
   let jlHtml = '';
   if (pg.jl) {
+    /* ═════ v1.21 · LA CORTESÍA È VIA (ordine di Alberto, 10-ago sera) ═════
+       Era l'unica porta senza misura: uno sconto del 100% che passava
+       accanto al tetto del 20% perché entrava da un'altra parte. E oggi si è
+       visto a cosa serviva davvero — a chiudere i tavoli che il sistema non
+       lasciava incassare. Un regalo usato come scopa non è un regalo.
+       Il chip sparisce di qui perché nessuno la cerchi; il GAS la rifiuta
+       comunque (`cortesia_deshabilitada`), perché una porta solo nascosta
+       resta aperta per chiunque conosca il payload.
+       Tornerà quando avrà la sua misura: monto massimo, contatore del giorno
+       e il nome di chi la concede. Allora sarà una decisione, non un buco. */
     jlHtml = '<div class="cs-psec" style="color:var(--cs-cyan,#22d3ee)">🔐 Opciones del JL</div>' +
       '<div class="cs-chips">' +
-        '<div class="cs-chip' + (esCort ? ' sel' : '') + '" onclick="pagoSet(\'medio\',\'' + (esCort ? 'debito' : 'cortesia') + '\')">🎁 Cortesía<small>invitación $0 · sin boleta</small></div>' +
-        (esCort ? '' : '<div class="cs-chip' + (pg.montoOn ? ' sel' : '') + '" onclick="pagoMontoToggle()">¿Cobraste otro monto?<small>el fósil lleva lo cobrado</small></div>') +
+        '<div class="cs-chip' + (pg.montoOn ? ' sel' : '') + '" onclick="pagoMontoToggle()">¿Cobraste otro monto?<small>el fósil lleva lo cobrado</small></div>' +
       '</div>' +
       (!esCort && pg.montoOn
         ? '<input class="cs-pin" inputmode="numeric" placeholder="Monto cobrado $" value="' + esc(pg.montoCustom) + '" oninput="pagoInput(\'montoCustom\',this.value)" onchange="renderPago()">'
@@ -3304,8 +3352,25 @@ function cardMio(p, umb) {
         } else {
           hc += '<button class="btn sec agr-add" onclick="agregarAbrir(\'' + esc(p.uuid) + '\')">➕ Agregar producto</button>';
         }
-        hc += '<div class="corr-tot">Total nuevo: <b>' + fmtPrice(totNuevo) + '</b>' + (totNuevo === 0 ? ' · <b class="warn">= pedido CANCELADO</b>' : '') + '</div>' +
-          '<div class="corr-btns"><button class="btn verde" onclick="guardarCorreccion(\'' + esc(p.uuid) + '\',this)">✓ Guardar</button>' +
+        hc += '<div class="corr-tot">Total nuevo: <b>' + fmtPrice(totNuevo) + '</b>' + (totNuevo === 0 ? ' · <b class="warn">= pedido CANCELADO</b>' : '') + '</div>';
+        /* v1.21 · il pedido è già uscito: motivo + firma del JL */
+        if (STATE.editVoid) {
+          hc += '<div style="margin-top:10px;padding:10px;border-radius:12px;background:rgba(245,166,35,.10);border:1px solid #f5a623">' +
+            '<div style="font-size:12.5px;color:#f5a623;font-weight:800;margin-bottom:6px">🔐 Este pedido YA salió — necesita el JL</div>' +
+            '<div style="font-size:12px;color:var(--t3);margin-bottom:6px">¿Por qué se cambia?</div>' +
+            '<div class="cs-chips">' +
+            CORR_MOTIVOS.map(function (m) {
+              return '<div class="cs-chip' + (STATE.editMotivo === m[0] ? ' sel' : '') +
+                '" onclick="corrMotivo(\'' + m[0] + '\')">' + m[1] + '</div>';
+            }).join('') + '</div>' +
+            '<input class="cs-pin" type="password" inputmode="numeric" autocomplete="off" style="margin-top:8px" ' +
+              'placeholder="PIN del JL" oninput="corrPin(this.value)">' +
+            '</div>';
+        }
+        hc += '<div class="corr-btns"><button class="btn verde" ' +
+            (STATE.editVoid && !STATE.editMotivo ? 'disabled ' : '') +
+            'onclick="guardarCorreccion(\'' + esc(p.uuid) + '\',this)">' +
+            (STATE.editVoid ? '✓ Cambiar — con el JL' : '✓ Guardar') + '</button>' +
           '<button class="btn sec" onclick="cerrarCorreccion()">dejar así</button></div></div>';
         return hc;
       }
@@ -3349,7 +3414,11 @@ function cardMio(p, umb) {
         (esRet ? '<div class="cs-aviso camino">🏃<div style="flex:1"><b>Retirado</b> — va en camino a la mesa</div></div>' : '') +
         (esDig
           ? '<button class="btn verde" onclick="marcar(\'' + esc(p.uuid) + '\',\'entregado\',this)">✓ Entregado — servido a la mesa' +
-            '<small style="display:block;font-size:10px;opacity:.75;font-weight:400">solo cuando los platos ya están en la mesa</small></button>'
+            '<small style="display:block;font-size:10px;opacity:.75;font-weight:400">solo cuando los platos ya están en la mesa</small></button>' +
+            /* v1.21 · «me lo cambias por otro» — el pedido ya salió, así que
+               esto NO es corregir: es anular con motivo y firma del JL. */
+            '<button class="btn sec" style="margin-top:6px" onclick="abrirCorreccion(\'' + esc(p.uuid) + '\')">✎ Cambiar / quitar algo' +
+            '<small style="display:block;font-size:10px;opacity:.75;font-weight:400">ya salió — lo autoriza el JL con su PIN</small></button>'
           : '<button class="btn" onclick="marcar(\'' + esc(p.uuid) + '\',\'digitado\',this)">✓ Confirmar pedido</button>' +
             // v1.10 · prima del digitado si può correggere (¿la mesa se equivocó?)
             '<button class="btn sec" style="margin-top:6px" onclick="abrirCorreccion(\'' + esc(p.uuid) + '\')">✎ Corregir pedido</button>') +
