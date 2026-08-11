@@ -597,7 +597,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.21</span>
+    <span class="ver" id="ver">consola v1.22</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1137,7 +1137,15 @@ async function seguirEnSala(btn) {
 
 /* ═════ v1.10 · CORRECCIÓN DEL PEDIDO (GAS corregirPedido, v3.3.8) ═════ */
 function abrirCorreccion(uuid) {
-  const p = ((STATE.sala && STATE.sala.mios) || []).find(x => x.uuid === uuid);
+  /* v1.22 · si cerca in TUTTE le liste, non solo nei `mios`. Un pedido già
+     consegnato vive in `por_limpiar`: cercandolo solo fra i míos, il bottone
+     nuovo sulla card «servida» non apriva niente — un tasto che non fa nulla
+     è peggio di un tasto che non c'è. */
+  const _todas = (STATE.sala
+    ? [].concat(STATE.sala.mios || [], STATE.sala.por_limpiar || [],
+                STATE.sala.pendientes || [], STATE.sala.sin_dueno || [])
+    : []);
+  const p = _todas.find(x => x && x.uuid === uuid);
   if (!p) return;
   STATE.editando = uuid;
   STATE.editQty = {};
@@ -2812,14 +2820,30 @@ function cardLiberar(p) {
      «Se fue sin pagar — liberar» NON ESISTE PIÙ. La mesa si chiude SOLO col
      pago (legge del tavolo G2-bis). La fuga vera è un atto del JL: cortesía
      col PIN — monto 0, consumo scritto, fossile parlante. */
+  /* v1.22 · DUE CORREZIONI, TROVATE DA ALBERTO SUL FERRO (10-ago, 22:00):
+     ① il bottone «Cambiar / quitar algo» c'era solo sulla card del digitado —
+        ma il caso vero è proprio questo: la mesa ha già in mano il piatto e lo
+        vuole cambiare. Senza qui, la funzione esisteva solo dove non serviva.
+     ② la cortesía era in DUE posti e ne avevo chiuso uno solo: il chip nel
+        pannello del pago, non questa riga. 🎓 Quando togli una porta, ELENCA
+        chi ci passava sopra — è la stessa lezione del 03-ago con BKS, e me la
+        sono ripetuta addosso a un'ora di distanza.
+     La fuga vera resta senza scorciatoia: si avvisa il JL, e il gesto giusto
+     («mesa perdida», perdita col nome del mesero) è ancora da costruire.
+     In correzione la card diventa il pannello degli steppers — lo STESSO di
+     `cardMio`, non una copia: due pannelli gemelli divergono al primo ritocco,
+     e il secondo lo scopri in servizio. */
+  if (STATE.editando === p.uuid) return cardMio(p, null);
   return '<div class="card" style="display:block">' +
     '<div class="cs-fila"><div class="cs-ico pass">✓</div>' +
     '<div class="cs-body"><div class="cs-tit"><b>Mesa ' + esc(p.mesa) + ' — servida</b></div>' +
     '<div class="cs-det">entregado · esperando el pago</div></div></div>' +
     bodyItems(p) +
     '<div class="mio-meta">' + resumenCorto(p) + '</div>' +
+    '<button class="btn sec" style="margin-top:8px" onclick="abrirCorreccion(\'' + esc(p.uuid) + '\')">✎ Cambiar / quitar algo' +
+    '<small style="display:block;font-size:10px;opacity:.75;font-weight:400">ya salió — lo autoriza el JL con su PIN</small></button>' +
     '<div style="font-size:11.5px;color:var(--t3);margin-top:8px;text-align:center">' +
-    'la mesa se cierra con 💳 Pagado · ¿se fue sin pagar? → JL (🔐 cortesía)</div></div>';
+    'la mesa se cierra con 💳 Pagado · ¿se fue sin pagar? → avisa al JL</div></div>';
 }
 /* v3.13 · IL GUARDIANO GUARDAVA IL PEDIDO SBAGLIATO (caso Diego-V, mesa 44,
    08-ago). `limpia` chiude TUTTI los entregados de la mesa, pero el control de
