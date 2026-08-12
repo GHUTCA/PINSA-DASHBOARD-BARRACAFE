@@ -755,7 +755,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">sala v3.0.1</span>
+    <span class="ver" id="ver">sala v3.1.0</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -3257,25 +3257,96 @@ function vhojaCerrar() { const w = $('vhojaWrap'); if (w) w.innerHTML = ''; }
    davanti — e si dice chiaro che il papel non è la boleta.
    ⚠️ Le PARTI (per persona / una parte) NON ci sono: emitirPreCuenta manda
    sempre l'intera sessione. È nella patch GAS, non è un bottone morto qui. */
+/* v3.1 · LA PRECUENTA DIVISA (Alberto, 12-ago sera: «quella che avevamo
+   vista») — il panel del mockup v6: Toda la cuenta · Copia por mesa (junta) ·
+   Por persona (i nomi della libreta) · Una parte (tocchi le righe). «Toda» è
+   già scelta e IMPRIMIR è lì: il cammino caldo resta 2 tap.
+   ⚠️ Onesto per costruzione: il SERVER stampa la sessione della mesa
+   (emitirPreCuenta) — «Toda» e «Copia por mesa» escono su carta; «Por
+   persona» e «Una parte» sono il papel IN PANTALLA da mostrare al tavolo
+   (il pago parziale non esiste ancora), e il panel lo dice. */
+function _vpItemsDet(mesa) {
+  const j = _juntaDe(mesa);
+  const mesas = j ? j.mesas.slice() : [mesa];
+  const out = [];
+  mesas.forEach(function (mm) {
+    const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mm; });
+    if (!m) return;
+    m.pend.concat(m.mios, m.limpiar).forEach(function (p) {
+      try {
+        JSON.parse(p.items_json || '[]').forEach(function (it) {
+          out.push({ n: it.nombre || it.id || '?', pu: parseFloat(it.precio) || 0,
+            q: parseInt(it.qty, 10) || 1, de: (it.de || '').toString(), mesa: mm,
+            k: out.length });
+        });
+      } catch (e) {}
+    });
+  });
+  return { mesas: mesas, items: out, junta: j };
+}
+function pcSetModo(m2) { if (STATE.pc) { STATE.pc.modo = m2; STATE.pc.quien = ''; STATE.pc.sub = ''; vPrecuentaSala(STATE.pc.mesa); } }
+function pcSetQuien(q2) { if (STATE.pc) { STATE.pc.quien = q2; vPrecuentaSala(STATE.pc.mesa); } }
+function pcSetSub(m2) { if (STATE.pc) { STATE.pc.sub = m2; vPrecuentaSala(STATE.pc.mesa); } }
+function pcToggle(k2) { if (STATE.pc) { STATE.pc.sel[k2] = !STATE.pc.sel[k2]; vPrecuentaSala(STATE.pc.mesa); } }
 function vPrecuentaSala(mesa) {
-  const tot = _vpTot(mesa), its = _vpItems(mesa);
-  if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
+  const det = _vpItemsDet(mesa);
+  if (!det.items.length) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
+  if (!STATE.pc || STATE.pc.mesa !== mesa) STATE.pc = { mesa: mesa, modo: 'toda', quien: '', sub: '', sel: {} };
+  const pc = STATE.pc;
+  const chipM = function (v, lbl) {
+    return '<div class="cs-chip' + (pc.modo === v ? ' sel' : '') + '" onclick="pcSetModo(\'' + v + '\')">' + lbl + '</div>';
+  };
+  // ── le righe del papel secondo il modo ──
+  let its = det.items, sotto = '', imprimible = true, titolo = det.junta ? 'Grupo ' + det.junta.n : 'Mesa ' + esc(mesa);
+  if (pc.modo === 'mesa' && det.junta) {
+    const mm = pc.sub || det.mesas[0];
+    sotto = '<div class="cs-chips" style="margin-top:6px">' + det.mesas.map(function (m2) {
+      return '<div class="cs-chip' + ((pc.sub || det.mesas[0]) === m2 ? ' sel' : '') + '" onclick="pcSetSub(\'' + esc(m2) + '\')">' + esc(m2) + '</div>'; }).join('') + '</div>';
+    its = det.items.filter(function (x) { return x.mesa === mm; });
+    titolo = 'Mesa ' + esc(mm);
+  } else if (pc.modo === 'persona') {
+    const nomi = []; det.items.forEach(function (x) { const q2 = x.de || ('mesa ' + x.mesa); if (nomi.indexOf(q2) < 0) nomi.push(q2); });
+    const qSel = pc.quien || nomi[0];
+    sotto = '<div class="cs-chips" style="margin-top:6px">' + nomi.map(function (q2) {
+      return '<div class="cs-chip' + (qSel === q2 ? ' sel' : '') + '" onclick="pcSetQuien(\'' + esc(q2) + '\')">' + esc(q2) + '</div>'; }).join('') + '</div>';
+    its = det.items.filter(function (x) { return (x.de || ('mesa ' + x.mesa)) === qSel; });
+    imprimible = false; titolo = esc(qSel);
+  } else if (pc.modo === 'parte') {
+    sotto = '<div style="font-size:11.5px;color:#8a8577;margin-top:4px">toca las líneas que van en esta parte</div>';
+    its = det.items.filter(function (x) { return pc.sel[x.k]; });
+    imprimible = false; titolo = 'Una parte';
+  }
+  const tot = its.reduce(function (s, x) { return s + x.q * x.pu; }, 0);
   const prop = Math.round(tot * 0.10);
   const ult = (STATE.pcUlt || {})[mesa] || 0;
   const hace = ult ? Math.round((Date.now() - ult) / 1000) : 0;
-  vhoja('<h3>Precuenta · Mesa ' + esc(mesa) + '</h3>' +
+  const righe = (pc.modo === 'parte' ? det.items : its).map(function (x) {
+    const dentro = pc.modo !== 'parte' || pc.sel[x.k];
+    return '<div class="pr"' + (pc.modo === 'parte' ? ' onclick="pcToggle(' + x.k + ')" style="cursor:pointer;' + (dentro ? '' : 'opacity:.35') + '"' : '') + '>' +
+      '<span>' + (pc.modo === 'parte' ? (dentro ? '☑ ' : '☐ ') : '') + x.q + '× ' + esc(x.n) +
+      (pc.modo === 'toda' && x.de ? ' <i style="opacity:.55">· ' + esc(x.de) + '</i>' : '') + '</span>' +
+      '<span>$' + _fmtMiles(x.q * x.pu) + '</span></div>';
+  }).join('');
+  vhoja('<h3>Precuenta · ' + (det.junta ? 'Grupo ' + det.junta.n : 'Mesa ' + esc(mesa)) + '</h3>' +
     '<div class="cs-psub">Es <b>el papel para el cliente</b>. No cobra, no cierra la mesa.</div>' +
-    (ult && hace < 300 ? '<div style="margin:10px 0;padding:10px 12px;border-radius:12px;background:rgba(245,166,35,.12);' +
+    '<div class="cs-chips" style="margin-top:8px">' +
+      chipM('toda', 'Toda la cuenta') +
+      (det.junta ? chipM('mesa', 'Copia por mesa') : '') +
+      chipM('persona', 'Por persona') +
+      chipM('parte', 'Una parte') + '</div>' + sotto +
+    (ult && hace < 300 && pc.modo === 'toda' ? '<div style="margin:10px 0;padding:10px 12px;border-radius:12px;background:rgba(245,166,35,.12);' +
       'border:1px solid #f5a623;font-size:12.5px;line-height:1.5"><b>Ya se imprimió hace ' + hace + ' s.</b> ' +
       'Otra copia es otro papel en la mano del cliente.</div>' : '') +
-    '<div class="papel"><div class="pz">BACKSTAGE</div><div class="pz2">precuenta · no es boleta</div>' +
-      its.map(function (x) { return '<div class="pr"><span>' + x.q + '× ' + esc(x.n) + '</span><span>$' +
-        _fmtMiles(x.q * x.pu) + '</span></div>'; }).join('') +
+    '<div class="papel"><div class="pz">BACKSTAGE</div><div class="pz2">precuenta · ' + titolo + ' · no es boleta</div>' +
+      righe +
       '<hr><div class="pr"><span>Consumo</span><span>$' + _fmtMiles(tot) + '</span></div>' +
       '<div class="pr pro"><span>Propina sugerida 10%</span><span>$' + _fmtMiles(prop) + '</span></div>' +
       '<hr><div class="pr tt2"><span>TOTAL</span><span>$' + _fmtMiles(tot + prop) + '</span></div>' +
       '<div class="nota2">gracias · la propina es voluntaria</div></div>' +
-    '<button class="btn" id="pcBtn" onclick="vPrecuentaImprimir(\'' + esc(mesa) + '\',this)">🖨 IMPRIMIR EN BARRA</button>');
+    (imprimible
+      ? '<button class="btn" id="pcBtn" onclick="vPrecuentaImprimir(\'' + esc(pc.modo === 'mesa' ? (pc.sub || det.mesas[0]) : mesa) + '\',this)">🖨 IMPRIMIR EN BARRA</button>'
+      : '<div style="font-size:12px;color:#8a8577;margin:10px 0 6px;text-align:center">esta vista se <b>muestra al cliente</b> — el papel imprime la cuenta entera</div>' +
+        '<button class="btn sec" onclick="pcSetModo(\'toda\')">‹ Volver a toda la cuenta</button>'));
 }
 async function vPrecuentaImprimir(mesa, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Imprimiendo…'; }
@@ -3676,7 +3747,7 @@ function renderPanel() {
     b.onclick = function () {
       const k = b.dataset.v;
       if (k === 'pedir') return nuevoAbrir(mesa);
-      if (k === 'precuenta') return vPrecuentaDirecta(mesa);   // v3.0 · CAMBIO 3 · un tap = carta
+      if (k === 'precuenta') return vPrecuentaSala(mesa);   // v3.1 · il panel DIVISO del mockup (Toda già scelta: 2 tap)
       if (k === 'cobrar') return vCobrarSala(mesa);   // v3.0 · CAMBIO 4 · le 4 vie sulla junta
       if (k === 'pedidos') return viva ? abrirMesa(mesa) : toast('warn', 'Esta mesa no tiene pedidos');
       if (k === 'mover') return vMoverSala(mesa);
