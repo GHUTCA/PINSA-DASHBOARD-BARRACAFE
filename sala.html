@@ -755,7 +755,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">sala v3.1.0</span>
+    <span class="ver" id="ver">sala v3.2.0</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -3379,7 +3379,7 @@ async function vPrecuentaImprimir(mesa, btn) {
      · A dedo — la vista per NOME (cambio 2): chi deve cosa, dai `de:`. */
 function vCobrarSala(mesa) {
   const j = _juntaDe(mesa);
-  if (!j) return abrirPago(mesa);
+  if (!j) return _cobrarMesaSola(mesa);   // v3.2 · la porta a 4 vie anche da sola (Alberto)
   let tot = 0; j.mesas.forEach(function (m) { tot += _vpTot(m); });
   vhoja('<h3>Cobrar · Junta ' + j.n + '</h3>' +
     '<div class="cs-psub"><b>$' + _fmtMiles(tot) + '</b> en la mesa · ' + j.mesas.length + ' mesas</div>' +
@@ -3391,6 +3391,53 @@ function vCobrarSala(mesa) {
       '<small>A la romana</small></button>' +
     '<button class="opt2" onclick="_cobrarADedo(' + j.n + ')"><b>👆 A dedo · repartir entre comensales</b>' +
       '<small>Quién debe qué, por nombre</small></button>');
+}
+/* v3.2 · la mesa SOLA entra dalla stessa porta della junta (correzione di
+   Alberto: «cobrar è quello vecchio anche lui») — Todo lo que queda apre il
+   pannello del pago; iguales e a-dedo sono le stesse viste, su una mesa. */
+function _cobrarMesaSola(mesa) {
+  const tot = _vpTot(mesa);
+  if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
+  vhoja('<h3>Cobrar · Mesa ' + esc(mesa) + '</h3>' +
+    '<div class="cs-psub"><b>$' + _fmtMiles(tot) + '</b> en la mesa</div>' +
+    '<button class="opt2" onclick="vhojaCerrar();abrirPago(\'' + esc(mesa) + '\')"><b>💳 Todo lo que queda · $' + _fmtMiles(tot) + '</b>' +
+      '<small>Una boleta, un pago. La mesa queda libre.</small></button>' +
+    '<button class="opt2" onclick="_cobrarIgualesMesa(\'' + esc(mesa) + '\')"><b>➗ Por partes iguales</b>' +
+      '<small>A la romana</small></button>' +
+    '<button class="opt2" onclick="_cobrarADedoMesa(\'' + esc(mesa) + '\')"><b>👆 A dedo · repartir entre comensales</b>' +
+      '<small>Quién debe qué, por nombre</small></button>');
+}
+function _cobrarIgualesMesa(mesa) {
+  const tot = _vpTot(mesa);
+  vhoja('<h3>Por partes iguales</h3>' +
+    '<div class="cs-psub">$' + _fmtMiles(tot) + ' · ¿entre cuántas personas?</div>' +
+    '<div class="cs-chips">' + [2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map(function (n2) {
+      return '<div class="cs-chip"><b>' + n2 + '</b><small>$' + _fmtMiles(Math.ceil(tot / n2 / 10) * 10) + '</small></div>'; }).join('') + '</div>' +
+    '<div style="font-size:12px;color:#8a8577;margin-top:10px">Esta pantalla es para DECIRLE al grupo cuánto pone cada uno. El cobro es uno solo.</div>' +
+    '<button class="btn" style="margin-top:10px" onclick="vhojaCerrar();abrirPago(\'' + esc(mesa) + '\')">💳 Cobrar $' + _fmtMiles(tot) + '</button>' +
+    '<button class="btn sec" style="margin-top:8px" onclick="_cobrarMesaSola(\'' + esc(mesa) + '\')">‹ Volver</button>');
+}
+function _cobrarADedoMesa(mesa) {
+  const det = _vpItemsDet(mesa);
+  const porQuien = {};
+  det.items.forEach(function (it) {
+    const q2 = it.de || ('mesa ' + it.mesa);
+    (porQuien[q2] = porQuien[q2] || []).push(it);
+  });
+  const nombres = Object.keys(porQuien);
+  if (!nombres.length) { toast('warn', 'Sin consumo'); return; }
+  vhoja('<h3>A dedo · quién debe qué</h3>' +
+    '<div class="cs-psub">Los nombres nacen en la libreta (toca la persona al pedir).</div>' +
+    nombres.map(function (q2) {
+      const its = porQuien[q2];
+      const t2 = its.reduce(function (s, x) { return s + x.q * x.pu; }, 0);
+      return '<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04)">' +
+        '<div style="display:flex;justify-content:space-between;font-weight:800"><span>' + esc(q2) + '</span><span>$' + _fmtMiles(t2) + '</span></div>' +
+        its.map(function (x) { return '<div style="display:flex;justify-content:space-between;font-size:12px;color:#b9b3a6"><span>' + x.q + '× ' + esc(x.n) + '</span><span>$' + _fmtMiles(x.q * x.pu) + '</span></div>'; }).join('') +
+        '</div>';
+    }).join('') +
+    '<button class="btn" style="margin-top:10px" onclick="vhojaCerrar();abrirPago(\'' + esc(mesa) + '\')">💳 Cobrar todo · $' + _fmtMiles(_vpTot(mesa)) + '</button>' +
+    '<button class="btn sec" style="margin-top:8px" onclick="_cobrarMesaSola(\'' + esc(mesa) + '\')">‹ Volver</button>');
 }
 function _cobrarPorMesa(nJ) {
   const j = _juntasLoad().find(function (x) { return x.n === nJ; }); if (!j) return;
@@ -3549,10 +3596,34 @@ function vDescontarSala(mesa) {
       '<small>Queda en ' + fmtPrice(Math.round(tot * 0.8)) + ' · lo abre el PIN del JL</small></button>' +
     '<button class="opt2" onclick="_dtoCortesia(\'' + esc(mesa) + '\')"><b>🎁 Cortesía · deja en $0</b>' +
       '<small>Invita la casa. Sin boleta. PIN del JL</small></button>' +
-    '<button class="opt2" onclick="vhojaCerrar();abrirMesa(\'' + esc(mesa) + '\')"><b>🍽 Un producto</b>' +
+    '<button class="opt2" onclick="_dtoProducto(\'' + esc(mesa) + '\')"><b>🍽 Un producto</b>' +
       '<small>Se cayó, lo devolvió, te equivocaste — se quita esa línea sola, con motivo</small></button>' +
     '<button class="opt2" onclick="_dtoFam(\'' + esc(mesa) + '\')"><b>👨‍👩‍👧 Desc FAM · deja en $0</b>' +
       '<small>La familia pone <b>su código</b> en tu teléfono</small></button>');
+}
+/* v3.2 · DESCONTAR → Un producto NON è «vai a guardare i pedidos» (correzione
+   di Alberto): si elencano i PRODOTTI della mesa, tocchi quello che torna
+   indietro e si atterra direttamente nella correzione di QUEL pedido —
+   quantità, motivo dalla lista, PIN del JL se è già in produzione. */
+function _dtoProducto(mesa) {
+  const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
+  if (!m) { toast('warn', 'Mesa ' + mesa + ' sin pedidos'); return; }
+  const righe = [];
+  m.pend.concat(m.mios, m.limpiar).forEach(function (p) {
+    try {
+      JSON.parse(p.items_json || '[]').forEach(function (it) {
+        righe.push({ uuid: p.uuid, id: p.id_pedido || '', n: it.nombre || it.id || '?',
+          q: parseInt(it.qty, 10) || 1, pu: parseFloat(it.precio) || 0 });
+      });
+    } catch (e) {}
+  });
+  if (!righe.length) { toast('warn', 'Mesa ' + mesa + ' sin productos'); return; }
+  vhoja('<h3>Un producto · Mesa ' + esc(mesa) + '</h3>' +
+    '<div class="cs-psub">Toca el que vuelve — se quita <b>esa línea sola</b>, con motivo.</div>' +
+    righe.map(function (x) {
+      return '<button class="opt2" onclick="vhojaCerrar();abrirMesa(\'' + esc(mesa) + '\');abrirCorreccion(\'' + esc(x.uuid) + '\')">' +
+        '<b>' + x.q + '× ' + esc(x.n) + '</b><small>$' + _fmtMiles(x.q * x.pu) + (x.id ? ' · ' + esc(x.id) : '') + '</small></button>';
+    }).join(''));
 }
 function _dtoPct(mesa, pct) {
   const tot = _vpTot(mesa);
@@ -4209,14 +4280,11 @@ function renderMesaSheet(r) {
       'se cobra <b>por mesa</b> (cada una su boleta)</span>' +
       ' · <a style="text-decoration:underline;cursor:pointer" onclick="juntaSeparar(' + jnS.n + ')">✂ separar</a></div>';
   }
-  /* v1.11 · VB Alberto (collaudo D-day): la PLATA in testa — Cuenta, Precuenta
-     e Pagado sotto l'intestazione, prima delle card. Il mesero apre la mesa
-     per COBRARE molto più spesso che per rileggere i pedidos. */
+  /* v3.2 · PEDIDOS fa i pedidos (correzione di Alberto, 12-ago sera):
+     Precuenta e Pagado qui erano DOPPIONI dei verbi del pannello — via.
+     Resta la cuenta come numero (informazione, non bottone) e l'Agregar. */
   if (tot > 0) {
     h += '<div class="cs-stot" style="margin-top:8px"><span>Cuenta</span><b class="tab">' + fmtPrice(tot) + '</b></div>';
-    h += '<div class="msh-row" style="display:flex;gap:8px">' +
-      (r.precuenta_on ? '<button class="btn sec" style="flex:1" onclick="precuentaMesa(\'' + esc(m.mesa) + '\',this)">🧾 Precuenta</button>' : '') +
-      '<button class="btn verde" style="flex:1.4" onclick="abrirPago(\'' + esc(m.mesa) + '\')">💳 Pagado</button></div>';
   }
   /* v1.12 · anche l'Agregar in testa (VB Alberto) — il blocco azione è UNO:
      cuenta · precuenta · pagado · agregar. Sotto la riga, la storia. */
