@@ -755,7 +755,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">sala v2.2.1</span>
+    <span class="ver" id="ver">sala v3.0.0</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1561,7 +1561,13 @@ async function cierreEnviar() {
   CIE.enviando = true;
   const b = $('cieBtn'); if (b) { b.disabled = true; b.textContent = 'Cerrando…'; }
   try {
+    /* v3.0 · CAMBIO 8 + BLOCCO 7 (GAS v3.124.0): la franja viaggia col cierre —
+       chi fa DUE turni nello stesso giorno (pranzo+sera, i chip del 12-ago) non
+       si vede più inghiottire il secondo corte come duplicato. Il valore nasce
+       al primo passo e resta stabile per i retry della stessa dichiarazione. */
+    if (!CIE.franja) CIE.franja = (new Date().getHours() < 17 ? 'dia' : 'noche');
     const r = await gasPost('cerrarMesero', { codigo: STATE.codigo, nombre: STATE.nombre,
+      franja: CIE.franja,
       uid: _cieUid(monto), efectivo_declarado: monto, motivo: CIE.motivo || '',
       pasar_mesas: !!CIE.pasarMesas });
     if (r && r.ok) {
@@ -1735,6 +1741,7 @@ async function agregarAbrir(uuid) {
         STATE.catalogo = r.productos;
         STATE.catalogoTs = Date.now();
         STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
+        STATE.terminoOps = Array.isArray(r.termino_opciones) ? r.termino_opciones : (STATE.terminoOps || []); // v3.0 · términos carne (GAS v3.124.0)
         mods2Cargar();   // v3.10 · MODS2 · una lettura accanto al catalogo, mai un poll (no-op a flag spento)
         // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
         if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
@@ -1866,10 +1873,11 @@ async function nuevoAbrir(mesaPre) {
   }
   // v2.0 · dal sheet del tavolo arriva con la mesa già scritta
   // v3 · la libreta: líneas terminadas (no qty/datos sueltos) + persona
-  // CONSOLA v1.1 · si atterra sulla CARTA (mockup): cajon:true — la libreta
-  // resta l'ultimo passo, la rilettura prima del Crear (tesi v3 intatta)
+  /* v3.0 · CAMBIO 2 (Alberto, 12-ago): PEDIR apre nella LIBRETA — il foglio
+     bianco che scrive quello che dicono — NON nella carta. La carta resta la
+     porta secondaria (bottone 🍽 Carta): `cajon:false`. */
   STATE.nuevo = { mesa: (mesaPre || '').toString(), lineas: [], seq: 0, ultima: 0,
-    personas: 1, pAct: 1, eligiendo: null, q: '', qc: '', filtro: '', cajon: true,
+    personas: 1, pAct: 1, eligiendo: null, q: '', qc: '', filtro: '', cajon: false,
     uuid: '', enviando: false };
   renderNuevo();
   if (_catalogoViejo()) {      // v2.14 · TTL: stessa cura di AGREGAR (la fascia cambia con l'ora)
@@ -1879,6 +1887,7 @@ async function nuevoAbrir(mesaPre) {
         STATE.catalogo = r.productos;
         STATE.catalogoTs = Date.now();
         STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
+        STATE.terminoOps = Array.isArray(r.termino_opciones) ? r.termino_opciones : (STATE.terminoOps || []); // v3.0 · términos carne (GAS v3.124.0)
         mods2Cargar();   // v3.10 · MODS2 · una lettura accanto al catalogo, mai un poll (no-op a flag spento)
         // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
         if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
@@ -2255,6 +2264,7 @@ function _cmLinea(l){
     notas.push('<span class="mk">🧩 '+esc(l.mods.map(function(m){
       return m.o + (m.d ? ' +'+fmtPrice(m.d) : ''); }).join(' · '))+'</span>');
   } else if(l.op) notas.push('<span class="mk">'+esc(l.op)+'</span>');
+  if(l.termino) notas.push('<span class="mk">🥩 '+esc(l.termino)+'</span>');   // v3.0 · il término si rilegge
   if(l.es_menu && !l.precio) notas.push('<span class="mk">bebida del menú · $0 · tkt a barra</span>');
   // v3.11 · la pareja si dice per quello che è: pagata e regalo, ognuna col suo
   if(l.dupla) notas.push('<span class="pm">'+(l.regalo2x1 ? '🎁 2x1 · unidad de REGALO · se cobra sólo el extra' : '🎁 2x1 · unidad pagada')+'</span>');
@@ -2313,7 +2323,7 @@ function _cmPadHtml(){
     for(let i=1;i<=n.personas;i++){
       const ls = n.lineas.filter(function(l){ return l.persona===i; });
       if(!ls.length) continue;
-      h += '<div class="cm-grp">Persona '+i+'<span>'+fmtPrice(_cmTotalP(i))+'</span></div>' + ls.map(_cmLinea).join('');
+      h += '<div class="cm-grp">'+esc((n.nombres&&n.nombres[i])||('Persona '+i))+'<span>'+fmtPrice(_cmTotalP(i))+'</span></div>' + ls.map(_cmLinea).join('');
     }
   } else h = n.lineas.map(_cmLinea).join('');
   return h + '<div class="cm-tot">Total<b>'+fmtPrice(_nuevoTotal())+'</b></div>';
@@ -2331,7 +2341,7 @@ function _cmPregHtml(){
   const e = STATE.nuevo.eligiendo; if(!e) return '';
   if(e.g2) return _cmPregG2Html(e);
   return '<div class="cm-preg"><div class="cm-preg-h"><b>'+(e.n>1?e.n+'× ':'')+esc(e.nombre)+'</b>'+
-    '<span class="q">'+(e.beb?'🥤 ¿bebida?':'¿cómo?')+'</span>'+
+    '<span class="q">'+(e.term?'🥩 ¿término?':e.beb?'🥤 ¿bebida?':'¿cómo?')+'</span>'+
     '<button class="no" onclick="nuevoCancelarPreg()" aria-label="dejarlo">✕</button></div>'+
     '<div class="cm-preg-o">'+e.opciones.map(function(o,i){
       return '<button onclick="nuevoResponder('+i+')">'+esc(o)+'</button>'; }).join('')+'</div></div>';
@@ -2498,10 +2508,15 @@ function _cmSlotHtml(){
 }
 function _cmPersHtml(){
   const n = STATE.nuevo; if(n.personas<2) return '';
+  /* v3.0 · CAMBIO 2 · le persone hanno un NOME: un secondo tap sulla persona
+     già attiva chiede come si chiama («Juan», «la de rojo») — il nome viaggia
+     con ogni riga (`de:`) e si riflette nel conto: la divisione può nascere
+     al tavolo o alla cassa. Senza nome resta P1/P2, come prima. */
   let h='<div class="cm-pers"><span class="lb">Para</span>';
   for(let i=1;i<=n.personas;i++){
     const t=_cmTotalP(i);
-    h += '<button class="cm-pbtn" aria-pressed="'+(n.pAct===i)+'" onclick="nuevoPersona('+i+')">P'+i+
+    const nm=(n.nombres&&n.nombres[i])||('P'+i);
+    h += '<button class="cm-pbtn" aria-pressed="'+(n.pAct===i)+'" onclick="nuevoPersona('+i+')" title="toca de nuevo = nombre">'+esc(nm)+
          '<small>'+(t?fmtPrice(t):'—')+'</small></button>';
   }
   return h+'<button class="cm-pbtn mas" onclick="nuevoMasPersona()" aria-label="otra persona">＋</button></div>';
@@ -2690,6 +2705,12 @@ function nuevoResponder(i){
   const p=(STATE.catalogo||[]).find(function(x){ return x.id===e.id; });
   if(!p){ n.eligiendo=null; _cmRedibujar(); return; }
   const op = e.opciones[i];
+  // v3.0 · la risposta del TÉRMINO: si riparte da _cmPoner col término in mano
+  if(e.term){
+    n.eligiendo=null;
+    _cmPoner(p, e._pend.op, e.n, e._pend.beb, e._pend.mods, op);
+    _cmRedibujar(); if(!n.cajon) _cmFoco('nuevoQ'); return;
+  }
   if(e.beb){ _cmPoner(p, e.opPrev||'', e.n, op); }
   else {
     const opFinal = (op==='Como viene') ? '' : op;
@@ -2704,9 +2725,22 @@ function nuevoResponder(i){
   n.eligiendo=null; _cmRedibujar(); if(!n.cajon) _cmFoco('nuevoQ');
 }
 function nuevoCancelarPreg(){ const n=STATE.nuevo; if(!n) return; n.eligiendo=null; _cmRedibujar(); if(!n.cajon) _cmFoco('nuevoQ'); }
+/* v3.0 · CAMBIO di Alberto (12-ago): «i modificadores sono spariti» — erano i
+   términos della carne, che il menú chiede dal v1.42 e la comandera MAI.
+   Stessa regola del menù: badges ∋ 'carne' + opciones da PARAMETROS. */
+function _esCarne(p){ return ((p && p.badges) || '').toLowerCase().indexOf('carne') >= 0; }
 /* la línea (ya terminada) entra en la libreta */
-function _cmPoner(p, op, q, bebNombre, mods){
+function _cmPoner(p, op, q, bebNombre, mods, termino){
   const n=STATE.nuevo;
+  /* il término si chiede UNA volta, come nel menú: se il piatto è carne e le
+     opciones esistono, la domanda si apre QUI — dopo mods/bebida, prima della
+     libreta — e al ritorno questa stessa funzione riparte col término in mano */
+  if(!termino && _esCarne(p) && (STATE.terminoOps||[]).length){
+    n.eligiendo={ id:p.id, nombre:p.nombre, n:q, term:true,
+      opciones:STATE.terminoOps.slice(),
+      _pend:{ op:op||'', beb:bebNombre||'', mods:mods||null } };
+    _cmRedibujar(); return;
+  }
   const esMenu = p.regla==='almuerzo';
   // v3.10 · MODS2 · IL PREZZO CHE SOMMA: i delta entrano DENTRO precio, così
   // Σ precio×qty resta vero in tutti i posti che lo calcolano (libreta, server,
@@ -2715,11 +2749,13 @@ function _cmPoner(p, op, q, bebNombre, mods){
   // con preparazioni diverse restano DUE righe — per unità, per costruzione.
   mods = mods || null;
   const dTot = mods ? mods.reduce(function(s,m){ return s + (m.d||0); }, 0) : 0;
-  const igual = n.lineas.find(function(l){ return l.id===p.id && l.persona===n.pAct && (l.op||'')===(op||''); });
+  // v3.0 · il merge guarda ANCHE il término: due filetes a cotture diverse
+  // restano DUE righe (stessa regola del menú: id+op+término)
+  const igual = n.lineas.find(function(l){ return l.id===p.id && l.persona===n.pAct && (l.op||'')===(op||'') && (l.termino||'')===(termino||''); });
   if(igual){ igual.qty += q; n.ultima=igual.k; }
   else {
     const l = { k:++n.seq, id:p.id, nombre:(esMenu?'Menú del Día · ':'')+p.nombre, precio:p.precio + dTot, qty:q,
-      cat:p.cat||'', op:op||'', es_menu:esMenu, promo:_cmEs2(p)?'2x1':'', persona:n.pAct, pri:0 };
+      cat:p.cat||'', op:op||'', termino:termino||'', es_menu:esMenu, promo:_cmEs2(p)?'2x1':'', persona:n.pAct, pri:0 };
     if(mods && mods.length){ l.mods = mods; l.precio_base = p.precio; }
     n.lineas.push(l); n.ultima=l.k;
   }
@@ -2759,7 +2795,14 @@ function nuevoPri(k){ const n=STATE.nuevo; if(!n) return;
   const l=n.lineas.find(function(x){ return x.k===k; }); if(!l) return;
   l.pri = l.pri?0:1; _cmRedibujar(); }
 /* ── dividir la cuenta · y su camino de vuelta ─────────────────────── */
-function nuevoPersona(i){ const n=STATE.nuevo; if(!n) return; n.pAct=i; _cmRedibujar(); }
+function nuevoPersona(i){ const n=STATE.nuevo; if(!n) return;
+  // v3.0 · secondo tap sulla persona attiva = battesimo («¿cómo se llama?»)
+  if(n.pAct===i){
+    const attuale=(n.nombres&&n.nombres[i])||'';
+    const nm=prompt('¿Cómo se llama? (vacío = P'+i+')', attuale);
+    if(nm!==null){ n.nombres=n.nombres||{}; const v=nm.trim().slice(0,18); if(v) n.nombres[i]=v; else delete n.nombres[i]; }
+  }
+  n.pAct=i; _cmRedibujar(); }
 function nuevoMasPersona(){ const n=STATE.nuevo; if(!n) return; n.personas++; n.pAct=n.personas; _cmRedibujar(); }
 function nuevoJuntar(){
   const n=STATE.nuevo; if(!n) return;
@@ -2803,6 +2846,11 @@ async function nuevoEnviar(btn) {
     return { id: l.id, nombre: l.nombre + (es2 ? ' · 2x1 (llevar ' + (l.qty*2) + ')' : ''),
       precio: l.precio, qty: l.qty, llevar: es2 ? l.qty*2 : l.qty, cat: l.cat || '', op: l.op || '',
       es_menu: !!l.es_menu, promo: es2 ? '2x1' : '', pri: l.pri ? 1 : 0, persona: l.persona || 1,   // v2.4 · ES ENTRADA
+      /* v3.0 · CAMBIO 2 · il término della carne (il chit lo stampa già: GAS
+         riga `- termino`) e il NOME di chi l'ha chiesto (additivo, verbatim
+         nel fossile → la divisione per nome vive nel conto da oggi) */
+      termino: l.termino || undefined,
+      de: (n.nombres && n.nombres[l.persona]) || undefined,
       // v3.10 · MODS2 (contratto §4, ADDITIVO): `precio` porta già i delta
       // dentro; `mods[]` è il dettaglio per le macchine (cucina per estación,
       // boleta, cervello) e `precio_base` separa il piatto dall'extra.
@@ -3000,7 +3048,20 @@ function _marcarLocal(uuid, marca, mesa) {
 /* Patcha la foto in arrivo con i gesti che il mesero ha già fatto.
    Un solo punto di passaggio: tutto ciò che disegna (tessere, sheet, card)
    legge da qui in poi una verità sola. */
+/* v3.0 · l'eco locale del MOVER (reperto V12: la foto del bordo è 1/min —
+   il gesto appena fatto deve vincere sulla foto vecchia, come le marcas).
+   Vive 90 s: il beat successivo porta la verità dal libro e l'eco decade. */
+function _movAplica(r) {
+  if (!r || !STATE.movLocal || !STATE.movLocal.length) return;
+  STATE.movLocal = STATE.movLocal.filter(function (mv) { return Date.now() - mv.ts < 90000; });
+  STATE.movLocal.forEach(function (mv) {
+    ['mios', 'pendientes', 'por_limpiar', 'sin_dueno'].forEach(function (k) {
+      (r[k] || []).forEach(function (p) { if (String(p.mesa) === String(mv.de)) p.mesa = mv.a; });
+    });
+  });
+}
 function _aplicarMarcados(r) {
+  _movAplica(r);   // v3.0 · il MOVER appena fatto vince sulla foto stantia
   if (!r) return;
   const us = Object.keys(STATE.marcado);
   if (!us.length) return;
@@ -3220,29 +3281,134 @@ async function vPrecuentaImprimir(mesa, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Imprimiendo…'; }
   STATE.pcUlt = STATE.pcUlt || {};
   try {
-    const r = await gasPost('emitirPreCuenta', { codigo: STATE.codigo, nombre: STATE.nombre,
-      emitida_por: STATE.nombre, mesa: mesa, canal: 'papel' });
+    /* v3.0 · la precuenta passa dal BORDO (consola v1.26, ~150 ms): la chiave
+       la conia il client (`pc_uid`, dottrina ①) e il fallback GAS vive già
+       dentro staffPost — mai peggio di prima. */
+    const pcUid = 'pc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+    const r = await staffPost('emitirPreCuenta', { codigo: STATE.codigo, nombre: STATE.nombre,
+      emitida_por: STATE.nombre, mesa: mesa, canal: 'papel', pc_uid: pcUid });
     if (r && r.ok) {
       STATE.pcUlt[mesa] = Date.now();
       vhojaCerrar();
-      toast('ok', '🧾 ' + (r.folio || '') + ' · ' + fmtPrice(r.total || 0) + ' — saliendo en barra');
+      toast('ok', '🧾 ' + (r.folio || '') + (r.total ? ' · ' + fmtPrice(r.total) : '') + ' — saliendo en barra');
       return;
     }
     toast('err', r && r.error === 'sin_consumo' ? 'Mesa ' + mesa + ' sin consumo' : 'No se pudo: ' + (r && r.error || '?'));
   } catch (e) { toast('err', 'Sin conexión — reintenta'); }
   if (btn) { btn.disabled = false; btn.textContent = '🖨 IMPRIMIR EN BARRA'; }
 }
+/* ═════ v3.0 · CAMBIO 4 · COBRAR — le 4 vie del mockup definito ═════════════
+   Mesa sola → il pannello del pago DIRETTO (zero passi in più: rapidissima).
+   Mesa in JUNTA → la porta a 4 vie:
+     · Todo lo que queda — spento finché la sesión de grupo non è accesa nel
+       GAS (SESION_GRUPO_ON, BLOCCO 1 deployato SPENTO): incassare «tutto» con
+       la cuenta ancora spaccata per mesa lascerebbe denaro fuori. Si dice.
+     · Por mesa (SIN TOCAR NADA) — ogni mesa la sua cuenta, un tap ciascuna.
+     · Por partes iguales — a la romana, in pantalla: quanto a testa.
+     · A dedo — la vista per NOME (cambio 2): chi deve cosa, dai `de:`. */
+function vCobrarSala(mesa) {
+  const j = _juntaDe(mesa);
+  if (!j) return abrirPago(mesa);
+  let tot = 0; j.mesas.forEach(function (m) { tot += _vpTot(m); });
+  vhoja('<h3>Cobrar · Junta ' + j.n + '</h3>' +
+    '<div class="cs-psub"><b>$' + _fmtMiles(tot) + '</b> en la mesa · ' + j.mesas.length + ' mesas</div>' +
+    '<button class="opt2" disabled style="opacity:.45"><b>💳 Todo lo que queda · $' + _fmtMiles(tot) + '</b>' +
+      '<small>Una boleta, un pago — se enciende con la sesión de grupo (mañana)</small></button>' +
+    '<button class="opt2" onclick="vhojaCerrar();_cobrarPorMesa(' + j.n + ')"><b>🪑 Por mesa</b> <span style="color:#3db876;font-size:10.5px;font-weight:800">SIN TOCAR NADA</span>' +
+      '<small>Cada mesa su cuenta — y se libera sola al pagar</small></button>' +
+    '<button class="opt2" onclick="_cobrarIguales(' + j.n + ')"><b>➗ Por partes iguales</b>' +
+      '<small>A la romana</small></button>' +
+    '<button class="opt2" onclick="_cobrarADedo(' + j.n + ')"><b>👆 A dedo · repartir entre comensales</b>' +
+      '<small>Quién debe qué, por nombre</small></button>');
+}
+function _cobrarPorMesa(nJ) {
+  const j = _juntasLoad().find(function (x) { return x.n === nJ; }); if (!j) return;
+  const vive = j.mesas.filter(function (m) { return _vpTot(m) > 0; });
+  if (!vive.length) { toast('warn', 'Nada por cobrar en la junta'); return; }
+  vhoja('<h3>Por mesa · Junta ' + j.n + '</h3>' +
+    '<div class="cs-psub">Toca una mesa para cobrarla. Las otras siguen abiertas.</div>' +
+    vive.map(function (m) {
+      return '<button class="opt2" onclick="vhojaCerrar();abrirPago(\'' + esc(m) + '\')"><b>Mesa ' + esc(m) + '</b>' +
+        '<small>$' + _fmtMiles(_vpTot(m)) + '</small></button>'; }).join(''));
+}
+function _cobrarIguales(nJ) {
+  const j = _juntasLoad().find(function (x) { return x.n === nJ; }); if (!j) return;
+  let tot = 0; j.mesas.forEach(function (m) { tot += _vpTot(m); });
+  vhoja('<h3>Por partes iguales</h3>' +
+    '<div class="cs-psub">$' + _fmtMiles(tot) + ' · ¿entre cuántas personas?</div>' +
+    '<div class="cs-chips">' + [2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map(function (n2) {
+      return '<div class="cs-chip"><b>' + n2 + '</b><small>$' + _fmtMiles(Math.ceil(tot / n2 / 10) * 10) + '</small></div>'; }).join('') + '</div>' +
+    '<div style="font-size:12px;color:#8a8577;margin-top:10px">El cobro se registra por mesa (o todo junto, mañana): esta pantalla es para DECIRLE al grupo cuánto pone cada uno.</div>' +
+    '<button class="btn sec" style="margin-top:10px" onclick="vCobrarSala(\'' + esc(j.mesas[0]) + '\')">‹ Volver</button>');
+}
+function _cobrarADedo(nJ) {
+  const j = _juntasLoad().find(function (x) { return x.n === nJ; }); if (!j) return;
+  // la vista per nome: i `de:` dei pedidos della junta (cambio 2), o per mesa
+  const porQuien = {};
+  j.mesas.forEach(function (m) {
+    const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === m; });
+    if (!mm) return;
+    mm.pend.concat(mm.mios, mm.limpiar).forEach(function (p) {
+      try {
+        JSON.parse(p.items_json || '[]').forEach(function (it) {
+          const q2 = (it.de || '').toString() || ('mesa ' + m);
+          porQuien[q2] = porQuien[q2] || [];
+          porQuien[q2].push({ n: it.nombre || it.id, q: parseInt(it.qty, 10) || 1, pu: parseFloat(it.precio) || 0 });
+        });
+      } catch (e) {}
+    });
+  });
+  const nombres = Object.keys(porQuien);
+  if (!nombres.length) { toast('warn', 'Sin consumo en la junta'); return; }
+  vhoja('<h3>A dedo · quién debe qué</h3>' +
+    '<div class="cs-psub">Los nombres nacen en la libreta (toca la persona al pedir). Sin nombre = su mesa.</div>' +
+    nombres.map(function (q2) {
+      const its = porQuien[q2];
+      const t2 = its.reduce(function (s, x) { return s + x.q * x.pu; }, 0);
+      return '<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04)">' +
+        '<div style="display:flex;justify-content:space-between;font-weight:800"><span>' + esc(q2) + '</span><span>$' + _fmtMiles(t2) + '</span></div>' +
+        its.map(function (x) { return '<div style="display:flex;justify-content:space-between;font-size:12px;color:#b9b3a6"><span>' + x.q + '× ' + esc(x.n) + '</span><span>$' + _fmtMiles(x.q * x.pu) + '</span></div>'; }).join('') +
+        '</div>';
+    }).join('') +
+    '<div style="font-size:12px;color:#8a8577;margin-top:10px">El cobro por persona (una parte) se enciende con el pago parcial — mañana. Hoy: cobra por mesa.</div>' +
+    '<button class="btn sec" style="margin-top:10px" onclick="vCobrarSala(\'' + esc(j.mesas[0]) + '\')">‹ Volver</button>');
+}
+/* v3.0 · CAMBIO 3 (Alberto, 12-ago): PRECUENTA = UN TAP E LA CARTA ESCE.
+   Niente schermata di opzioni sul cammino caldo. L'anteprima (vPrecuentaSala)
+   resta per il caso raro: una ristampa entro 5 min si conferma guardando. */
+function vPrecuentaDirecta(mesa) {
+  const tot = _vpTot(mesa);
+  if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
+  const ult = (STATE.pcUlt || {})[mesa] || 0;
+  if (ult && Date.now() - ult < 300000) { vPrecuentaSala(mesa); return; }   // anti doble papel
+  vPrecuentaImprimir(mesa, null);
+}
 
 /* ── ↔ MOVER · il tastierino, non il prompt del browser ──────────────── */
 let _mvDe = '', _mvA = '';
+/* v3.0 · CAMBIO 5 (Alberto, 12-ago): MOVER è quello DEFINITO — due strade con
+   pesi diversi. DENTRO LA TUA PLAZA · AHORA MISMO: le mese libere come chip,
+   un tap e via. A OTRA PLAZA: il tastierino, e si dichiara che il consumo (e
+   la propina) escono dalle tue mani. La mesa si muove INTERA. */
 function vMoverSala(de) { _mvDe = de; _mvA = ''; _vMoverPinta(); }
+function _mvLibres() {
+  const vive = {};
+  (STATE.mesasModel || []).forEach(function (m) { vive[m.mesa] = true; });
+  return _plazaLista().filter(function (m) { return m !== _mvDe && !vive[m]; });
+}
+function _mvChip(m) { _mvA = m; _mvHacer(null); }
 function _vMoverPinta() {
   const mia = _plazaLista().indexOf(_mvA) >= 0;
   const ocupada2 = (STATE.mesasModel || []).some(function (x) { return x.mesa === _mvA; });
   const valido = _mvA && _mvA !== _mvDe && !ocupada2;
+  const libres = _mvLibres();
   vhoja('<h3>Mover la mesa ' + esc(_mvDe) + '</h3>' +
     '<div class="cs-psub">Se mueve <b>la mesa entera</b> — todo su consumo abierto viaja junto.<br>' +
     '<span style="opacity:.7">Los pedidos ya cerrados se quedan donde están.</span></div>' +
+    (libres.length ? '<div class="cs-psec">Dentro de tu plaza <span style="color:#3db876;font-size:11px;font-weight:800">AHORA MISMO</span></div>' +
+      '<div class="cs-chips">' + libres.slice(0, 12).map(function (m) {
+        return '<div class="cs-chip" onclick="_mvChip(\'' + esc(m) + '\')">' + esc(m) + '</div>'; }).join('') + '</div>' : '') +
+    '<div class="cs-psec">A otra mesa · escribe el número</div>' +
     '<div class="visor2 ' + (_mvA ? '' : 'vacio') + '">' + (_mvA || 'número de mesa') + '</div>' +
     (_mvA ? '<div class="quien2 ' + (valido ? '' : 'mala') + '">' +
       (_mvA === _mvDe ? '⚠️ Es la <b>misma mesa</b>'
@@ -3267,12 +3433,23 @@ function _mvTecla(k) {
 }
 async function _mvHacer(btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Moviendo…'; }
+  /* v3.0 · il reperto della V12 (Isa, 18:01): moverMesa scrive via GAS ma lo
+     schermo legge la FOTO del bordo (beat 1/min) → per un minuto la vista
+     raccontava il mondo di prima. Cura: ECO LOCALE — il cambio si applica
+     subito sulla vista e sopravvive alle foto stantie finché il beat non lo
+     porta da solo. E il verbo DICE cosa ha mosso, non esegue in silenzio. */
+  const deL = _mvDe, aL = _mvA;
+  const cosa = _vpItems(deL).map(function (x) { return x.q + 'x ' + x.n; }).slice(0, 3).join(' · ');
+  const plata = _vpTot(deL);
   try {
     const r = await gasPost('moverMesa', { codigo: STATE.codigo, nombre: STATE.nombre, de: _mvDe, a: _mvA });
     if (r && r.ok) {
       vhojaCerrar(); vpSoltar();
-      toast('ok', '↔ Mesa ' + _mvDe + ' → ' + _mvA + ' · ' + r.movidos + ' pedido' + (r.movidos > 1 ? 's' : '') +
-        (r.cerrados_quedan ? ' · ' + r.cerrados_quedan + ' cerrados quedan' : ''));
+      STATE.movLocal = (STATE.movLocal || []).concat([{ de: deL, a: aL, ts: Date.now() }]);
+      _movAplica(STATE.sala);
+      renderMesas(STATE.sala);
+      toast('ok', '↔ ' + (cosa ? cosa + ' · ' : '') + '$' + _fmtMiles(plata) + ' → mesa ' + aL +
+        (r.cerrados_quedan ? ' · ' + r.cerrados_quedan + ' cerrados quedan en la ' + deL : ''));
       refrescar(false); return;
     }
     toast('err', { nada_que_mover: 'No hay pedidos abiertos en la ' + _mvDe,
@@ -3295,14 +3472,16 @@ function vDescontarSala(mesa) {
   vhoja('<h3>Descontar · Mesa ' + esc(mesa) + '</h3>' +
     '<div class="cs-psub">Consumo <b>' + fmtPrice(tot) + '</b>. Todo queda en el libro: ' +
     'qué, cuánto, por qué y quién lo autorizó.</div>' +
+    /* v3.0 · CAMBIO 6 (Alberto, 12-ago): l'ordine è 20% · Cortesía · Un
+       producto · e il Desc FAM per ULTIMO. */
     '<button class="opt2" onclick="_dtoPct(\'' + esc(mesa) + '\',20)"><b>20% de descuento</b>' +
       '<small>Queda en ' + fmtPrice(Math.round(tot * 0.8)) + ' · lo abre el PIN del JL</small></button>' +
     '<button class="opt2" onclick="_dtoCortesia(\'' + esc(mesa) + '\')"><b>🎁 Cortesía · deja en $0</b>' +
       '<small>Invita la casa. Sin boleta. PIN del JL</small></button>' +
-    '<button class="opt2" onclick="_dtoFam(\'' + esc(mesa) + '\')"><b>👨‍👩‍👧 Desc FAM · deja en $0</b>' +
-      '<small>La familia pone <b>su código</b> en tu teléfono</small></button>' +
     '<button class="opt2" onclick="vhojaCerrar();abrirMesa(\'' + esc(mesa) + '\')"><b>🍽 Un producto</b>' +
-      '<small>Se cayó, lo devolvió, te equivocaste — se quita esa línea sola, con motivo</small></button>');
+      '<small>Se cayó, lo devolvió, te equivocaste — se quita esa línea sola, con motivo</small></button>' +
+    '<button class="opt2" onclick="_dtoFam(\'' + esc(mesa) + '\')"><b>👨‍👩‍👧 Desc FAM · deja en $0</b>' +
+      '<small>La familia pone <b>su código</b> en tu teléfono</small></button>');
 }
 function _dtoPct(mesa, pct) {
   const tot = _vpTot(mesa);
@@ -3336,41 +3515,53 @@ function _dtoFam(mesa) {
    visto JL asincrono) NON compare: nessun bottone morto.
    ═══════════════════════════════════════════════════════════════════════ */
 function _kpisRender(r) {
+  /* v3.0 · CAMBIO 1 (Alberto, 12-ago): l'header è quello DEFINITO del mockup —
+     VENTA TURNO (aperta+cobrada, col cobrado sotto) · PROPINA · TICKET MEDIO.
+     Stessa matematica di `pintaKpis` del v6, coi dati veri del poll. */
   const vt = (r && r.venta_turno) || null;
-  let porCobrar = 0;
+  let abierta = 0;
   (STATE.mesasModel || []).forEach(function (m) {
-    m.pend.concat(m.mios, m.limpiar).forEach(function (p) { porCobrar += parseFloat(p.total) || 0; });
+    m.pend.concat(m.mios, m.limpiar).forEach(function (p) { abierta += parseFloat(p.total) || 0; });
   });
   const cobrado = vt ? (parseFloat(vt.venta) || 0) : 0;
+  const venta = abierta + cobrado;
   const propDecl = vt ? (parseFloat(vt.propinas) || 0) : 0;
-  const propEst = Math.round(cobrado * 0.10);
+  const propEst = Math.round(venta * 0.10);
   const brecha = propEst - propDecl;
   const nC = vt ? (parseInt(vt.cuentas, 10) || 0) : 0;
+  const ticket = nC ? Math.round(cobrado / nC) : 0;
   const el = $('kpis'); if (!el) return;
   el.innerHTML =
-    '<div class="kpi venta"><div class="kl">Por cobrar</div><div class="kv">$' + _fmtMiles(porCobrar) + '</div>' +
-      '<div class="ks">' + (STATE.mesasModel || []).length + ' mesas vivas</div></div>' +
+    '<div class="kpi venta"><div class="kl">Venta turno</div><div class="kv">$' + _fmtMiles(venta) + '</div>' +
+      '<div class="ks">$' + _fmtMiles(cobrado) + ' cobrado</div></div>' +
     '<div class="kpi prop"><div class="kl">Propina</div><div class="kv">$' + _fmtMiles(propDecl) + '</div>' +
-      '<div class="ks">' + (cobrado ? 'est. $' + _fmtMiles(propEst) + (brecha > 0 ? ' · <b>−' + _fmtMiles(brecha) + '</b>' : '') : '—') + '</div></div>' +
-    '<div class="kpi"><div class="kl">Vendido hoy</div><div class="kv">$' + _fmtMiles(cobrado) + '</div>' +
-      '<div class="ks">' + (nC ? nC + ' cuenta' + (nC === 1 ? '' : 's') + (vt.por_cuenta ? ' · $' + _fmtMiles(vt.por_cuenta) : '') : 'sin cobros aún') + '</div></div>';
+      '<div class="ks">' + (venta ? 'est. $' + _fmtMiles(propEst) + (brecha > 0 && cobrado ? ' · <b>−' + _fmtMiles(brecha) + '</b>' : '') : '—') + '</div></div>' +
+    '<div class="kpi"><div class="kl">Ticket medio</div><div class="kv">' + (nC ? '$' + _fmtMiles(ticket) : '—') + '</div>' +
+      '<div class="ks">' + (nC ? nC + ' cuenta' + (nC === 1 ? '' : 's') : 'sin cobros aún') + '</div></div>';
 }
 
 /* ── IL TICKER ── */
 let _tickPausa = null, _tickBound = false;
 function _tickRender(r) {
   const el = $('tick'), w = $('tickw'); if (!el || !w) return;
+  /* v3.0 · CAMBIO 1 (nota di Alberto: con 2 plazas la griglia copre i
+     messaggi) — il ticker è SEMPRE visibile e ogni chip con una mesa è
+     TAPPABILE: un tap seleziona la mesa e apre i verbi. Il fatto urgente
+     vive anche SULLA card (renderMesas): la mappa stessa grida. */
   const pz = [];
+  const chip = function (cls, mesa, txt) {
+    return '<div class="fp ' + cls + '"' + (mesa ? ' data-mesa="' + esc(mesa) + '" style="cursor:pointer"' : '') + '>' + txt + '</div>';
+  };
   (r.llamadas || []).forEach(function (l) {
-    pz.push('<div class="fp bad">🔔 mesa ' + esc(l.mesa) + ' llama · ' +
-      esc(l.motivo === 'cuenta' ? 'la cuenta' : l.motivo === 'duda' ? 'una duda' : 'te busca') + '</div>');
+    pz.push(chip('bad', l.mesa, '🔔 mesa ' + esc(l.mesa) + ' llama · ' +
+      esc(l.motivo === 'cuenta' ? 'la cuenta' : l.motivo === 'duda' ? 'una duda' : 'te busca')));
   });
   const listos = {};
   (r.mios || []).concat(r.pendientes || []).forEach(function (p) {
     if (p.listo && !p.retirado) listos[p.mesa] = (listos[p.mesa] || 0) + 1;
   });
   Object.keys(listos).forEach(function (m) {
-    pz.push('<div class="fp">✓ listo en el pass · mesa ' + esc(m) + '</div>');
+    pz.push(chip('', m, '✓ listo en el pass · mesa ' + esc(m)));
   });
   const nPend = (r.pendientes || []).length;
   if (nPend) pz.push('<div class="fp warn">✋ ' + nPend + ' pedido' + (nPend === 1 ? '' : 's') + ' sin dueño en tu plaza</div>');
@@ -3385,6 +3576,11 @@ function _tickRender(r) {
   el.innerHTML = corto ? pz.join('') : pz.join('') + pz.join('');
   if (!_tickBound) {
     _tickBound = true;
+    // v3.0 · il chip con una mesa porta alla mesa: tap = selezione + verbi
+    w.addEventListener('click', function (ev) {
+      const fp = ev.target && ev.target.closest ? ev.target.closest('.fp[data-mesa]') : null;
+      if (fp && fp.dataset.mesa) { try { abrirMesa(fp.dataset.mesa); } catch (e) {} }
+    });
     w.addEventListener('pointerdown', function () {
       if (w.classList.contains('corto')) return;
       w.classList.add('pausa');
@@ -3480,8 +3676,8 @@ function renderPanel() {
     b.onclick = function () {
       const k = b.dataset.v;
       if (k === 'pedir') return nuevoAbrir(mesa);
-      if (k === 'precuenta') return vPrecuentaSala(mesa);
-      if (k === 'cobrar') return abrirPago(mesa);
+      if (k === 'precuenta') return vPrecuentaDirecta(mesa);   // v3.0 · CAMBIO 3 · un tap = carta
+      if (k === 'cobrar') return vCobrarSala(mesa);   // v3.0 · CAMBIO 4 · le 4 vie sulla junta
       if (k === 'pedidos') return viva ? abrirMesa(mesa) : toast('warn', 'Esta mesa no tiene pedidos');
       if (k === 'mover') return vMoverSala(mesa);
       if (k === 'descontar') return vDescontarSala(mesa);
@@ -3529,12 +3725,33 @@ function juntaCrear() {
   STATE.selMesas = [];
   toast('ok', '👥 Junta ' + n + ' · mesas ' + j.mesas.join(' · ') + ' — los pedidos llegan a la ' + principal);
   refrescarMapa();
+  /* v3.0 · BLOCCO 3 (GAS v3.124.0): la junta della PROPRIA plaza diventa un
+     GRUPO vero nel libro, col codigo del turno — niente PIN. Dietro, senza
+     far aspettare il dito; se il server dice no (cross-plaza, rete), la junta
+     resta locale come ieri: il servizio non dipende dall'esito. */
+  (function (jj) {
+    try {
+      gasPost('unirMesas', { codigo: STATE.codigo, nombre: STATE.nombre,
+        mesas: [jj.principal].concat(jj.mesas.filter(function (m) { return m !== jj.principal; })).join(',') })
+        .then(function (r) {
+          if (r && r.ok && r.grupo_id) {
+            const l2 = _juntasLoad(); const x = l2.find(function (y) { return y.n === jj.n; });
+            if (x) { x.gid = r.grupo_id; _juntasSave(l2); }
+          }
+        }).catch(function () {});
+    } catch (e) {}
+  })(j);
   nuevoAbrir(principal);
 }
 function juntaSeparar(nJ) {
   const list = _juntasLoad(); const j = list.find(function (x) { return x.n === nJ; }); if (!j) return;
   _juntasSave(list.filter(function (x) { return x.n !== nJ; }));
-  toast('ok', '✂ Junta ' + nJ + ' separada — cada mesa con su cuenta, como siempre');
+  // v3.0 · CAMBIO 7 · il messaggio del definito: nulla si perde, ogni piatto con la sua mesa
+  toast('ok', '✂ Junta ' + nJ + ' separada — cada plato vuelve con su mesa. No se pierde nada.');
+  // e il grupo VERO nel libro si chiude anche lui (BLOCCO 3: codigo, no PIN)
+  if (j.gid || j.principal) {
+    try { gasPost('separarMesas', { codigo: STATE.codigo, nombre: STATE.nombre, principal: j.principal }).catch(function () {}); } catch (e) {}
+  }
   cerrarMesa(); refrescarMapa();
 }
 function refrescarMapa() { if (STATE.sala) { renderMesas(STATE.sala); } }
@@ -3736,6 +3953,16 @@ function renderMesas(r) {
       const min = Math.round(mx / 60);
       const PAL = { nuevo: '\ud83d\udd14 pide ya', digitar: 'confirmar',
         listo: '\ud83c\udf78 en el pass', prep: 'preparando', ok: '\u2713 bien' };
+      /* v3.0 \u00b7 CAMBIO 1 \u00b7 il messaggio urgente vive SULLA mesa: una llamada
+         del cliente cambia lo stato della card (\ud83d\udcb3 la cuenta / \ud83d\udd14 llama, rossa
+         e pulsante) \u2014 con 2 plazas la griglia copre la zona messaggi, ma la
+         mappa stessa grida. Il chip nel ticker resta, ed \u00e8 tappabile. */
+      let llam = null;
+      ((r && r.llamadas) || []).forEach(function (l) { if (String(l.mesa) === String(m.mesa)) llam = l; });
+      if (llam) {
+        m.st = 'nuevo';
+        PAL.nuevo = llam.motivo === 'cuenta' ? '\ud83d\udcb3 la cuenta' : '\ud83d\udd14 llama';
+      }
       /* v1.5 \u00b7 l'avviso Fintoc VINCE su ogni altro badge: plata gi\u00e0 entrata
          che aspetta solo il registro \u2014 \u00e8 la cosa pi\u00f9 urgente della tessera */
       const pagFin = _fintocDeMesa(m.mesa);
@@ -4257,7 +4484,29 @@ function renderPago() {
       chip('medio', 'efectivo', 'Efectivo') +
       chip('medio', 'debito', 'Débito', 'tarjeta') +
       chip('medio', 'credito', 'Crédito', 'tarjeta') +
-      chip('medio', 'transferencia', 'Transfer', 'bancaria') + '</div>' +
+      chip('medio', 'transferencia', 'Transfer', 'bancaria') +
+      chip('medio', 'mixto', '🔀 Mixto', '2+ medios') + '</div>' +
+    /* v3.0 · CAMBIO 4 · PAGO MIXTO: una parte per medio, la somma deve essere
+       ESATTA (il resto si vede vivo). GAS v3.124.0 valida e fossilizza lo
+       spezzato (`Medios_Json`): l'arqueo del cierre conta l'efectivo VERO. */
+    (pg.medio === 'mixto' ? (function () {
+      const objetivo = _pagoMonto();
+      const mx = pg.mixto = pg.mixto || { efectivo: '', debito: '', credito: '', transferencia: '' };
+      const suma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k2) {
+        return s + (Math.round(parseFloat(String(mx[k2]).replace(/[^0-9]/g, '')) || 0)); }, 0);
+      const resto = objetivo - suma;
+      const fila = function (k2, lbl) {
+        return '<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="flex:0 0 92px;font-size:12.5px">' + lbl + '</span>' +
+          '<input class="cs-pin" style="margin:0" inputmode="numeric" placeholder="$0" value="' + esc(mx[k2]) + '"' +
+          ' oninput="STATE.pago.mixto[\'' + k2 + '\']=this.value" onchange="renderPago()"></div>';
+      };
+      return '<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.35)">' +
+        fila('efectivo', 'Efectivo') + fila('debito', 'Débito') + fila('credito', 'Crédito') + fila('transferencia', 'Transfer') +
+        '<div style="margin-top:8px;font-size:12.5px;' + (resto === 0 && suma > 0 ? 'color:#3db876' : 'color:#f5a623') + '">' +
+        (resto === 0 && suma > 0 ? '✓ cuadra: $' + _fmtMiles(suma)
+          : resto > 0 ? 'faltan <b>$' + _fmtMiles(resto) + '</b> de $' + _fmtMiles(objetivo)
+          : 'sobran <b>$' + _fmtMiles(-resto) + '</b> — la suma debe ser exacta') + '</div></div>';
+    })() : '') +
     /* v1.7 · VB Alberto: il CELULAR davanti — è la chiave per riconoscere il
        cliente quando torna (LA LISTA); il correo è la via della boleta. E se
        la vuole in mano anche con la mail: chip 🖨, la carta esce comunque. */
@@ -4327,6 +4576,19 @@ async function pagoConfirmar(btn) {
   // v2.0 · seconda cintura del medio: la UI lo esige già, ma una funzione
   // che scrive denaro non si fida del solo vetro
   if (!pg.medio) { toast('err', 'Elige el medio de pago'); return; }
+  /* v3.0 · CAMBIO 4 · MIXTO: ≥2 parti, tutte >0, somma ESATTA al monto —
+     la stessa legge che il GAS rivalida (mixto_no_cuadra). Qui si ferma
+     PRIMA, col resto sotto gli occhi. */
+  let mixtoPartes = null;
+  if (pg.medio === 'mixto') {
+    const mx = pg.mixto || {};
+    mixtoPartes = ['efectivo', 'debito', 'credito', 'transferencia'].map(function (k2) {
+      return { medio: k2, monto: Math.round(parseFloat(String(mx[k2]).replace(/[^0-9]/g, '')) || 0) };
+    }).filter(function (x) { return x.monto > 0; });
+    const suma = mixtoPartes.reduce(function (s, x) { return s + x.monto; }, 0);
+    if (mixtoPartes.length < 2) { toast('err', 'Mixto = al menos 2 medios con monto'); return; }
+    if (suma !== _pagoMonto()) { toast('err', 'La suma no cuadra: $' + _fmtMiles(suma) + ' vs $' + _fmtMiles(_pagoMonto())); return; }
+  }
   pg.enviando = true; renderPago();
   const propina = _pagoPropina();
   const esCort = pg.medio === 'cortesia';
@@ -4348,6 +4610,7 @@ async function pagoConfirmar(btn) {
     }
     body.boleta = 1;
     if (pg.imprimir) body.imprimir = 1;   // v1.7 · la vuole in mano anche con la mail
+    if (mixtoPartes) body.medios_json = JSON.stringify(mixtoPartes);   // v3.0 · lo spezzato nel fossile
   }
   try {
     /* ═ v1.19 · FASE B · SI BUSSA PRIMA AL BORDO ════════════════════════════
