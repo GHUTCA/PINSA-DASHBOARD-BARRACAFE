@@ -622,7 +622,7 @@
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">consola v1.25</span>
+    <span class="ver" id="ver">consola v1.26</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1817,8 +1817,16 @@ async function precuentaMesa(mesa, btn){
   STATE.pcUlt[mesa] = Date.now();
   if (btn) { btn.disabled = true; btn.classList.add('cargando'); }
   try {
-    const r = await gasPost('emitirPreCuenta', { codigo: STATE.codigo, nombre: STATE.nombre, emitida_por: STATE.nombre, mesa: mesa, canal: 'papel' });
-    if (r && r.ok) toast('ok', '🧾 ' + (r.folio || '') + ' · ' + fmtPrice(r.total || 0) + ' — imprimiendo en barra');
+    /* v1.26 · 12-ago · la precuenta passa dal BORDO (~150 ms) invece di
+       aspettare il giro di Google (2-8 s) col dito sul bottone. `pc_uid` è la
+       chiave d'idempotenza, coniata QUI (dottrina ①: la conia chi ripete).
+       Fallback GAS invariato dentro staffPost: qualsiasi risposta senza il
+       timbro `borde:true` → la via di sempre, con folio e total nel toast. */
+    const r = await staffPost('emitirPreCuenta', { codigo: STATE.codigo, nombre: STATE.nombre,
+      emitida_por: STATE.nombre, mesa: mesa, canal: 'papel',
+      pc_uid: 'pc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7) });
+    if (r && r.ok && r.borde === true) toast('ok', '🧾 Mesa ' + mesa + ' — precuenta en camino, imprimiendo en barra');
+    else if (r && r.ok) toast('ok', '🧾 ' + (r.folio || '') + ' · ' + fmtPrice(r.total || 0) + ' — imprimiendo en barra');
     else if (r && r.error === 'sin_consumo') toast('warn', 'Mesa ' + mesa + ' sin consumo en esta sesión');
     else toast('err', 'No se pudo: ' + (r && r.error || '?'));
   } catch (e) { toast('err', 'Sin conexión — reintenta'); }
