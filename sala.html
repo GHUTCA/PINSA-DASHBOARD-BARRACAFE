@@ -755,7 +755,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
   <div id="secLimpiar"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">sala v2.1.0</span>
+    <span class="ver" id="ver">sala v2.2.0</span>
     <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
     <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
     <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -2895,8 +2895,14 @@ function entrarSala() {
   $('vEntrada').classList.add('hide');
   $('vSala').classList.remove('hide');
   $('fabNuevo').classList.remove('hide');   // v1.17 · #15 · pedido a voce
-  $('salaLocal').textContent = CFG.LOCAL;
-  $('salaCodigo').textContent = STATE.codigo;
+  /* 🔴 v2.2.0 · questi due elementi VIVEVANO nell'header della consola e la
+     v2.1 li ha sostituiti col nome + la plaza del mockup. Senza guardia,
+     entrarSala() moriva QUI — «Cannot set properties of null» — e la sala
+     non si disegnava affatto: l'app entrava e restava bianca.
+     🎓 Il collaudo non l'ha visto perché provavo render(), non il CAMMINO
+     D'INGRESSO. Un test che salta la porta non prova la casa. */
+  const _sl = $('salaLocal'); if (_sl) _sl.textContent = CFG.LOCAL;
+  const _sc = $('salaCodigo'); if (_sc) _sc.textContent = STATE.codigo;
   /* v2.0 · LA SALA SI APRE CON L'ULTIMA FOTO (entrata ottimista): se c'è una
      foto salvata di MENO di 30 min, dello STESSO mesero, si disegna SUBITO —
      il banner ambra dice l'età, il poll la rimpiazza appena arriva. Il dito
@@ -4887,6 +4893,69 @@ async function marcarLlamada(idLlamada, btn) {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   v2.2 · LE DUE VIE PER PROVARE SENZA SPORCARE (nate il 12-ago: Alberto
+   è entrato come Isa per guardare, e ha scoperto che «Salir» avrebbe
+   TIMBRATO L'USCITA di una mesera che stava lavorando).
+
+   ?salir=local  → dimentica la sessione di QUESTO telefono e basta.
+                   ZERO chiamate al server: nessun salidaMesero, nessun
+                   fossile. È il gesto di chi ha guardato e se ne va.
+   ?demo=1       → la sala su dati FINTI, con la rete TAGLIATA alla radice.
+                   Si tocca tutto — pedir, cobrar, precuenta, mover — e non
+                   esce niente da questo telefono. Nemmeno il poll parte.
+   ═══════════════════════════════════════════════════════════════════════ */
+const DEMO = QS.get('demo') === '1';
+if (QS.get('salir') === 'local') {
+  try {
+    ['sala_codigo', 'sala_nombre', 'sala_local', 'sala_foto_v1'].forEach(function (k) { localStorage.removeItem(k); });
+  } catch (e) {}
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  STATE.codigo = ''; STATE.nombre = '';
+  /* il battesimo NON si revoca (è del telefono, e revocarlo è un gesto del
+     server): si mette da parte per QUESTO giro, così la schermata d'entrata
+     compare davvero invece di rientrare da sola. */
+  deviceToken = '';
+}
+if (DEMO) {
+  /* la rete si taglia QUI, non nei singoli verbi: una guardia per porta si
+     dimentica sempre una porta. Tutto ciò che scrive risponde ok finto. */
+  const _demoResp = { ok: true, demo: true, id_pedido: 'PED-DEMO-001', folio: 'PC-DEMO-0001',
+    pago_id: 'PG-DEMO', movidos: 1, total: 0, plaza: 'DEMO' };
+  window.gasPost = function (a) { toast('warn', '🎭 DEMO · «' + a + '» NO salió de este teléfono'); return Promise.resolve(_demoResp); };
+  window.gasGet = function () { return Promise.resolve({ ok: true, demo: true, ids: [], productos: [] }); };
+  window.staffPost = window.gasPost;
+  window.leerSala = function () { return Promise.resolve(_demoSala()); };
+  /* 🔴 E LA VERA GUARDIA È QUESTA, non le quattro sopra.
+     Il collaudo ha beccato subito la porta che avevo dimenticato:
+     `_pagoAlBorde` parla al Worker con un fetch SUO, e in demo il pago
+     usciva davvero. Quattro sostituzioni sono quattro porte; le porte si
+     dimenticano. Il muro è uno: nessun fetch esce da questa pagina. */
+  const _fetchVero = window.fetch;
+  window.fetch = function (u) {
+    const url = (typeof u === 'string' ? u : (u && u.url) || '');
+    if (/script\.google\.com|workers\.dev|pinsita/.test(url)) {
+      return Promise.reject(new Error('demo_sin_red'));
+    }
+    return _fetchVero.apply(this, arguments);
+  };
+}
+function _demoSala() {
+  const it = function (n, p, q) { return JSON.stringify([{ nombre: n, precio: p, qty: q }]); };
+  return { ok: true, nombre: 'PRUEBA', sin_plaza: false, campanilla: true, plazas: ['Terraza'],
+    plazas_detalle: [{ plaza: 'Terraza (DEMO)', mesas: '20-29' }], precuenta_on: true, bw: false,
+    venta_turno: { venta: 240000, cuentas: 4, por_cuenta: 60000, propinas: 19000 },
+    mios: [
+      { uuid: 'd1', mesa: '21', estado: 'entregado', total: 40000, hace_s: 1800, items_json: it('Schop LOA', 5000, 8) },
+      { uuid: 'd2', mesa: '21', estado: 'digitado', total: 24900, hace_s: 420, listo: 1, items_json: it('Tabla BKS', 24900, 1) },
+      { uuid: 'd3', mesa: '25', estado: 'atendido', total: 14400, hace_s: 120, items_json: it('Mojito', 7200, 2) }],
+    pendientes: [{ uuid: 'd4', mesa: '27', estado: 'pendiente', total: 29800, hace_s: 95, items_json: it('Pizza Pepperoni', 14900, 2) }],
+    por_limpiar: [{ uuid: 'd5', mesa: '23', estado: 'entregado', total: 18900, hace_s: 2700, items_json: it('Filete al pobre', 18900, 1) }],
+    sin_dueno: [], llamadas: [{ id_llamada: 'L1', mesa: '24', plaza: 'Terraza', motivo: 'cuenta', hace_s: 55 }],
+    novedades: [], mesas_pagadas: { '29': { hora: '13:05', monto: 31500, medio: 'debito', quien: 'PRUEBA', boleta: '405999', n: 1 } },
+    pagos_fintoc: [], umbrales: { RING_REPEAT_S: 120, RING_VECINAS_S: 300 }, franja: null };
+}
+
 /* ═════ BOOTSTRAP ═════ */
 /* ═════ v2.0 · L'ENTRATA OTTIMISTA (kickoff 13-ago §6.1 — LE DUE PORTE) ═════
    Il guasto n°1 misurato l'11-ago: il telefono va in tasca → la pagina si
@@ -4900,6 +4969,17 @@ async function marcarLlamada(idLlamada, btn) {
    lo dirà lui — tre volte, ben formato. */
 (async function boot() {
   $('entLocal').textContent = CFG.LOCAL;
+  // PORTA 0 · DEMO: si entra da soli, con un nome che non è di nessuno
+  if (DEMO) {
+    STATE.codigo = 'DEMO'; STATE.nombre = 'PRUEBA';
+    document.body.insertAdjacentHTML('afterbegin',
+      '<div style="position:fixed;top:0;left:0;right:0;z-index:99;background:#7c3aed;color:#fff;' +
+      'font-size:11.5px;font-weight:900;text-align:center;padding:5px;letter-spacing:.05em">' +
+      '🎭 MODO PRUEBA — datos falsos · nada sale de este teléfono</div>');
+    document.body.style.paddingTop = '26px';
+    entrarSala();
+    return;
+  }
   // PORTA 1 · sessione viva → DENTRO SUBITO, zero rete nel cammino del dito
   if (STATE.codigo && STATE.nombre) {
     entrarSala();
