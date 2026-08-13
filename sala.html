@@ -698,6 +698,13 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
   border:1px solid rgba(224,82,82,.55);background:rgba(224,82,82,.10);font-size:13px;color:#e05252;font-weight:800}
 /* v3.4.3 · la cattura del cliente in testa al pannello del pago:
    un riquadro vero, non una riga grigia — è il dato che vale di più */
+/* v3.4.1 · IL BOTTONE SPENTO NON VESTE DA VERDE (trovato da Alberto sul vivo:
+   «COBRAR è rimasto disabilitato, non funziona» — funzionava: aspettava il
+   medio. Ma un bottone VERDE che non risponde si legge ROTTO, non «scegli
+   sopra»: il verde è la grammatica del toccami, in tutta l'app. Da spento
+   veste da spento; si veste di verde nell'istante in cui la mano sceglie). */
+.cs-pcard .btn.verde:disabled{background:rgba(255,255,255,.07);color:#8a8577;
+  border:1px solid rgba(255,255,255,.12);opacity:1}
 .cs-captura{margin:10px 0 4px;padding:10px 12px;border-radius:12px;
   border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04)}
 .cs-captura .cap-t{font-size:13px;font-weight:800;color:#e8e2d5;margin-bottom:7px}
@@ -881,7 +888,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.4.0</span>
+      <span class="ver" id="ver">sala v3.4.1</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -3564,8 +3571,21 @@ function vCobrarSala(mesa) {
   let tot = 0; j.mesas.forEach(function (m) { tot += _vpTot(m); });
   vhoja('<h3>Cobrar · Junta ' + j.n + '</h3>' +
     '<div class="cs-psub"><b>$' + _fmtMiles(tot) + '</b> en la mesa · ' + j.mesas.length + ' mesas</div>' +
-    '<button class="opt2" disabled style="opacity:.45"><b>💳 Todo lo que queda · $' + _fmtMiles(tot) + '</b>' +
-      '<small>Una boleta, un pago — se enciende con la sesión de grupo (mañana)</small></button>' +
+    /* v3.4.1 · «TODO LO QUE QUEDA» SI ACCENDE (ordine di Alberto, 13-ago a
+       servizio aperto: «come faccio a cobrar un gruppo per tavolo? sarebbe un
+       casino» — e la norma del subito è sua). Il GAS era GIÀ pronto dal
+       v3.124.0 (sesión grupo-aware dietro SESION_GRUPO_ON, ora accesa): col
+       flag ON il pago copre e chiude TUTTE le mesas della sessione (r.15987).
+       Si accende SOLO se il grupo è confermato dal server (j.gid): una junta
+       solo-locale non ha sessione di là, e cobrarla «tutta» lascerebbe fuori
+       le mesas che il server non conosce. E se il flag tornasse a 0 col
+       bottone vivo, la cintura v3.128 rifiuta il monto che non quadra
+       (cuenta_desactualizada): fail-closed sui soldi, mai in silenzio. */
+    (j.gid
+      ? '<button class="opt2" onclick="vhojaCerrar();abrirPago(\'' + esc(j.principal) + '\')"><b>💳 Todo lo que queda · $' + _fmtMiles(tot) + '</b>' +
+          '<small>Una boleta, un pago — cierra las ' + j.mesas.length + ' mesas juntas</small></button>'
+      : '<button class="opt2" disabled style="opacity:.45"><b>💳 Todo lo que queda · $' + _fmtMiles(tot) + '</b>' +
+          '<small>El grupo no llegó al servidor — sepáralas y júntalas de nuevo</small></button>') +
     '<button class="opt2" onclick="vhojaCerrar();_cobrarPorMesa(' + j.n + ')"><b>🪑 Por mesa</b> <span style="color:#3db876;font-size:10.5px;font-weight:800">SIN TOCAR NADA</span>' +
       '<small>Cada mesa su cuenta — y se libera sola al pagar</small></button>' +
     '<button class="opt2" onclick="_cobrarIguales(' + j.n + ')"><b>➗ Por partes iguales</b>' +
@@ -4915,9 +4935,20 @@ function abrirPago(mesa) {
     refrescar(false);
     return;
   }
-  const md = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
-  const tot = md ? md.pend.concat(md.mios).concat(md.limpiar)
-    .reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0) : 0;
+  /* v3.4.1 · IL TOTALE È DELLA SESSIONE, NON DELLA MESA: se la mesa è la
+     principal di un grupo confermato dal server (gid), il pago copre TUTTE le
+     sue mesas (specchio esatto di _sesionDeMesa col flag ON, GAS r.11993).
+     Il monto che mostriamo e il consumo che il server chiude devono essere
+     LO STESSO numero — se divergono, la cintura v3.128 ferma tutto. */
+  const jPago = _juntaDe(mesa);
+  const mesasPago = (jPago && jPago.gid && (jPago.principal || jPago.mesas[0]).toString() === mesa.toString())
+    ? jPago.mesas.slice() : [mesa];
+  let tot = 0;
+  mesasPago.forEach(function (mm) {
+    const md2 = (STATE.mesasModel || []).find(function (x) { return x.mesa === mm; });
+    if (md2) md2.pend.concat(md2.mios).concat(md2.limpiar)
+      .forEach(function (p) { tot += parseFloat(p.total) || 0; });
+  });
   /* v2.0 · IL MEDIO NON SI PRESELEZIONA (ordine di Alberto, 12-ago): un
      default è una selezione che nessuno ha fatto — e finisce nel fossile.
      Il bottone verde nasce spento e si accende quando la mano SCEGLIE. */
