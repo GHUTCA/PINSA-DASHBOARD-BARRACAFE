@@ -888,7 +888,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.4.2</span>
+      <span class="ver" id="ver">sala v3.4.3</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1843,7 +1843,15 @@ function abrirCorreccion(uuid) {
      tutti i POS seri fra *correggere* e *anullare*.
      Il motivo esce da una lista chiusa perché un motivo si deve poter
      CONTARE: quale prodotto torna indietro, da quale mano, a che ora. */
-  STATE.editVoid = (p.estado === 'digitado' || p.estado === 'entregado');
+  /* v3.4.3 · IL VOID È SEMPRE VOID (bug urgente di Alberto, mesa 50, 13-ago):
+     la regola v1.21 lasciava LIBERI pendiente/atendido — giusta quando la
+     produzione partiva al «digitado». Dal chit-al-bordo (E2, stamattina) la
+     comanda stampa ALL'ENTRATA: un atendido è già in cucina, e toglierli
+     senza firma è denaro che sparisce in silenzio. Da ora OGNI correzione
+     chiede motivo + PIN del JL. (Il server oggi lo esige solo da digitado in
+     su: questo vetro è più severo della cintura — la cintura si allinea
+     nell'innesto, PATCH_GAS_COLACION §server.) */
+  STATE.editVoid = true;
   STATE.editMotivo = '';
   STATE.editPinJL = '';
   itemsDe(p).forEach(it => { STATE.editQty[it.id] = parseInt(it.qty, 10) || 1; });
@@ -3799,8 +3807,72 @@ function vDescontarSala(mesa) {
       '<small>Invita la casa. Sin boleta. PIN del JL</small></button>' +
     '<button class="opt2" onclick="_dtoProducto(\'' + esc(mesa) + '\')"><b>🍽 Un producto</b>' +
       '<small>Se cayó, lo devolvió, te equivocaste — se quita esa línea sola, con motivo</small></button>' +
+    /* v3.4.3 · COLACIÓN (dettata da Alberto 13-ago — e chiude l'ambiguo
+       dell'11-ago: QUESTA è la colación): il pasto del personale. Mesa a $0,
+       sin boleta, PIN del JL come firma, e il fossile porta PER CHI era —
+       nome scelto dalla lista del turno (getStaffSala), mai digitato.
+       DOMANI (fase 2, dichiarata): la zona colaciones — tavoli dedicati e
+       derecho per persona (non tutti ce l'hanno). */
+    /* ⛔ dietro ?coln=1 (o DEMO) finché il GAS non conosce registrarColacion:
+       un bottone che risponde «el servidor no me conoce» non va in sala */
+    ((DEMO || QS.get('coln') === '1')
+      ? '<button class="opt2" onclick="_dtoColacion(\'' + esc(mesa) + '\')"><b>🍱 Colación · deja en $0</b>' +
+        '<small>Comida del personal — se elige <b>para quién</b> (lista del turno) · firma JL</small></button>'
+      : '') +
     '<button class="opt2" onclick="_dtoFam(\'' + esc(mesa) + '\')"><b>👨‍👩‍👧 Desc FAM · deja en $0</b>' +
       '<small>La familia pone <b>su código</b> en tu teléfono</small></button>');
+}
+/* v3.4.3 · il flusso della colación: nome dalla lista (la mesa si SCEGLIE,
+   il nome pure) → PIN JL → registrarColacion. L'azione server nasce con
+   l'innesto (PATCH_GAS_COLACION): finché non c'è, il bottone risponde onesto. */
+async function _dtoColacion(mesa) {
+  vhojaCerrar();
+  let staff = [];
+  try { const r = await gasPost('getStaffSala', { codigo: STATE.codigo });
+    if (r && r.ok) staff = (r.staff || []).map(function (s) { return s.nombre; }); } catch (e) {}
+  STATE.coln = { mesa: mesa, para: '', pin: '' };
+  vhoja('<h3>🍱 Colación · Mesa ' + esc(mesa) + '</h3>' +
+    '<div class="cs-psub">Deja la mesa en <b>$0</b> · sin boleta · queda escrito <b>para quién</b> y quién la firmó.</div>' +
+    '<div class="cs-psec">¿Para quién es?</div>' +
+    '<div class="cs-chips">' + (staff.length ? staff.map(function (n) {
+      return '<div class="cs-chip" onclick="colnPara(this,\'' + esc(n) + '\')">' + esc(n) + '</div>'; }).join('')
+      : '<span style="color:#8a8577;font-size:12px">No llegó la lista del turno — cierra y reintenta</span>') + '</div>' +
+    '<div class="cs-psec">PIN del JL — la firma</div>' +
+    '<input class="cs-pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" oninput="STATE.coln.pin=this.value">' +
+    '<button class="btn" style="margin-top:12px" onclick="colnConfirmar(this)">✓ Registrar colación — $0</button>');
+}
+function colnPara(el, n) {
+  if (STATE.coln) STATE.coln.para = n;
+  el.parentElement.querySelectorAll('.cs-chip').forEach(function (c) { c.classList.remove('sel'); });
+  el.classList.add('sel');
+}
+async function colnConfirmar(btn) {
+  const c = STATE.coln || {};
+  if (!c.para) { toast('warn', '¿Para quién es? Toca el nombre'); return; }
+  if (!(c.pin || '').trim()) { toast('warn', 'Falta el PIN del JL'); return; }
+  /* la chiave la conia il client, UNA per apertura: il retry non duplica */
+  if (!c.uid) c.uid = 'col-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+  btn.disabled = true; btn.classList.add('cargando');
+  try {
+    const r = await gasPost('registrarColacion', { codigo: STATE.codigo, nombre: STATE.nombre,
+      mesa: c.mesa, para: c.para, pin_jl: c.pin, uid: c.uid });
+    if (r && r.ok) {
+      // stesso ottimismo della FAM: la mesa si pulisce subito, il poll conferma
+      const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === c.mesa; });
+      if (mm) {
+        mm.pend.concat(mm.mios, mm.limpiar).forEach(function (p) { _marcarLocal(p.uuid, 'limpia', c.mesa); });
+        if (STATE.sala) _aplicarMarcados(STATE.sala);
+      }
+      vhojaCerrar();
+      toast('ok', '🍱 Colación de ' + c.para + ' ✓ mesa ' + c.mesa + ' · $0');
+      STATE.coln = null; refrescar(false); return;
+    }
+    toast('err', /action not found/.test((r && r.error) || '')
+      ? 'El servidor aún no conoce la colación — falta el innesto GAS'
+      : ((r && (r.error === 'pin_jl_invalido' || r.error === 'pin_invalido')) ? 'PIN del JL incorrecto'
+        : 'No se pudo: ' + (r && r.error || '?')));
+  } catch (e) { toast('err', 'Sin conexión — reintenta'); }
+  btn.disabled = false; btn.classList.remove('cargando');
 }
 /* v3.2 · DESCONTAR → Un producto NON è «vai a guardare i pedidos» (correzione
    di Alberto): si elencano i PRODOTTI della mesa, tocchi quello che torna
@@ -5903,6 +5975,9 @@ if (DEMO) {
        senza, la junta del demo non aveva mai la conferma e «Todo lo que
        queda» restava spento — trovato da Alberto al collaudo del grupo. */
     if (a === 'unirMesas') return Promise.resolve(Object.assign({}, _demoResp, { grupo_id: 'G-DEMO-' + (++_demoGrupoN) }));
+    /* v3.4.3 · la lista del turno per la colación (come il getStaffSala vero) */
+    if (a === 'getStaffSala') return Promise.resolve(Object.assign({}, _demoResp,
+      { staff: ['Gabriel', 'Carlos', 'Isa', 'Claret', 'Nacho', 'July', 'Ray', 'Anthony'].map(function (n) { return { nombre: n }; }) }));
     return Promise.resolve(_demoResp);
   };
   /* v2.2.1 · 12-ago · IL DEMO SI ERA BLOCCATO SU «Cargando la carta…»:
