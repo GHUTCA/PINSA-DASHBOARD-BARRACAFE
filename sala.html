@@ -892,7 +892,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.4.6</span>
+      <span class="ver" id="ver">sala v3.4.7</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -3502,7 +3502,19 @@ function vPrecuentaSala(mesa) {
     its = det.items.filter(function (x) { return pc.sel[x.k]; });
     imprimible = false; titolo = 'Una parte';
   }
-  const tot = its.reduce(function (s, x) { return s + x.q * x.pu; }, 0);
+  let tot = its.reduce(function (s, x) { return s + x.q * x.pu; }, 0);
+  /* v3.4.7 · IL PAPEL NON PUÒ DIRE MENO DELLA MESA. Le righe le costruiamo dai
+     pedidos che questo telefono vede; il totale VERO lo sa il server (`mesas`).
+     Se manca qualcosa — un pedido di chi è uscito, uno passato con Traspaso_A —
+     il papel mostrato al cliente direbbe un numero più basso di quello che poi
+     si stampa e si incassa. Si dichiara la differenza invece di nasconderla.
+     Solo sul papel INTERO: «por persona» e «una parte» sono viste parziali per
+     definizione, e lì la differenza non è un buco. */
+  // (la mesa che stampa si ricalcola qui: `mesaPrint` nasce più sotto)
+  const _resP = (pc.modo === 'toda' || pc.modo === 'mesa')
+    ? _resDe(pc.modo === 'mesa' ? (pc.sub || det.mesas[0]) : mesa) : null;
+  let faltanP = 0;
+  if (_resP && (_resP.total || 0) > tot) { faltanP = Math.round(_resP.total - tot); tot = _resP.total; }
   const prop = Math.round(tot * 0.10);
   /* v3.4.3 · il lucchetto guarda la mesa che STAMPA: nella junta la copia va
      alla sub-mesa, e ognuna ha il suo diritto a una precuenta */
@@ -3533,6 +3545,8 @@ function vPrecuentaSala(mesa) {
       'Una precuenta por cuenta — el papel está en la mesa.</div>' : '') +
     '<div class="papel"><div class="pz">BACKSTAGE</div><div class="pz2">precuenta · ' + titolo + ' · no es boleta</div>' +
       righe +
+      // v3.4.7 · la riga che fa quadrare il papel col totale vero della mesa
+      (faltanP > 0 ? '<div class="pr"><span>Otros consumos de la mesa</span><span>$' + _fmtMiles(faltanP) + '</span></div>' : '') +
       '<hr><div class="pr"><span>Consumo</span><span>$' + _fmtMiles(tot) + '</span></div>' +
       '<div class="pr pro"><span>Propina sugerida 10%</span><span>$' + _fmtMiles(prop) + '</span></div>' +
       '<hr><div class="pr tt2"><span>TOTAL</span><span>$' + _fmtMiles(tot + prop) + '</span></div>' +
@@ -4199,8 +4213,14 @@ function _pedidoMioVp(uuid, btn) {
    il denaro lo dice LUI. Se il flag è spento, `_resDe` torna null e tutto
    funziona esattamente come prima. */
 function _resDe(mesa) {
-  const rs = (STATE.sala && STATE.sala.mesas_resumen) || null;
-  if (!rs) return null;
+  /* ⚠️ v3.4.7 · il campo del server si chiama `mesas`, NON `mesas_resumen`:
+     la v3.4.6 cercava un nome che non esiste e non attaccava mai — nessun
+     errore in console, semplicemente non faceva niente. Trovato da Alberto
+     («non si vede né nella precuenta né nella mesa») e confermato leggendo
+     i campi VERI della risposta, non il commento del codice.
+     🎓 Un campo sbagliato non grida: tace. Si legge la risposta, non la spec. */
+  const rs = (STATE.sala && (STATE.sala.mesas || STATE.sala.mesas_resumen)) || null;
+  if (!rs || !rs.length) return null;
   for (let i = 0; i < rs.length; i++) if (String(rs[i].mesa) === String(mesa)) return rs[i];
   return null;
 }
