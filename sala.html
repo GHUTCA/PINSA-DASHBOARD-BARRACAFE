@@ -906,7 +906,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.5.3</span>
+      <span class="ver" id="ver">sala v3.5.4</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1209,7 +1209,12 @@ async function staffPost(action, body) {
    un bug che nessuno vede finché non incassa. */
 const BORDE_PAGO = {
   QS: (QS.get('bordep') || '').trim(),   // '1' prova sempre (telefono di prova) · '0' spegne qui
-  PORTAS: ['pin_jl', 'pin_fam', 'cortesia', 'fam', 'monto_manual', 'forzar_nuevo_pago', 'imprimir'],
+  /* v3.5.4 · `parcial` è una porta: il bordo non sa cos'è una PARTE — girerebbe
+     al GAS un pago che sembra intero, e il tavolo si chiuderebbe con una parte
+     sola dentro. La guardia del parziale vive nel GAS (v3.137.0): finché non la
+     conosce anche il bordo, una parte prende sempre la via lunga. Costa ~1 s in
+     più a chi divide il conto, e non costa un tavolo a nessuno. */
+  PORTAS: ['pin_jl', 'pin_fam', 'cortesia', 'fam', 'monto_manual', 'forzar_nuevo_pago', 'imprimir', 'parcial'],
   /* Il bordo nasce spento e lo dirà a ogni mesa: chiederglielo ogni volta
      sarebbe pagare 200 ms per sentirsi dire «no». Ci si ferma un momento e si
      riprova da soli — e se Alberto accende l'interruttore a metà servizio, la
@@ -3543,6 +3548,14 @@ function pcGrande() {
     '<div class="pc-grande-pie">toca para volver</div></div>';
 }
 function pcGrandeCerrar() { const g = document.getElementById('pcGrandeWrap'); if (g) g.innerHTML = ''; }
+/* v3.5.4 · dalla parte al pago: si chiude il papel e si apre il pannello col
+   monto della parte. Il resto lo sanno abrirPago e il GAS. */
+function pcCobrarParte(monto, titulo) {
+  const mesa = STATE.pc && STATE.pc.mesa;
+  if (!mesa || !(monto > 0)) return;
+  pcGrandeCerrar(); vhojaCerrar();
+  abrirPago(mesa, { titulo: titulo, monto: monto });
+}
 function pcMoverA(kk, quien, original) {
   if (!STATE.pc) return;
   STATE.pcDe = STATE.pcDe || {};
@@ -3700,8 +3713,12 @@ function vPrecuentaSala(mesa, _seguir) {
          manca (il server oggi stampa la sessione intera) e finché non c'è la
          si dichiara, invece di lasciare un bottone che promette e non fa. */
       : '<button class="btn" onclick="pcGrande()">🔎 MOSTRAR EN GRANDE AL CLIENTE</button>' +
+        /* v3.5.4 · e da qui la parte si COBRA (GAS v3.137.0): pago suo, propina
+           sua, boleta sua — e la mesa resta aperta finché il resto non paga. */
+        (tot > 0 ? '<button class="btn" style="margin-top:8px" onclick="pcCobrarParte(' + tot + ',\'' + _jsq(titolo.replace(/<[^>]*>/g, '')) + '\')">' +
+          '💳 COBRAR ESTA PARTE · $' + _fmtMiles(tot) + '</button>' : '') +
         '<div style="font-size:12px;color:#8a8577;margin:10px 0 6px;text-align:center">' +
-          'Esta parte se <b>muestra</b>, todavía no se imprime — el papel de la barra sale con la cuenta entera.</div>' +
+          'El resto de la mesa <b>queda abierto</b>. El papel de la barra todavía sale con la cuenta entera.</div>' +
         '<button class="btn sec" onclick="pcSetModo(\'toda\')">‹ Volver a toda la cuenta</button>'));
 }
 async function vPrecuentaImprimir(mesa, btn) {
@@ -5278,7 +5295,17 @@ function liberarMesa(uuid, mesa, tsEnt, btn) {
    non consegna OF_KEY_BKS). `local:'BKS'` lo mette gasPost (CFG.LOCAL).
    Propina: SUGERIDA finché la efectiva non nasce (kickoff §2.4) — il pannello
    lo dice. Correo/celular: la cattura gentile per LA LISTA e la boleta. */
-function abrirPago(mesa) {
+/* ═══ v3.5.4 · LA CUENTA SI DIVIDE — il vetro del pago parziale ══════════════
+   `parte` = { titulo, monto } quando si cobra UNA PARTE (la persona, la
+   romana, il dedo). Cambia tre cose e nient'altro:
+    · il monto è quello della parte, e la propina si calcola sulla SUA parte;
+    · il payload porta `parcial:1` — è ciò che esenta la parte dalla cintura
+      del monto e accende la guardia del GAS v3.137.0 (la parte non può
+      superare il residuo);
+    · a pago riuscito la mesa NON si chiude se il server dice che manca ancora
+      qualcosa (`mesa_abierta`): sparisce solo quando è coperta.
+   Senza `parte` è il pago di sempre, riga per riga. */
+function abrirPago(mesa, parte) {
   /* v2.0.1 · IL DENARO NON SI FIDA DELLA FOTO LOCALE (reperto ROSSO del
      collaudo): su una foto di boot fino a 30 min vecchia, mesas_pagadas può
      non contenere un pago appena entrato → fascia rossa assente → seconda
@@ -5306,7 +5333,13 @@ function abrirPago(mesa) {
   /* v2.0 · IL MEDIO NON SI PRESELEZIONA (ordine di Alberto, 12-ago): un
      default è una selezione che nessuno ha fatto — e finisce nel fossile.
      Il bottone verde nasce spento e si accende quando la mano SCEGLIE. */
-  STATE.pago = { mesa: mesa, tot: tot, prop: 'sug', medio: '',
+  /* v3.5.4 · la parte non può mai valere più del tavolo: se il vetro si è
+     sbagliato (una riga spostata due volte, un poll in mezzo), si taglia qui
+     e non si manda. Il server ha la sua guardia — questa è la prima. */
+  const _pt = (parte && parte.monto > 0) ? Math.min(Math.round(parte.monto), tot || Math.round(parte.monto)) : 0;
+  if (_pt) tot = _pt;
+  STATE.pago = { mesa: mesa, tot: tot, parte: _pt ? { titulo: (parte.titulo || 'parte'), monto: _pt } : null,
+    prop: 'sug', medio: '',
     otro: '', correo: '', celular: '', nombre: '', enviando: false,
     montoOn: false, montoCustom: '',     // v1.1 · sconto manuale di cassa: il fossile porta il monto VERO
     jl: false, pinJL: '', pinAsk: false, // v1.4 · le mosse del JL, dietro il PIN (verità: la valida il GAS)
@@ -5478,7 +5511,14 @@ function renderPago() {
     /* v3.4.3 · il titolo diceva «— pagado» PRIMA del pago (Alberto: «li
        abbiamo alla fine, a pagamento avvenuto» — il pannello mentiva sul
        tempo). Qui non è pagato niente: si sta COBRANDO. */
-    '<h3>Mesa ' + esc(pg.mesa) + ' — cobrar</h3>' +
+    /* v3.5.4 · chi cobra una PARTE deve vederlo prima di battere la carta:
+       il pannello è identico a quello del pago intero, e un mesero convinto
+       di star chiudendo il tavolo è il modo più veloce per lasciare il resto
+       fuori. Il titolo lo dice, e la fascia sotto dice che la mesa resta. */
+    '<h3>Mesa ' + esc(pg.mesa) + (pg.parte ? ' — parte de ' + esc(pg.parte.titulo) : ' — cobrar') + '</h3>' +
+    (pg.parte ? '<div style="margin:2px 0 10px;padding:9px 12px;border-radius:12px;' +
+      'background:rgba(61,184,118,.13);border:1px solid #3db876;font-size:12.5px;line-height:1.5">' +
+      '<b>Cobras solo esta parte.</b> La mesa <b>queda abierta</b> con el resto — se cierra sola cuando esté todo pagado.</div>' : '') +
     avisoYa +
     '<div class="cs-psub">Consumo <b class="tab" style="color:var(--cs-ink)">' + fmtPrice(pg.tot) + '</b></div>' +
     /* v3.4.3 · LA CATTURA IN TESTA, VESTITA DA PROTAGONISTA (ordine di
@@ -5640,6 +5680,13 @@ async function pagoConfirmar(btn) {
      monto_manual:1 + monto (la boleta esce dal cobrado, riga unica). */
   if (esCort) { body.cortesia = 1; body.pin_jl = (pg.pinJL || '').trim(); }
   else {
+    /* v3.5.4 · LA PARTE: `monto` più piccolo del consumo SENZA `monto_manual`
+       e senza PIN — perché non è uno sconto, è una parte. È `parcial:1` che
+       lo dichiara, e il GAS v3.137.0 lo esenta dalla cintura e gli mette la
+       guardia sua (non oltre il residuo, e la mesa resta aperta finché non è
+       coperta). Se il JL ha anche ritoccato il monto a mano, comanda la sua
+       porta: le due non si sommano mai in silenzio. */
+    if (pg.parte && !pg.montoOn) { body.parcial = 1; body.monto = _pagoMonto(); }
     if (pg.montoOn && _pagoMonto() !== pg.tot) {
       body.monto = _pagoMonto(); body.monto_manual = 1; body.pin_jl = (pg.pinJL || '').trim();
     }
@@ -5685,6 +5732,22 @@ async function pagoConfirmar(btn) {
     }
     const r = await gasPost('registrarPago', body);
     if (r && r.ok) {
+      /* ═══ v3.5.4 · LA PARTE CHE NON COPRE NON CHIUDE NIENTE ════════════════
+         Il server dice `mesa_abierta:true` quando la somma dei pagos non copre
+         ancora il consumo. Qui la mano ottimistica DEVE stare ferma: far
+         sparire i pedidos dopo la prima parte lascerebbe il tavolo invisibile
+         col resto da incassare — e un conto che mostra troppo poco non lo
+         ferma nessuno (la lezione del 10-ago, $435.860).
+         Si dice quanto manca, si chiude il pannello, e la mesa resta lì. */
+      if (r.mesa_abierta) {
+        toast('ok', '💳 Parte cobrada · ' + fmtPrice(r.monto || pg.tot) +
+          (propina ? ' + propina ' + fmtPrice(propina) : '') +
+          ' — FALTA ' + fmtPrice(r.falta || 0) + ' · la mesa sigue abierta');
+        STATE.pago = null; renderPago();
+        cerrarMesa(); refrescar(false);
+        if (r.pago_id) _pedirBoleta(r.pago_id, pg.mesa);   // ogni parte ha la SUA boleta
+        return;
+      }
       /* v1.13 · il GAS v3.85 chiude TUTTA la mesa al pago (anche gli in-volo):
          la mano ottimistica fa sparire OGNI pedido della mesa, subito. */
       const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === pg.mesa; });
@@ -6270,6 +6333,27 @@ if (DEMO) {
     }
     if (a === 'separarMesas' && d && d.principal) {
       window._demoGrupos = window._demoGrupos.filter(function (g) { return g.principal !== String(d.principal).trim(); });
+    }
+    /* v3.5.4 · il finto server sa dividere il conto (come il GAS v3.137.0):
+       tiene quanto è stato pagato per mesa e risponde `falta` / `mesa_abierta`.
+       Senza, il demo mostrerebbe una parte che chiude il tavolo — cioè
+       esattamente il difetto che questo pezzo esiste per non fare. */
+    if (a === 'registrarPago' && d && (d.parcial === 1 || d.parcial === '1')) {
+      const mk = String(d.mesa || ''), mt = Math.round(parseFloat(d.monto) || 0);
+      window._demoPagado = window._demoPagado || {};
+      const consumo = (function () {
+        const j = _juntaDe(mk), ms = j ? j.mesas : [mk];
+        return ms.reduce(function (s, m2) { return s + _vpTot(m2); }, 0);
+      })();
+      const antes = window._demoPagado[mk] || 0;
+      if (mt > consumo - antes) {
+        return Promise.resolve({ ok: false, error: 'parte_mayor_que_resto', residuo: consumo - antes,
+          mensaje: 'Esta parte ($' + _fmtMiles(mt) + ') es mayor que lo que falta ($' + _fmtMiles(consumo - antes) + ').' });
+      }
+      window._demoPagado[mk] = antes + mt;
+      const falta = Math.max(0, consumo - window._demoPagado[mk]);
+      return Promise.resolve(Object.assign({}, _demoResp, { monto: mt, parcial: 1,
+        pagado_total: window._demoPagado[mk], falta: falta, mesa_abierta: falta > 0 }));
     }
     toast('warn', '🎭 DEMO · «' + a + '» NO salió de este teléfono');
     /* v3.4.2 · il finto unirMesas rende il GID come il server vero (v3.124):
