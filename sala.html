@@ -418,6 +418,13 @@
   .mt-digitar::before{background:var(--cs-avisa)} .mt-digitar .tl-st{color:var(--cs-avisa)}
   .mt-listo::before{background:var(--cs-cyan)}    .mt-listo .tl-st{color:var(--cs-cyan)}
   .mt-prep::before{background:var(--cs-line-hi)}  .mt-prep .tl-st{color:var(--cs-mut)}
+  /* v3.5.7 · «pagado · en camino»: ambra, non verde. Il verde in questa mappa
+     vuol dire «finito, puoi lasciarlo»; qui il cliente sta ancora aspettando
+     un piatto che ha già pagato — è la mesa che NON si deve smettere di
+     guardare. Prima della v3.5.7 questa tessera non esisteva: la mesa si
+     disegnava libre. */
+  .mt-pagado{border-color:#f5a623;background:rgba(245,166,35,.12)}
+  .mt-pagado::before{background:#f5a623}  .mt-pagado .tl-st{color:#f5a623}
   .mt-ok::before{background:var(--cs-ok)}         .mt-ok .tl-st{color:var(--cs-ok)}
   .mt-add{border-style:dashed;opacity:.6;justify-content:center}
   @keyframes cs-resp{0%,100%{box-shadow:0 0 0 0 rgba(255,107,107,0)}
@@ -906,7 +913,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.5.6</span>
+      <span class="ver" id="ver">sala v3.5.7</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -3720,6 +3727,23 @@ function vPrecuentaSala(mesa, _seguir) {
       righe +
       // v3.4.7 · la riga che fa quadrare il papel col totale vero della mesa
       (faltanP > 0 ? '<div class="pr"><span>Otros consumos ' + (det.junta && pc.modo === 'toda' ? 'del grupo' : 'de la mesa') + '</span><span>$' + _fmtMiles(faltanP) + '</span></div>' : '') +
+      /* 🔴 v3.5.7 · «YA PAGADO» — LA RIGA CHE IMPEDISCE IL DOPPIO ADDEBITO.
+         Il caso mesa 120 (14-ago, trovato da Alberto): 14:55 due drink · 14:59
+         pagati (boleta OF 405507) · 15:02 entra il cibo · 15:46 si guarda la
+         cuenta e **i drink non ci sono più** — il pago li chiude e li toglie
+         dalla sessione. Il mesero, che non aveva NIENTE sullo schermo che
+         dicesse «sono già saldati», ha concluso che mancavano e li ha fatti
+         RIORDINARE: 15:51 cuenta $53.108, con dentro gli stessi due prodotti
+         già pagati. Lo stesso cliente, seduto lì, stava per pagarli due volte.
+         Intercettato in tempo ($53.108 → $33.000).
+         🎓 Il problema non era «non guardano»: era che una riga sparita non è
+            un'informazione in meno, è un'informazione SBAGLIATA — e il rimedio
+            naturale di chiunque, davanti a una riga che manca, è rimetterla.
+         Il fatto viaggia GIÀ nel poll da luglio (`mesas_pagadas`, GAS v3.97.0)
+         e si vedeva solo nel pannello del PAGO. Ma il gesto che rompe il
+         portafoglio del cliente si fa QUI, guardando la cuenta, minuti prima
+         di aprire quel pannello. Stessa informazione, messa dove si decide. */
+      _pcYaPagado(mesa) +
       '<hr><div class="pr"><span>Consumo</span><span>$' + _fmtMiles(tot) + '</span></div>' +
       '<div class="pr pro"><span>Propina sugerida 10%</span><span>$' + _fmtMiles(prop) + '</span></div>' +
       '<hr><div class="pr tt2"><span>TOTAL</span><span>$' + _fmtMiles(tot + prop) + '</span></div>' +
@@ -4070,7 +4094,7 @@ async function _dtoColacion(mesa) {
       return '<div class="cs-chip" onclick="colnPara(this,\'' + esc(n) + '\')">' + esc(n) + '</div>'; }).join('')
       : '<span style="color:#8a8577;font-size:12px">No llegó la lista del turno — cierra y reintenta</span>') + '</div>' +
     '<div class="cs-psec">PIN del JL — la firma</div>' +
-    '<input class="cs-pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" oninput="STATE.coln.pin=this.value">' +
+    '<input class="cs-pin" type="password" inputmode="numeric" autocomplete="new-password" name="pin-no-guardar" data-1p-ignore="true" data-lpignore="true" placeholder="PIN" oninput="STATE.coln.pin=this.value">' +
     '<button class="btn" style="margin-top:12px" onclick="colnConfirmar(this)">✓ Registrar colación — $0</button>');
 }
 function colnPara(el, n) {
@@ -4836,9 +4860,28 @@ function _mapaBind() {
 function _mesasModel(r) {
   const map = {};
   const add = function (mesa) {
-    if (!map[mesa]) map[mesa] = { mesa: mesa, pend: [], mios: [], limpiar: [], grupo: '', regalo: false };
+    if (!map[mesa]) map[mesa] = { mesa: mesa, pend: [], mios: [], limpiar: [], pagados: [], grupo: '', regalo: false };
     return map[mesa];
   };
+  /* ═══ 🔴 v3.5.7 · IL TAVOLO PAGATO CON I PIATTI ANCORA IN CUCINA ═══════════
+     Misurato il 14-ago: 6 pedidos, $119.940, chiusi dal pago mentre la cucina
+     li stava facendo. Mesa 51: due pedidos entrati alle 14:19, chiusi alle
+     14:24, uno uscito alle 14:55 **e l'altro mai fatto**. Alberto dal terreno:
+     «mesa 51, sono spariti due piatti». Erano lì — solo che il pago li aveva
+     marcati `cerrado`, e un `cerrado` non entrava in NESSUNA di queste liste:
+     la mesa spariva dalla mappa e si ridisegnava LIBRE, mentre la cucina
+     continuava a vederla e a produrla.
+     A pranzo è la norma, non l'eccezione: il Menú del Día si paga PRIMA di
+     mangiare.
+     Il GAS (v3.140.0) manda ora `pagados`: i `cerrado` che la cucina non ha
+     ancora fatto uscire, entro lo stesso tetto del KDS. Entrano nel modello
+     come tutti gli altri — così la mesa **esiste**, si può toccare, e dice
+     cosa sta aspettando. Array assente (GAS vecchio, freno tirato) = mondo di
+     ieri, riga per riga. */
+  (r.pagados || []).forEach(function (p) {
+    const m = add(p.mesa); m.pagados.push(p);
+    if (p.mesa_grupo && !m.grupo) m.grupo = p.mesa_grupo;
+  });
   (r.mios || []).forEach(function (p) {
     const m = add(p.mesa); m.mios.push(p);
     if (p.mesa_grupo) m.grupo = p.mesa_grupo;
@@ -4867,11 +4910,17 @@ function _mesasModel(r) {
        atendido non digitado è plata fuori da Aloha finché non lo tocchi. */
     const hayDigitar = m.mios.some(function (p) { return p.estado === 'atendido'; });
     m.hayListo = hayListo;
-    m.st = m.pend.length ? 'nuevo' : hayDigitar ? 'digitar' : hayListo ? 'listo' : m.mios.length ? 'prep' : 'ok';
-    m.n = m.pend.length + m.mios.length + m.limpiar.length;
+    /* v3.5.7 · `pagado` sta DOPO tutti gli stati vivi e prima di `ok`: se sulla
+       mesa c'è ancora qualcosa da fare (digitare, consegnare) comanda quello —
+       il piatto pagato in arrivo è un'attesa, non un obbligo. Ma su una mesa
+       dove non resta altro NON deve mai vincere `ok · bien`: è esattamente la
+       bugia che ha fatto sparire mesa 51. */
+    m.st = m.pend.length ? 'nuevo' : hayDigitar ? 'digitar' : hayListo ? 'listo'
+      : m.mios.length ? 'prep' : m.pagados.length ? 'pagado' : 'ok';
+    m.n = m.pend.length + m.mios.length + m.limpiar.length + m.pagados.length;
     return m;
   });
-  const ord = { nuevo: 0, digitar: 1, listo: 2, prep: 3, ok: 4 };
+  const ord = { nuevo: 0, digitar: 1, listo: 2, prep: 3, pagado: 4, ok: 5 };
   list.sort(function (a, b) {
     return ord[a.st] - ord[b.st] || (parseInt(a.mesa, 10) || 0) - (parseInt(b.mesa, 10) || 0);
   });
@@ -4946,13 +4995,27 @@ function renderMesas(r) {
         if ((p.hace_s || 0) > mx) mx = p.hace_s || 0;
         plata += parseFloat(p.total) || 0;
       });
+      /* v3.5.7 · i `pagados` danno il TEMPO ma non la PLATA. Il tempo perché è
+         l'unica cosa che conta su quella tessera — da quanto un cliente che ha
+         già pagato aspetta il suo piatto (mesa 40: 27 minuti; mesa 51: uno mai
+         arrivato). La plata no: è già in cassa, e sommarla qui gonfierebbe il
+         «por cobrar» del turno con denaro incassato — la stessa bugia al
+         contrario di quella che stiamo curando. */
+      m.pagados.forEach(function (p) {
+        const t = p.hace_cierre_s || p.hace_s || 0;
+        if (t > mx) mx = t;
+      });
       /* v3.4.6 · la tessera dice il totale VERO (server), non solo il mio */
       const _res = _resDe(m.mesa);
       if (_res && (_res.total || 0) > plata) plata = _res.total;
       porCobrar += plata;
       const min = Math.round(mx / 60);
       const PAL = { nuevo: '\ud83d\udd14 pide ya', digitar: 'confirmar',
-        listo: '\ud83c\udf78 en el pass', prep: 'preparando', ok: '\u2713 bien' };
+        listo: '\ud83c\udf78 en el pass', prep: 'preparando', ok: '\u2713 bien',
+        /* v3.5.7 \u00b7 la parola dice il fatto intero: ha pagato E sta aspettando.
+           \u00abpagado\u00bb da solo sembrerebbe \u00abfinito\u00bb \u2014 che \u00e8 la bugia da cui
+           veniamo. Il numero dei piatti sta nel contatore della tessera. */
+        pagado: '\ud83c\udf7d\ufe0f pagado \u00b7 en camino' };
       /* v3.0 \u00b7 CAMBIO 1 \u00b7 il messaggio urgente vive SULLA mesa: una llamada
          del cliente cambia lo stato della card (\ud83d\udcb3 la cuenta / \ud83d\udd14 llama, rossa
          e pulsante) \u2014 con 2 plazas la griglia copre la zona messaggi, ma la
@@ -5039,6 +5102,25 @@ function _fintocDeMesa(mesa) {
 function _pagadaDeMesa(mesa) {
   const mp = (STATE.sala && STATE.sala.mesas_pagadas) || null;
   return (mp && mp[mesa]) ? mp[mesa] : null;
+}
+/* v3.5.7 · la riga «ya pagado» dentro il papel della precuenta (v. il commento
+   lungo nel punto d'innesto: caso mesa 120, doppio addebito sfiorato).
+   Dice le tre cose che fermano la mano — QUANTO, QUANDO, CON QUALE BOLETA — e
+   una frase che toglie al mesero il motivo di far riordinare. Se il pago è
+   stato più d'uno lo dice al plurale: `n` viaggia già nel poll.
+   ⚠️ Non tocca il totale: il consumo qui sotto è quello ANCORA da cobrar, ed è
+   giusto così. Questa è memoria, non un addebito. */
+function _pcYaPagado(mesa) {
+  const p = _pagadaDeMesa(mesa);
+  if (!p) return '';
+  return '<div style="margin:10px 0;padding:10px 12px;border-radius:12px;' +
+    'background:rgba(46,160,67,.14);border:1px solid #2ea043;font-size:12.5px;line-height:1.5">' +
+    '<b>✅ Esta mesa ya pagó $' + _fmtMiles(p.monto || 0) + '</b>' +
+    (p.hora ? ' a las ' + esc(p.hora) : '') +
+    (p.boleta ? ' · boleta <b>OF ' + esc(p.boleta) + '</b>' : '') +
+    ((p.n || 1) > 1 ? ' <i>(' + p.n + ' pagos)</i>' : '') +
+    '<br>Eso <b>ya no aparece</b> en esta cuenta porque está saldado. ' +
+    'No falta nada — <b>no lo pidas de nuevo</b>.</div>';
 }
 /* v1.5 · un tocco: il fossile del pago Fintoc + la mesa si libera.
    Niente doppio tap: guardia enviando come nel pannello pago. */
@@ -5505,7 +5587,7 @@ function renderPago() {
         : '');
   } else if (pg.pinAsk) {
     jlHtml = '<div class="cs-psec">PIN del JL</div>' +
-      '<input class="cs-pin" id="pinJLInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" value="' + esc(pg.pinJL) + '" oninput="pagoInput(\'pinJL\',this.value)">' +
+      '<input class="cs-pin" id="pinJLInput" type="password" inputmode="numeric" autocomplete="new-password" name="pin-no-guardar" data-1p-ignore="true" data-lpignore="true" placeholder="PIN" value="' + esc(pg.pinJL) + '" oninput="pagoInput(\'pinJL\',this.value)">' +
       '<button class="btn sec" style="margin-top:8px" onclick="pagoJLOk()">Abrir opciones del JL</button>';
   } else {
     /* v3.4.3 · Mesa FAM e Opciones del JL sono USCITE dal pannello del pago
@@ -5519,7 +5601,7 @@ function renderPago() {
   /* v1.9 · la porta FAM: codice suo, chiusura in $0, sin boleta */
   if (pg.famAsk && !pg.jl && !pg.pinAsk) {
     jlHtml += '<div class="cs-psec">Código FAM — la mesa cierra en $0</div>' +
-      '<input class="cs-pin" id="pinFamInput" type="password" inputmode="numeric" autocomplete="off" placeholder="Código" value="' + esc(pg.pinFam) + '" oninput="pagoInput(\'pinFam\',this.value)">' +
+      '<input class="cs-pin" id="pinFamInput" type="password" inputmode="numeric" autocomplete="new-password" name="pin-no-guardar" data-1p-ignore="true" data-lpignore="true" placeholder="Código" value="' + esc(pg.pinFam) + '" oninput="pagoInput(\'pinFam\',this.value)">' +
       '<button class="btn sec" style="margin-top:8px" ' + (pg.enviando ? 'disabled' : '') + ' onclick="pagoFamConfirmar()">' +
       (pg.enviando ? 'Registrando…' : 'Cerrar mesa FAM — $0 ✓') + '</button>';
   }
@@ -6049,7 +6131,7 @@ function cardMio(p, umb) {
               return '<div class="cs-chip' + (STATE.editMotivo === m[0] ? ' sel' : '') +
                 '" onclick="corrMotivo(\'' + m[0] + '\')">' + m[1] + '</div>';
             }).join('') + '</div>' +
-            '<input class="cs-pin" type="password" inputmode="numeric" autocomplete="off" style="margin-top:8px" ' +
+            '<input class="cs-pin" type="password" inputmode="numeric" autocomplete="new-password" name="pin-no-guardar" data-1p-ignore="true" data-lpignore="true" style="margin-top:8px" ' +
               'placeholder="PIN del JL" oninput="corrPin(this.value)">' +
             '</div>';
         }
