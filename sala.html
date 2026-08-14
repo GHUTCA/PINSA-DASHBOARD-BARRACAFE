@@ -906,7 +906,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.5.4</span>
+      <span class="ver" id="ver">sala v3.5.5</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -3807,28 +3807,45 @@ function _cobrarIgualesMesa(mesa) {
     '<button class="btn" style="margin-top:10px" onclick="vhojaCerrar();abrirPago(\'' + esc(mesa) + '\')">💳 Cobrar $' + _fmtMiles(tot) + '</button>' +
     '<button class="btn sec" style="margin-top:8px" onclick="_cobrarMesaSola(\'' + esc(mesa) + '\')">‹ Volver</button>');
 }
-function _cobrarADedoMesa(mesa) {
+/* ═══ v3.5.5 · «A DEDO» SA INCASSARE (Alberto, 14-ago, guardando la schermata:
+   «se ho preso un ordine separato lo posso pagare per persona adesso?») ══════
+   Da qui si vedeva chi deve cosa e poi c'era un solo bottone: «Cobrar todo».
+   Due porte mostravano la stessa divisione — la precuenta e questa — e solo la
+   precuenta sapeva incassarla, mentre questa sta DENTRO il cobro, cioè dove uno
+   arriva quando vuole prendere i soldi. Ora ogni persona ha il suo bottone.
+   E si raccoglie una seconda incoerenza: qui si raggruppava per `de:` secco,
+   cioè per chi ha ORDINATO, ignorando gli spostamenti fatti nella precuenta
+   («il mojito di Leo lo paga Cami»). Ora entrambe le viste passano da
+   `_vpItemsDet` + `_quienPaga`: una sorgente sola, una risposta sola. */
+function _dedoVista(mesa, volverJs) {
   const det = _vpItemsDet(mesa);
   const porQuien = {};
-  det.items.forEach(function (it) {
-    const q2 = it.de || ('mesa ' + it.mesa);
-    (porQuien[q2] = porQuien[q2] || []).push(it);
-  });
+  det.items.forEach(function (x) { const q2 = _quienPaga(x); (porQuien[q2] = porQuien[q2] || []).push(x); });
   const nombres = Object.keys(porQuien);
   if (!nombres.length) { toast('warn', 'Sin consumo'); return; }
+  const todo = det.mesas.reduce(function (s, m2) { return s + _vpTot(m2); }, 0);
   vhoja('<h3>A dedo · quién debe qué</h3>' +
-    '<div class="cs-psub">Los nombres nacen en la libreta (toca la persona al pedir).</div>' +
+    '<div class="cs-psub">Los nombres nacen en la libreta (toca la persona al pedir). Sin nombre = su mesa.</div>' +
     nombres.map(function (q2) {
       const its = porQuien[q2];
       const t2 = its.reduce(function (s, x) { return s + x.q * x.pu; }, 0);
+      const movidas = its.filter(function (x) { return _quienPaga(x) !== _quienPidio(x); }).length;
       return '<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04)">' +
         '<div style="display:flex;justify-content:space-between;font-weight:800"><span>' + esc(q2) + '</span><span>$' + _fmtMiles(t2) + '</span></div>' +
-        its.map(function (x) { return '<div style="display:flex;justify-content:space-between;font-size:12px;color:#b9b3a6"><span>' + x.q + '× ' + esc(x.n) + '</span><span>$' + _fmtMiles(x.q * x.pu) + '</span></div>'; }).join('') +
+        its.map(function (x) {
+          return '<div style="display:flex;justify-content:space-between;font-size:12px;color:#b9b3a6"><span>' + x.q + '× ' + esc(x.n) +
+            (_quienPaga(x) !== _quienPidio(x) ? ' <i style="opacity:.6">· pidió ' + esc(_quienPidio(x)) + '</i>' : '') +
+            '</span><span>$' + _fmtMiles(x.q * x.pu) + '</span></div>'; }).join('') +
+        (movidas ? '' : '') +
+        (t2 > 0 ? '<button class="btn" style="margin-top:8px;padding:9px;font-size:13px" onclick="vhojaCerrar();abrirPago(\'' +
+          esc(mesa) + '\',{titulo:\'' + _jsq(q2) + '\',monto:' + t2 + '})">💳 Cobrar ' + esc(q2) + ' · $' + _fmtMiles(t2) + '</button>' : '') +
         '</div>';
     }).join('') +
-    '<button class="btn" style="margin-top:10px" onclick="vhojaCerrar();abrirPago(\'' + esc(mesa) + '\')">💳 Cobrar todo · $' + _fmtMiles(_vpTot(mesa)) + '</button>' +
-    '<button class="btn sec" style="margin-top:8px" onclick="_cobrarMesaSola(\'' + esc(mesa) + '\')">‹ Volver</button>');
+    '<div style="font-size:11.5px;color:#8a8577;margin:12px 0 2px;text-align:center">Cada uno paga lo suyo — la mesa se cierra sola cuando esté todo.</div>' +
+    '<button class="btn" onclick="vhojaCerrar();abrirPago(\'' + esc(mesa) + '\')">💳 Cobrar todo · $' + _fmtMiles(todo) + '</button>' +
+    '<button class="btn sec" style="margin-top:8px" onclick="' + volverJs + '">‹ Volver</button>');
 }
+function _cobrarADedoMesa(mesa) { _dedoVista(mesa, "_cobrarMesaSola('" + _jsq(mesa) + "')"); }
 function _cobrarPorMesa(nJ) {
   const j = _juntasLoad().find(function (x) { return x.n === nJ; }); if (!j) return;
   const vive = j.mesas.filter(function (m) { return _vpTot(m) > 0; });
@@ -3849,37 +3866,14 @@ function _cobrarIguales(nJ) {
     '<div style="font-size:12px;color:#8a8577;margin-top:10px">El cobro se registra por mesa (o todo junto, mañana): esta pantalla es para DECIRLE al grupo cuánto pone cada uno.</div>' +
     '<button class="btn sec" style="margin-top:10px" onclick="vCobrarSala(\'' + esc(j.mesas[0]) + '\')">‹ Volver</button>');
 }
+/* v3.5.5 · la gemella della junta: stessa vista, stessa sorgente. Qui stava
+   scritto «el cobro por persona se enciende con el pago parcial — mañana».
+   Quel domani è oggi (GAS v3.137.0): la riga se ne va perché la cosa c'è.
+   Il pago va sulla PRINCIPAL — è lei che porta la sessione del grupo. */
 function _cobrarADedo(nJ) {
   const j = _juntasLoad().find(function (x) { return x.n === nJ; }); if (!j) return;
-  // la vista per nome: i `de:` dei pedidos della junta (cambio 2), o per mesa
-  const porQuien = {};
-  j.mesas.forEach(function (m) {
-    const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === m; });
-    if (!mm) return;
-    mm.pend.concat(mm.mios, mm.limpiar).forEach(function (p) {
-      try {
-        JSON.parse(p.items_json || '[]').forEach(function (it) {
-          const q2 = (it.de || '').toString() || ('mesa ' + m);
-          porQuien[q2] = porQuien[q2] || [];
-          porQuien[q2].push({ n: it.nombre || it.id, q: parseInt(it.qty, 10) || 1, pu: parseFloat(it.precio) || 0 });
-        });
-      } catch (e) {}
-    });
-  });
-  const nombres = Object.keys(porQuien);
-  if (!nombres.length) { toast('warn', 'Sin consumo en la junta'); return; }
-  vhoja('<h3>A dedo · quién debe qué</h3>' +
-    '<div class="cs-psub">Los nombres nacen en la libreta (toca la persona al pedir). Sin nombre = su mesa.</div>' +
-    nombres.map(function (q2) {
-      const its = porQuien[q2];
-      const t2 = its.reduce(function (s, x) { return s + x.q * x.pu; }, 0);
-      return '<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04)">' +
-        '<div style="display:flex;justify-content:space-between;font-weight:800"><span>' + esc(q2) + '</span><span>$' + _fmtMiles(t2) + '</span></div>' +
-        its.map(function (x) { return '<div style="display:flex;justify-content:space-between;font-size:12px;color:#b9b3a6"><span>' + x.q + '× ' + esc(x.n) + '</span><span>$' + _fmtMiles(x.q * x.pu) + '</span></div>'; }).join('') +
-        '</div>';
-    }).join('') +
-    '<div style="font-size:12px;color:#8a8577;margin-top:10px">El cobro por persona (una parte) se enciende con el pago parcial — mañana. Hoy: cobra por mesa.</div>' +
-    '<button class="btn sec" style="margin-top:10px" onclick="vCobrarSala(\'' + esc(j.mesas[0]) + '\')">‹ Volver</button>');
+  const princ = (j.principal || j.mesas[0]).toString();
+  _dedoVista(princ, "vCobrarSala('" + _jsq(princ) + "')");
 }
 /* v3.0 · CAMBIO 3 (Alberto, 12-ago): PRECUENTA = UN TAP E LA CARTA ESCE.
    Niente schermata di opzioni sul cammino caldo. L'anteprima (vPrecuentaSala)
