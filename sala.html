@@ -759,6 +759,20 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
 .vb.peli .vn{color:#e05252}
 .vb .lk{position:absolute;top:3px;right:5px;font-size:8.5px;color:#2ea6da;font-weight:900}
 /* il papel della precuenta */
+/* v3.5.3 · il papel a schermo pieno: il telefono del mesero diventa il foglio
+   che il cliente legge da mezzo metro — testo grande, niente altro intorno. */
+.pc-grande{position:fixed;inset:0;z-index:120;background:#f6f1e6;color:#1a1a1a;
+  overflow:auto;padding:26px 20px 60px;display:flex;flex-direction:column;justify-content:center}
+.pc-grande-hoja{font-size:19px;line-height:1.85;max-width:520px;margin:0 auto;width:100%}
+.pc-grande-hoja .pz{text-align:center;font-weight:800;font-size:22px;letter-spacing:.06em}
+.pc-grande-hoja .pz2{text-align:center;font-size:14px;color:#5a5a5a;margin-bottom:16px}
+.pc-grande-hoja .pr{display:flex;justify-content:space-between;gap:14px;padding:3px 0}
+.pc-grande-hoja .pr.tt2{font-size:26px;font-weight:800;padding-top:6px}
+.pc-grande-hoja hr{border:0;border-top:1px dashed #b9b0a0;margin:12px 0}
+.pc-grande-hoja .nota2{text-align:center;font-size:13px;color:#5a5a5a;margin-top:14px}
+.pc-grande-hoja .cs-chips{display:none}   /* i chip non vanno mostrati al cliente */
+.pc-grande-pie{position:fixed;left:0;right:0;bottom:16px;text-align:center;
+  font-size:12px;color:#8a8577;font-weight:700}
 .papel{background:#f6f1e6;color:#1a1a1a;border-radius:10px;padding:14px 15px;margin-bottom:13px;
   font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.65;box-shadow:0 5px 18px rgba(0,0,0,.4)}
 .papel .pz{text-align:center;font-weight:800;font-size:13px;letter-spacing:.06em}
@@ -892,7 +906,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.5.2</span>
+      <span class="ver" id="ver">sala v3.5.3</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -3465,15 +3479,80 @@ function _vpItemsDet(mesa) {
     if (!m) return;
     m.pend.concat(m.mios, m.limpiar).forEach(function (p) {
       try {
-        JSON.parse(p.items_json || '[]').forEach(function (it) {
+        JSON.parse(p.items_json || '[]').forEach(function (it, i) {
           out.push({ n: it.nombre || it.id || '?', pu: parseFloat(it.precio) || 0,
             q: parseInt(it.qty, 10) || 1, de: (it.de || '').toString(), mesa: mm,
-            k: out.length });
+            k: out.length,
+            /* v3.5.3 · chiave STABILE della riga: `k` è la posizione nella
+               lista, e la lista cambia a ogni poll (entra un pedido nuovo e
+               tutti gli indici slittano). Per ricordare «questa la paga Cami»
+               serve un nome che non si muove: il pedido + il posto dentro il
+               suo Items_Json. */
+            kk: (p.uuid || p.id_pedido || mm) + '#' + i });
         });
       } catch (e) {}
     });
   });
   return { mesas: mesas, items: out, junta: j };
+}
+/* ═══ v3.5.3 · CHI L'HA ORDINATO ≠ CHI LO PAGA (Alberto, 14-ago: «Leo dice
+   che il suo mojito lo paga Cami, come lo si sposta?») ══════════════════════
+   Non si sposta il `de:` dentro il pedido: quello è il fossile e dice una cosa
+   VERA — chi ha ordinato. Serve al mesero per servire il piatto alla persona
+   giusta, e riscriverlo per dire chi paga cancellerebbe un fatto per scriverne
+   un altro. Sono due fatti diversi, e vivono in due posti diversi.
+   Qui vive il secondo: una mappa della SERATA (riga → chi la paga), locale al
+   telefono che sta facendo il conto, per fecha_op. Non tocca il libro, non
+   tocca il pago, e si disfa toccandola di nuovo. */
+const PAGADE_KEY = 'sala_pagade_v1';
+function _pagaDeLoad() {
+  try {
+    const s = JSON.parse(localStorage.getItem(PAGADE_KEY) || 'null');
+    return (s && s.fecha === _fechaOpJS() && s.map) ? s.map : {};
+  } catch (e) { return {}; }
+}
+function _pagaDeSave(map) {
+  try { localStorage.setItem(PAGADE_KEY, JSON.stringify({ fecha: _fechaOpJS(), map: map })); } catch (e) {}
+}
+// chi paga questa riga: l'override della serata, se no chi ha ordinato, se no la mesa
+function _quienPaga(x) {
+  const ov = (STATE.pcDe || {})[x.kk];
+  return ov || x.de || ('mesa ' + x.mesa);
+}
+function _quienPidio(x) { return x.de || ('mesa ' + x.mesa); }
+/* un nome dentro un onclick='…' : «la de rojo» va bene, «l'amiga» no. Una riga
+   per non lasciare che un apostrofo rompa il conto. */
+function _jsq(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+/* il gesto: tocchi la riga → si aprono i nomi → tocchi chi la paga. Toccare di
+   nuovo la stessa riga chiude senza spostare niente. */
+function pcMover(kk) { if (STATE.pc) { STATE.pc.moviendo = (STATE.pc.moviendo === kk) ? '' : kk; vPrecuentaSala(STATE.pc.mesa, true); } }
+/* ═══ v3.5.3 · IL PAPEL A SCHERMO PIENO (Alberto, 14-ago: «click sulla
+   precuenta e la ingrandisci a telefono pieno, perché il cliente la veda»).
+   Il telefono del mesero diventa il foglio: niente chip, niente bottoni,
+   niente barre — solo il conto, grande. Si esce toccando ovunque. È la via
+   che NON consuma carta e non chiede la stampante: la parte di Cami si può
+   mostrare così, e stamparla resta una scelta, non un obbligo. */
+function pcGrande() {
+  const w = document.getElementById('vhojaWrap');
+  const p = w && w.querySelector('.papel');
+  if (!p) return;
+  let g = document.getElementById('pcGrandeWrap');
+  if (!g) { g = document.createElement('div'); g.id = 'pcGrandeWrap'; document.body.appendChild(g); }
+  g.innerHTML = '<div class="pc-grande" onclick="pcGrandeCerrar()">' +
+    '<div class="pc-grande-hoja">' + p.innerHTML + '</div>' +
+    '<div class="pc-grande-pie">toca para volver</div></div>';
+}
+function pcGrandeCerrar() { const g = document.getElementById('pcGrandeWrap'); if (g) g.innerHTML = ''; }
+function pcMoverA(kk, quien, original) {
+  if (!STATE.pc) return;
+  STATE.pcDe = STATE.pcDe || {};
+  if (quien === original) delete STATE.pcDe[kk]; else STATE.pcDe[kk] = quien;
+  _pagaDeSave(STATE.pcDe);
+  STATE.pc.moviendo = '';
+  /* il chip selezionato resta quello che stavi guardando: se sposti via
+     l'ultima riga di Leo vuoi restare su Leo e vederlo vuoto, non essere
+     sbalzato altrove */
+  vPrecuentaSala(STATE.pc.mesa, true);
 }
 /* v3.5.2 · i chip ridisegnano la STESSA precuenta (`_seguir`), la porta la
    apre sempre da capo — vedi il commento in vPrecuentaSala */
@@ -3490,6 +3569,7 @@ function pcToggle(k2) { if (STATE.pc) { STATE.pc.sel[k2] = !STATE.pc.sel[k2]; vP
    quello che deve pagare. `_seguir` distingue le due cose: i chip
    ridisegnano (e tengono la selezione di «Una parte»), la porta azzera. */
 function vPrecuentaSala(mesa, _seguir) {
+  if (!STATE.pcDe) STATE.pcDe = _pagaDeLoad();   // v3.5.3 · chi paga cosa, dalla serata
   const det = _vpItemsDet(mesa);
   if (!det.items.length) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
   if (!_seguir || !STATE.pc || STATE.pc.mesa !== mesa) STATE.pc = { mesa: mesa, modo: 'toda', quien: '', sub: '', sel: {} };
@@ -3506,11 +3586,23 @@ function vPrecuentaSala(mesa, _seguir) {
     its = det.items.filter(function (x) { return x.mesa === mm; });
     titolo = 'Mesa ' + esc(mm);
   } else if (pc.modo === 'persona') {
-    const nomi = []; det.items.forEach(function (x) { const q2 = x.de || ('mesa ' + x.mesa); if (nomi.indexOf(q2) < 0) nomi.push(q2); });
+    /* v3.5.3 · i nomi nascono da CHI PAGA (l'override della serata sopra il
+       `de:` del pedido), non da chi ha ordinato: se il mojito di Leo lo paga
+       Cami, il chip di Cami deve portarlo. Ma la lista dei nomi resta quella
+       di TUTTI — anche di chi è rimasto senza righe, altrimenti sposti
+       l'ultima riga di Leo e Leo scompare dai chip mentre lo stai guardando. */
+    const nomi = [];
+    det.items.forEach(function (x) {
+      [_quienPidio(x), _quienPaga(x)].forEach(function (q2) { if (nomi.indexOf(q2) < 0) nomi.push(q2); });
+    });
     const qSel = pc.quien || nomi[0];
     sotto = '<div class="cs-chips" style="margin-top:6px">' + nomi.map(function (q2) {
-      return '<div class="cs-chip' + (qSel === q2 ? ' sel' : '') + '" onclick="pcSetQuien(\'' + esc(q2) + '\')">' + esc(q2) + '</div>'; }).join('') + '</div>';
-    its = det.items.filter(function (x) { return (x.de || ('mesa ' + x.mesa)) === qSel; });
+      const suyo = det.items.filter(function (x) { return _quienPaga(x) === q2; })
+        .reduce(function (s, x) { return s + x.q * x.pu; }, 0);
+      return '<div class="cs-chip' + (qSel === q2 ? ' sel' : '') + '" onclick="pcSetQuien(\'' + _jsq(q2) + '\')">' + esc(q2) +
+        (suyo ? ' <b style="opacity:.65;font-weight:700">$' + _fmtMiles(suyo) + '</b>' : '') + '</div>'; }).join('') + '</div>' +
+      '<div style="font-size:11.5px;color:#8a8577;margin-top:4px">toca una línea para pasarla a otra persona</div>';
+    its = det.items.filter(function (x) { return _quienPaga(x) === qSel; });
     imprimible = false; titolo = esc(qSel);
   } else if (pc.modo === 'parte') {
     sotto = '<div style="font-size:11.5px;color:#8a8577;margin-top:4px">toca las líneas que van en esta parte</div>';
@@ -3548,10 +3640,30 @@ function vPrecuentaSala(mesa, _seguir) {
   const hace = ult ? Math.round((Date.now() - ult) / 1000) : 0;
   const righe = (pc.modo === 'parte' ? det.items : its).map(function (x) {
     const dentro = pc.modo !== 'parte' || pc.sel[x.k];
-    return '<div class="pr"' + (pc.modo === 'parte' ? ' onclick="pcToggle(' + x.k + ')" style="cursor:pointer;' + (dentro ? '' : 'opacity:.35') + '"' : '') + '>' +
+    const pers = pc.modo === 'persona';
+    const orig = _quienPidio(x), paga = _quienPaga(x);
+    const fila = '<div class="pr"' +
+      (pc.modo === 'parte' ? ' onclick="pcToggle(' + x.k + ')" style="cursor:pointer;' + (dentro ? '' : 'opacity:.35') + '"'
+        : pers ? ' onclick="pcMover(\'' + _jsq(x.kk) + '\')" style="cursor:pointer"' : '') + '>' +
       '<span>' + (pc.modo === 'parte' ? (dentro ? '☑ ' : '☐ ') : '') + x.q + '× ' + esc(x.n) +
-      (pc.modo === 'toda' && x.de ? ' <i style="opacity:.55">· ' + esc(x.de) + '</i>' : '') + '</span>' +
+      (pc.modo === 'toda' && x.de ? ' <i style="opacity:.55">· ' + esc(x.de) + '</i>' : '') +
+      /* v3.5.3 · la riga spostata lo dice, e dice da dove viene: senza questo
+         il papel di Cami mostra un mojito che lei non ha ordinato e nessuno
+         sa più perché è lì. */
+      (pers && paga !== orig ? ' <i style="opacity:.55">· pidió ' + esc(orig) + '</i>' : '') + '</span>' +
       '<span>$' + _fmtMiles(x.q * x.pu) + '</span></div>';
+    if (!pers || pc.moviendo !== x.kk) return fila;
+    /* i nomi fra cui scegliere: tutti quelli del tavolo, più il ritorno a chi
+       l'ha ordinato — che è sempre l'uscita di sicurezza */
+    const nomi2 = [];
+    det.items.forEach(function (y) {
+      [_quienPidio(y), _quienPaga(y)].forEach(function (q3) { if (nomi2.indexOf(q3) < 0) nomi2.push(q3); });
+    });
+    return fila + '<div class="cs-chips" style="margin:2px 0 8px">' +
+      nomi2.map(function (q3) {
+        return '<div class="cs-chip' + (q3 === paga ? ' sel' : '') + '" onclick="pcMoverA(\'' + _jsq(x.kk) + '\',\'' + _jsq(q3) + '\',\'' + _jsq(orig) + '\')">' +
+          (q3 === orig ? '↩ ' : 'paga ') + esc(q3) + '</div>';
+      }).join('') + '</div>';
   }).join('');
   vhoja('<h3>Precuenta · ' + (det.junta ? 'Grupo ' + det.junta.n : 'Mesa ' + esc(mesa)) + '</h3>' +
     '<div class="cs-psub">Es <b>el papel para el cliente</b>. No cobra, no cierra la mesa.</div>' +
@@ -3568,7 +3680,10 @@ function vPrecuentaSala(mesa, _seguir) {
       'border:1px solid #f5a623;font-size:12.5px;line-height:1.5"><b>Ya se imprimió hace ' +
       (hace < 120 ? hace + ' s' : Math.round(hace / 60) + ' min') + '.</b> ' +
       'Una precuenta por cuenta — el papel está en la mesa.</div>' : '') +
-    '<div class="papel"><div class="pz">BACKSTAGE</div><div class="pz2">precuenta · ' + titolo + ' · no es boleta</div>' +
+    /* v3.5.3 · un tocco sul papel e diventa il foglio grande da girare al
+       cliente (pcGrande). Il sussurro sta sotto la carta, non sopra: chi lo
+       sa già non lo rilegge. */
+    '<div class="papel" onclick="pcGrande()" style="cursor:pointer"><div class="pz">BACKSTAGE</div><div class="pz2">precuenta · ' + titolo + ' · no es boleta</div>' +
       righe +
       // v3.4.7 · la riga che fa quadrare il papel col totale vero della mesa
       (faltanP > 0 ? '<div class="pr"><span>Otros consumos ' + (det.junta && pc.modo === 'toda' ? 'del grupo' : 'de la mesa') + '</span><span>$' + _fmtMiles(faltanP) + '</span></div>' : '') +
@@ -3580,7 +3695,13 @@ function vPrecuentaSala(mesa, _seguir) {
       ? (ult
         ? '<button class="btn" disabled style="opacity:.55">✓ Ya impresa — una por cuenta</button>'
         : '<button class="btn" id="pcBtn" onclick="vPrecuentaImprimir(\'' + esc(mesaPrint) + '\',this)">🖨 IMPRIMIR EN BARRA</button>')
-      : '<div style="font-size:12px;color:#8a8577;margin:10px 0 6px;text-align:center">esta vista se <b>muestra al cliente</b> — el papel imprime la cuenta entera</div>' +
+      /* v3.5.3 · la vista parziale ha ora una via SUA per arrivare al cliente:
+         il papel grande sul telefono. La stampa della parte è il pezzo che
+         manca (il server oggi stampa la sessione intera) e finché non c'è la
+         si dichiara, invece di lasciare un bottone che promette e non fa. */
+      : '<button class="btn" onclick="pcGrande()">🔎 MOSTRAR EN GRANDE AL CLIENTE</button>' +
+        '<div style="font-size:12px;color:#8a8577;margin:10px 0 6px;text-align:center">' +
+          'Esta parte se <b>muestra</b>, todavía no se imprime — el papel de la barra sale con la cuenta entera.</div>' +
         '<button class="btn sec" onclick="pcSetModo(\'toda\')">‹ Volver a toda la cuenta</button>'));
 }
 async function vPrecuentaImprimir(mesa, btn) {
