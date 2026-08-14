@@ -906,7 +906,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.5.5</span>
+      <span class="ver" id="ver">sala v3.5.6</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -3550,6 +3550,13 @@ function pcGrande() {
 function pcGrandeCerrar() { const g = document.getElementById('pcGrandeWrap'); if (g) g.innerHTML = ''; }
 /* v3.5.4 · dalla parte al pago: si chiude il papel e si apre il pannello col
    monto della parte. Il resto lo sanno abrirPago e il GAS. */
+/* v3.5.6 · stampa la parte che stai guardando. Le righe le ha già raccolte il
+   disegno (pc.parteLineas): qui non si ricalcola niente, si manda. */
+function pcImprimirParte(btn) {
+  const pc = STATE.pc;
+  if (!pc || !pc.parteLineas || !pc.parteLineas.length) { toast('warn', 'Esta parte está vacía'); return; }
+  vPrecuentaImprimir(pc.mesa, btn, { titulo: pc.parteTitulo || 'parte', lineas: pc.parteLineas });
+}
 function pcCobrarParte(monto, titulo) {
   const mesa = STATE.pc && STATE.pc.mesa;
   if (!mesa || !(monto > 0)) return;
@@ -3623,6 +3630,14 @@ function vPrecuentaSala(mesa, _seguir) {
     imprimible = false; titolo = 'Una parte';
   }
   let tot = its.reduce(function (s, x) { return s + x.q * x.pu; }, 0);
+  /* v3.5.6 · le righe di QUESTA parte, pronte per la stampa. Si prendono qui,
+     dov'è appena stata decisa: ricostruirle dentro il bottone vorrebbe dire
+     rifare lo stesso ragionamento in due posti — e prima o poi i due posti si
+     mettono d'accordo su cose diverse (è la storia di stamattina). */
+  if (pc.modo === 'persona' || pc.modo === 'parte') {
+    pc.parteTitulo = (pc.modo === 'persona' ? (pc.quien || '') : 'Una parte') || 'parte';
+    pc.parteLineas = its.map(function (x) { return { nombre: x.n, precio: Math.round(x.pu), qty: x.q }; });
+  } else { pc.parteTitulo = ''; pc.parteLineas = null; }
   /* v3.4.7 · IL PAPEL NON PUÒ DIRE MENO DELLA MESA. Le righe le costruiamo dai
      pedidos che questo telefono vede; il totale VERO lo sa il server (`mesas`).
      Se manca qualcosa — un pedido di chi è uscito, uno passato con Traspaso_A —
@@ -3712,16 +3727,23 @@ function vPrecuentaSala(mesa, _seguir) {
          il papel grande sul telefono. La stampa della parte è il pezzo che
          manca (il server oggi stampa la sessione intera) e finché non c'è la
          si dichiara, invece di lasciare un bottone che promette e non fa. */
-      : '<button class="btn" onclick="pcGrande()">🔎 MOSTRAR EN GRANDE AL CLIENTE</button>' +
+      /* v3.5.6 · le tre vie della parte, nell'ordine in cui servono al tavolo:
+         gliela mostro · gliela stampo · la incasso. */
+      : '<button class="btn sec" onclick="pcGrande()">🔎 MOSTRAR EN GRANDE AL CLIENTE</button>' +
+        (tot > 0 ? '<button class="btn sec" style="margin-top:8px" id="pcBtnParte" onclick="pcImprimirParte(this)">🖨 IMPRIMIR ESTA PARTE</button>' : '') +
         /* v3.5.4 · e da qui la parte si COBRA (GAS v3.137.0): pago suo, propina
            sua, boleta sua — e la mesa resta aperta finché il resto non paga. */
         (tot > 0 ? '<button class="btn" style="margin-top:8px" onclick="pcCobrarParte(' + tot + ',\'' + _jsq(titolo.replace(/<[^>]*>/g, '')) + '\')">' +
           '💳 COBRAR ESTA PARTE · $' + _fmtMiles(tot) + '</button>' : '') +
         '<div style="font-size:12px;color:#8a8577;margin:10px 0 6px;text-align:center">' +
-          'El resto de la mesa <b>queda abierto</b>. El papel de la barra todavía sale con la cuenta entera.</div>' +
+          'El resto de la mesa <b>queda abierto</b> hasta que esté todo pagado.</div>' +
         '<button class="btn sec" onclick="pcSetModo(\'toda\')">‹ Volver a toda la cuenta</button>'));
 }
-async function vPrecuentaImprimir(mesa, btn) {
+/* v3.5.6 · `parte` = { titulo, lineas:[{nombre,precio,qty}] } quando si stampa
+   il papel di UNA persona. Il client dice QUALI righe, non quanto: il GAS
+   (v3.138.0) le ritrova dentro la sessione una per una e rifiuta tutto se una
+   non torna. Così la carta non può dire un numero che il libro non conosce. */
+async function vPrecuentaImprimir(mesa, btn, parte) {
   /* v3.4.3 · da qui passano DUE bottoni (il pannello e il 🧾 Cuenta della
      libreta, unificato): l'etichetta da ripristinare su errore è la SUA,
      non una hardcoded */
@@ -3733,15 +3755,26 @@ async function vPrecuentaImprimir(mesa, btn) {
        la conia il client (`pc_uid`, dottrina ①) e il fallback GAS vive già
        dentro staffPost — mai peggio di prima. */
     const pcUid = 'pc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
-    const r = await staffPost('emitirPreCuenta', { codigo: STATE.codigo, nombre: STATE.nombre,
-      emitida_por: STATE.nombre, mesa: mesa, canal: 'papel', pc_uid: pcUid });
+    const body = { codigo: STATE.codigo, nombre: STATE.nombre,
+      emitida_por: STATE.nombre, mesa: mesa, canal: 'papel', pc_uid: pcUid };
+    if (parte && parte.lineas && parte.lineas.length) body.parte = parte;
+    const r = await staffPost('emitirPreCuenta', body);
     if (r && r.ok) {
-      STATE.pcUlt[mesa] = Date.now();
+      /* v3.5.6 · il lucchetto «una precuenta por cuenta» NON vale per le parti:
+         è nato per non stampare due volte la stessa cuenta, e un tavolo che si
+         divide in quattro ha bisogno di quattro carte diverse. Se lo lasciassi
+         cadere qui, la seconda persona non potrebbe avere la sua. */
+      if (!parte) STATE.pcUlt[mesa] = Date.now();
       vhojaCerrar();
-      toast('ok', '🧾 ' + (r.folio || '') + (r.total ? ' · ' + fmtPrice(r.total) : '') + ' — saliendo en barra');
+      toast('ok', '🧾 ' + (r.folio || '') + (parte ? ' · parte de ' + parte.titulo : '') +
+        (r.total ? ' · ' + fmtPrice(r.total) : '') + ' — saliendo en barra');
       return;
     }
-    toast('err', r && r.error === 'sin_consumo' ? 'Mesa ' + mesa + ' sin consumo' : 'No se pudo: ' + (r && r.error || '?'));
+    /* v3.5.6 · l'errore della parte si dice in parole: «no cuadra» col nome
+       della riga che non torna. Il mesero deve sapere COSA rifare. */
+    toast('err', r && r.mensaje ? r.mensaje
+      : r && r.error === 'sin_consumo' ? 'Mesa ' + mesa + ' sin consumo'
+      : 'No se pudo: ' + (r && r.error || '?'));
   } catch (e) { toast('err', 'Sin conexión — reintenta'); }
   if (btn) { btn.disabled = false; btn.textContent = lbl0 || '🖨 IMPRIMIR EN BARRA'; }
 }
