@@ -892,7 +892,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.4.7</span>
+      <span class="ver" id="ver">sala v3.5.0</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -3326,6 +3326,11 @@ async function refrescar(conSkeleton) {
     }
     STATE.strikes = 0;   // v1.11 · risposta buona = si riparte da zero
     STATE.sala = r;
+    /* v3.5.0 · i grupos vivi del server diventano il registro locale delle
+       juntas — SOLO da un poll fresco: la foto salvata può avere mezz'ora e
+       resusciterebbe un tavolone già separato (stessa prudenza di _foto_local
+       sui gesti di denaro). */
+    _juntasSync(r);
     /* v2.0 · L'ULTIMA FOTO SI SALVA: al prossimo boot la sala si apre con
        questa, PRIMA che la rete risponda (entrata ottimista). Best-effort:
        se localStorage è pieno, pazienza — si apre senza foto come oggi. */
@@ -3510,11 +3515,21 @@ function vPrecuentaSala(mesa) {
      si stampa e si incassa. Si dichiara la differenza invece di nasconderla.
      Solo sul papel INTERO: «por persona» e «una parte» sono viste parziali per
      definizione, e lì la differenza non è un buco. */
-  // (la mesa che stampa si ricalcola qui: `mesaPrint` nasce più sotto)
-  const _resP = (pc.modo === 'toda' || pc.modo === 'mesa')
-    ? _resDe(pc.modo === 'mesa' ? (pc.sub || det.mesas[0]) : mesa) : null;
+  /* v3.5.0 · IL PAPEL DEL GRUPO GUARDA TUTTO IL GRUPO (Alberto, 13-ago: «il
+     conto sommava i tre e il ver precuenta ne faceva vedere solo 2»).
+     La v3.4.7 aveva già la riga che fa quadrare il papel, ma il metro era
+     `_resDe(mesa)`: il riepilogo di UNA mesa sola. Su una junta il totale di
+     riferimento è la somma delle mesas del grupo — lo stesso numero che
+     «Todo lo que queda» mostra in Cobrar (Σ `_vpTot`), così le due schermate
+     non possono più dire due cifre diverse. Le RIGHE restano quelle che questo
+     telefono ha in mano (le carte non si spostano: herencia solo sul quieto),
+     ma ciò che manca si dichiara, non si nasconde.
+     «Copia por mesa» resta per-mesa: è il papel di quella mesa, per disegno. */
+  const _refTot = pc.modo === 'toda'
+    ? det.mesas.reduce(function (s, mm) { return s + _vpTot(mm); }, 0)
+    : (pc.modo === 'mesa' ? _vpTot(pc.sub || det.mesas[0]) : 0);
   let faltanP = 0;
-  if (_resP && (_resP.total || 0) > tot) { faltanP = Math.round(_resP.total - tot); tot = _resP.total; }
+  if (_refTot > tot) { faltanP = Math.round(_refTot - tot); tot = _refTot; }
   const prop = Math.round(tot * 0.10);
   /* v3.4.3 · il lucchetto guarda la mesa che STAMPA: nella junta la copia va
      alla sub-mesa, e ognuna ha il suo diritto a una precuenta */
@@ -3546,7 +3561,7 @@ function vPrecuentaSala(mesa) {
     '<div class="papel"><div class="pz">BACKSTAGE</div><div class="pz2">precuenta · ' + titolo + ' · no es boleta</div>' +
       righe +
       // v3.4.7 · la riga che fa quadrare il papel col totale vero della mesa
-      (faltanP > 0 ? '<div class="pr"><span>Otros consumos de la mesa</span><span>$' + _fmtMiles(faltanP) + '</span></div>' : '') +
+      (faltanP > 0 ? '<div class="pr"><span>Otros consumos ' + (det.junta && pc.modo === 'toda' ? 'del grupo' : 'de la mesa') + '</span><span>$' + _fmtMiles(faltanP) + '</span></div>' : '') +
       '<hr><div class="pr"><span>Consumo</span><span>$' + _fmtMiles(tot) + '</span></div>' +
       '<div class="pr pro"><span>Propina sugerida 10%</span><span>$' + _fmtMiles(prop) + '</span></div>' +
       '<hr><div class="pr tt2"><span>TOTAL</span><span>$' + _fmtMiles(tot + prop) + '</span></div>' +
@@ -4373,6 +4388,53 @@ function _juntasLoad() {
   } catch (e) { return []; }
 }
 function _juntasSave(list) { try { localStorage.setItem(JUNTAS_KEY, JSON.stringify({ fecha: _fechaOpJS(), list: list })); } catch (e) {} }
+/* ═══ v3.5.0 · IL GRUPO LO DICE IL SERVER, NON IL TELEFONO ═══════════════════
+   (13-ago, pagato in servizio: Francisco unisce sul suo telefono e sul telefono
+   del JL — e nella sua stessa precuenta — restava il clip, con una mesa fuori.)
+   Le juntas v1 nascevano LOCALI: il tavolone viveva solo nella memoria
+   dell'apparecchio che l'aveva fatto. Da qui in poi il poll porta i grupos VIVI
+   (`r.grupos`) e questa funzione ci riscrive sopra il registro locale: **il
+   localStorage diventa una copia della verità del server, non una verità
+   parallela**. Nessun consumatore cambia — tile, precuenta, cobrar e separar
+   leggono `_juntasLoad()` esattamente come prima.
+   · il numero (e quindi il colore) resta quello che la junta aveva già qui;
+   · una junta appena fatta sopravvive 20 s senza conferma (il dito non aspetta
+     il poll), poi o il server la conosce o sparisce;
+   · una mesa col punto (`87.88`) è la firma del difetto della virgola, curato
+     nel GAS v3.133.0: si scarta, invece di disegnare un tavolo che non esiste.
+   🧯 Freno: se il GAS non manda `grupos` (riga `sala_grupos_off` in PARAMETROS,
+   o versione vecchia), il campo è null e qui non si tocca niente — si torna a
+   ieri, con la memoria locale sovrana. */
+function _juntasSync(r) {
+  const gs = r && r.grupos;
+  if (!Array.isArray(gs)) return;
+  const prev = _juntasLoad(), usati = {}, out = [];
+  gs.forEach(function (g) {
+    const principal = (g.principal == null ? '' : g.principal).toString().trim();
+    if (!principal || principal.indexOf('.') >= 0) return;
+    const mesas = [principal];
+    (g.mesas || []).forEach(function (m) {
+      m = (m == null ? '' : m).toString().trim();
+      if (m && m.indexOf('.') < 0 && mesas.indexOf(m) < 0) mesas.push(m);
+    });
+    if (mesas.length < 2) return;   // un grupo di una mesa sola non è un grupo
+    const viejo = prev.find(function (x) { return x.principal === principal; });
+    let n = (viejo && !usati[viejo.n]) ? viejo.n : 0;
+    if (!n) { n = 1; while (usati[n]) n++; }
+    usati[n] = true;
+    out.push({ n: n, principal: principal, mesas: mesas, gid: g.gid || '', srv: true });
+  });
+  const ahora = Date.now();
+  prev.forEach(function (j) {   // la junta appena nata, finché il server non la conferma
+    if (j.srv || !j.ts || ahora - j.ts > 20000 || usati[j.n]) return;
+    if (out.some(function (x) { return x.principal === j.principal; })) return;
+    usati[j.n] = true; out.push(j);
+  });
+  const firma = function (l) {
+    return l.map(function (x) { return x.n + ':' + x.principal + ':' + x.mesas.join(',') + ':' + (x.gid || ''); }).join('|');
+  };
+  if (firma(out) !== firma(prev)) _juntasSave(out);   // niente scritture a vuoto ogni 5 s
+}
 function _juntaDe(mesa) { return _juntasLoad().find(function (j) { return j.mesas.indexOf(mesa) >= 0; }) || null; }
 function _jbandHtml(j) {
   return '<span class="jband" style="background:' + _juntaCol(j.n) + '30;color:' + _juntaCol(j.n) + '">JUNTA ' + j.n + ' · ' + j.mesas.length + '</span>';
@@ -4425,7 +4487,7 @@ function juntaCrear() {
   if (rotte) toast('warn', '✂ ' + rotte + ' junta' + (rotte === 1 ? '' : 's') + ' anterior' + (rotte === 1 ? '' : 'es') + ' se deshizo — estas mesas cambian de grupo');
   const n = list.reduce(function (mx, j) { return Math.max(mx, j.n); }, 0) + 1;
   const principal = (_mapStart && sel.indexOf(_mapStart) >= 0) ? _mapStart : sel[0];
-  const j = { n: n, principal: principal,
+  const j = { n: n, principal: principal, ts: Date.now(),   // v3.5.0 · la finestra di 20s di _juntasSync
     mesas: sel.sort(function (a, b) { return (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0); }) };
   list.push(j); _juntasSave(list);
   STATE.selMesas = [];
