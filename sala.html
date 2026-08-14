@@ -892,7 +892,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.4.5</span>
+      <span class="ver" id="ver">sala v3.4.6</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -4188,10 +4188,31 @@ function _pedidoMioVp(uuid, btn) {
 }
 
 /* ── IL PANNELLO DEI VERBI ── */
+/* ═══ v3.4.6 · IL TOTALE DELLA MESA È QUELLO DEL SERVER, NON QUELLO CHE VEDO ═══
+   Trovato col fossile la sera del 13-ago, cercando le mese che passano da un
+   turno all'altro: la sala somma SOLO i pedidos che il mesero possiede o ha
+   ereditato. Un pedido servito da chi è uscito — o passato con Traspaso_A, che
+   `leerSala` non legge — non entra in quella somma. Risultato: la mesa si vede,
+   ma vale MENO di quanto ha consumato, e chi cobra incassa quel meno.
+   Il server il numero vero ce l'ha (`mesas_resumen`, GAS v3.130.0, acceso il
+   13-ago con `sala_mesas_on`): {mesa, total, mio, ajeno, de[]}. Da qui in poi
+   il denaro lo dice LUI. Se il flag è spento, `_resDe` torna null e tutto
+   funziona esattamente come prima. */
+function _resDe(mesa) {
+  const rs = (STATE.sala && STATE.sala.mesas_resumen) || null;
+  if (!rs) return null;
+  for (let i = 0; i < rs.length; i++) if (String(rs[i].mesa) === String(mesa)) return rs[i];
+  return null;
+}
 function _vpTot(mesa) {
+  const res = _resDe(mesa);
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
-  if (!m) return 0;
-  return m.pend.concat(m.mios, m.limpiar).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0);
+  const visto = m ? m.pend.concat(m.mios, m.limpiar).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0) : 0;
+  /* il MASSIMO fra i due, non il resumen secco: il resumen salta i `pendiente`
+     (di nessuno, per disegno) — se un pedido è appena entrato e non è ancora
+     stato preso, quel consumo esiste comunque e va cobrado. Il denaro non si
+     perde da nessuna delle due parti. */
+  return res ? Math.max(res.total || 0, visto) : visto;
 }
 function _vpItems(mesa) {
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
@@ -4650,6 +4671,9 @@ function renderMesas(r) {
         if ((p.hace_s || 0) > mx) mx = p.hace_s || 0;
         plata += parseFloat(p.total) || 0;
       });
+      /* v3.4.6 · la tessera dice il totale VERO (server), non solo il mio */
+      const _res = _resDe(m.mesa);
+      if (_res && (_res.total || 0) > plata) plata = _res.total;
       porCobrar += plata;
       const min = Math.round(mx / 60);
       const PAL = { nuevo: '\ud83d\udd14 pide ya', digitar: 'confirmar',
@@ -4807,12 +4831,21 @@ function renderMesaSheet(r) {
   const umb = r.umbrales;
   // v2.9 · el total contaba los entregados en `n` pero no en la suma → una
   // mesa ya servida mostraba «1 pedido · total $0» (caso 104 del 25-jul)
-  const tot = m.pend.concat(m.mios).concat(m.limpiar).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0);
+  const tot = _vpTot(m.mesa);   // v3.4.6 · il totale vero del server, non solo il mio
   /* CONSOLA v1 · quanto vive la mesa: il hace_s più vecchio della sessione */
   const mxS = m.pend.concat(m.mios).concat(m.limpiar).reduce(function (s, p) { return Math.max(s, p.hace_s || 0); }, 0);
   let h = '<div class="cs-asa"></div><div class="msh-top"><h2>Mesa ' + esc(m.mesa) +
     ((m.grupo && m.grupo !== m.mesa) ? ' <span style="font-size:14px;color:var(--acc)">🔗' + esc(m.grupo) + '</span>' : '') +
     '</h2><button class="msh-x" onclick="cerrarMesa()">✕</button></div>';
+  /* v3.4.6 · «en esta mesa hay consumo que no es tuyo»: senza questa riga il
+     mesero stampa una cuenta che dice il falso — è il caso della 119 (Isa
+     uscita, mesa passata a Diego-V) trovato col fossile il 13-ago. */
+  const _resS = _resDe(m.mesa);
+  if (_resS && (_resS.ajeno || 0) > 0) {
+    h += '<div class="msh-llam" style="border-color:rgba(245,166,35,.6);background:rgba(245,166,35,.10);color:#f5a623">' +
+      '👥 <b>' + fmtPrice(_resS.ajeno) + '</b> de esta mesa lo tomó ' +
+      esc((_resS.de || []).join(', ') || 'otro') + ' — <b>está en la cuenta</b></div>';
+  }
   h += '<div class="msh-sub">' + m.n + ' pedido' + (m.n === 1 ? '' : 's') +
     (mxS > 0 ? ' · <span class="tab">' + Math.round(mxS / 60) + ' min en mesa</span>' : '') + '</div>';
   /* ═══ v3.4.2 · LA LLAMADA VIVE NELLA MESA (giro di Alberto: «la 32 pulsa per
