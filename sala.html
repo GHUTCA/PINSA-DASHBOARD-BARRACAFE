@@ -913,7 +913,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.5.9</span>
+      <span class="ver" id="ver">sala v3.6.0</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1263,9 +1263,18 @@ async function _pagoAlBorde(body, consumo) {
       /* lo STESSO vestito di gasPost — action + local davanti, il body verbatim
          dietro — più il `consumo` che il Worker chiede per rifiutare da solo un
          monto che non combacia. Il payload lo conserva com'è e lo rigioca al
-         GAS: il fossile che nascerà è quello di sempre. */
-      body: JSON.stringify(Object.assign({ action: 'registrarPago', local: CFG.LOCAL },
-        body, { consumo: Math.round(consumo) })),
+         GAS: il fossile che nascerà è quello di sempre.
+         v3.6.0 · MENO `folio_pc`: il bordo dà l'ACK subito e scrive dietro —
+         se il GAS poi non trovasse il folio (precuenta non ancora
+         fossilizzata), il rifiuto cadrebbe DIETRO un ACK già dato: un pago
+         perso in silenzio. Qui la cintura è il `consumo` del Worker; il folio
+         vive sulla via del GAS, dove un no è sincrono e prima della penna. */
+      body: JSON.stringify((function () {
+        const bB = Object.assign({ action: 'registrarPago', local: CFG.LOCAL },
+          body, { consumo: Math.round(consumo) });
+        delete bB.folio_pc;
+        return bB;
+      })()),
       signal: ctrl.signal, cache: 'no-store',
     });
     clearTimeout(to);
@@ -3270,6 +3279,9 @@ function _marcarLocal(uuid, marca, mesa) {
 function _limpiarMesaLocal(mesa) {
   const mm2 = (mesa == null ? '' : mesa).toString().trim();
   if (!mm2) return;
+  /* v3.6.0 · il folio della cuenta muore col tavolo: il PROSSIMO cliente su
+     questo numero non deve mai ereditare la carta di quello di prima. */
+  if (STATE.pcFolio) delete STATE.pcFolio[mm2];
   _marcarLocal('mesa#' + mm2, 'limpia', mm2);
   const md = (STATE.mesasModel || []).find(function (x) { return x.mesa === mm2; });
   if (md) md.pend.concat(md.mios, md.limpiar).forEach(function (p) { _marcarLocal(p.uuid, 'limpia', mm2); });
@@ -3844,7 +3856,15 @@ async function vPrecuentaImprimir(mesa, btn, parte) {
          è nato per non stampare due volte la stessa cuenta, e un tavolo che si
          divide in quattro ha bisogno di quattro carte diverse. Se lo lasciassi
          cadere qui, la seconda persona non potrebbe avere la sua. */
-      if (!parte) STATE.pcUlt[mesa] = Date.now();
+      if (!parte) {
+        STATE.pcUlt[mesa] = Date.now();
+        /* v3.6.0 · LA CARTA COMANDA (15-ago): il folio della cuenta stampata
+           si RICORDA, per viaggiare col pago come `folio_pc`. Il GAS lo sa
+           leggere da sempre (v3.75.0): prende il consumo dalla CARTA, non da
+           ciò che il vetro crede in quel momento. Solo la cuenta INTERA: il
+           folio di una parte pinnerebbe il conto sbagliato. */
+        if (r.folio) { STATE.pcFolio = STATE.pcFolio || {}; STATE.pcFolio[mesa] = r.folio; }
+      }
       vhojaCerrar();
       toast('ok', '🧾 ' + (r.folio || '') + (parte ? ' · parte de ' + parte.titulo : '') +
         (r.total ? ' · ' + fmtPrice(r.total) : '') + ' — saliendo en barra');
@@ -4999,6 +5019,8 @@ function renderMesas(r) {
      (pcUlt vive in RAM: un reload lo azzera — via d'uscita onesta se la
      stampante mangia il papel; il tetto vero contro il doppio è nel gesto.) */
   Object.keys(STATE.pcUlt || {}).forEach(function (m) { if (!vivos[m]) delete STATE.pcUlt[m]; });
+  // v3.6.0 · stessa sorte per il folio ricordato: mesa libera = carta finita
+  Object.keys(STATE.pcFolio || {}).forEach(function (m) { if (!vivos[m]) delete STATE.pcFolio[m]; });
   const todas = _plazaLista();
   list.forEach(function (m) { if (todas.indexOf(m.mesa) < 0) todas.push(m.mesa); });
   if (todas.length) {
@@ -5868,6 +5890,17 @@ async function pagoConfirmar(btn) {
     body.boleta = 1;
     if (pg.imprimir) body.imprimir = 1;   // v1.7 · la vuole in mano anche con la mail
     if (mixtoPartes) body.medios_json = JSON.stringify(mixtoPartes);   // v3.0 · lo spezzato nel fossile
+    /* v3.6.0 · LA CARTA COMANDA (15-ago, il giorno dopo mesa 86): se per
+       questa mesa è stata stampata una cuenta, il suo folio viaggia col pago.
+       Il GAS (v3.75.0, da sempre) prende allora il consumo dalla riga della
+       PRECUENTA — la carta che il cliente ha in mano — invece dell'ultima
+       emitida che trova, e un folio non si può incassare due volte
+       (Folio_PC è nella dedup). Solo il pago INTERO e senza porte: una parte
+       o un monto manual hanno la loro strada e il folio la sporcherebbe. */
+    if (!body.parcial && !body.monto_manual) {
+      const fPc = (STATE.pcFolio || {})[pg.mesa];
+      if (fPc) body.folio_pc = fPc;
+    }
   }
   try {
     /* ═ v1.19 · FASE B · SI BUSSA PRIMA AL BORDO ════════════════════════════
@@ -5901,7 +5934,17 @@ async function pagoConfirmar(btn) {
       refrescar(false);
       return;
     }
-    const r = await gasPost('registrarPago', body);
+    let r = await gasPost('registrarPago', body);
+    /* v3.6.0 · LA CADUTA MORBIDA: se il GAS non trova il folio (la precuenta
+       del bordo non è ancora nel foglio — succede quando Apps Script affoga),
+       si riprova UNA volta senza folio, cioè il comportamento di ieri.
+       Sicuro perché: ① quel rifiuto vive PRIMA della penna (v3.140: il no sta
+       sopra appendRow — zero righe scritte) e ② il pago_uid è lo stesso, la
+       guardia di mesa 49 riconosce il gesto. Peggio di ieri non si può andare. */
+    if (r && !r.ok && r.error === 'precuenta_no_encontrada' && body.folio_pc) {
+      delete body.folio_pc;
+      r = await gasPost('registrarPago', body);
+    }
     if (r && r.ok) {
       /* ═══ v3.5.4 · LA PARTE CHE NON COPRE NON CHIUDE NIENTE ════════════════
          Il server dice `mesa_abierta:true` quando la somma dei pagos non copre
