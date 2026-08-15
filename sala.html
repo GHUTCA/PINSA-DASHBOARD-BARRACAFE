@@ -913,7 +913,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.5.8</span>
+      <span class="ver" id="ver">sala v3.5.9</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -3256,6 +3256,25 @@ function _marcarLocal(uuid, marca, mesa) {
   if (!uuid || (!MARCA_ESTADO[marca] && marca !== 'limpia')) return;
   STATE.marcado[uuid] = { marca: marca, mesa: (mesa || '').toString(), ts: Date.now() };
 }
+/* 🔴 v3.5.9 · LA MESA PAGATA SI PULISCE SEMPRE, anche quella che il telefono
+   non conosce. Prima i quattro punti che incassano facevano tutti così:
+       const mm = (STATE.mesasModel||[]).find(x => x.mesa === mesa);
+       if (mm) { …marca gli uuid che mm conosce… }
+   → se la foto era vecchia e la mesa non era nel modello, `mm` è undefined e
+   **non nasceva NESSUNA marca**: il tavolo appena pagato restava a schermo per
+   sempre. E anche con `mm` presente, si marcavano solo gli uuid che il telefono
+   aveva già visto — i pedidos arrivati con la foto dopo non erano coperti.
+   Il ramo `limpia` di `_aplicarMarcados` lavora per MESA, non per uuid: quindi
+   basta UNA chiave, e la si conia dalla mesa. Gli uuid noti si marcano lo stesso
+   (costa nulla e copre il caso in cui la mesa cambi nome nel modello). */
+function _limpiarMesaLocal(mesa) {
+  const mm2 = (mesa == null ? '' : mesa).toString().trim();
+  if (!mm2) return;
+  _marcarLocal('mesa#' + mm2, 'limpia', mm2);
+  const md = (STATE.mesasModel || []).find(function (x) { return x.mesa === mm2; });
+  if (md) md.pend.concat(md.mios, md.limpiar).forEach(function (p) { _marcarLocal(p.uuid, 'limpia', mm2); });
+  if (STATE.sala) _aplicarMarcados(STATE.sala);
+}
 
 /* Patcha la foto in arrivo con i gesti che il mesero ha già fatto.
    Un solo punto di passaggio: tutto ciò che disegna (tessere, sheet, card)
@@ -3284,16 +3303,48 @@ function _aplicarMarcados(r) {
     if (!m || now - m.ts > MARCA_SAFETY_MS) { delete STATE.marcado[u]; return; }
 
     if (m.marca === 'limpia') {
-      // la mesa liberata non deve tornare: si tolgono i suoi entregados
-      let restava = false;
+      /* ═══ 🔴 v3.5.9 · 15-ago 01:30 · IL TAVOLO CHE NON SI CHIUDE QUANDO SI PAGA
+         Ordine di Alberto, a locale pieno: «che non si perdano i conti, che si
+         stampi la precuenta giusta, e che il tavolo si chiuda quando si paga».
+         Il server faceva già la sua parte — misurato sul libro di stanotte:
+         **zero pagos hanno lasciato aperto consumo precedente**, `registrarPago`
+         chiude tutto, sempre. Il difetto era QUI, in due righe.
+
+         ① `it.estado === 'entregado'` — si toglievano SOLO gli entregado. Ma il
+            pago chiude `atendido`, `digitado` E `entregado`. E siccome la
+            entrega quasi nessuno la marca (`TS_Entregado` lo riempie in pratica
+            un mesero solo), la maggior parte delle righe è `digitado`: restavano
+            sullo schermo, e il tavolo pagato continuava a sembrare occupato.
+         ② `if (!restava) delete STATE.marcado[u]` — se la foto in arrivo non
+            conteneva quelle righe (perché ha 74 s di ritardo e non le ha ancora
+            viste), la marca veniva buttata SUBITO. Alla foto successiva, quando
+            le righe vere arrivavano, non c'era più niente a sopprimerle: **il
+            tavolo si riapriva da solo.** È il «si pagano ma non si liberano».
+
+         LA CURA, e il confine che la rende sicura: si sopprime tutto ciò che è
+         VIVO su quella mesa **e che esisteva già quando è stato fatto il pago**.
+         Un pedido nato DOPO il pago è consumo nuovo — il cliente che ordina un
+         altro giro — e non si tocca: nasconderlo sarebbe far sparire soldi veri,
+         cioè il difetto che stiamo curando, al contrario.
+         ⏱ L'età si stima con `hace_s`, che il server calcola al momento della
+         foto. Se la foto è vecchia, quel conto fa sembrare i pedidos PIÙ GIOVANI
+         del vero — quindi sbaglia sempre nel verso sicuro: al massimo lascia una
+         riga visibile in più, mai ne nasconde una che andava vista.
+         La marca non si molla più alla prima foto muta: vive il suo
+         MARCA_SAFETY_MS (5 min) e poi decade da sola. */
+      const VIVI = { pendiente: 1, atendido: 1, digitado: 1, entregado: 1 };
       arrs.forEach(function (k) {
         if (!Array.isArray(r[k])) return;
         for (let i = r[k].length - 1; i >= 0; i--) {
           const it = r[k][i];
-          if (it && String(it.mesa) === m.mesa && it.estado === 'entregado') { r[k].splice(i, 1); restava = true; }
+          if (!it || String(it.mesa) !== m.mesa) continue;
+          if (!VIVI[it.estado]) continue;
+          // nato dopo il pago? è un giro nuovo: resta.
+          const nato = now - (parseFloat(it.hace_s) || 0) * 1000;
+          if (nato > m.ts) continue;
+          r[k].splice(i, 1);
         }
       });
-      if (!restava) delete STATE.marcado[u];   // la foto l'ha assorbita: si molla
       return;
     }
 
@@ -4114,11 +4165,7 @@ async function colnConfirmar(btn) {
       mesa: c.mesa, para: c.para, pin_jl: c.pin, uid: c.uid });
     if (r && r.ok) {
       // stesso ottimismo della FAM: la mesa si pulisce subito, il poll conferma
-      const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === c.mesa; });
-      if (mm) {
-        mm.pend.concat(mm.mios, mm.limpiar).forEach(function (p) { _marcarLocal(p.uuid, 'limpia', c.mesa); });
-        if (STATE.sala) _aplicarMarcados(STATE.sala);
-      }
+      _limpiarMesaLocal(c.mesa);   // v3.5.9 · la marca nasce SEMPRE, anche senza modello
       vhojaCerrar();
       toast('ok', '🍱 Colación de ' + c.para + ' ✓ mesa ' + c.mesa + ' · $0');
       STATE.coln = null; refrescar(false); return;
@@ -5501,11 +5548,7 @@ async function pagoFamConfirmar() {
       codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: STATE.nombre,
       mesa: pg.mesa, medio: 'fam', fam: 1, pin_fam: (pg.pinFam || '').trim() });
     if (r && r.ok) {
-      const mmF = (STATE.mesasModel || []).find(function (x) { return x.mesa === pg.mesa; });
-      if (mmF) {
-        mmF.pend.concat(mmF.mios, mmF.limpiar).forEach(function (p) { _marcarLocal(p.uuid, 'limpia', pg.mesa); });
-        if (STATE.sala) _aplicarMarcados(STATE.sala);
-      }
+      _limpiarMesaLocal(pg.mesa);   // v3.5.9 · la marca nasce SEMPRE, anche senza modello
       toast('ok', '👨‍👩‍👧 Mesa FAM ✓ mesa ' + pg.mesa + ' · $0' +
         (r.en_vuelo ? ' · ' + r.en_vuelo + ' cerrados sin marcar entrega' : ''));
       STATE.pago = null; renderPago(); cerrarMesa(); refrescar(false); return;
@@ -5842,11 +5885,7 @@ async function pagoConfirmar(btn) {
       /* la mesa si chiude ottimisticamente come sempre (v1.13): il GAS chiude
          TUTTA la mesa al pago, e lo farà anche stavolta — solo, lo fa dietro,
          chiamato dal bordo. La mano che fa sparire i pedidos è la stessa. */
-      const mmB = (STATE.mesasModel || []).find(function (x) { return x.mesa === pg.mesa; });
-      if (mmB) {
-        mmB.pend.concat(mmB.mios, mmB.limpiar).forEach(function (p) { _marcarLocal(p.uuid, 'limpia', pg.mesa); });
-        if (STATE.sala) _aplicarMarcados(STATE.sala);
-      }
+      _limpiarMesaLocal(pg.mesa);   // v3.5.9 · la marca nasce SEMPRE, anche senza modello
       /* `dedup:true` — il ritocco di un pago già accettato — non fa rumore: è
          lo stesso fatto, e la risposta del bordo è identica alla prima. Il
          mesero non deve imparare una parola nuova per un gesto che ha già
@@ -5891,11 +5930,7 @@ async function pagoConfirmar(btn) {
       }
       /* v1.13 · il GAS v3.85 chiude TUTTA la mesa al pago (anche gli in-volo):
          la mano ottimistica fa sparire OGNI pedido della mesa, subito. */
-      const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === pg.mesa; });
-      if (mm) {
-        mm.pend.concat(mm.mios, mm.limpiar).forEach(function (p) { _marcarLocal(p.uuid, 'limpia', pg.mesa); });
-        if (STATE.sala) _aplicarMarcados(STATE.sala);
-      }
+      _limpiarMesaLocal(pg.mesa);   // v3.5.9 · la marca nasce SEMPRE, anche senza modello
       /* v1.16 · il server dice «questo pago esisteva già» (guardia mesa 49):
          non è un errore ed è la risposta giusta — la mesa si chiude, e il
          mesero legge che NON ha cobrato due volte. */
