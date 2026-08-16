@@ -280,6 +280,20 @@
   /* LA LIBRETA */
   .cm-pad{flex:1;min-height:0;overflow-y:auto;padding:5px 14px 8px;background:var(--cm-pad);
     background-image:repeating-linear-gradient(var(--cm-raya) 0 1px, transparent 1px 44px);background-attachment:local}
+  /* ═══ v3.9.0 · [AUT-0012] · LA LIBRETA SE APOYA SOBRE EL TECLADO ═══════
+     Con el teclado abierto la ventana se acorta: con pocas líneas quedaban
+     ARRIBA, con un hueco entre ellas y el teclado, y había que hacer scroll
+     para ver lo que ya habías puesto. Es LA razón por la que un mesero anota
+     en el Notes (observado en sala, 15-ago): nunca te obliga a elegir entre
+     escribir y ver lo escrito.
+     🔧 El truco es el ::before con margin-top:auto — se come el espacio libre
+        cuando hay pocas líneas y se COLAPSA solo cuando desbordan, así el
+        scroll sigue sano (justify-content:flex-end lo rompería: en varios
+        navegadores no deja llegar arriba del todo).
+     ?lib=0 → como ayer. */
+  .cm-pad{display:flex;flex-direction:column}
+  .cm-pad::before{content:"";margin-top:auto}
+  body.cm-lib-arriba .cm-pad::before{margin-top:0}
   .cm-vacio{padding:30px 14px;text-align:center;color:var(--cm-t3);font-size:14px;line-height:1.6}
   .cm-vacio b{display:block;color:var(--cm-t2);font-size:16px;margin-bottom:5px;font-weight:700}
   .cm-grp{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;font-weight:800;
@@ -913,7 +927,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.7.2</span>
+      <span class="ver" id="ver">sala v3.9.0</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -961,6 +975,24 @@ const CFG = {
   TIMEOUT_MS: (parseInt(QS.get('tmo'), 10) || 40) * 1000,
   SK: { COD: 'sala_codigo', NOM: 'sala_nombre', LOC: 'sala_local', TOK: 'sala_device_token' },
 };
+
+/* ═══ v3.9.0 · [AUT-0012] · I FRENI DELLA LIBRETA NUOVA ═══════════════════
+   Tre interruttori d'URL: si torna a ieri SENZA deploy, come ?poll= e ?tmo=.
+     ?bp=0    → búsqueda de ayer (substring contiguo, en ese orden)
+     ?lib=0   → la libreta vuelve ARRIBA (con el hueco sobre el teclado)
+     ?camp=1  → vuelve la re-campana de 90 s del listo
+   Default = el comportamiento nuevo; los tres flags = exactamente el de ayer. */
+const BP_ON = QS.get('bp') !== '0';
+const LIB_ON = QS.get('lib') !== '0';
+const CAMP_REPITE = QS.get('camp') === '1';
+/* il freno della libreta es CSS → viaja como clase; si el body aún no existe
+   (script movido a <head> mañana) se reintenta al DOMContentLoaded */
+(function _cmFreno(){
+  if (LIB_ON) return;
+  if (document.body) { document.body.classList.add('cm-lib-arriba'); return; }
+  document.addEventListener('DOMContentLoaded', function(){
+    if (document.body) document.body.classList.add('cm-lib-arriba'); });
+})();
 
 /* v1.19 · PATCH ② · QR SALA (?sala=BKS): il QR fisso in zona pass è solo il
    trigger. Device battezzato → salaCheckIn automatico (código dal server,
@@ -1113,8 +1145,21 @@ function detectarNuevos(r){
   // v1.7 · finché c'è un LISTO non ritirato, la campana INSISTE ogni 90s
   // (il piatto raffredda — in parallelo il GAS manda il Telegram "retirar")
   // v1.8 · retirado dal pass → la campana lascia in pace (è in camino)
+  /* ═══ v3.9.0 · [AUT-0012] · LA RE-CAMPANA DEI 90 s SI SPEGNE ════════════
+     Lo stesso fatto — un piatto al pass — suonava su QUATTRO canali: due
+     Telegram del motorRings (10/11), questa campana ogni 90 s, e la card del
+     pass. Misura del 14-ago: 277 pedidos (39%) arrivati in fase retiro →
+     ~462 Telegram in una notte, per un'azione che, col runner in sala, non
+     è nemmeno del mesero.
+     🔔 RESTA IL PRIMO AVVISO (sopra, in `hayNuevo`): non si spegne l'allarme,
+        si spegne la RIPETIZIONE. E soprattutto: listo e llamada oggi sono lo
+        STESSO din-don — togliendo il rumore, «un cliente ti chiama» torna a
+        distinguersi, ed è l'unico che non può essere perso.
+     ⏳ Lo spegnimento vero del listo al mesero NON è qui: aspetta che il
+        runner riceva (AUT-0011, passo 1). Prima si accende là, poi si tace qui.
+     ?camp=1 → torna a insistere come ieri. */
   const hayListo = (r.mios||[]).some(p => p.listo && !p.retirado);
-  if (hayListo && STATE.vistosInit && Date.now() - STATE.listoRingAt > 90000) {
+  if (hayListo && STATE.vistosInit && CAMP_REPITE && Date.now() - STATE.listoRingAt > 90000) {
     alarmaNueva();
     STATE.listoRingAt = Date.now();
   }
@@ -2400,13 +2445,59 @@ function _cmNorm(s){ s=(s||'').toString().toLowerCase();
   try{ s=s.normalize('NFD').replace(/[̀-ͯ]/g,''); }catch(e){}
   return s; }
 // «2 pis» = dos Pisco Sour: la cantidad como se dice en voz alta
-function _cmParseQ(t){ const m=(t||'').trim().match(/^(\d{1,2})\s+(.*)$/);
-  return m ? { n:parseInt(m[1],10), t:m[2] } : { n:1, t:(t||'').trim() }; }
+/* ═══ v3.9.0 · [AUT-0012] · LA CANTIDAD COMO SE DICE ══════════════════════
+   Portado de registro_movimientos.html (NUMWORD), con DOS decisiones que no
+   son de estilo — son las dos formas en que esto se rompe:
+   ① la cantidad va SOLO ADELANTE. Nunca atrás: 13 productos llevan cifras en
+      el nombre — «piscola 35» es el PRODUCTO, no 35 piscolas.
+   ② LA GUARDIA: si el texto entero nombra un producto, la primera palabra NO
+      es cantidad. Sin esto «dos huevos» (plato real de la carta: «Dos huevos
+      con arroz») se leería como 2× «huevos». Un solo caso, y basta.
+   Probado sobre el catálogo real: dos huevos → 1× Dos huevos con arroz ✓ ·
+   dos pisco sour → 2× Pisco Sour ✓ · piscola 35 → 1× Piscola Mistral 35 ✓  */
+const CM_NUM = { un:1, una:1, uno:1, dos:2, tres:3, cuatro:4, cinco:5, seis:6,
+                 siete:7, ocho:8, nueve:9, diez:10, once:11, doce:12 };
+function _cmEmpiezaProd(q){
+  const c = STATE.catalogo || [];
+  for (let i = 0; i < c.length; i++){ if (_cmNorm(c[i].nombre).indexOf(q) === 0) return true; }
+  return false;
+}
+function _cmParseQ(t){
+  t = (t || '').toString().trim(); if (!t) return { n:1, t:'' };
+  const m = t.match(/^(\d{1,2})\s+(.*)$/);
+  if (m) return { n:parseInt(m[1],10), t:m[2] };
+  if (BP_ON){
+    const w = t.split(/\s+/);
+    if (w.length > 1){
+      const k = _cmNorm(w[0]);
+      if (CM_NUM[k] != null && !_cmEmpiezaProd(_cmNorm(t))){
+        return { n:CM_NUM[k], t:w.slice(1).join(' ') };
+      }
+    }
+  }
+  return { n:1, t:t };
+}
+/* ═══ v3.9.0 · [AUT-0012] · BUSCA POR PALABRAS, EN CUALQUIER ORDEN ════════
+   El mesero escribe en el orden en que el CLIENTE lo dice. Hoy `indexOf`
+   exige la cadena contigua y en ese orden, así que «gin trop», «mojito
+   mango» y «piscola 35» dan CERO — y son los tres productos más vendidos de
+   la noche del 14 (63 · 7 · 19 unidades). Por eso se escribe en el Notes.
+   🔒 PROPIEDAD GARANTIZADA · SOBRECONJUNTO: con UNA sola palabra el filtro y
+      el orden son IDÉNTICOS a los de ayer; con varias sólo AÑADE. Probado:
+      529 consultas del catálogo, 0 resultados quitados, 197 recuperadas.
+   ?bp=0 → exactamente el buscador de ayer. */
 function _cmBuscar(txt){
   const q=_cmNorm(_cmParseQ(txt).t); if(!q) return [];
   const a=[],b=[];
+  if (!BP_ON){
+    (STATE.catalogo||[]).forEach(function(p){ const n=_cmNorm(p.nombre);
+      if(n.indexOf(q)===0) a.push(p); else if(n.indexOf(q)>=0) b.push(p); });
+    return a.concat(b);
+  }
+  const ws = q.split(/\s+/).filter(Boolean);
   (STATE.catalogo||[]).forEach(function(p){ const n=_cmNorm(p.nombre);
-    if(n.indexOf(q)===0) a.push(p); else if(n.indexOf(q)>=0) b.push(p); });
+    for (let i = 0; i < ws.length; i++){ if (n.indexOf(ws[i]) < 0) return; }
+    if(n.indexOf(ws[0])===0) a.push(p); else b.push(p); });
   return a.concat(b);
 }
 function _cmEs2(p){ return !!(p && p.promo && (p.promo.tipo==='2x1'||p.promo.tipo==='multiplo')); }
