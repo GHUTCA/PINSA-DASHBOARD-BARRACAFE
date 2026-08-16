@@ -913,7 +913,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.6.6</span>
+      <span class="ver" id="ver">sala v3.6.7</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -954,8 +954,10 @@ const CFG = {
   LOCAL: (QS.get('l') || localStorage.getItem('sala_local') || 'BKS').trim().toUpperCase(),
   /* v3.6.6 · AUT-EMERG-0004: in GAS-diretto ogni poll costa 15-33 s al server
      (misurato 15-ago sera) — a 10 s ogni telefono tiene un'esecuzione sempre in
-     volo e il bound satura (precuentas in coda). URL override: ?poll=10&tmo=25. */
-  POLL_MS: (parseInt(QS.get('poll'), 10) || 30) * 1000,
+     volo e il bound satura (precuentas in coda). URL override: ?poll=10&tmo=25.
+     v3.6.7 · POLL_MS torna a essere il TICK di base (15 s): il ritmo vero lo
+     detta il backoff adattivo in refrescar(), sulla durata misurata del poll. */
+  POLL_MS: (parseInt(QS.get('poll'), 10) || 15) * 1000,
   TIMEOUT_MS: (parseInt(QS.get('tmo'), 10) || 40) * 1000,
   SK: { COD: 'sala_codigo', NOM: 'sala_nombre', LOC: 'sala_local', TOK: 'sala_device_token' },
 };
@@ -3442,7 +3444,15 @@ async function refrescar(conSkeleton) {
   // risposte >10s l'interval lanciava un secondo poll sopra il primo: due
   // slot per telefono e il banner rosso restava incollato. Un poll alla volta.
   if (STATE.pollEnVuelo) return;
+  /* v3.6.7 · AUT-EMERG-0004b · BACKOFF ADATTIVO: il ritmo lo detta il server,
+     non una costante. Poll veloce (<4s) → cadenza piena (tick POLL_MS); lento
+     (4-15s) → prossimo poll fra 45s; in apnea (>15s) → 75s. Così N telefoni
+     smettono di tenere il bound al tetto proprio quando è al tetto, e
+     riaccelerano DA SOLI appena respira — senza reload, senza deploy.
+     Il refresh manuale (conSkeleton) passa sempre. */
+  if (!conSkeleton && Date.now() < (STATE.pollProxOk || 0)) return;
   STATE.pollEnVuelo = true;
+  const _pollT0 = Date.now();
   if (conSkeleton) $('secPend').innerHTML = '<div class="h">Cargando sala…</div><div class="card cargando" style="height:70px"></div>';
   try {
     const r = await leerSala(STATE.codigo, STATE.nombre);
@@ -3522,6 +3532,10 @@ async function refrescar(conSkeleton) {
     }
   } finally {
     STATE.pollEnVuelo = false;
+    // v3.6.7 · il backoff si tara sulla durata VERA del poll appena finito
+    const _pollDur = Date.now() - _pollT0;
+    STATE.pollProxOk = _pollDur < 4000 ? 0
+                     : Date.now() + (_pollDur < 15000 ? 45000 : 75000);
   }
 }
 
