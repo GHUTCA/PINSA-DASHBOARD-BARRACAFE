@@ -927,7 +927,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.13.0</span>
+      <span class="ver" id="ver">sala v3.14.0</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -2015,7 +2015,7 @@ async function agregarAbrir(uuid) {
         STATE.catalogoTs = Date.now();
         STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
         STATE.terminoOps = Array.isArray(r.termino_opciones) ? r.termino_opciones : (STATE.terminoOps || []); // v3.0 · términos carne (GAS v3.124.0)
-        mods2Cargar();   // v3.10 · MODS2 · una lettura accanto al catalogo, mai un poll (no-op a flag spento)
+        mods2Cargar(r);  // v3.14.0 · col catálogo viaggia il cancello del foglio (v3.10: una lettura, mai un poll)
         // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
         if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
       } else if (!STATE.catalogo) { STATE.catalogo = []; }
@@ -2161,7 +2161,7 @@ async function nuevoAbrir(mesaPre) {
         STATE.catalogoTs = Date.now();
         STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
         STATE.terminoOps = Array.isArray(r.termino_opciones) ? r.termino_opciones : (STATE.terminoOps || []); // v3.0 · términos carne (GAS v3.124.0)
-        mods2Cargar();   // v3.10 · MODS2 · una lettura accanto al catalogo, mai un poll (no-op a flag spento)
+        mods2Cargar(r);  // v3.14.0 · col catálogo viaggia il cancello del foglio (v3.10: una lettura, mai un poll)
         // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
         if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
       } else if (!STATE.catalogo) { STATE.catalogo = []; }
@@ -2359,22 +2359,50 @@ function _modsDe(p){
    🔒 Dietro flag `?mods2=1` (default SPENTO): a flag spento il giro è
       identico a v3.9, byte per byte.
    ═══════════════════════════════════════════════════════════════════════ */
+/* ═══ v3.14.0 · AUT-0017 passo 2 · IL CANCELLO STA NEL FOGLIO, NON NEL TELEFONO ═══
+   Misurato il 16-ago sul fossile: delle opzioni che DICHIARANO un prezzo nel
+   proprio nome («Chelada +$1.500»), **0 addebitate su 110** — $165.000 in tre
+   giorni, 100 unità dalla comandera, ZERO dal menù del cliente. La causa non è
+   una persona: il cliente e il mesero leggevano DUE cancelli diversi.
+     · menù cliente → `mods2_on` di PARAMETROS  → il delta si addebita
+     · comandera    → `?mods2=1` PER TELEFONO   → default SPENTO, quindi cade
+                      sul vocabolario vecchio (`_modsDe`), dove il prezzo è
+                      TESTO dentro un'etichetta e non lo paga nessuno.
+   Sedici cheladas nella stessa finestra: sei a $7.000 e dieci a $5.000-5.500.
+   🔴 Due persone allo stesso tavolo, una col QR e una col mesero, pagano la
+   stessa bevanda $1.500 di differenza — ed è una cosa che il cliente VEDE.
+   Da qui in poi il cancello è UNO SOLO: quello del foglio, che viaggia col
+   catálogo. 🧯 Freno per telefono: `?mods2=0` (resta appiccicato: se il foglio
+   dice sì, questo telefono continua col giro vecchio finché non si toglie).
+   ⚠️ Se il GAS non manda ancora il flag → `undefined` → comportamento di oggi,
+   byte per byte: il degrado è pulito, non è un salto nel buio. */
+var MODS2_FRENO = false;
 var MODS2_ON = (function(){
   var on = false, q = null;
   try { q = new URLSearchParams(location.search).get('mods2'); } catch(e){}
-  if (q === '1') on = true; else if (q === '0') on = false;
+  if (q === '1') on = true; else if (q === '0') { on = false; MODS2_FRENO = true; }
   try {
     if (q === '1' || q === '0') localStorage.setItem('mesero_mods2', q);
-    else if (localStorage.getItem('mesero_mods2') === '1') on = true;
+    else {
+      var _ls = localStorage.getItem('mesero_mods2');
+      if (_ls === '1') on = true; else if (_ls === '0') MODS2_FRENO = true;
+    }
   } catch(e){}
   return on;
 })();
+/* il cancello del FOGLIO arriva dentro la risposta del catálogo (una lettura
+   che la comandera fa già: nessuna chiamata nuova, invariante 9 intatta). */
+function mods2Cancello(rCat){
+  if (MODS2_FRENO) { MODS2_ON = false; return; }
+  if (rCat && rCat.mods2_on === true) MODS2_ON = true;
+}
 var MODS2_VOC = null;          // {grupos:[{g,gn,aplica,tipo,min,max,est,ops:[...]}]}
 var MODS2_RECARGO = null;      // {f,d,g:{gid:{f,d}}} · dal cancello prezzi (GAS v3.66.0)
 // i tetti anti-tilt · default della casa finché non vivono in PARAMETROS
 var MODS2_MAX = { ajuste: 1, side: 5 };
 
-async function mods2Cargar(){
+async function mods2Cargar(rCat){
+  mods2Cancello(rCat);        // v3.14.0 · il cancello del foglio PRIMA del no-op
   if (!MODS2_ON) return;
   try {
     const r = await gasGet('getModificadores', {});
@@ -3371,7 +3399,7 @@ function entrarSala() {
     if (r && r.ok && Array.isArray(r.productos)) {
       STATE.catalogo = r.productos; STATE.catalogoTs = Date.now();
       STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);
-      mods2Cargar();
+      mods2Cargar(r);   // v3.14.0 · il cancello del foglio, dalla precarica
       if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
     }
   }).catch(function () {});
