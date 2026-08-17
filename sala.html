@@ -927,7 +927,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.11.0</span>
+      <span class="ver" id="ver">sala v3.12.0</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1380,8 +1380,25 @@ async function leerSala(codigo, nombre) {
       if (r.ok && j && j.ok && j.datos && j.datos.datos && j.datos.datos.ok) {
         const mia = (j.datos.datos.meseros || {})[_slugSalaJS(nombre)];
         if (mia && mia.ok) {
-          if (j.datos.edad_ms < BORDE_SALA.MAX_EDAD_MS) { BORDE_SALA.fallos = 0; return mia; }
-          fotoVieja = mia; fotoVieja._vieja_s = Math.round(j.datos.edad_ms / 1000);
+          /* ═══ v3.12.0 · 16-ago · L'ETÀ SI CHIEDE AL DATO, NON ALLA COPIA ═══
+             `edad_ms` è l'età del record NEL WORKER, non del dato. Misurato
+             oggi su 8 giri: dichiarava **110-520 ms** mentre la foto era
+             vecchia di **57-165 s** (il battito pubblica ogni ~124 s).
+             🔴 Con quel campo il tetto dei 6 minuti — scritto dopo il caso Ray
+             del 30-lug — NON POTEVA SCATTARE MAI: battito fermo = sala vecchia
+             e nessun allarme. La guardia misurava la cosa sbagliata, e non
+             faceva rumore mentre non proteggeva.
+             Ora l'età esce da `ts_datos`: il momento in cui il GAS ha guardato
+             il libro davvero.
+             🧯 Se `ts_datos` manca si ricade su `edad_ms` — mai peggio di ieri.
+             ⏰ Orologio del telefono storto: se è indietro l'età sembra minore
+                (= comportamento vecchio); se è avanti sembra maggiore e la foto
+                si scarta ripiegando sul GAS. **Entrambe le derive portano al
+                comportamento di prima, mai a mostrare roba più vecchia.** */
+          const _tsD = Number((j.datos.datos.ts_datos || j.datos.datos.ts) || 0);
+          const _edadV = _tsD > 0 ? Math.max(0, Date.now() - _tsD) : (j.datos.edad_ms || 0);
+          if (_edadV < BORDE_SALA.MAX_EDAD_MS) { BORDE_SALA.fallos = 0; mia._edad_dato_s = Math.round(_edadV / 1000); return mia; }
+          fotoVieja = mia; fotoVieja._vieja_s = Math.round(_edadV / 1000);
         }
         // il mio nombre non c'è nella foto (appena entrato, fila non ancora
         // scritta): non è un guasto del bordo — si chiede al GAS e basta
