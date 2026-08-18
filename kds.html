@@ -287,7 +287,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.24</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.25</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -568,8 +568,30 @@ function bordeWriteOn() {
   if (BORDE_W.QS === '1') return true;
   return !!(STATE.kds && STATE.kds.bw);
 }
+/* ═════ v1.25 · [AUT-0025] IL TAP DICE DA DOVE È PASSATO ═══════════════════
+   Nato dalla notte del 17-ago: *«al cliccare su listo si chiude e si riapre…
+   su tutte»*. Il giorno dopo, per capire cosa fosse successo, si sono dovute
+   leggere quattro parti del sistema e uccidere quattro ipotesi — e la causa
+   è ancora ignota, **perché un `listo` accettato dal bordo e un `listo`
+   ripiegato sul GAS lasciano la stessa identica traccia** (`TS_Listo`
+   valorizzata). Nessun fossile dice da dove è passato quel dito.
+
+   Qui il dito lo dice. Il campo NON è quello che il tablet *crede*: è quello
+   che ha **davvero usato**, scritto sul ramo che lo usa:
+     `borde`            · accettato dal bordo (il GAS lo riceve dal forward,
+                          che spedisce il payload VERBATIM: non serve nessuno)
+     `gas_borde_off`    · il bordo non è stato nemmeno provato (`?borde=0`)
+     `gas_bw_off`       · provato no: `kds_borde_write_on` spento nel poll
+     `gas_<error>`      · provato e NON accettato (`sin_gate`, `rate_limit`…)
+     `gas_red`          · provato e la rete è morta in mezzo
+   👉 I primi due sono «① spenta», gli altri tre sono «① ha fallito»: **sono
+   diagnosi opposte e oggi hanno la stessa faccia.**
+   📌 Zero cambi di comportamento: un campo in più nel payload. Il GAS di oggi
+   ignora i campi che non conosce (garanzia già usata per `idioma`). */
 async function staffPost(action, body) {
+  let via = 'gas_borde_off';
   if (BORDE.ON && bordeWriteOn()) {
+    via = 'gas_no_borde';   // provato, risposta senza il timbro `borde:true`
     try {
       const u = BORDE.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL)
         + '?t=' + encodeURIComponent(BORDE.T);
@@ -578,15 +600,19 @@ async function staffPost(action, body) {
       const r = await fetch(u, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {})),
+        // `via` in fondo: il body non può sovrascriverlo (è un fatto, non un dato)
+        body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {}, { via: 'borde' })),
         signal: ctrl.signal, cache: 'no-store',
       });
       clearTimeout(to);
       const j = await r.json();
       if (j && j.borde === true) return j;   // definitiva; il resto → GAS
-    } catch (e) { /* bordo muto → la via di sempre */ }
-  }
-  return await gasPost(action, body);
+      // il MOTIVO del no viaggia col ripiego: `sin_gate` e `rate_limit` sono
+      // due guasti diversi, e senza il motivo si somigliano nel fossile
+      if (j && j.error) via = 'gas_' + String(j.error).replace(/[^a-z_]/gi, '').slice(0, 12);
+    } catch (e) { via = 'gas_red'; }
+  } else if (BORDE.ON) { via = 'gas_bw_off'; }
+  return await gasPost(action, Object.assign({}, body || {}, { via: via }));
 }
 
 async function leerKds(codigo, estacion) {
