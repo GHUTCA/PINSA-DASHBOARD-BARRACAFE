@@ -927,7 +927,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.16.0</span>
+      <span class="ver" id="ver">sala v3.17.0</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -2591,9 +2591,19 @@ function _cmEnMisMesas(m){
    «nel verso giusto»: un flusso di copertura dichiarato (chi copro, perché),
    non una porta aperta. Il mesero SENZA plaza non si blocca (non avrebbe
    nessuna mesa): quello resta un caso da JL, com'era. */
+/* 🔴 v3.17.0 · [AUT-0034] · QUESTO È IL DIRITTO DI COMANDARE, e da oggi si
+   decide sugli INTERVALLI: nessun tetto può più togliere a un mesero una mesa
+   che è sua. È la riga che il 17-ago ha bloccato ISA su mesa 98 e il 18 BREANA.
+   La guardia «senza plaza non si blocca» resta identica: si misura sul TESTO
+   del perimetro, non sulla lista (che poteva essere vuota per troncamento). */
 function _mesaFuera(m){
-  const lista = _plazaLista();
-  return !!(m && lista.length && lista.indexOf(m) < 0);
+  if (!PERIM_ON) {                       // 🧯 il giro di ieri
+    const lista = _plazaLista();
+    return !!(m && lista.length && lista.indexOf(m) < 0);
+  }
+  const txt = (STATE.plazaMesas || '').toString();
+  if (!m || !_perimParse(txt).tratti.length) return false;   // senza plaza: mai bloccato
+  return !_mesaDentro(m, txt);
 }
 function _cmSusHtml(){
   const n = STATE.nuevo; let h = '';
@@ -4311,7 +4321,10 @@ function _mvLibres() {
 }
 function _mvChip(m) { _mvA = m; _mvHacer(null); }
 function _vMoverPinta() {
-  const mia = _plazaLista().indexOf(_mvA) >= 0;
+  /* v3.17.0 · [AUT-0034] · secondo DIRITTO: «la mesa di destino è mia?».
+     Stessa cura del primo — sugli intervalli, senza tetti. */
+  const mia = PERIM_ON ? _mesaDentro(_mvA, (STATE.plazaMesas || '').toString())
+                       : _plazaLista().indexOf(_mvA) >= 0;
   const ocupada2 = (STATE.mesasModel || []).some(function (x) { return x.mesa === _mvA; });
   const valido = _mvA && _mvA !== _mvDe && !ocupada2;
   const libres = _mvLibres();
@@ -5088,17 +5101,82 @@ function juntaSeparar(nJ) {
   cerrarMesa(); refrescarMapa();
 }
 function refrescarMapa() { if (STATE.sala) { renderMesas(STATE.sala); } }
-/* la plaza in lista di mese: '20-29' o '3, 5, 8' → ['20','21',…] (tetto 60) */
-function _plazaLista() {
-  const out = [];
-  (STATE.plazaMesas || '').toString().split(/[,·]/).forEach(function (tr) {
-    tr = tr.trim(); if (!tr) return;
-    const r = tr.match(/^(\d+)\s*-\s*(\d+)$/);
-    if (r) { const a = parseInt(r[1], 10), b = parseInt(r[2], 10);
-      if (b >= a && b - a <= 40) for (let i = a; i <= b; i++) out.push(String(i)); }
-    else { const nn = parseInt(tr, 10); if (nn) out.push(String(nn)); }
+/* ═══ v3.17.0 · [AUT-0034] · IL PERIMETRO NON SI TRONCA MAI IN SILENZIO ═══
+   Il male, pagato DUE volte in 29 ore: ISA (17-ago 14:42, bloccata a servizio
+   aperto su mesa 98) e BREANA (18-ago ~19:10). `_plazaLista()` ESPANDE gli
+   intervalli in stringhe e poi taglia — due volte, e nessuno dei due tagli
+   parla:  ① `b - a <= 40` scarta un tratto INTERO   ② `slice(0,60)` tronca.
+   Chi cadeva oltre il taglio si sentiva rispondere «no es de tu plaza» su una
+   mesa che ERA sua.
+
+   🔑 L'idea (collaudata in `perimetro_mesero_REFERENCE.mjs`, 11 verdi):
+      per il DIRITTO di comandare non serve la LISTA, serve la RISPOSTA.
+      Si decide sugli INTERVALLI → niente espansione, niente tetti, niente
+      da tagliare. `mesaDentro('98','90-98,363-368')` → true, sempre.
+
+   ⚖️ PERIMETRO DELLA PATCH (condizione del CONTROLLER): si cura **solo il
+      DIRITTO di comandare**, NON la mappa. I disegni (chips, «Mi plaza»,
+      lista dei destini) continuano a usare una lista — ma da oggi quella
+      lista DICHIARA quando tronca, invece di far finta di essere intera.
+   🧯 `?perim=0` → esattamente il comportamento di ieri, tetti compresi.     */
+const PERIM_ON = QS.get('perim') !== '0';
+
+/* Il perimetro come INTERVALLI: '90-98,363-368 · 99-101' → [[90,98],[363,368],[99,101]]
+   `scartati` non si butta: un tratto illeggibile (`98-90`) si DICHIARA. */
+function _perimParse(txt) {
+  const tratti = [], scartati = [];
+  String(txt || '').split(/[,·]/).forEach(function (t) {
+    t = t.trim(); if (!t) return;
+    const r = t.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (r) {
+      const a = parseInt(r[1], 10), b = parseInt(r[2], 10);
+      if (b >= a) tratti.push([a, b]); else scartati.push(t);
+      return;
+    }
+    const n = parseInt(t, 10);
+    if (n) tratti.push([n, n]); else scartati.push(t);
   });
-  return out.slice(0, 60);
+  return { tratti: tratti, scartati: scartati };
+}
+/* LA DOMANDA CHE SERVE DAVVERO — l'unica che il diritto di comandare deve fare. */
+function _mesaDentro(mesa, txt) {
+  const n = parseInt(String(mesa).replace(/[^0-9]/g, ''), 10);
+  if (!n) return false;
+  return _perimParse(txt).tratti.some(function (t) { return n >= t[0] && n <= t[1]; });
+}
+/* Quante mese sono, senza costruirle: serve per DIRLO, non per tagliare. */
+function _perimConta(txt) {
+  return _perimParse(txt).tratti.reduce(function (s, t) { return s + (t[1] - t[0] + 1); }, 0);
+}
+/* la plaza in lista di mese — SOLO PER DISEGNARE. Se il disegno ha un limite,
+   quel limite torna indietro dichiarato (`_plazaTronca`), mai in silenzio. */
+let _plazaTronca = null;   // {mostrate, totale} quando la mappa è incompleta
+function _plazaLista() {
+  const txt = (STATE.plazaMesas || '').toString();
+  if (!PERIM_ON) {                      // 🧯 il giro di ieri, tetti compresi
+    const out = [];
+    txt.split(/[,·]/).forEach(function (tr) {
+      tr = tr.trim(); if (!tr) return;
+      const r = tr.match(/^(\d+)\s*-\s*(\d+)$/);
+      if (r) { const a = parseInt(r[1], 10), b = parseInt(r[2], 10);
+        if (b >= a && b - a <= 40) for (let i = a; i <= b; i++) out.push(String(i)); }
+      else { const nn = parseInt(tr, 10); if (nn) out.push(String(nn)); }
+    });
+    _plazaTronca = null;
+    return out.slice(0, 60);
+  }
+  const P = _perimParse(txt), out = [];
+  const TETTO = 200;                    // tetto del DISEGNO, non del diritto
+  let troncata = false;
+  for (let k = 0; k < P.tratti.length && !troncata; k++) {
+    for (let i = P.tratti[k][0]; i <= P.tratti[k][1]; i++) {
+      if (out.length >= TETTO) { troncata = true; break; }
+      out.push(String(i));
+    }
+  }
+  const tot = _perimConta(txt);
+  _plazaTronca = troncata ? { mostrate: out.length, totale: tot } : null;
+  return out;
 }
 /* ── il dito (v2.0.1, dopo il collaudo a teste diverse):
    TAP = apre (viva → sheet · libre → comandera) · SWIPE = scroll della
@@ -5303,6 +5381,11 @@ function renderMesas(r) {
   list.forEach(function (m) { if (todas.indexOf(m.mesa) < 0) todas.push(m.mesa); });
   if (todas.length) {
     h += '<div class="h">Mi plaza — ' + list.length + ' con gente</div>' +
+      /* v3.17.0 · [AUT-0034] · se il DISEGNO tronca, lo dice. Il diritto di
+         comandare non è più troncato (decide sugli intervalli), ma una mappa
+         incompleta che tace è come si è arrivati a bloccare ISA. */
+      (_plazaTronca ? '<div style="font-size:11px;color:var(--cs-avisa);margin:-2px 0 6px">🗺 Mostrando <b>' +
+        _plazaTronca.mostrate + '</b> de <b>' + _plazaTronca.totale + '</b> mesas — las demás <b>igual son tuyas</b>: ábrelas por número.</div>' : '') +
       '<div style="font-size:11px;color:#8a8577;margin:-2px 0 8px">toca = abrir · <b>mantén presionada</b> una mesa y arrastra = juntar</div>' +
       '<div class="mesa-grid" id="mapaGrid">';
     const jDib = {};   // v3.4.1 · junta già disegnata → i membri non si ripetono
