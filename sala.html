@@ -927,7 +927,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.17.0</span>
+      <span class="ver" id="ver">sala v3.19.0</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -981,6 +981,9 @@ const CFG = {
    `bo` (soglia della cadenza piena, in SECONDI): default 4 = come oggi;
    `?bo=8` la porta sopra il pavimento di Apps Script; `?bo=0` spegne il backoff. */
 const GESTO_FORZA = QS.get('gf') !== '0';
+/* v3.19.0 · [AUT-0035] · l'interruttore delle tre cure. `?pinta=0` riporta
+   il giro di ieri: bordo solo dall'URL, catch muto, backoff sempre. */
+const PINTA_ON = QS.get('pinta') !== '0';
 const BACKOFF_MS = QS.get('bo') === null ? 4000
                  : Math.max(0, parseInt(QS.get('bo'), 10) || 0) * 1000;
 
@@ -1194,7 +1197,23 @@ const BORDE_SALA = {
      liberato dalla fase sala (borde_sala_on=FALSE, misurato 300-400ms) la via
      diretta è più veloce E vera. Si torna al bordo con ?borde=1 — o quando
      la sombra riallineata (cantiere #10) porterà TUTTI i secchi, mercoledì. */
-  ON: new URLSearchParams(location.search).get('borde') === '1',
+  /* ═══ v3.19.0 · [AUT-0035] · ① IL BORDO SI RICORDA NELL'APPARECCHIO ═══════
+     Il male: `?borde=1` viveva SOLO nell'URL. Un telefono che lo perde — un
+     link condiviso, un preferito vecchio, un rientro dal PIN — finisce sul GAS
+     diretto, che di notte risponde più lento del proprio timeout. Da lì parte
+     la catena dello schermo nero (v. il `catch` di `refrescar`).
+     🔑 È lo stesso male del 23-lug con `?solo=mapa`, curato allo stesso modo:
+        il modo di lavorare sta NELL'APPARECCHIO, non nel link. Un parametro
+        d'URL è un biglietto che si perde in tasca.
+     `?borde=0` scorda (serve a tornare indietro), `?borde=1` ricorda.        */
+  ON: (function () {
+    const q = new URLSearchParams(location.search).get('borde');
+    try {
+      if (q === '1') { localStorage.setItem('sala_borde_v1', '1'); return true; }
+      if (q === '0') { localStorage.removeItem('sala_borde_v1'); return false; }
+      return localStorage.getItem('sala_borde_v1') === '1';
+    } catch (e) { return q === '1'; }
+  })(),
   /* v3.2 · caso Ray (30-lug sera, «entra y sale, lento»): il trigger che
      pubblica la sala sotto carico respira a 60-90s — con 45s di freschezza
      il telefono scartava foto BUONE e finiva sul GAS lento senza bisogno.
@@ -3724,6 +3743,50 @@ async function refrescar(conSkeleton) {
       _of.textContent = '⏳ Google respira lento — reintentando… (tus gestos igual quedan guardados)';
       _of.classList.add('show', 'vieja');
     }
+    /* ═══ v3.19.0 · [AUT-0035] · ② IL CATCH RIDIPINGE SEMPRE ═════════════════
+       IL GUASTO, riprodotto in browser sul file vivo il 20-ago:
+         giro 1 · fetch fallisce → render chiamato ZERO volte · 0 mese
+                  · e il banner NON ha `show`: schermo nero E MUTO
+         giro 2 · fallos=2 → compare il giallo · render ancora ZERO
+       La via felice finiva con `render(r)`; questa non ridipingeva niente.
+       Al PRIMO caricamento non era mai stato disegnato nulla → nero.
+       🎓 Un ramo d'errore che non tocca lo schermo lascia l'ultimo stato al
+          suo posto — e se non c'è ancora uno stato, quel posto è il vuoto.
+       La cura non inventa dati: mostra ciò che si ha, DICENDO cosa è.        */
+    if (PINTA_ON) try {
+      if (STATE.sala) {
+        render(STATE.sala);                      // l'ultima buona, resta in piedi
+      } else {
+        let f = null;
+        try { f = JSON.parse(localStorage.getItem('sala_foto_v1') || 'null'); } catch (e2) {}
+        if (f && f.r && f.nombre === STATE.nombre && f.local === CFG.LOCAL) {
+          /* 🔴 nessun tetto di 30 min qui, apposta: al boot una foto vecchia si
+             SCARTA perché sta per arrivarne una fresca. Qui la fresca NON è
+             arrivata — e una sala di un'ora fa, dichiarata, batte il vuoto.
+             Il `_foto_local` la marca: i gesti di denaro non si fidano di lei. */
+          f.r._foto_local = Math.max(1, Math.round((Date.now() - f.ts) / 1000));
+          STATE.sala = f.r; render(f.r);
+          _of.textContent = '📷 Sala de hace ' + Math.max(1, Math.round((Date.now() - f.ts) / 60000)) +
+            ' min — no logro actualizar. Tus gestos igual quedan guardados.';
+          _of.classList.add('show', 'vieja');
+        } else if (!document.querySelector('.mtile')) {
+          /* niente foto e niente disegnato: **mai lo schermo nero**. Si dice la
+             verità e si dà un dito da premere — l'attesa cieca è la cosa che
+             fa riaprire l'app, e riaprire non cura niente. */
+          const _g = $('mapaWrap') || $('vSala');
+          if (_g) _g.innerHTML =
+            '<div style="padding:26px 18px;text-align:center;color:#c2bcae">' +
+            '<div style="font-size:34px;margin-bottom:8px">📡</div>' +
+            '<div style="font-size:15px;font-weight:800;margin-bottom:5px">No logro ver la sala</div>' +
+            '<div style="font-size:13px;opacity:.8;line-height:1.5">Google no contesta.<br>' +
+            '<b>Lo que toques igual queda guardado</b> y entra al volver la señal.</div>' +
+            '<button class="btn" style="margin-top:14px" onclick="STATE.pollProxOk=0;refrescar(true)">Reintentar</button>' +
+            '</div>';
+          _of.textContent = 'Sin conexión — reintentando sola.';
+          _of.classList.add('show');
+        }
+      }
+    } catch (e3) { /* la cura non deve mai uccidere il poll */ }
   } finally {
     STATE.pollEnVuelo = false;
     // v3.6.7 · il backoff si tara sulla durata VERA del poll appena finito
@@ -3733,7 +3796,18 @@ async function refrescar(conSkeleton) {
        alzarla rimette carico sul bound e quella è una decisione, non un fix.
        Ma il giorno che la sala è di nuovo lenta si gira `?bo=8` dal telefono,
        senza deploy — e `?bo=0` spegne il backoff del tutto. */
-    STATE.pollProxOk = (BACKOFF_MS <= 0 || _pollDur < BACKOFF_MS) ? 0
+    /* ═══ v3.19.0 · [AUT-0035] · ③ NESSUN BACKOFF FINCHÉ NON SI VEDE NIENTE ══
+       Misurato in browser il 20-ago: un poll che dura 11 s congela il prossimo
+       per **45.000 ms**. Giusto per un telefono che sta già guardando la sala
+       — il backoff nasce per non tenere il bound al tetto (15-ago sera).
+       🔴 Ma su un telefono che NON ha ancora disegnato niente quei 45 s sono
+          tre quarti di minuto di schermo vuoto, e il mesero riapre l'app: che
+          è la cosa che aumenta il carico, cioè esattamente ciò che il backoff
+          esisteva per evitare. **Un freno che si morde la coda.**
+       Finché non c'è nulla sullo schermo si riprova subito; dal primo disegno
+       in poi il backoff torna quello di ieri, intatto. */
+    const _mai = PINTA_ON && !STATE.sala && !document.querySelector('.mtile');
+    STATE.pollProxOk = (_mai || BACKOFF_MS <= 0 || _pollDur < BACKOFF_MS) ? 0
                      : Date.now() + (_pollDur < 15000 ? 45000 : 75000);
   }
 }
