@@ -927,7 +927,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.17.0</span>
+      <span class="ver" id="ver">sala v3.18.0</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -4152,6 +4152,13 @@ async function vPrecuentaImprimir(mesa, btn, parte) {
            ciò che il vetro crede in quel momento. Solo la cuenta INTERA: il
            folio di una parte pinnerebbe il conto sbagliato. */
         if (r.folio) { STATE.pcFolio = STATE.pcFolio || {}; STATE.pcFolio[mesa] = r.folio; }
+        /* v3.18.0 · [AUT-0036] · la verità di SESSIONE arrivava qui da sempre
+           (`ya_pagado`, GAS v3.140.0) e si buttava via. Si ricorda accanto al
+           folio, e si ricorda ANCHE quando è vuota: «zero pagos in questa
+           sessione» è un fatto che spegne l'avviso di giornata, e vale quanto
+           il suo contrario. Senza questa riga la guardia resta cieca. */
+        STATE.pcYaPag = STATE.pcYaPag || {};
+        STATE.pcYaPag[mesa] = r.ya_pagado || { n: 0, monto: 0, pagos: [] };
       }
       vhojaCerrar();
       toast('ok', '🧾 ' + (r.folio || '') + (parte ? ' · parte de ' + parte.titulo : '') +
@@ -5377,6 +5384,10 @@ function renderMesas(r) {
   Object.keys(STATE.pcUlt || {}).forEach(function (m) { if (!vivos[m]) delete STATE.pcUlt[m]; });
   // v3.6.0 · stessa sorte per il folio ricordato: mesa libera = carta finita
   Object.keys(STATE.pcFolio || {}).forEach(function (m) { if (!vivos[m]) delete STATE.pcFolio[m]; });
+  /* v3.18.0 · [AUT-0036] · stessa sorte per la verita' di sessione: mesa
+     libera = sessione finita. Tenerla sarebbe peggio che non averla —
+     spegnerebbe l'avviso sui clienti NUOVI col dato di quelli di prima. */
+  Object.keys(STATE.pcYaPag || {}).forEach(function (m) { if (!vivos[m]) delete STATE.pcYaPag[m]; });
   const todas = _plazaLista();
   list.forEach(function (m) { if (todas.indexOf(m.mesa) < 0) todas.push(m.mesa); });
   if (todas.length) {
@@ -5532,6 +5543,55 @@ function _fintocDeMesa(mesa) {
 function _pagadaDeMesa(mesa) {
   const mp = (STATE.sala && STATE.sala.mesas_pagadas) || null;
   return (mp && mp[mesa]) ? mp[mesa] : null;
+}
+/* ═══ v3.18.0 · [AUT-0036] · LA GUARDIA CAMBIA DOMANDA, NON FORMA ══════════
+   Il buco più caro che abbiamo (15-ago: 8-14% della venta senza fattura) ha
+   due facce opposte, e questa riga sta in mezzo:
+     · la sessione che si chiude sotto il mesero (mesa 127 di Anthony)
+     · la sessione che non si chiude per il corte (le mese di Gabriel)
+
+   🔑 LA GUARDIA CONTRO IL DOPPIO ADDEBITO ESISTE GIÀ ED È GIUSTA: `okDoble`
+      toglie il bottone verde finché il mesero non tocca «Lo vi — es otro
+      cliente». **Non la tocco.** Quello che era sbagliato è LA DOMANDA:
+        oggi  → «questa mesa ha pagato OGGI?»    (`mesas_pagadas`, di giornata)
+        nuovo → «questa SESSIONE ha già un pago?» (`ya_pagado`, del GAS v3.140.0)
+      Su un tavolo che ha girato — pranzo pagato, clienti nuovi la sera — la
+      domanda vecchia grida al lupo parlando del cliente di PRIMA (caso mesa
+      117, 14-ago: la fascia fu spenta per questo, e il buco restò).
+   🎓 Una guardia che scatta sulla domanda sbagliata insegna a scavalcarla —
+      e poi fallisce il giorno che ha ragione. La cura non è togliere l'attrito
+      (Alberto, 18-ago: «quegli avvisi non hanno più senso») né aggiungerne
+      (CONTROLLER: «mai accettare in silenzio»): è **renderlo vero**.
+
+   ⚖️ Il calcolo NON si rifà qui: `ya_pagado` lo produce il GAS risalendo la
+      catena dei pagos fino alla «mesa limpia» vera. Il client lo RICEVE già da
+      `emitirPreCuenta` (r.~4141) **e lo buttava via**. Ora se lo ricorda.
+   🔴 PERIMETRO ONESTO: si sa la verità di sessione SOLO dopo una precuenta.
+      Sul cammino `directo` (nessuna cuenta stampata: il 41,2% dei pagos,
+      misurato il 18-ago) non c'è, e si ricade sull'indizio di giornata —
+      dichiarato come tale nella fascia, non spacciato per un fatto.
+   🧯 `?yapag=0` → la domanda di ieri, di giornata.                          */
+const YAPAG_ON = QS.get('yapag') !== '0';
+function _pagadaEnSesion(mesa) {
+  if (!YAPAG_ON) return null;
+  const s = (STATE.pcYaPag || {})[mesa];
+  if (!s || !s.n) return null;                      // «so, ed è zero» → non è un avviso
+  const ult = (s.pagos && s.pagos.length) ? s.pagos[s.pagos.length - 1] : null;
+  return { hora: (ult && ult.hora) || '', monto: s.monto || 0,
+           medio: '', quien: '', boleta: (ult && ult.boleta) || '',
+           n: s.n, sesion: true };
+}
+/* 🔴 «ESISTE?» e «COSA C'ERA» sono DUE domande (lezione 09-ago, pagata sul
+   ferro col dedup muto): qui la differenza è fra «la sessione dice zero» e
+   «della sessione non so niente». La prima SPEGNE l'avviso, la seconda lo
+   lascia acceso come indizio. Confonderle rimette il lupo o lo toglie. */
+function _pagadaAviso(mesa) {
+  const ses = _pagadaEnSesion(mesa);
+  if (ses) return ses;
+  if (!YAPAG_ON) return _pagadaDeMesa(mesa);
+  if ((STATE.pcYaPag || {})[mesa]) return null;     // so della sessione: è zero
+  const dia = _pagadaDeMesa(mesa);                  // non so: resta l'indizio
+  return dia ? Object.assign({}, dia, { sesion: false }) : null;
 }
 /* v3.5.7 · la riga «ya pagado» dentro il papel della precuenta (v. il commento
    lungo nel punto d'innesto: caso mesa 120, doppio addebito sfiorato).
@@ -5922,7 +5982,7 @@ function abrirPago(mesa, parte) {
        c'è. Nasce dalla notte del 15: tre pagos con carta dichiarati e mai
        incassati ($274.770 + $130.960 + $116.120). */
     voucher: '', sinVoucher: false, voucherPin: '',
-    ya: _pagadaDeMesa(mesa), okDoble: false };
+    ya: _pagadaAviso(mesa), okDoble: false };   // v3.18.0 [AUT-0036] · sessione, non giornata
   renderPago();
 }
 /* v3.7.0 · il pago in corso vuole il sello? (débito/crédito, anche dentro un mixto) */
@@ -6017,7 +6077,7 @@ function renderPago() {
      arrivava col pannello aperto e la fascia rossa restava assente). Si può
      solo GUADAGNARE l'avviso, mai perderlo; se compare, l'okDoble decade. */
   if (!pg.enviando) {
-    const yaF = _pagadaDeMesa(pg.mesa);
+    const yaF = _pagadaAviso(pg.mesa);   // v3.18.0 [AUT-0036]
     if (yaF && !pg.ya) { pg.ya = yaF; pg.okDoble = false; }
     else if (yaF) pg.ya = yaF;
   }
@@ -6076,12 +6136,26 @@ function renderPago() {
   const avisoYa = (ya && !esCort)
     ? '<div style="margin:10px 0 2px;padding:10px 12px;border-radius:12px;' +
         'background:rgba(226,75,74,.13);border:1px solid #e24b4a;color:#ffd9d8;font-size:13px;line-height:1.45">' +
-        '<b>⚠️ Esta mesa ya se cobró hoy</b><br>' +
-        esc(ya.hora) + ' · <b>' + fmtPrice(ya.monto) + '</b> · ' + esc(ya.medio) + ' · ' + esc(ya.quien) +
+        /* v3.18.0 · [AUT-0036] · un FATTO e un INDIZIO non si scrivono uguale.
+           `sesion:true` = il GAS ha risalito la catena dei pagos fino alla
+           «mesa limpia»: sono gli STESSI clienti, e il rischio è reale.
+           `sesion:false` = so solo che il NUMERO ha incassato oggi, e potrebbe
+           essere il turno di pranzo. Dirlo cambia cosa fa il mesero: nel primo
+           caso si ferma, nel secondo controlla. Scriverli uguali è come non
+           scriverli — è così che questa fascia si era guadagnata «no tiene
+           más sentido». */
+        (ya.sesion
+          ? '<b>⚠️ Esta cuenta ya se cobró</b> <span style="opacity:.8">— en esta misma sesión</span><br>'
+          : '<b>⚠️ Esta mesa ya cobró hoy</b> <span style="opacity:.8">— puede ser el turno anterior</span><br>') +
+        esc(ya.hora) + ' · <b>' + fmtPrice(ya.monto) + '</b>' +
+        (ya.medio ? ' · ' + esc(ya.medio) : '') + (ya.quien ? ' · ' + esc(ya.quien) : '') +
         (ya.boleta ? '<br>🧾 boleta <b>' + esc(ya.boleta) + '</b> — ya está en el SII' : '') +
-        (ya.n > 1 ? '<br><b>' + ya.n + ' veces</b> hoy' : '') +
-        '<br><span style="opacity:.85">Si es un cliente <b>nuevo</b>, sigue tranquilo. ' +
-        'Si es la <b>misma cuenta</b>, no cobres de nuevo: saldría una segunda boleta.</span></div>'
+        (ya.n > 1 ? '<br><b>' + ya.n + ' veces</b>' + (ya.sesion ? ' en esta sesión' : ' hoy') : '') +
+        '<br><span style="opacity:.85">' +
+        (ya.sesion
+          ? 'Si es la <b>misma cuenta</b>, no cobres de nuevo: saldría una segunda boleta.'
+          : 'Si es un cliente <b>nuevo</b>, sigue tranquilo. Si es la <b>misma cuenta</b>, no cobres de nuevo.') +
+        '</span></div>'
     : '';
   w.innerHTML = '<div class="cs-pago" onclick="if(event.target===this)pagoCerrar()"><div class="cs-pcard">' +
     '<div class="cs-asa"></div>' +
