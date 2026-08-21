@@ -287,7 +287,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.25</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.26</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -588,6 +588,12 @@ function bordeWriteOn() {
    diagnosi opposte e oggi hanno la stessa faccia.**
    📌 Zero cambi di comportamento: un campo in più nel payload. Il GAS di oggi
    ignora i campi che non conosce (garanzia già usata per `idioma`). */
+/* v1.26 · [AUT-0040 · metà A] IL VETRO DICE LA SUA VERSIONE.
+   Un campo nel payload del tap: il fossile smette di dedurre la versione
+   dall'assenza del marcatore (`via=?` diceva solo «vecchio», non QUANTO).
+   Il GAS la scrive nella riga di audit accanto alla via (2 righe, stessa
+   sanificazione). Client vecchio = campo assente = il GAS scrive `?`. */
+const KDS_VER = '1.26';
 async function staffPost(action, body) {
   let via = 'gas_borde_off';
   if (BORDE.ON && bordeWriteOn()) {
@@ -601,7 +607,7 @@ async function staffPost(action, body) {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         // `via` in fondo: il body non può sovrascriverlo (è un fatto, non un dato)
-        body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {}, { via: 'borde' })),
+        body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {}, { via: 'borde', vkds: KDS_VER })),
         signal: ctrl.signal, cache: 'no-store',
       });
       clearTimeout(to);
@@ -612,7 +618,7 @@ async function staffPost(action, body) {
       if (j && j.error) via = 'gas_' + String(j.error).replace(/[^a-z_]/gi, '').slice(0, 12);
     } catch (e) { via = 'gas_red'; }
   } else if (BORDE.ON) { via = 'gas_bw_off'; }
-  return await gasPost(action, Object.assign({}, body || {}, { via: via }));
+  return await gasPost(action, Object.assign({}, body || {}, { via: via, vkds: KDS_VER }));
 }
 
 async function leerKds(codigo, estacion) {
@@ -710,6 +716,31 @@ async function poll(){
   }
 }
 function aplicar(r){
+  /* ═════ v1.26 · [AUT-0040 · metà B] IL VETRO SI RINNOVA DA SOLO ═══════════
+     Scoperto il 19-ago col marcatore `via`: questo tablet si rinnova il codice
+     del turno SENZA mai ricaricare la pagina (v1.11, voluto) — quindi può
+     girare per GIORNI su una versione vecchia. Deploy delle 09:45, servizio
+     intero su v1.24: 645 tap senza marcatore.
+     La ricarica avviene SOLO al cambio di `fecha_op` (il taglio delle 06:00),
+     quando la coda è per definizione vuota — e con DUE guardie, perché una
+     ricarica in mezzo a un servizio è peggio di un tablet vecchio:
+       ① fecha_op cambiata (non primo poll: serve un valore precedente)
+       ② zero card a schermo (cola E listos vuoti — non si strappa niente,
+          e senza card non esiste nemmeno un tap a metà)
+     (una terza guardia su `pollEnVuelo` sarebbe TEATRO: aplicar gira DENTRO
+      il poll, quel flag qui è sempre alzato — trovato dal collaudo ⑤)
+     Il codigo e la estación vivono in localStorage: il tablet torna alla cola
+     DA SOLO, nessun gesto del JL (r.10 — è il motivo per cui è sicuro).
+     🧯 freno: `?ar=0` nell'URL — per apparecchio, come `?borde=0`. */
+  if (r && r.fecha_op) {
+    if (STATE.fechaOp && r.fecha_op !== STATE.fechaOp
+        && !(r.cola || []).length && !(r.listos || []).length
+        && QS.get('ar') !== '0') {
+      try { location.reload(); } catch (e) {}
+      return;
+    }
+    STATE.fechaOp = r.fecha_op;
+  }
   // v1.17 · EL TREN si fonde PRIMA di tutto: vistos/alarma/pins/render
   // vedono già le card fuse (uuid sintetico 'u1+u2').
   if (r && r.cola) r.cola = fundeTrenes(r.cola, false);
