@@ -927,7 +927,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.18.0</span>
+      <span class="ver" id="ver">sala v3.19.0</span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1233,7 +1233,17 @@ function bordeWriteOn() {
   return !!(STATE.sala && STATE.sala.bw);
 }
 async function staffPost(action, body) {
-  if (BORDE_SALA.ON && bordeWriteOn()) {
+  /* ═══ v3.19.0 · [AUT-EMERG 22-ago] · LA PENNA SI SGANCIA DALLA FOTO ═══════
+     Scoperto la notte del 21: `BORDE_SALA.ON` è l'opt-in della FOTO (spento
+     dal 15-ago perché la foto mentiva sul por_limpiar) — e teneva spente ANCHE
+     le scritture al bordo, che con la foto non c'entrano niente. Da allora
+     ogni gesto pagava il GAS (marcarPedido 2,5s ×577, crearPedido 6,9s ×313,
+     pago 9,4s ×125 — T_MS della notte). LEGGERE la sala e SCRIVERE un gesto
+     sono due vie diverse: la penna ha la SUA leva (`mesero_borde_write_on` in
+     PARAMETROS, o ?bordew=1/0 per telefono) e da oggi risponde solo a quella.
+     Il fallback GAS resta identico: qualsiasi risposta senza `borde:true` →
+     la via di sempre. 🧯 Freno: bw=FALSE → mondo di ieri, zero deploy. */
+  if (bordeWriteOn()) {
     try {
       const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS')
         + '?t=' + encodeURIComponent(BORDE_SALA.T);
@@ -1305,7 +1315,14 @@ const BORDE_PAGO = {
 /* Ritorna la risposta del bordo se il pago è ACCETTATO, `null` in ogni altro
    caso — e `null` significa una cosa sola: fai quello che facevi ieri. */
 async function _pagoAlBorde(body, consumo) {
-  if (!BORDE_SALA.ON || BORDE_PAGO.QS === '0') return null;
+  /* v3.19.0 · [AUT-EMERG 22-ago] · stessa sganciata di staffPost: il pago al
+     bordo era incatenato a BORDE_SALA.ON (la foto) e quindi spento per tutti
+     dal 15-ago — 125 pagos a 9,4s con l'ACK da 200ms già costruito e
+     collaudato. La penna del pago segue la STESSA leva dei gesti (bw), più la
+     sua manopola ?pago=1/0. Le cinque porte di rifiuto del Worker e il
+     fallback GAS restano intatti: questa riga decide solo a chi si bussa
+     per primi. */
+  if (!bordeWriteOn() || BORDE_PAGO.QS === '0') return null;
   if (BORDE_PAGO.QS !== '1' && Date.now() < BORDE_PAGO.pausaHasta) return null;
   /* la porta si guarda sul payload GIÀ COSTRUITO, non sullo stato del pannello:
      è il payload che parte, ed è di lui che stiamo dicendo «è semplice». */
