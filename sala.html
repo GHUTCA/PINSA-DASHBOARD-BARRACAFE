@@ -927,7 +927,14 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.20.1</span>
+      <span class="ver" id="ver">sala v3.21.0</span>
+      <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
+           gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
+           fallback è muto per disegno (è la sua virtù), ma un ripiego che non
+           si dichiara è un guasto invisibile. Qui la ragione dell'ultimo gesto
+           si vede in due caratteri, sul telefono di chi lavora. Zero logica
+           nuova: solo il verdetto dell'ultima staffPost. -->
+      <span class="ver" id="verw" style="font-weight:700"></span>
       <span class="ver" id="colaBadge" style="color:#f5a623;font-weight:600"></span>
       <!-- v2.6 · canale Pinsita: spento = ayuda · pulsante = hay novedad -->
       <span id="novBadge" onclick="novAbrir()" style="cursor:pointer;opacity:.45;font-size:15px" title="Pinsita">✨</span>
@@ -1252,29 +1259,48 @@ async function staffPost(action, body) {
      PARAMETROS, o ?bordew=1/0 per telefono) e da oggi risponde solo a quella.
      Il fallback GAS resta identico: qualsiasi risposta senza `borde:true` →
      la via di sempre. 🧯 Freno: bw=FALSE → mondo di ieri, zero deploy. */
-  if (bordeWriteOn()) {
-    try {
-      const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS')
-        + '?t=' + encodeURIComponent(BORDE_SALA.T);
-      const ctrl = new AbortController();
-      const to = setTimeout(() => ctrl.abort(), 6000);
-      const r = await fetch(u, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {})),
-        signal: ctrl.signal, cache: 'no-store',
-      });
-      clearTimeout(to);
-      const j = await r.json();
-      // solo una risposta TIMBRATA dal DO è definitiva; tutto il resto
-      // (sin_gate 503, rate_limit 429, token, rete) → la via di sempre.
-      if (j && j.borde === true) {
-        if (j.ok && body && body.uuid) BORDE_W.ok[body.uuid] = Date.now();
-        return j;
-      }
-    } catch (e) { /* il bordo non risponde → GAS, come oggi */ }
+  if (!bordeWriteOn()) { _pennaDice('gas:leva-off'); return await gasPost(action, body); }
+  try {
+    const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS')
+      + '?t=' + encodeURIComponent(BORDE_SALA.T);
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(u, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {})),
+      signal: ctrl.signal, cache: 'no-store',
+    });
+    clearTimeout(to);
+    const j = await r.json();
+    // solo una risposta TIMBRATA dal DO è definitiva; tutto il resto
+    // (sin_gate 503, rate_limit 429, token, rete) → la via di sempre.
+    if (j && j.borde === true) {
+      if (j.ok && body && body.uuid) BORDE_W.ok[body.uuid] = Date.now();
+      _pennaDice('borde');
+      return j;
+    }
+    /* v3.21.0 · il ripiego DICE il suo motivo. Fino a oggi taceva: il 22-ago
+       ci è costato mezza giornata di diagnosi a scatola chiusa. */
+    _pennaDice('gas:' + ((j && (j.error || j.motivo)) || ('http' + r.status)));
+  } catch (e) {
+    _pennaDice('gas:' + (e && e.name === 'AbortError' ? 'timeout' : 'red'));
   }
   return await gasPost(action, body);
+}
+/* v3.21.0 · [AUT-EMERG-0004] · due caratteri in fondo alla sala: da dove è
+   passato l'ultimo gesto. ✍ verde = bordo · ⚠ ambra = ripiego, col motivo.
+   Non cambia NIENTE nel comportamento: guarda e basta. */
+let _PENNA_ULT = '';
+function _pennaDice(v) {
+  _PENNA_ULT = v || '';
+  try {
+    const el = document.getElementById('verw');
+    if (!el) return;
+    const ok = _PENNA_ULT === 'borde';
+    el.textContent = ok ? '✍ borde' : ('⚠ ' + _PENNA_ULT);
+    el.style.color = ok ? '#22c55e' : '#f5a623';
+  } catch (e) {}
 }
 
 /* ═════ v1.19 · FASE B · IL PAGO AL BORDO (11-ago-2026) ═════
