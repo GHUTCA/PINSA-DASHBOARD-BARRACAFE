@@ -927,7 +927,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.25.0</span>
+      <span class="ver" id="ver">sala v3.26.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2109,6 +2109,33 @@ function corrPin(v) { STATE.editPinJL = v; }   /* niente re-render: perderebbe i
 const _CATALOGO_TTL_MS = 120000;
 function _catalogoViejo() { return !STATE.catalogo || !STATE.catalogoTs || (Date.now() - STATE.catalogoTs > _CATALOGO_TTL_MS); }
 
+/* ═══ v3.26.0 · [AUT-0062] · IL MESERO SA COSA È FINITO ═══════════════════
+   Pagato sul ferro oggi, mesa 51 (segnalato da Alberto dal terreno):
+     12:35:20  Eduardo mette in 86 la Merluza
+     12:38:54  Nacho la vende — perché il SUO telefono non lo sapeva
+   `getCatalogo` esclude già gli 86, ma il catalogo del mesero è una FOTO con
+   TTL 120 s, e il tempo di comporre l'ordine allarga ancora la finestra: per
+   qualche minuto la comandera offre un piatto che la cucina non ha più.
+   Il cliente col QR era protetto (poll `getAgotados` ogni 60 s), il mesero no.
+   🔑 Qui NON si aggiunge un poll (regola della casa): si impara dal RIFIUTO.
+   Dal v3.169.0 il server dice `items_agotados` col nome del piatto — quel no
+   diventa memoria: il prodotto sparisce dal picker e si segna in rosso nella
+   libreta, e il catalogo si invalida perché il prossimo giro sia vero.
+   Vive per la sessione: un 86 tolto torna disponibile al refresh del catalogo. */
+function _ago86Marca(ids) {
+  if (!STATE._ago86) STATE._ago86 = {};
+  (ids || []).forEach(function (x) {
+    const id = (x && x.id ? x.id : x || '').toString().trim();
+    if (id) STATE._ago86[id] = true;
+  });
+  // il catalogo in mano è bugiardo: si butta la foto e si toglie il piatto
+  STATE.catalogoTs = 0;
+  if (Array.isArray(STATE.catalogo)) {
+    STATE.catalogo = STATE.catalogo.filter(function (p) { return !STATE._ago86[p.id]; });
+  }
+}
+function _ago86(id) { return !!(STATE._ago86 && STATE._ago86[(id || '').toString().trim()]); }
+
 /* ═════ v1.15 · AGREGAR items al pedido pre-digitado (upsell «¿otra copa?») ═════ */
 async function agregarAbrir(uuid) {
   STATE.agregando = uuid;
@@ -2119,6 +2146,7 @@ async function agregarAbrir(uuid) {
       if (r && r.ok && Array.isArray(r.productos)) {
         STATE.catalogo = r.productos;
         STATE.catalogoTs = Date.now();
+        STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server: un 86 tolto TORNA disponibile
         STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
         STATE.terminoOps = Array.isArray(r.termino_opciones) ? r.termino_opciones : (STATE.terminoOps || []); // v3.0 · términos carne (GAS v3.124.0)
         mods2Cargar(r);  // v3.14.0 · col catálogo viaggia il cancello del foglio (v3.10: una lettura, mai un poll)
@@ -2143,7 +2171,8 @@ function agregarBuscar(v) {   // no re-render completo (perderebbe il focus): fi
 }
 function _agregarListaHtml() {
   const q = (STATE.agregarQ || '').toLowerCase().trim();
-  const cat = (STATE.catalogo || []);
+  // v3.26.0 · [AUT-0062] · ciò che è finito non si offre più
+  const cat = (STATE.catalogo || []).filter(function (p) { return !_ago86(p.id); });
   const filt = (q ? cat.filter(p => (p.nombre || '').toLowerCase().includes(q)) : cat).slice(0, 40);
   if (!cat.length) return '<div class="agr-vacio">catálogo vacío</div>';
   if (!filt.length) return '<div class="agr-vacio">nada con «' + esc(q) + '»</div>';
@@ -2282,6 +2311,7 @@ async function nuevoAbrir(mesaPre) {
       if (r && r.ok && Array.isArray(r.productos)) {
         STATE.catalogo = r.productos;
         STATE.catalogoTs = Date.now();
+        STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server: un 86 tolto TORNA disponibile
         STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
         STATE.terminoOps = Array.isArray(r.termino_opciones) ? r.termino_opciones : (STATE.terminoOps || []); // v3.0 · términos carne (GAS v3.124.0)
         mods2Cargar(r);  // v3.14.0 · col catálogo viaggia il cancello del foglio (v3.10: una lettura, mai un poll)
@@ -3441,6 +3471,20 @@ async function nuevoEnviar(btn) {
       refrescar(false);
       return;
     }
+    /* v3.26.0 · [AUT-0062] · il no che INSEGNA. Il server (v3.169.0) dice
+       quale piatto è finito: si dice al mesero col NOME, si toglie dal
+       picker e si segna la riga — la libreta NON si perde, lui cambia il
+       piatto e rispedisce con lo stesso uuid. Prima leggeva «No se pudo:
+       items_agotados» e non sapeva quale. */
+    if (r && r.error === 'items_agotados') {
+      _ago86Marca(r.agotados || []);
+      const nomi = (r.agotados || []).map(function (x) { return x.nombre || x.id; }).join(' · ');
+      toast('err', '🚫 Se acabó: ' + (nomi || r.producto || '') + ' — cámbialo y vuelve a enviar');
+      if (btn) btn.disabled = false;
+      n.enviando = false;
+      renderNuevo();
+      return;
+    }
     toast('err', 'No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
     // v2.2 · MODO PUENTE: la captura NO depende del pulgar que reintenta.
@@ -3558,6 +3602,7 @@ function entrarSala() {
   if (_catalogoViejo()) gasGet('getCatalogo', { codigo: STATE.codigo }).then(function (r) {
     if (r && r.ok && Array.isArray(r.productos)) {
       STATE.catalogo = r.productos; STATE.catalogoTs = Date.now();
+      STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server
       STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);
       mods2Cargar(r);   // v3.14.0 · il cancello del foglio, dalla precarica
       if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
