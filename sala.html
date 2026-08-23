@@ -927,7 +927,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.23.0</span>
+      <span class="ver" id="ver">sala v3.24.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1319,6 +1319,32 @@ function _pennaDice(v) {
     el.textContent = ok ? '✍ borde' : ('⚠ ' + _PENNA_ULT);
     el.style.color = ok ? '#22c55e' : '#f5a623';
   } catch (e) {}
+}
+
+/* ═════ v3.24.0 · [AUT-0058] · IL TESTIMONE — il bordo viene a sapere ══════
+   I verbi che NON passano dal bordo (moverMesa · corregirPedido · unir/
+   separar · il pago con porte) restano sincroni sul GAS, che è il loro
+   giudice (PIN, plaza, grupo). Ma il vetro degli ALTRI telefoni li scopriva
+   solo al battito dopo — minuti, quando il battito soffre: sono le 10 mese
+   su 59 della misura dell'83% (22-ago 22:00). Da oggi, DOPO l'ok del GAS,
+   si racconta il fatto al bordo: eco e sombra lo applicano al poll
+   successivo. Fire-and-forget: se la notifica muore, comportamento di ieri
+   (la foto ripara da sola). MAI prima dell'ok: il testimone racconta il
+   libro, non le intenzioni. */
+function bordeHecho(gesto, datos) {
+  try {
+    if (!BORDE_SALA || !BORDE_SALA.URL) return;
+    const uid = 'gh-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+    const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS')
+      + '?t=' + encodeURIComponent(BORDE_SALA.T);
+    fetch(u, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ action: 'gestoHecho', local: CFG.LOCAL,
+        codigo: STATE.codigo, nombre: STATE.nombre, gesto: gesto, uid: uid }, datos || {})),
+      cache: 'no-store',
+    }).catch(function () {});
+  } catch (e) { /* un testimone che inciampa non ferma nessun gesto */ }
 }
 
 /* ═════ v1.19 · FASE B · IL PAGO AL BORDO (11-ago-2026) ═════
@@ -2158,6 +2184,12 @@ async function guardarCorreccion(uuid, btn) {
          ancora uscito resta il gesto libero di sempre, senza attrito. */
       STATE.editVoid ? { motivo: STATE.editMotivo, pin_jl: (STATE.editPinJL || '').trim() } : {}));
     if (r && r.ok) {
+      /* v3.24.0 · [AUT-0058] il testimone: il GAS risponde col totale NUOVO
+         (o `cancelado`) — si racconta al bordo, mai prima dell'ok. */
+      if (r.cancelado) bordeHecho('corregir', { uuid: uuid, total_nuevo: 0 });
+      else if (!r.sin_cambios && r.total != null) {
+        bordeHecho('corregir', { uuid: uuid, total_nuevo: r.total, items_json_nuevo: r.items_json || '' });
+      }
       toast('ok', r.void_jl
         ? '✓ Cambiado — «' + (r.motivo || '') + '», autorizó ' + r.void_jl
         : (r.cancelado ? 'Pedido cancelado — la mesa se arrepintió' : (r.sin_cambios ? 'Sin cambios' : '✓ Corregido — queda en el registro')));
@@ -2319,6 +2351,7 @@ async function moverMesaUI(de){
   try {
     const r = await gasPost('moverMesa', { codigo: STATE.codigo, nombre: STATE.nombre, de: de, a: a });
     if (r && r.ok) {
+      bordeHecho('mover', { de: de, a: a });   // v3.24.0 · [AUT-0058] il vetro degli altri lo sa subito
       toast('ok', '🔀 Mesa ' + de + ' → ' + a + ' · ' + r.movidos + ' pedido' + (r.movidos > 1 ? 's' : '') +
         (r.cerrados_quedan ? ' · ' + r.cerrados_quedan + ' cerrados quedan en la ' + de : '') +
         (r.plaza ? ' · ' + r.plaza : ''));
@@ -4490,6 +4523,7 @@ async function _mvHacer(btn) {
   try {
     const r = await gasPost('moverMesa', { codigo: STATE.codigo, nombre: STATE.nombre, de: _mvDe, a: _mvA });
     if (r && r.ok) {
+      bordeHecho('mover', { de: deL, a: aL });   // v3.24.0 · [AUT-0058] il vetro degli altri lo sa subito
       vhojaCerrar(); vpSoltar();
       STATE.movLocal = (STATE.movLocal || []).concat([{ de: deL, a: aL, ts: Date.now() }]);
       _movAplica(STATE.sala);
@@ -5197,6 +5231,12 @@ function juntaCrear() {
       gasPost('unirMesas', { codigo: STATE.codigo, nombre: STATE.nombre,
         mesas: [jj.principal].concat(jj.mesas.filter(function (m) { return m !== jj.principal; })).join(',') })
         .then(function (r) {
+          if (r && r.ok) {
+            // v3.24.0 · [AUT-0058] il testimone: la junta si vede anche dagli altri
+            // telefoni — STESSA lista mandata al GAS (principal inclusa)
+            bordeHecho('unir', { principal: jj.principal,
+              mesas: [jj.principal].concat(jj.mesas.filter(function (m) { return m !== jj.principal; })).join(',') });
+          }
           if (r && r.ok && r.grupo_id) {
             const l2 = _juntasLoad(); const x = l2.find(function (y) { return y.n === jj.n; });
             if (x) { x.gid = r.grupo_id; _juntasSave(l2); }
@@ -5216,7 +5256,13 @@ function juntaSeparar(nJ) {
   toast('ok', '✂ Junta ' + nJ + ' separada — cada plato vuelve con su mesa. No se pierde nada.');
   // e il grupo VERO nel libro si chiude anche lui (BLOCCO 3: codigo, no PIN)
   if (j.gid || j.principal) {
-    try { gasPost('separarMesas', { codigo: STATE.codigo, nombre: STATE.nombre, principal: j.principal }).catch(function () {}); } catch (e) {}
+    try {
+      gasPost('separarMesas', { codigo: STATE.codigo, nombre: STATE.nombre, principal: j.principal })
+        .then(function (r) {
+          // v3.24.0 · [AUT-0058] il testimone, solo DOPO l'ok del GAS
+          if (r && r.ok) bordeHecho('separar', { principal: j.principal, mesas: (j.mesas || []).join(',') });
+        }).catch(function () {});
+    } catch (e) {}
   }
   cerrarMesa(); refrescarMapa();
 }
@@ -5765,6 +5811,7 @@ async function fintocRegistrar(mesa) {
       mesa: mesa, medio: 'fintoc', ref: pagFin.pi || '',
       propina: Math.max(0, Math.round(pagFin.monto - tot)), boleta: 1 });
     if (r && r.ok) {
+      bordeHecho('pago_gas', { mesa: mesa, monto: pagFin.monto || 0 });   // v3.24.0 · [AUT-0058] il testimone
       const ent = _entregadosDeMesa(mesa)[0];
       if (ent) { _marcarLocal(ent.uuid, 'limpia', mesa); if (STATE.sala) _aplicarMarcados(STATE.sala); }
       /* v1.17 · stessa dottrina del tap PAGADO (A3, 10-ago): il fossile torna
@@ -6124,6 +6171,7 @@ async function pagoFamConfirmar() {
       mesa: pg.mesa, medio: 'fam', fam: 1, pin_fam: (pg.pinFam || '').trim() });
     if (r && r.ok) {
       _limpiarMesaLocal(pg.mesa);   // v3.5.9 · la marca nasce SEMPRE, anche senza modello
+      bordeHecho('pago_gas', { mesa: pg.mesa, monto: 0 });   // v3.24.0 · [AUT-0058] il testimone
       toast('ok', '👨‍👩‍👧 Mesa FAM ✓ mesa ' + pg.mesa + ' · $0' +
         (r.en_vuelo ? ' · ' + r.en_vuelo + ' cerrados sin marcar entrega' : ''));
       STATE.pago = null; renderPago(); cerrarMesa(); refrescar(false); return;
@@ -6616,6 +6664,12 @@ async function pagoConfirmar(btn) {
       /* v1.13 · il GAS v3.85 chiude TUTTA la mesa al pago (anche gli in-volo):
          la mano ottimistica fa sparire OGNI pedido della mesa, subito. */
       _limpiarMesaLocal(pg.mesa);   // v3.5.9 · la marca nasce SEMPRE, anche senza modello
+      /* v3.24.0 · [AUT-0058] il testimone: il pago con porte (PIN/sconto/
+         cortesía) passa dal GAS e il bordo non lo vedeva mai — la mesa
+         restava aperta sul vetro degli ALTRI (caso mesa 88/97 del 22-ago).
+         Si notifica SOLO il cierre completo: la parte (`mesa_abierta`) non
+         chiude niente e non deve sottrarre niente. */
+      bordeHecho('pago_gas', { mesa: pg.mesa, monto: r.monto || pg.tot || 0 });
       /* v1.16 · il server dice «questo pago esisteva già» (guardia mesa 49):
          non è un errore ed è la risposta giusta — la mesa si chiude, e il
          mesero legge che NON ha cobrato due volte. */
