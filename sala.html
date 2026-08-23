@@ -927,7 +927,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.22.0</span>
+      <span class="ver" id="ver">sala v3.23.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1216,7 +1216,25 @@ const BORDE_SALA = {
      il telefono scartava foto BUONE e finiva sul GAS lento senza bisogno.
      120s tollera il respiro; il pericolo dati-vecchi non esiste: la foto
      porta la sua età e oltre i 120s si va comunque al GAS. */
-  MAX_EDAD_MS: 360000,   // v3.5 (31-jul cena): col picco del rush la foto sfiora i 240   // v3.4 (31-jul, pranzo): il trigger sotto carico slitta a 90-120s
+  /* ═══ v3.23.0 · [AUT-EMERG-0005] · 23-ago 00:3x, A LOCALE PIENO ═══════════
+     «MESAS DESAPARECEN», tutti insieme. Misurato mentre gridavano: al bordo la
+     mappa era PIENA (82 tavoli, sempre) — a sparire era lo schermo. Il battito
+     si ferma ogni ~5 min, la foto supera i 6 minuti, TUTTI i telefoni la
+     buttano nello stesso istante e vanno a chiedere a Google, che risponde in
+     **89.188 ms · 71.086 ms · 74.663 ms** (~60 letture in 20 minuti). In quel
+     minuto e mezzo lo schermo è vuoto.
+     🔑 Decisione di Alberto, testuale: *«se vede la foto vecchia non è tanto
+     problema, il problema è non vederla»*. Il tetto sale a 15 minuti: il
+     telefono non scarta più la foto del bordo e non fa più la fila davanti a
+     Google. Ciò che si muove davvero resta fresco lo stesso — l'eco del bordo
+     sovrappone ordini, MÍO, entregado e pagos che Google non ha ancora visto.
+     ⚖️ E il prezzo si DICHIARA, o la cura diventa una bugia (norma N4, scritta
+     tre ore fa): oltre `DECLARA_MS` la foto viaggia marcata `_vieja_s` e il
+     mesero legge in cima «📷 Sala de hace N min». Sotto i 5 minuti non cambia
+     NIENTE rispetto a ieri: nessun banner, foto salvata, avvisi attivi.
+     🧯 Rollback: `git revert` + push (~60 s) — o `?borde=0` sul singolo telefono. */
+  MAX_EDAD_MS: 900000,   // v3.23.0: 6 min → 15 min (v. sopra)   // v3.5 (31-jul cena): col picco del rush la foto sfiora i 240   // v3.4 (31-jul, pranzo): il trigger sotto carico slitta a 90-120s
+  DECLARA_MS: 300000,    // v3.23.0: oltre 5 min la foto DICE la sua età
                           // e la foto al limite veniva SCARTATA -> GAS ingolfato -> sala vuota.
                           // Una foto di 2-4 min con i TAVOLI visibili batte uno schermo vuoto.
   fallos: 0,
@@ -1449,7 +1467,17 @@ async function leerSala(codigo, nombre) {
                 comportamento di prima, mai a mostrare roba più vecchia.** */
           const _tsD = Number((j.datos.datos.ts_datos || j.datos.datos.ts) || 0);
           const _edadV = _tsD > 0 ? Math.max(0, Date.now() - _tsD) : (j.datos.edad_ms || 0);
-          if (_edadV < BORDE_SALA.MAX_EDAD_MS) { BORDE_SALA.fallos = 0; mia._edad_dato_s = Math.round(_edadV / 1000); return mia; }
+          if (_edadV < BORDE_SALA.MAX_EDAD_MS) {
+            BORDE_SALA.fallos = 0;
+            mia._edad_dato_s = Math.round(_edadV / 1000);
+            /* v3.23.0 · una sala vecchia si mostra, ma DICE quanto è vecchia.
+               `_vieja_s` accende il banner «📷 Sala de hace N min», salta il
+               toast della junta (il confronto fra due poll non è affidabile su
+               una foto vecchia) e non la salva come foto di boot: sono i tre
+               comportamenti giusti per un dato stantio, e sono già scritti. */
+            if (_edadV > BORDE_SALA.DECLARA_MS) mia._vieja_s = mia._edad_dato_s;
+            return mia;
+          }
           fotoVieja = mia; fotoVieja._vieja_s = Math.round(_edadV / 1000);
         }
         // il mio nombre non c'è nella foto (appena entrato, fila non ancora
