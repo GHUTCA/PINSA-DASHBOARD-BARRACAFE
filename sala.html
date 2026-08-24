@@ -2407,7 +2407,25 @@ try { _gFail = JSON.parse(localStorage.getItem('sala_gfail_v1') || '{}') || {}; 
 /* 🔴 il rosso SOPRAVVIVE AL RELOAD. Vivendo in RAM sarebbe sparito proprio
    quando il mesero ricarica perché qualcosa non torna — la famiglia di
    `_ricaduta` del 23-ago: il testimone muore nello scenario del guasto. */
-function _gFailSalva() { try { localStorage.setItem('sala_gfail_v1', JSON.stringify(_gFail)); } catch (e) {} }
+/* 🔴 TETTO E ROTAZIONE — come ogni cosa che cresce (cantiere 13), qui su un
+   telefono invece che su una tab. Senza, un rosso mai toccato resta per giorni
+   e la lista cresce da sola. TTL 24 h · tetto 20, si tengono i più recenti.
+   Il tetto NON è muto: se taglia, la banda lo dice. */
+var _GFAIL_TTL_MS = 24 * 3600 * 1000, _GFAIL_MAX = 20, _gFailTagliati = 0;
+function _gFailPota() {
+  const ora = Date.now();
+  Object.keys(_gFail).forEach(function (k) {
+    const g = _gFail[k];
+    if (!g || !g.ts || ora - g.ts > _GFAIL_TTL_MS) delete _gFail[k];
+  });
+  const ks = Object.keys(_gFail).sort(function (a, b) { return (_gFail[b].ts || 0) - (_gFail[a].ts || 0); });
+  _gFailTagliati = Math.max(0, ks.length - _GFAIL_MAX);
+  ks.slice(_GFAIL_MAX).forEach(function (k) { delete _gFail[k]; });
+}
+function _gFailSalva() { _gFailPota(); try { localStorage.setItem('sala_gfail_v1', JSON.stringify(_gFail)); } catch (e) {} }
+/* la potatura gira anche all'AVVIO: un telefono spento tre giorni non deve
+   riaprire la sala coi rossi di venerdì. */
+setTimeout(function () { try { _gFailSalva(); } catch (e) {} }, 0);
 
 /* i pedidos che il gesto DEVE portarsi via: gli aperti. I `pagados` NO —
    sono i `cerrado` che la cucina non ha ancora fatto uscire, e il confirm
@@ -2443,17 +2461,28 @@ function _gestoRiconcilia(list) {
   Object.keys(_gPend).forEach(function (gid) {
     const g = _gPend[gid];
     if (g.tipo === 'mover') {
+      /* ⚠️ LIMITE DICHIARATO: il vetro NON verifica l'ATOMICITÀ del movimento.
+         `some` è deliberato — con `every`, un uuid cambiato o chiuso nel frattempo
+         darebbe un rosso FALSO, cioè il difetto che abbiamo appena curato.
+         Un movimento PARZIALE si legge qui come successo pieno.
+         L'ATOMICITÀ LA VERIFICA IL LIBRO, non il vetro.
+         CHI LO UCCIDE: una vedetta che cerca pedidos della stessa sessione su DUE
+                        mese dopo un mover.
+         QUANDO: non questa settimana · proprietario 📊 STATISTICS. */
       const arrivati = (g.uuids || []).some(function (u) { return dove[u] === String(g.a); });
       if (arrivati) { _gestoOk(gid); return; }
       // ripiego se non avevo gli uuid (modello non ancora popolato al gesto)
       if (!(g.uuids || []).length && vive[String(g.a)] && !vive[String(g.de)]) { _gestoOk(gid); return; }
     }
-    if (Date.now() - g.t0 > 90000) { _gFail[gid] = g; delete _gPend[gid]; _gFailSalva(); }
+    if (Date.now() - g.t0 > 90000) { _gFail[gid] = { tipo: g.tipo, de: g.de, a: g.a, ts: Date.now() }; delete _gPend[gid]; _gFailSalva(); }
   });
 }
 function _gestoAvvisoHtml() {
   const ks = Object.keys(_gFail); if (!ks.length) return '';
-  return ks.map(function (gid) {
+  // nessun tetto muto: se la potatura ha tagliato, la banda lo dice
+  const extra = _gFailTagliati ? '<div style="font-size:11px;color:#fca5a5;margin:0 0 6px">⚠ y ' +
+    _gFailTagliati + ' más (lista llena)</div>' : '';
+  return extra + ks.map(function (gid) {
     const g = _gFail[gid];
     return '<div onclick="_gestoVisto(\'' + gid + '\')" style="cursor:pointer;font-size:12px;font-weight:800;' +
       'background:#7f1d1d;color:#fff;border-radius:8px;padding:8px 10px;margin:0 0 8px">' +
@@ -2479,7 +2508,7 @@ function _gConflitto(r) {
   const n = (r.movidas !== undefined) ? Number(r.movidas) : Number(r.movidos);
   return n === 0;
 }
-function _gestoRosso(gid, tipo, de, a) { _gFail[gid] = { tipo: tipo, de: de, a: a }; delete _gPend[gid]; _gFailSalva(); }
+function _gestoRosso(gid, tipo, de, a) { _gFail[gid] = { tipo: tipo, de: de, a: a, ts: Date.now() }; delete _gPend[gid]; _gFailSalva(); }
 
 async function moverMesaUI(de){
   const a = (window.prompt('¿A qué mesa se cambió el cliente de la mesa ' + de + '?') || '').replace(/[^0-9]/g, '');
