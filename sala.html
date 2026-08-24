@@ -927,7 +927,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.26.0</span>
+      <span class="ver" id="ver">sala v3.27.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2384,13 +2384,128 @@ function novEntendida(id){
    El GAS mueve solo el consumo ABIERTO de la sesión (cerrados jamás) y deja
    fósil en AUDIT; con precuenta emitida susurra a la cúpula (anti-truco).
    El menú del cliente (v2.30.0) sigue solo: su historia viaja con el teléfono. */
+/* ═══ v3.27.0 · [AUT-0078] · IL GESTO DI MESA NASCE AL BORDO ═══════════════
+   La chiave d'idempotenza la conia IL CLIENT — il lato che RIPETE. Se la
+   coniasse il server, il retry ne genererebbe un'altra e la guardia sarebbe
+   teatro (`_COME_SI_CODIFICA` ①). Si conia UNA VOLTA quando il gesto nasce e
+   si riusa a ogni tentativo.
+   ⚠️ `uuid` NON serviva: quello è l'id del PEDIDO, non del GESTO — due
+      correzioni sullo stesso pedido avrebbero la stessa chiave. */
+function _gid(pfx) { return pfx + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+
+/* ═══ IL RIPRISTINO SI FA VEDERE — condizione per accendere l'interruttore ══
+   Col gesto ottimista il mesero vede «fatto» e va via. Se il GAS poi rifiuta,
+   il tavolo torna dov'era e lui NON LO SA: il vetro smette di mentire e
+   comincia a mentire al contrario. Perciò il gesto non riuscito RICOMPARE,
+   in rosso, sopra la griglia — dove lo vede anche chi sta guardando un altro
+   tavolo — e non sparisce da solo: sparisce quando qualcuno lo tocca.
+   🔴 Se questo avviso non c'è, l'interruttore resta SPENTO: l'ottimismo si
+      compra con la visibilità, e senza visibilità non l'abbiamo comprato. */
+var _gPend = {};   // gid → { tipo, de, a, t0, uuids }
+var _gFail = {};   // gid → { tipo, de, a }
+try { _gFail = JSON.parse(localStorage.getItem('sala_gfail_v1') || '{}') || {}; } catch (e) { _gFail = {}; }
+/* 🔴 il rosso SOPRAVVIVE AL RELOAD. Vivendo in RAM sarebbe sparito proprio
+   quando il mesero ricarica perché qualcosa non torna — la famiglia di
+   `_ricaduta` del 23-ago: il testimone muore nello scenario del guasto. */
+function _gFailSalva() { try { localStorage.setItem('sala_gfail_v1', JSON.stringify(_gFail)); } catch (e) {} }
+
+/* i pedidos che il gesto DEVE portarsi via: gli aperti. I `pagados` NO —
+   sono i `cerrado` che la cucina non ha ancora fatto uscire, e il confirm
+   dice esplicitamente «los ya cerrados se quedan». */
+function _uuidsAperti(mesa) {
+  const m = (STATE.mesasModel || []).find(function (x) { return String(x.mesa) === String(mesa); });
+  if (!m) return [];
+  return [].concat(m.mios || [], m.pend || [], m.limpiar || [])
+    .map(function (p) { return p && p.uuid; }).filter(Boolean);
+}
+function _gestoAttendi(gid, tipo, de, a, uuids) {
+  _gPend[gid] = { tipo: tipo, de: de, a: a, t0: Date.now(), uuids: uuids || [] };
+}
+function _gestoOk(gid) { delete _gPend[gid]; if (_gFail[gid]) { delete _gFail[gid]; _gFailSalva(); } }
+/* ═══ LA RICONCILIAZIONE ═══════════════════════════════════════════════════
+   🔴 CORRETTA dal collaudo di 🍳 (24-ago): la prima versione chiudeva il gesto
+   solo se «la mesa di partenza è SPARITA» (`vive[a] && !vive[de]`). **Falso a
+   pranzo, dove è la norma:** una mesa con un piatto PAGATO e non ancora uscito
+   resta viva (`pagados`, v3.5.7) — quindi un mover riuscito produceva la banda
+   rossa dopo 90 s. *E un avviso che grida al lupo si smette di guardare al
+   terzo pranzo: dopo, il rosso vero non lo vede più nessuno (N8).*
+   👉 Il segnale di successo non è l'assenza di `de`: è che i pedidos che
+      dovevano muoversi ADESSO STANNO SU `a`. Regge il caso «`de` è ancora viva
+      perché ha dei pagados», che è precisamente il caso normale. */
+function _gestoRiconcilia(list) {
+  const dove = {}, vive = {};
+  (list || []).forEach(function (m) {
+    vive[String(m.mesa)] = true;
+    [].concat(m.mios || [], m.pend || [], m.limpiar || [], m.pagados || []).forEach(function (p) {
+      if (p && p.uuid) dove[p.uuid] = String(m.mesa);
+    });
+  });
+  Object.keys(_gPend).forEach(function (gid) {
+    const g = _gPend[gid];
+    if (g.tipo === 'mover') {
+      const arrivati = (g.uuids || []).some(function (u) { return dove[u] === String(g.a); });
+      if (arrivati) { _gestoOk(gid); return; }
+      // ripiego se non avevo gli uuid (modello non ancora popolato al gesto)
+      if (!(g.uuids || []).length && vive[String(g.a)] && !vive[String(g.de)]) { _gestoOk(gid); return; }
+    }
+    if (Date.now() - g.t0 > 90000) { _gFail[gid] = g; delete _gPend[gid]; _gFailSalva(); }
+  });
+}
+function _gestoAvvisoHtml() {
+  const ks = Object.keys(_gFail); if (!ks.length) return '';
+  return ks.map(function (gid) {
+    const g = _gFail[gid];
+    return '<div onclick="_gestoVisto(\'' + gid + '\')" style="cursor:pointer;font-size:12px;font-weight:800;' +
+      'background:#7f1d1d;color:#fff;border-radius:8px;padding:8px 10px;margin:0 0 8px">' +
+      '⚠ NO SE MOVIÓ la mesa ' + esc(String(g.de)) + ' → ' + esc(String(g.a)) +
+      ' · vuelve a intentarlo <span style="opacity:.75;font-weight:600">(toca para quitar)</span></div>';
+  }).join('');
+}
+function _gestoVisto(gid) { delete _gFail[gid]; _gFailSalva(); refrescar(false); }
+/* 🔴 `ok` CON ZERO MOVIMENTI NON È UN SUCCESSO (requisito del collaudo di 🍳).
+   Due meseros sulla stessa mesa: il primo sposta le righe, il secondo non trova
+   più niente e riceve `ok:true` con ZERO mosse. Se il vetro disegna, quel
+   mesero vede una sala che il libro non ha — e non c'è nessun errore da
+   nessuna parte. È il buco che la replica a ~50 s produce, ed è dal lato che
+   non fa rumore. `duplicado:true` è invece un successo: è il MIO stesso gesto
+   ripetuto, riconosciuto dalla chiave — e va riconosciuto, non dedotto. */
+function _gConflitto(r) {
+  if (!r || !r.ok || r.duplicado) return false;
+  /* il bordo dice `movidas`, il GAS dice `movidos`: si guardano tutti e due.
+     ⚠️ Solo uno ZERO ESPLICITO conta — campo assente = NaN = non è una decisione
+     («vuoto ≠ zero»), e su un ripiego GAS vecchio il mondo resta quello di ieri.
+     Il guardiano vive anche sul ripiego apposta: dopo l'accensione quella
+     diventa la strada che nessuno guarda più. */
+  const n = (r.movidas !== undefined) ? Number(r.movidas) : Number(r.movidos);
+  return n === 0;
+}
+function _gestoRosso(gid, tipo, de, a) { _gFail[gid] = { tipo: tipo, de: de, a: a }; delete _gPend[gid]; _gFailSalva(); }
+
 async function moverMesaUI(de){
   const a = (window.prompt('¿A qué mesa se cambió el cliente de la mesa ' + de + '?') || '').replace(/[^0-9]/g, '');
   if (!a) return;
   if (a === de) { toast('warn', 'Es la misma mesa'); return; }
   if (!window.confirm('Mover la mesa ' + de + ' → ' + a + '\n\nSe mueven los pedidos abiertos de la sesión. Los ya cerrados se quedan.')) return;
+  const gid = _gid('gm');
+  const _uapDe = _uuidsAperti(de);   // gli aperti PRIMA del gesto: sono loro che devono arrivare su `a`
   try {
-    const r = await gasPost('moverMesa', { codigo: STATE.codigo, nombre: STATE.nombre, de: de, a: a });
+    const r = await staffPost('moverMesa', { codigo: STATE.codigo, nombre: STATE.nombre, de: de, a: a, gid: gid });
+    /* v3.27.0 · la via del bordo: ack ~200 ms, il GAS applica dietro. Non ha i
+       conteggi (`movidos`, `cerrados_quedan`, `plaza`): quelli li sa solo il
+       libro, e arrivano col poll. Qui si dice ciò che si sa, non di più. */
+    if (_gConflitto(r)) {
+      _gestoRosso(gid, 'mover', de, a);
+      toast('err', '⚠ La mesa ' + de + ' ya no tenía pedidos — puede haberla movido otro');
+      refrescar(false);
+      return;
+    }
+    if (r && r.borde === true && r.ok) {
+      _gestoAttendi(gid, 'mover', de, a, _uapDe);
+      toast('ok', '🔀 Mesa ' + de + ' → ' + a);
+      cerrarMesa();
+      refrescar(false);
+      return;
+    }
     if (r && r.ok) {
       bordeHecho('mover', { de: de, a: a });   // v3.24.0 · [AUT-0058] il vetro degli altri lo sa subito
       toast('ok', '🔀 Mesa ' + de + ' → ' + a + ' · ' + r.movidos + ' pedido' + (r.movidos > 1 ? 's' : '') +
@@ -4577,7 +4692,32 @@ async function _mvHacer(btn) {
   const cosa = _vpItems(deL).map(function (x) { return x.q + 'x ' + x.n; }).slice(0, 3).join(' · ');
   const plata = _vpTot(deL);
   try {
-    const r = await gasPost('moverMesa', { codigo: STATE.codigo, nombre: STATE.nombre, de: _mvDe, a: _mvA });
+    const gid = _gid('gm');
+    const _uapDe = _uuidsAperti(deL);   // idem: il segnale di successo sono questi uuid su `a`
+    const r = await staffPost('moverMesa', { codigo: STATE.codigo, nombre: STATE.nombre, de: _mvDe, a: _mvA, gid: gid });
+    /* v3.27.0 · [AUT-0078] · il conflitto viene PRIMA del successo: `ok` con
+       zero righe mosse e senza `duplicado` non è un successo, è un altro
+       mesero che è arrivato prima. Qui NON si disegna e NON si applica l'eco
+       locale — altrimenti questo telefono resterebbe convinto per sempre. */
+    if (_gConflitto(r)) {
+      _gestoRosso(gid, 'mover', deL, aL);
+      vhojaCerrar(); vpSoltar();
+      toast('err', '⚠ La mesa ' + deL + ' ya no tenía pedidos — puede haberla movido otro');
+      refrescar(false); return;
+    }
+    if (r && r.borde === true && r.ok) {
+      /* la via del bordo: ack ~200 ms. L'eco locale resta — è la cura del
+         reperto di Isa (la foto del bordo racconta il mondo di prima) — ma il
+         gesto entra in riconciliazione: se dopo 90 s l'effetto non si vede
+         nella sala, ricompare in rosso sopra la griglia. */
+      _gestoAttendi(gid, 'mover', deL, aL, _uapDe);
+      vhojaCerrar(); vpSoltar();
+      STATE.movLocal = (STATE.movLocal || []).concat([{ de: deL, a: aL, ts: Date.now() }]);
+      _movAplica(STATE.sala);
+      renderMesas(STATE.sala);
+      toast('ok', '↔ ' + (cosa ? cosa + ' · ' : '') + '$' + _fmtMiles(plata) + ' → mesa ' + aL);
+      refrescar(false); return;
+    }
     if (r && r.ok) {
       bordeHecho('mover', { de: deL, a: aL });   // v3.24.0 · [AUT-0058] il vetro degli altri lo sa subito
       vhojaCerrar(); vpSoltar();
@@ -5575,6 +5715,7 @@ function _mesasModel(r) {
 function renderMesas(r) {
   const list = _mesasModel(r);
   STATE.mesasModel = list;
+  _gestoRiconcilia(list);   // v3.27.0 · [AUT-0078] · l'effetto si è visto? se no, dopo 90 s è un rosso
   /* CONSOLA v1 (10-ago): la tessera dice numero · da quanto · stato IN PAROLA
      · consumo aperto. Il tempo esce da hace_s (il piu vecchio della sessione),
      la plata da p.total — tutto gia nel poll, zero campi nuovi. Lo stato non
@@ -5613,6 +5754,10 @@ function renderMesas(r) {
       (_plazaTronca ? '<div style="font-size:11px;color:var(--cs-avisa);margin:-2px 0 6px">🗺 Mostrando <b>' +
         _plazaTronca.mostrate + '</b> de <b>' + _plazaTronca.totale + '</b> mesas — las demás <b>igual son tuyas</b>: ábrelas por número.</div>' : '') +
       '<div style="font-size:11px;color:#8a8577;margin:-2px 0 8px">toca = abrir · <b>mantén presionada</b> una mesa y arrastra = juntar</div>' +
+      /* v3.27.0 · [AUT-0078] · il gesto ottimista che il libro ha rifiutato
+         ricompare QUI, sopra la griglia: lo vede anche chi sta guardando un
+         altro tavolo, e non se ne va da solo. */
+      _gestoAvvisoHtml() +
       '<div class="mesa-grid" id="mapaGrid">';
     const jDib = {};   // v3.4.1 · junta già disegnata → i membri non si ripetono
     todas.forEach(function (mesa) {
