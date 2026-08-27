@@ -947,7 +947,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.35.0</span>
+      <span class="ver" id="ver">sala v3.36.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -6580,6 +6580,21 @@ var _pgReloj = null;
    dice la hora, y una hora sin fecha no delata un screenshot de anoche. */
 const _PG_DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const _PG_MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+/* l'ora del PRIMO disegno: senza questo il vetro mostrava `--:--:--` per un
+   secondo a ogni apertura — e il primo secondo è quello in cui il cliente
+   guarda per capire che è la SUA cuenta, adesso. */
+/* +56969082375 non si legge: si legge +56 9 6908 2375. Il fossile continua
+   a ricevere il canonico — questo è solo per l'occhio del mesero. */
+function _pgTelLindo(t) {
+  const d = String(t || '').replace(/[^0-9]/g, '');
+  return (d.length === 11 && d.slice(0, 3) === '569')
+    ? '+56 9 ' + d.slice(3, 7) + ' ' + d.slice(7) : String(t || '');
+}
+function _pgReloj0() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2, '0') + ':' +
+    String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
+}
 function _pgFechaCorta(d) {
   return _PG_DIAS[d.getDay()] + ' ' + d.getDate() + '-' + _PG_MESES[d.getMonth()];
 }
@@ -6652,7 +6667,7 @@ function renderPago() {
         '<div style="display:inline-flex;gap:6px;margin-top:5px;padding:4px 12px;border-radius:99px;' +
           'background:rgba(63,224,240,.08);border:1px solid rgba(63,224,240,.35)">' +
           '<span style="font-size:11.5px;font-weight:700;color:var(--cs-ink2)">' + _pgFechaCorta(new Date()) + '</span>' +
-          '<span id="pgRelojH" style="font-size:13px;font-weight:900;color:var(--cs-cyan,#22d3ee)">--:--:--</span></div></div>' +
+          '<span id="pgRelojH" style="font-size:13px;font-weight:900;color:var(--cs-cyan,#22d3ee)">' + _pgReloj0() + '</span></div></div>' +
       /* la lista scorre DENTRO su cuadro: con 12 items la propina y los datos
          quedaban bajo el borde, y el cliente con el teléfono en la mano NO
          hace scroll — devolvería el aparato sin haber escrito el correo. */
@@ -6854,13 +6869,11 @@ function renderPago() {
               /* solo i CONTATTI, come la striscia del mockup («✓ correo · celular»):
                  la propina vive già nella riga «consumo · propina» qui sopra, e
                  dirla due volte fa cercare al mesero quale delle due comanda. */
-              [((pg.correo || '').trim() ? esc(pg.correo) : ''), ((pg.celular || '').trim() ? esc(pg.celular) : '')]
+              [((pg.correo || '').trim() ? esc(pg.correo) : ''), ((pg.celular || '').trim() ? esc(_pgTelLindo(pg.celular)) : '')]
                 .filter(function (x) { return x; }).join(' · ')
             : 'background:rgba(233,196,106,.12);border:1px solid rgba(233,196,106,.45);color:#f3e3b5">' +
               'sin datos — la boleta saldrá impresa') +
-        '</div>' +
-        /* la via di ritorno esiste ma NON compete col medio */
-        '<div style="text-align:center;font-size:11.5px;color:var(--cs-mut);margin:6px 0 2px;text-decoration:underline;cursor:pointer" onclick="pagoClienteAbrir()">↩︎ volver a mostrárselo al cliente</div>'
+        '</div>'
       : /* ⓐ · ancora da mostrare al cliente (o flag spento: il pannello di oggi) */
         (PAGO_V3_ON
           ? '<button class="btn" style="margin-top:12px;background:var(--cs-oro,#E9C46A);color:#332B1E" onclick="pagoClienteAbrir()">📱 Mostrar precuenta al cliente</button>' +
@@ -6910,12 +6923,27 @@ function renderPago() {
           'color:var(--cs-mut);font-size:14px;font-weight:800;margin-bottom:7px" title="Fintoc: aún no está activo">' +
           '🏦<small style="display:block;font-size:10.5px;font-weight:700;opacity:.8;margin-top:2px">Próximamente</small></div>'
       : '') +
-    '<div class="cs-chips">' +
-      chip('medio', 'efectivo', 'Efectivo') +
-      chip('medio', 'debito', 'Débito', 'tarjeta') +
-      chip('medio', 'credito', 'Crédito', 'tarjeta') +
-      chip('medio', 'transferencia', 'Transfer', 'bancaria') +
-      chip('medio', 'mixto', '🔀 Mixto', '2+ medios') + '</div>' +
+    /* v3.36.0 · l'ordine del mockup: le due TARJETAS in cima (è il caso più
+       frequente e sta sotto il banco), poi efectivo e mixto. `Transfer` resta
+       in coda da solo — dichiarato: nel mockup non c'è perché lì Fintoc è
+       acceso e «Transfer È Fintoc», ma Fintoc NON è attivo e toglierlo oggi
+       lascerebbe una transferencia vera senza modo di essere registrata.
+       Esce il giorno che si accende il banco, non prima. */
+    (PAGO_V3_ON
+      ? '<div class="cs-chips">' +
+          chip('medio', 'debito', 'Débito', 'tarjeta') +
+          chip('medio', 'credito', 'Crédito', 'tarjeta') + '</div>' +
+        '<div class="cs-chips" style="margin-top:6px">' +
+          chip('medio', 'efectivo', 'Efectivo') +
+          chip('medio', 'mixto', '🔀 Mixto', '2+ medios') + '</div>' +
+        '<div class="cs-chips" style="margin-top:6px">' +
+          chip('medio', 'transferencia', 'Transfer', 'bancaria') + '</div>'
+      : '<div class="cs-chips">' +
+          chip('medio', 'efectivo', 'Efectivo') +
+          chip('medio', 'debito', 'Débito', 'tarjeta') +
+          chip('medio', 'credito', 'Crédito', 'tarjeta') +
+          chip('medio', 'transferencia', 'Transfer', 'bancaria') +
+          chip('medio', 'mixto', '🔀 Mixto', '2+ medios') + '</div>') +
     /* v3.0 · CAMBIO 4 · PAGO MIXTO: una parte per medio, la somma deve essere
        ESATTA (il resto si vede vivo). GAS v3.124.0 valida e fossilizza lo
        spezzato (`Medios_Json`): l'arqueo del cierre conta l'efectivo VERO. */
@@ -6977,6 +7005,22 @@ function renderPago() {
           (pg.enviando ? 'Registrando…'
             : !pg.medio ? 'Elige el medio de pago'
             : (esCort ? 'Confirmar cortesía — $0 ✓' : 'Confirmar pago — ' + fmtPrice(_pagoMonto()) + ' ✓')) + '</button>') +
+    /* ═══ v3.36.0 · [AUT-0113] · LA CODA DELLA ② COM'È NEL MOCKUP ═══════════
+       Aperto il mockup e confrontato riga per riga col mio (dump renderizzato,
+       non a memoria): sotto il bottone d'azione ci vanno DUE cose, e una me
+       l'ero PERSA riscrivendo il pannello — cioè l'avevo tolta io, non era
+       mai mancata prima:
+       · «🖶 Imprimir — solo si la pide» → col correo dentro la boleta va per
+         mail, ma il mesero deve poterla far uscire lo stesso. Averla persa
+         significava che con `clienteHecho` non c'era PIÙ NESSUN modo di
+         stamparla: una funzione viva tolta mentre «allineavo al mockup».
+       · «‹ volver a la cuenta» → la via di ritorno sta in FONDO, dopo
+         l'azione, non sopra i medios dove compete con la scelta. */
+    (PAGO_V3_ON && pg.clienteHecho
+      ? '<button class="btn sec" style="margin-top:8px" onclick="pagoImprimirToggle()">' +
+          (pg.imprimir ? '🖶 Saldrá impresa en barra ✓' : '🖶 Imprimir — solo si la pide') + '</button>' +
+        '<div style="text-align:center;font-size:11.5px;color:var(--cs-mut);padding:11px 0 2px;text-decoration:underline;cursor:pointer" onclick="pagoClienteAbrir()">‹ volver a mostrárselo al cliente</div>'
+      : '') +
     '<button class="btn sec" style="margin-top:8px" onclick="pagoCerrar()">Cancelar</button>' +
     '</div></div>';
 }
