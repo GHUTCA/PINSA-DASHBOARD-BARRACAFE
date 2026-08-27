@@ -947,7 +947,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.29.0</span>
+      <span class="ver" id="ver">sala v3.30.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2286,8 +2286,61 @@ async function guardarCorreccion(uuid, btn) {
       return;
     }
   } catch (e) {
-    toast('err', 'Sin conexión — reintenta');
-    if (btn) btn.disabled = false;
+    /* ═══ v3.30.0 · [AUT-EMERG-0110] · IL VETRO NON DA' PIU' UN ORDINE CHE PUO' SDOPPIARE UN FATTO ═══
+       PAGATO SUL FERRO la notte del 26→27-ago, con Alberto al vetro: voleva
+       togliere UN prodotto da mesa 195, ha visto un errore, ha ripetuto, e i
+       prodotti tolti sono stati DUE. Il terzo tentativo ha risposto
+       `pedido_not_found` — che non era un guasto: era la prova che il PRIMO
+       era riuscito.
+
+       🔴 IL VETRO NON MENTIVA SUL RISULTATO: DAVA UN ORDINE.
+       `gasPost` non ritorna sul timeout, LANCIA - quindi qui non sappiamo
+       NIENTE: il gesto puo' essere atterrato benissimo. E qui c'era scritto
+       «reintenta», cioe' l'unica cosa da non fare.
+
+       🔑 E PERCHE' RIPETERE E' PEGGIO CHE ASPETTARE (meccanismo trovato da
+       📖 MENU in MENU_GAS r.9535-9601): `corregirPedido` NON riceve un delta,
+       riceve la QUANTITA' FINALE voluta e la confronta con l'Items_Json letto
+       in quel momento. Un secondo colpo calcolato dal vetro su uno stato
+       VECCHIO - quello che il client ancora crede, non quello vero - manda un
+       bersaglio sbagliato. «Un altro -1» diventa «-1 su un altro prodotto».
+
+       ⇒ LA CURA: il pannello SI CHIUDE (nessun secondo colpo puo' nascere da
+         uno stato vecchio) e il messaggio dice che NON SI SA, non che e'
+         fallito. La ricarica si chiede, ma il messaggio NON dipende da lei:
+         `refrescar` esce subito se un poll e' gia' in volo, quindi non si
+         puo' promettere che i dati siano freschi.
+       ⚠️ E VA CHIAMATA COL SUO NOME: e' una mitigazione del COMPORTAMENTO,
+         non una guardia. Toglie il consiglio sbagliato; non impedisce a un
+         gesto ripetuto di sdoppiarsi. La guardia vera sarebbe il MODO PUENTE
+         (coda + uuid fisso) come `crearPedidoMesero` (r.3654) - piu' invasiva,
+         non oggi. 🧯 interruttore: si torna alla riga di prima. */
+    /* 🔎 IL `render` NON E' DECORAZIONE - reperto di 📖 MENU scrivendo il test:
+       `refrescar` sul guardia `pollEnVuelo` (r.3989) fa un `return` SEMPLICE,
+       non lancia - e l'unico `render()` sta DOPO quel guardia. Quindi con un
+       poll gia' in volo `STATE.editando` e' null in memoria ma sullo schermo
+       il pannello RESTA, finche' il poll di prima non torna da solo.
+       ⇒ la proprieta' di sicurezza reggeva lo stesso (bottone disabilitato,
+         nessun secondo colpo puo' partire) MA PER UNA RAGIONE DIVERSA DA
+         QUELLA SCRITTA QUI SOPRA. Un commento che descrive una cura che non
+         avviene e' peggio di nessun commento: si crede.
+       ⇒ `render` esplicito, la stessa convenzione di `cerrarCorreccion()`
+         (r.2210): il pannello sparisce SUBITO, e il commento torna vero.
+       🔴 MA VA DOPO IL TOAST E DENTRO IL SUO PROPRIO try - e non e' pedanteria:
+         `render(r)` legge `r.plazas_detalle` alla SECONDA riga (r.7059), quindi
+         con `STATE.sala` nullo LANCIA. Lanciando QUI dentro, l'eccezione
+         uscirebbe da tutta la funzione e il mesero non riceverebbe NIENTE -
+         ne' il messaggio ne' la ricarica: PEGGIO di prima della cura.
+         Trovato perche' il test di 📖 MENU e' andato ROSSO (`render is not
+         defined` nel suo sandbox): il sandbox non aveva lo stub, ma il rosso
+         ha mostrato una proprieta' vera del codice, non solo del test.
+       🎓 UNA DECORAZIONE NON DEVE POTER UCCIDERE LA CURA CHE DECORA.
+         L'ordine e' la garanzia: il toast - l'unica cosa che ferma il gesto
+         doppio - avviene per PRIMO e senza condizioni. */
+    STATE.editando = null;
+    toast('warn', 'No sé si entró — revisa la cuenta antes de repetir');
+    try { render(STATE.sala); } catch (e3) { /* cosmetico: mai fatale */ }
+    try { await refrescar(false); } catch (e2) { /* il messaggio regge lo stesso */ }
     return;
   }
   refrescar(false);
