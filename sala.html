@@ -947,7 +947,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.30.0</span>
+      <span class="ver" id="ver">sala v3.31.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1020,6 +1020,17 @@ const BACKOFF_MS = QS.get('bo') === null ? 4000
 const BP_ON = QS.get('bp') !== '0';
 const LIB_ON = QS.get('lib') !== '0';
 const CAMP_REPITE = QS.get('camp') === '1';
+/* ═══ v3.31.0 · [AUT-0113] · EL PAGO A DOS MANOS — NACE APAGADO ═══════════
+   El teléfono cambia de mano: la propina y los datos los pone QUIEN LOS
+   POSEE. Hoy el correo se captura en el 0,2% de los pagos (7 de 2.824 en 17
+   días, medido por 📖 MENU) porque se dicta en voz alta y lo teclea un
+   tercero — y sin correo la boleta sale SIEMPRE en papel y se queda en la
+   barra sin que nadie la entregue.
+     ?pagov3=1   → el flujo nuevo
+     sin el flag → EXACTAMENTE el pago de hoy, sin una línea de diferencia
+   🔴 Se prueba con el flag en la URL, en un teléfono solo: ningún mesero
+      cambia de comportamiento mientras esta constante sea false por defecto. */
+const PAGO_V3_ON = QS.get('pagov3') === '1';
 /* il freno della libreta es CSS → viaja como clase; si el body aún no existe
    (script movido a <head> mañana) se reintenta al DOMContentLoaded */
 (function _cmFreno(){
@@ -6429,6 +6440,11 @@ function abrirPago(mesa, parte) {
   STATE.pago = { mesa: mesa, tot: tot, parte: _pt ? { titulo: (parte.titulo || 'parte'), monto: _pt } : null,
     prop: 'sug', medio: '',
     otro: '', correo: '', celular: '', nombre: '', enviando: false,
+    /* v3.31.0 · [AUT-0113] · `cliente:true` = el teléfono está en manos del
+       cliente. `cel8` son los 8 dígitos que él escribe (sin prefijo, ver
+       pagoTelIn); `celular` sigue siendo el número canónico que viaja al
+       fósil, para que pagoEnviar no cambie ni una línea. */
+    cliente: false, cel8: '',
     montoOn: false, montoCustom: '',     // v1.1 · sconto manuale di cassa: il fossile porta il monto VERO
     jl: false, pinJL: '', pinAsk: false, // v1.4 · le mosse del JL, dietro il PIN (verità: la valida il GAS)
     imprimir: false,                     // v1.7 · «la quiero en la mano» anche con la mail
@@ -6508,7 +6524,51 @@ function _pagoMonto() {
   return (pg.montoOn && mc) ? parseInt(mc, 10) : pg.tot;
 }
 function pagoMontoToggle() { if (STATE.pago) { STATE.pago.montoOn = !STATE.pago.montoOn; if (!STATE.pago.montoOn) STATE.pago.montoCustom = ''; renderPago(); } }
-function pagoCerrar() { if (STATE.pago && STATE.pago.enviando) return; STATE.pago = null; renderPago(); }
+/* v3.31.0 · [AUT-0113] · 🔴 CONDICIÓN DE SEGURIDAD, no un detalle: mientras
+   el teléfono está en manos del cliente, de esta pantalla NO se sale. Ni al
+   salón, ni a otras mesas, ni al corte. El único regreso es «Listo». Sin
+   este candado se le entrega la consola del local a un desconocido. */
+function pagoCerrar() { if (STATE.pago && (STATE.pago.enviando || STATE.pago.cliente)) return; _pgRelojOff(); STATE.pago = null; renderPago(); }
+/* v3.31.0 · el prefijo +56 9 es FIJO y no se escribe: así desaparece la
+   ambigüedad +569…/+56…/9567… . Y si el cliente lo escribe igual por
+   costumbre, se lo quitamos en vez de cortar mal el número — cortar los
+   primeros 8 dígitos tal cual habría capturado un número FALSO, en silencio. */
+function _pagoTelNorm(raw) {
+  let d = String(raw || '').replace(/[^0-9]/g, '');
+  if (d.length > 8) {
+    if (d.slice(0, 2) === '56') d = d.slice(2);
+    if (d.length === 9 && d.charAt(0) === '9') d = d.slice(1);
+  }
+  return d.slice(0, 8);
+}
+function pagoTelIn(el) {
+  const t = _pagoTelNorm(el.value);
+  el.value = t.length > 4 ? t.slice(0, 4) + ' ' + t.slice(4) : t;
+  if (!STATE.pago) return;
+  STATE.pago.cel8 = t;
+  /* al fósil viaja el número canónico y SOLO si está completo: medio número
+     no es un dato incompleto, es un dato falso. El contador lo dice a la vista. */
+  STATE.pago.celular = (t.length === 8) ? '+569' + t : '';
+  const c = $('pgTelN');
+  if (c) { c.textContent = t.length + '/8'; c.style.color = (t.length === 8) ? '#2f8f5a' : '#8a7a52'; }
+}
+var _pgReloj = null;
+/* el reloj VIVO con los segundos corriendo: la amenaza es el screenshot de la
+   precuenta enseñado en otra mesa — una imagen congelada se delata sola. */
+function _pgRelojOn() {
+  _pgRelojOff();
+  _pgReloj = setInterval(function () {
+    const h = $('pgRelojH');
+    if (!h) { _pgRelojOff(); return; }   // la pantalla ya no existe: no dejar el intervalo colgado
+    const d = new Date();
+    h.textContent = String(d.getHours()).padStart(2, '0') + ':' +
+      String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
+  }, 1000);
+}
+function _pgRelojOff() { if (_pgReloj) { clearInterval(_pgReloj); _pgReloj = null; } }
+function pagoClienteAbrir() { if (STATE.pago) { STATE.pago.cliente = true; renderPago(); } }
+/* «Listo» es un gesto DEL CLIENTE: cierra su parte y devuelve el aparato. */
+function pagoClienteListo() { if (STATE.pago) { STATE.pago.cliente = false; _pgRelojOff(); renderPago(); } }
 function pagoSet(campo, v) { if (STATE.pago) { STATE.pago[campo] = v; renderPago(); } }
 function pagoInput(campo, v) { if (STATE.pago) STATE.pago[campo] = v; }   // niente re-render: il focus resta
 /* v3.4.3 · il tocco sul campo vuoto del mixto CONFERMA il resto: lo scrive
@@ -6536,7 +6596,71 @@ function renderPago() {
   let w = $('pagoWrap');
   if (!w) { w = document.createElement('div'); w.id = 'pagoWrap'; document.body.appendChild(w); }
   const pg = STATE.pago;
-  if (!pg) { w.innerHTML = ''; return; }
+  if (!pg) { w.innerHTML = ''; _pgRelojOff(); return; }
+  /* ═══ v3.31.0 · [AUT-0113] · LA PANTALLA DEL CLIENTE ══════════════════════
+     Sale ANTES que todo lo demás y no comparte una línea con el panel del
+     mesero: no lleva el onclick del backdrop (no se sale tocando fuera), no
+     lleva la franja roja del doble cobro (es información del mesero, no del
+     cliente) y no lleva ningún medio de pago. Solo lo que únicamente él puede
+     decidir: la propina y sus datos.
+     🔑 La propina NO cambia de dueño ni se duplica: es la MISMA `pg.prop` que
+        el mesero ya usaba. Una sola variable ⇒ el panel del mesero la hereda
+        por construcción, y no existe el «segundo sitio que sobrescribe al
+        primero en silencio» que temíamos al diseñarlo. */
+  if (PAGO_V3_ON && pg.cliente) {
+    const det = _vpItemsDet(pg.mesa);
+    const prop = _pagoPropina();
+    const tot = _pagoMonto() + prop;
+    const cChip = function (val, lbl, sub) {
+      return '<div class="cs-chip' + (pg.prop === val ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'' + val + '\')">' +
+        lbl + (sub ? '<small>' + sub + '</small>' : '') + '</div>';
+    };
+    w.innerHTML = '<div class="cs-pago"><div class="cs-pcard">' +
+      '<div style="text-align:center;margin:2px 0 8px">' +
+        '<div style="font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--cs-mut)">PRECUENTA</div>' +
+        '<div style="font-size:28px;font-weight:900;margin-top:1px">Mesa ' + esc(pg.mesa) + '</div>' +
+        '<div style="display:inline-flex;gap:6px;margin-top:5px;padding:4px 12px;border-radius:99px;' +
+          'background:rgba(63,224,240,.08);border:1px solid rgba(63,224,240,.35)">' +
+          '<span id="pgRelojH" style="font-size:13px;font-weight:900;color:var(--cs-cyan,#22d3ee)">--:--:--</span></div></div>' +
+      /* la lista scorre DENTRO su cuadro: con 12 items la propina y los datos
+         quedaban bajo el borde, y el cliente con el teléfono en la mano NO
+         hace scroll — devolvería el aparato sin haber escrito el correo. */
+      (det.items.length
+        ? '<div style="max-height:150px;overflow-y:auto;border-top:1px solid var(--cs-line);' +
+          'border-bottom:1px solid var(--cs-line);padding:6px 0">' +
+          det.items.map(function (it) {
+            return '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12.5px;color:var(--cs-ink2)">' +
+              '<span>' + (it.q > 1 ? it.q + 'x ' : '') + esc(it.n) + '</span>' +
+              '<span>' + fmtPrice(it.pu * it.q) + '</span></div>';
+          }).join('') + '</div>'
+        : '') +
+      '<div class="cs-psub" style="margin-top:8px">Consumo <b class="tab" style="color:var(--cs-ink)">' + fmtPrice(_pagoMonto()) + '</b></div>' +
+      '<div class="cs-psec">Propina</div>' +
+      '<div class="cs-chips">' +
+        cChip('sug', '10%', fmtPrice(Math.round(pg.tot * 0.10))) +
+        cChip('otro', 'Otro', 'monto') +
+        cChip('sin', 'Sin', 'propina') + '</div>' +
+      (pg.prop === 'otro'
+        ? '<input class="cs-pin" style="margin-top:8px;text-align:center" inputmode="numeric" placeholder="Monto propina $" value="' + esc(pg.otro) + '" oninput="pagoInput(\'otro\',this.value)" onchange="renderPago()">'
+        : '') +
+      '<div style="text-align:right;font-size:21px;font-weight:900;margin-top:10px">TOTAL ' + fmtPrice(tot) + '</div>' +
+      '<div class="cs-captura">' +
+        '<div class="cap-t">Déjanos tu correo y te mandamos la boleta</div>' +
+        '<input class="cs-pin" type="email" autocomplete="off" inputmode="email" placeholder="Correo" value="' + esc(pg.correo) + '" oninput="pagoInput(\'correo\',this.value)">' +
+        '<div style="display:flex;align-items:stretch;gap:0;margin-top:6px;border:1.5px solid #CBB99B;border-radius:10px;overflow:hidden;background:#fff">' +
+          '<span style="background:#EFE7D3;color:#5B4A22;font-weight:800;font-size:13px;display:flex;align-items:center;padding:0 10px;border-right:1.5px solid #CBB99B">🇨🇱 +56 9</span>' +
+          '<input class="cs-pin" style="margin:0;border:none;border-radius:0;flex:1;min-width:0" inputmode="numeric" placeholder="0000 0000" value="' +
+            esc(pg.cel8.length > 4 ? pg.cel8.slice(0, 4) + ' ' + pg.cel8.slice(4) : pg.cel8) + '" oninput="pagoTelIn(this)"></div>' +
+        '<div id="pgTelN" style="text-align:right;font-size:9.5px;color:#8a7a52;margin-top:2px">' + pg.cel8.length + '/8</div>' +
+        '<input class="cs-pin" autocomplete="off" autocapitalize="words" placeholder="Nombre (opcional)" value="' + esc(pg.nombre) + '" oninput="pagoInput(\'nombre\',this.value)">' +
+      '</div>' +
+      '<button class="btn verde" style="margin-top:12px" onclick="pagoClienteListo()">Listo — devolver el teléfono</button>' +
+      '<div style="text-align:center;font-size:10px;color:var(--cs-mut);margin-top:8px">esta pantalla no sale al resto del salón</div>' +
+      '</div></div>';
+    _pgRelojOn();
+    return;
+  }
+  _pgRelojOff();
   /* v2.0.1 · pg.ya NON è più congelato all'apertura (reperto: il poll fresco
      arrivava col pannello aperto e la fascia rossa restava assente). Si può
      solo GUADAGNARE l'avviso, mai perderlo; se compare, l'okDoble decade. */
@@ -6643,6 +6767,16 @@ function renderPago() {
        ragione da offrirgli (la boleta al mail, LA LISTA). Nombre è NUOVO —
        prima non esisteva. Tutto resta facoltativo: mai un pago bloccato da
        un campo vuoto. */
+    /* v3.31.0 · [AUT-0113] · EL GESTO QUE MUEVE LOS CUATRO OBJETIVOS. El
+       correo escrito por su dueño es el único que llega: dictado en voz alta
+       en un salón ruidoso y tecleado por un tercero se equivoca lo bastante
+       seguido como para envenenar el dato — y un correo equivocado no es un
+       dato que falta, es peor: la boleta sale, no llega, y nadie se entera.
+       Con el flag apagado esta línea no existe y el panel es el de hoy. */
+    (PAGO_V3_ON
+      ? '<button class="btn sec" style="margin-top:10px" onclick="pagoClienteAbrir()">📱 Pasar el teléfono al cliente</button>' +
+        '<div style="text-align:center;font-size:10.5px;color:var(--cs-mut);margin-top:4px">él elige la propina y escribe sus datos</div>'
+      : '') +
     '<div class="cs-captura">' +
       /* v3.4.3 · il titolo è la FRASE DEL MESERO, dettata da Alberto: non
          chiede dati per il sistema, offre la boleta al cliente — la ragione
@@ -7790,6 +7924,23 @@ async function _verificaDetras() {
     const r = await gasPost('clockIn', { codigo: STATE.codigo, nombre: STATE.nombre });
     if (r && r.ok) { STATE.tgLink = r.tg_link || ''; return; }
     if (r && (r.error === 'codigo_invalid' || r.error === 'no_turno_abierto')) {
+      /* ═══ v3.31.0 · [AUT-0113] · IL KICK-OUT ASPETTA CHE IL TELEFONO TORNI ═══
+         Trovato da 📖 MENU facendo da seconda testa, e NON dal mio collaudo:
+         il candado di `pagoCerrar` non passa di qui: questa riga faceva
+         `STATE.pago = null` incondizionato. Se il turno si chiude (o il device
+         si revoca) proprio mentre il CLIENTE ha il telefono in mano e sta
+         scrivendo il suo correo, lo schermo gli cambiava sotto le dita: perdeva
+         quello che aveva scritto e si ritrovava una schermata che chiede un
+         código che lui non ha.
+         🔑 Si rimanda il kick-out INTERO, non solo questa riga: sbatterlo fuori
+         a metà (sessione morta, pannello ancora su) è uno stato che nessuno ha
+         disegnato. Non si perde niente — `_verificaDetras` ripassa col poll, e
+         il códice invalido rende comunque impotente ogni gesto nel frattempo.
+         ⚖️ Costo dichiarato: se il cliente sparisce col telefono la sessione
+         resta a vetro aperto. Non dà nessun potere (ogni gasPost è già
+         rifiutato dal server) ed è un problema di telefono perso, non di
+         software. */
+      if (STATE.pago && STATE.pago.cliente) return;
       try { localStorage.removeItem(CFG.SK.COD); } catch (e) {}
       STATE.codigo = '';
       if (STATE.pollTimer) clearInterval(STATE.pollTimer);
