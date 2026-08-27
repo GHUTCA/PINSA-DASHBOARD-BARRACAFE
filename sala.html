@@ -947,7 +947,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.33.0</span>
+      <span class="ver" id="ver">sala v3.34.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -6467,7 +6467,7 @@ function abrirPago(mesa, parte) {
        cliente. `cel8` son los 8 dígitos que él escribe (sin prefijo, ver
        pagoTelIn); `celular` sigue siendo el número canónico que viaja al
        fósil, para que pagoEnviar no cambie ni una línea. */
-    cliente: false, cel8: '',
+    cliente: false, cel8: '', clienteHecho: false,
     montoOn: false, montoCustom: '',     // v1.1 · sconto manuale di cassa: il fossile porta il monto VERO
     jl: false, pinJL: '', pinAsk: false, // v1.4 · le mosse del JL, dietro il PIN (verità: la valida il GAS)
     imprimir: false,                     // v1.7 · «la quiero en la mano» anche con la mail
@@ -6598,7 +6598,7 @@ function _pgRelojOn() {
 function _pgRelojOff() { if (_pgReloj) { clearInterval(_pgReloj); _pgReloj = null; } }
 function pagoClienteAbrir() { if (STATE.pago) { STATE.pago.cliente = true; renderPago(); } }
 /* «Listo» es un gesto DEL CLIENTE: cierra su parte y devuelve el aparato. */
-function pagoClienteListo() { if (STATE.pago) { STATE.pago.cliente = false; _pgRelojOff(); renderPago(); } }
+function pagoClienteListo() { if (STATE.pago) { STATE.pago.cliente = false; STATE.pago.clienteHecho = true; _pgRelojOff(); renderPago(); } }
 function pagoSet(campo, v) { if (STATE.pago) { STATE.pago[campo] = v; renderPago(); } }
 function pagoInput(campo, v) { if (STATE.pago) STATE.pago[campo] = v; }   // niente re-render: il focus resta
 /* v3.4.3 · il tocco sul campo vuoto del mixto CONFERMA il resto: lo scrive
@@ -6816,30 +6816,65 @@ function renderPago() {
        evidenziarlo di più» — era `btn sec` (trasparente, 14px): il gesto
        NUOVO era il meno visibile del pannello. E il nome giusto è quello che
        dice cosa VEDE il cliente, non cosa fa il mesero col telefono. */
-    (PAGO_V3_ON
-      ? '<button class="btn" style="margin-top:12px;background:var(--cs-oro,#E9C46A);color:#332B1E" onclick="pagoClienteAbrir()">📱 Mostrar precuenta al cliente</button>' +
-        '<div style="text-align:center;font-size:11px;color:var(--cs-mut);margin-top:5px;margin-bottom:2px">él ve la cuenta, elige la propina y escribe sus datos</div>'
-      : '') +
-    '<div class="cs-captura">' +
-      /* v3.4.3 · il titolo è la FRASE DEL MESERO, dettata da Alberto: non
-         chiede dati per il sistema, offre la boleta al cliente — la ragione
-         di dare i dati sta dentro la domanda stessa. */
-      '<div class="cap-t">🧾 «¿Me dejas tus datos y te mando la boleta?»</div>' +
-      '<input class="cs-pin" autocomplete="off" autocapitalize="words" placeholder="Nombre" value="' + esc(pg.nombre) + '" oninput="pagoInput(\'nombre\',this.value)">' +
-      '<input class="cs-pin" inputmode="tel" autocomplete="off" placeholder="Celular — para reconocerte la próxima" value="' + esc(pg.celular) + '" oninput="pagoInput(\'celular\',this.value)">' +
-      '<input class="cs-pin" type="email" autocomplete="off" placeholder="Correo — la boleta le llega al mail" value="' + esc(pg.correo) + '" oninput="pagoInput(\'correo\',this.value)" onchange="renderPago()">' +
-      ((pg.correo || '').trim()
-        ? '<div class="cs-chips" style="margin-top:6px"><div class="cs-chip' + (pg.imprimir ? ' sel' : '') + '" onclick="pagoImprimirToggle()">🖨 Imprimir igual<small>' + (pg.imprimir ? 'saldrá en barra' : 'solo si la pide en la mano') + '</small></div></div>'
-        : '') +
-    '</div>' +
-    '<div class="cs-psec">Propina (sugerida)</div>' +
-    '<div class="cs-chips">' +
-      chip('prop', 'sug', 'Sugerida', '10% · ' + fmtPrice(Math.round(pg.tot * 0.10))) +
-      chip('prop', 'otro', 'Otro', 'monto') +
-      chip('prop', 'sin', 'Sin', 'propina') + '</div>' +
-    (pg.prop === 'otro'
-      ? '<input class="cs-pin" inputmode="numeric" placeholder="Monto propina $" value="' + esc(pg.otro) + '" oninput="pagoInput(\'otro\',this.value)">'
-      : '') +
+    /* ═══ v3.34.0 · [AUT-0113] · LA ② DEL MOCKUP, ADESSO DAVVERO ═════════════
+       Alberto, provandolo: «questa non è la seconda schermata definita» — e
+       aveva ragione. Avevo aggiunto la pantalla del cliente e lasciato il
+       pannello del mesero IDENTICO a prima, col bottone appiccicato sopra.
+       Ma il mockup la ② la definisce così, testuale: *«nessun campo da
+       riempire: propina e dati sono già dentro. Solo il medio.»*
+       🔴 Era una MIA decisione di disegno (la presi per prudenza) e NON l'ho
+          dichiarata a chi aveva validato il mockup. Una divergenza taciuta è
+          peggio di una discussa: si scopre solo col telefono in mano.
+       Due stati, uno solo per volta:
+       ⓐ il cliente NON ha ancora avuto il telefono → il gesto d'oro in cima e
+         la cattura di oggi sotto, INTATTA (è il ripiego se rifiuta il telefono)
+       ⓑ il cliente ha già fatto la sua parte → conferma di ciò che ha scelto,
+         e sotto solo il medio. Quello che ha deciso lui non si richiede: si
+         mostra. Riaprirla resta possibile, ma è un gesto secondario. */
+    (PAGO_V3_ON && pg.clienteHecho
+      ? /* ⓑ · la ② vera: nessun campo, solo conferma + medio */
+        '<div style="margin:10px 0 2px;padding:10px 12px;border-radius:12px;' +
+          'background:rgba(61,201,126,.1);border:1px solid rgba(61,201,126,.4)">' +
+          '<div style="font-size:11px;font-weight:800;letter-spacing:.06em;color:#8ff0bd;margin-bottom:4px">✓ LO PUSO EL CLIENTE</div>' +
+          ((pg.correo || '').trim() || (pg.celular || '').trim()
+            ? '<div style="font-size:12.5px;color:#cfe9da;line-height:1.5">' +
+                ((pg.correo || '').trim() ? '✉️ ' + esc(pg.correo) + '<br>' : '') +
+                ((pg.celular || '').trim() ? '📱 ' + esc(pg.celular) : '') + '</div>'
+            : '<div style="font-size:12.5px;color:#f3e3b5">sin datos — la boleta saldrá impresa</div>') +
+          '<div style="font-size:12.5px;color:#cfe9da;margin-top:5px">' +
+            '💚 propina ' + (_pagoPropina() > 0 ? '<b>' + fmtPrice(_pagoPropina()) + '</b>' : '<b>sin propina</b>') + '</div>' +
+        '</div>' +
+        /* la via di ritorno esiste ma NON compete col medio: se il cliente si
+           è sbagliato, o vuole cambiare la propina, si riapre. */
+        '<div style="text-align:center;font-size:11.5px;color:var(--cs-mut);margin:6px 0 2px;text-decoration:underline;cursor:pointer" onclick="pagoClienteAbrir()">↩︎ volver a mostrárselo al cliente</div>' +
+        ((pg.correo || '').trim()
+          ? '<div class="cs-chips" style="margin-top:8px"><div class="cs-chip' + (pg.imprimir ? ' sel' : '') + '" onclick="pagoImprimirToggle()">🖨 Imprimir igual<small>' + (pg.imprimir ? 'saldrá en barra' : 'solo si la pide en la mano') + '</small></div></div>'
+          : '')
+      : /* ⓐ · ancora da mostrare al cliente (o flag spento: il pannello di oggi) */
+        (PAGO_V3_ON
+          ? '<button class="btn" style="margin-top:12px;background:var(--cs-oro,#E9C46A);color:#332B1E" onclick="pagoClienteAbrir()">📱 Mostrar precuenta al cliente</button>' +
+            '<div style="text-align:center;font-size:11px;color:var(--cs-mut);margin-top:5px;margin-bottom:2px">él ve la cuenta, elige la propina y escribe sus datos</div>'
+          : '') +
+        '<div class="cs-captura">' +
+          /* v3.4.3 · il titolo è la FRASE DEL MESERO, dettata da Alberto: non
+             chiede dati per il sistema, offre la boleta al cliente — la ragione
+             di dare i dati sta dentro la domanda stessa. */
+          '<div class="cap-t">🧾 «¿Me dejas tus datos y te mando la boleta?»</div>' +
+          '<input class="cs-pin" autocomplete="off" autocapitalize="words" placeholder="Nombre" value="' + esc(pg.nombre) + '" oninput="pagoInput(\'nombre\',this.value)">' +
+          '<input class="cs-pin" inputmode="tel" autocomplete="off" placeholder="Celular — para reconocerte la próxima" value="' + esc(pg.celular) + '" oninput="pagoInput(\'celular\',this.value)">' +
+          '<input class="cs-pin" type="email" autocomplete="off" placeholder="Correo — la boleta le llega al mail" value="' + esc(pg.correo) + '" oninput="pagoInput(\'correo\',this.value)" onchange="renderPago()">' +
+          ((pg.correo || '').trim()
+            ? '<div class="cs-chips" style="margin-top:6px"><div class="cs-chip' + (pg.imprimir ? ' sel' : '') + '" onclick="pagoImprimirToggle()">🖨 Imprimir igual<small>' + (pg.imprimir ? 'saldrá en barra' : 'solo si la pide en la mano') + '</small></div></div>'
+            : '') +
+        '</div>' +
+        '<div class="cs-psec">Propina (sugerida)</div>' +
+        '<div class="cs-chips">' +
+          chip('prop', 'sug', 'Sugerida', '10% · ' + fmtPrice(Math.round(pg.tot * 0.10))) +
+          chip('prop', 'otro', 'Otro', 'monto') +
+          chip('prop', 'sin', 'Sin', 'propina') + '</div>' +
+        (pg.prop === 'otro'
+          ? '<input class="cs-pin" inputmode="numeric" placeholder="Monto propina $" value="' + esc(pg.otro) + '" oninput="pagoInput(\'otro\',this.value)">'
+          : '')) +
     /* v1.3 · i 4 medios VERI (tassonomia Fintoc, ordine Alberto): efectivo ·
        tarjeta débito · tarjeta crédito · transferencia. Questo pannello è la
        finestra della TARJETA FISICA/efectivo: il pago Fintoc dal telefono del
