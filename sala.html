@@ -947,7 +947,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.37.0</span>
+      <span class="ver" id="ver">sala v3.38.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -4658,10 +4658,13 @@ function vCobrarSala(mesa) {
           '<small>El grupo no llegó al servidor — sepáralas y júntalas de nuevo</small></button>') +
     '<button class="opt2" onclick="vhojaCerrar();_cobrarPorMesa(' + j.n + ')"><b>🪑 Por mesa</b> <span style="color:#3db876;font-size:10.5px;font-weight:800">SIN TOCAR NADA</span>' +
       '<small>Cada mesa su cuenta — y se libera sola al pagar</small></button>' +
-    '<button class="opt2" onclick="_cobrarIguales(' + j.n + ')"><b>➗ Por partes iguales</b>' +
-      '<small>A la romana</small></button>' +
-    '<button class="opt2" onclick="_cobrarADedo(' + j.n + ')"><b>👆 A dedo · repartir entre comensales</b>' +
-      '<small>Quién debe qué, por nombre</small></button>');
+    /* la junta tiene DUE opzioni vere (todo · por mesa): la schermata resta,
+       spariscono solo le due che non incassano. */
+    (PAGO_V3_ON ? '' :
+      '<button class="opt2" onclick="_cobrarIguales(' + j.n + ')"><b>➗ Por partes iguales</b>' +
+        '<small>A la romana</small></button>' +
+      '<button class="opt2" onclick="_cobrarADedo(' + j.n + ')"><b>👆 A dedo · repartir entre comensales</b>' +
+        '<small>Quién debe qué, por nombre</small></button>'));
 }
 /* v3.2 · la mesa SOLA entra dalla stessa porta della junta (correzione di
    Alberto: «cobrar è quello vecchio anche lui») — Todo lo que queda apre il
@@ -4669,6 +4672,19 @@ function vCobrarSala(mesa) {
 function _cobrarMesaSola(mesa) {
   const tot = _vpTot(mesa);
   if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
+  /* ═══ v3.38.0 · [AUT-0113] · UN TAP IN MENO SU OGNI TAVOLO ════════════════
+     Tolte «Por partes iguales» e «A dedo» (sotto), a una mesa sola resta UNA
+     opzione: «Todo lo que queda». Una schermata che offre una scelta sola non
+     e' una scelta, e' un tap. Col flag acceso 💳 apre direttamente il pannello.
+     🔬 MISURATO prima di togliere, non dedotto (27-ago, 919 pedidos / 1.810
+        item su PEDIDOS): gli item con il nome del commensale sono **ZERO**.
+        «A dedo» raggruppa per quel nome ⇒ mette sempre tutto in un mucchio
+        solo, cioe' e' identica a «Cobrar todo» con due tap in piu'.
+        «Por partes iguales» non incassa: i numeri 2…12 non hanno onclick, e
+        il testo stesso dice che serve «para DECIRLE al grupo cuanto pone cada
+        uno». E' un divisore, e nella versione junta non ha nemmeno il bottone
+        per incassare. Il codice resta nel file: si riaccende togliendo il flag. */
+  if (PAGO_V3_ON) return abrirPago(mesa);
   vhoja('<h3>Cobrar · Mesa ' + esc(mesa) + '</h3>' +
     '<div class="cs-psub"><b>$' + _fmtMiles(tot) + '</b> en la mesa</div>' +
     '<button class="opt2" onclick="vhojaCerrar();abrirPago(\'' + esc(mesa) + '\')"><b>💳 Todo lo que queda · $' + _fmtMiles(tot) + '</b>' +
@@ -6468,7 +6484,7 @@ function abrirPago(mesa, parte) {
        pagoTelIn); `celular` sigue siendo el número canónico que viaja al
        fósil, para que pagoEnviar no cambie ni una línea. */
     cliente: false, cel8: '', clienteHecho: false,
-    paso3: false,   // v3.37.0 · ③ dopo lo swipe: le 6 cifre
+    paso3: false, yoCobro: false,   // v3.37/38 · ③ dopo lo swipe · ① il ripiego
     montoOn: false, montoCustom: '',     // v1.1 · sconto manuale di cassa: il fossile porta il monto VERO
     jl: false, pinJL: '', pinAsk: false, // v1.4 · le mosse del JL, dietro il PIN (verità: la valida il GAS)
     imprimir: false,                     // v1.7 · «la quiero en la mano» anche con la mail
@@ -6627,6 +6643,9 @@ function _pgRelojOff() { if (_pgReloj) { clearInterval(_pgReloj); _pgReloj = nul
    si chiude di sabato sera è peggio del buco che sto tappando
    (`regola-zero-gesti-jl`: cosa succede se nessuno fa niente?). Resta il
    cancello per il cammino normale, e la valvola per il caso rotto — firmata. */
+/* v3.38.0 · il ripiego: il cliente non vuole il telefono (o non c'è), il
+   mesero prende i dati come sempre. Apre il pannello di oggi, intatto. */
+function pagoYoCobro() { if (STATE.pago) { STATE.pago.yoCobro = true; renderPago(); } }
 function pagoAlPaso3() { if (STATE.pago) { STATE.pago.paso3 = true; renderPago(); } }
 function pagoVolverA2() { if (STATE.pago) { STATE.pago.paso3 = false; renderPago(); } }
 function pagoClienteAbrir() { if (STATE.pago) { STATE.pago.cliente = true; renderPago(); } }
@@ -6733,6 +6752,44 @@ function renderPago() {
     return;
   }
   _pgRelojOff();
+  /* ═══ ① · IL LANCIATORE — una schermata, UN gesto ════════════════════════
+     Alberto, guardandola sul telefono: «la schermata uno è un mix che non si
+     capisce e non serve a molto». Aveva ragione: chiedeva al MESERO le stesse
+     tre cose (nombre · celular · correo) che stava per far scrivere al
+     CLIENTE, con la propina accanto. Due mestieri nello stesso vetro, e chi
+     legge non sa quale dei due deve fare.
+     Qui c'è solo quello che serve per decidere: il tavolo, quanto, e il gesto.
+     🔑 Il pannello di oggi NON sparisce — vive dietro il link in fondo, per
+     quando il cliente rifiuta il telefono. Senza quella via, un cliente che
+     non vuole l'apparecchio diventerebbe un tavolo che non si può incassare. */
+  if (PAGO_V3_ON && !pg.clienteHecho && !pg.yoCobro && !pg.paso3 && !pg.enviando
+      && !pg.jl && !pg.pinAsk && !pg.famAsk && !pg.montoOn) {
+    w.innerHTML = '<div class="cs-pago" onclick="if(event.target===this)pagoCerrar()"><div class="cs-pcard">' +
+      '<div class="cs-asa"></div>' +
+      '<h3>Mesa ' + esc(pg.mesa) + (pg.parte ? ' — parte de ' + esc(pg.parte.titulo) : ' — cobrar') + '</h3>' +
+      (pg.parte ? '<div style="margin:2px 0 10px;padding:9px 12px;border-radius:12px;' +
+        'background:rgba(61,184,118,.13);border:1px solid #3db876;font-size:12.5px;line-height:1.5">' +
+        '<b>Cobras solo esta parte.</b> La mesa <b>queda abierta</b> con el resto.</div>' : '') +
+      /* la fascia del doppio cobro NON si tocca: è denaro, e deve stare prima
+         di qualunque gesto — anche prima di porgere il telefono. */
+      ((pg.ya && !pg.okDoble)
+        ? '<div style="margin:8px 0 2px;padding:10px 12px;border-radius:12px;' +
+            'background:rgba(226,75,74,.13);border:1px solid #e24b4a;color:#ffd9d8;font-size:12.5px;line-height:1.45">' +
+            (pg.ya.sesion ? '<b>⚠️ Esta cuenta ya se cobró</b> — en esta misma sesión<br>'
+                          : '<b>⚠️ Esta mesa ya cobró hoy</b> — puede ser el turno anterior<br>') +
+            esc(pg.ya.hora) + ' · <b>' + fmtPrice(pg.ya.monto) + '</b></div>'
+        : '') +
+      '<div style="text-align:center;margin:14px 0 2px">' +
+        '<div style="font-size:11.5px;color:var(--cs-mut)">Consumo</div>' +
+        '<div style="font-size:30px;font-weight:900;margin-top:1px">' + fmtPrice(pg.tot) + '</div></div>' +
+      '<button class="btn" style="margin-top:18px;background:var(--cs-oro,#E9C46A);color:#332B1E" onclick="pagoClienteAbrir()">📱 Mostrar precuenta al cliente</button>' +
+      '<div style="text-align:center;font-size:11px;color:var(--cs-mut);margin-top:6px">él ve la cuenta, elige la propina y escribe sus datos</div>' +
+      '<div style="border-top:1px solid var(--cs-line);margin-top:20px;padding-top:14px;text-align:center">' +
+        '<span style="font-size:11.5px;color:var(--cs-mut);text-decoration:underline;cursor:pointer" onclick="pagoYoCobro()">el cliente no quiere el teléfono · cobro yo</span></div>' +
+      '<button class="btn sec" style="margin-top:16px" onclick="pagoCerrar()">Cancelar</button>' +
+      '</div></div>';
+    return;
+  }
   /* ═══ ③ · DOPO LO SWIPE — le 6 cifre, e il tavolo si chiude solo lì ══════ */
   if (PAGO_V3_ON && pg.paso3 && !pg.enviando) {
     const vD = String(pg.voucher || '').replace(/[^0-9]/g, '').slice(0, 6);
@@ -6925,9 +6982,12 @@ function renderPago() {
               'sin datos — la boleta saldrá impresa') +
         '</div>'
       : /* ⓐ · ancora da mostrare al cliente (o flag spento: il pannello di oggi) */
+        /* v3.38.0 · qui ci si arriva SOLO da «cobro yo» (il lanciatore ① ha
+           già la sua schermata): il bottone oro non va ripetuto — sarebbe di
+           nuovo l'ibrido che Alberto ha nominato. Resta una via di ritorno
+           discreta, per chi ci è entrato per sbaglio. */
         (PAGO_V3_ON
-          ? '<button class="btn" style="margin-top:12px;background:var(--cs-oro,#E9C46A);color:#332B1E" onclick="pagoClienteAbrir()">📱 Mostrar precuenta al cliente</button>' +
-            '<div style="text-align:center;font-size:11px;color:var(--cs-mut);margin-top:5px;margin-bottom:2px">él ve la cuenta, elige la propina y escribe sus datos</div>'
+          ? '<div style="text-align:center;font-size:11.5px;color:var(--cs-mut);margin:10px 0 2px;text-decoration:underline;cursor:pointer" onclick="pagoClienteAbrir()">‹ mejor se la muestro al cliente</div>'
           : '') +
         '<div class="cs-captura">' +
           /* v3.4.3 · il titolo è la FRASE DEL MESERO, dettata da Alberto: non
