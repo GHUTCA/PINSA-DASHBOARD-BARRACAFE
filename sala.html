@@ -947,7 +947,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.40.0</span>
+      <span class="ver" id="ver">sala v3.41.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -6484,7 +6484,7 @@ function abrirPago(mesa, parte) {
        pagoTelIn); `celular` sigue siendo el número canónico que viaja al
        fósil, para que pagoEnviar no cambie ni una línea. */
     cliente: false, cel8: '', clienteHecho: false,
-    paso3: false, yoCobro: false,   // v3.37/38 · ③ dopo lo swipe · ① il ripiego
+    paso3: false, yoCobro: false, otroEdit: false,   // v3.37/38 · ③ dopo lo swipe · ① il ripiego
     montoOn: false, montoCustom: '',     // v1.1 · sconto manuale di cassa: il fossile porta il monto VERO
     jl: false, pinJL: '', pinAsk: false, // v1.4 · le mosse del JL, dietro il PIN (verità: la valida il GAS)
     imprimir: false,                     // v1.7 · «la quiero en la mano» anche con la mail
@@ -6666,6 +6666,22 @@ function pagoVouIn(el) {
     b.textContent = ok6 ? 'CERRAR MESA ' + STATE.pago.mesa : 'Faltan ' + (6 - d.length) + ' cifras';
   }
 }
+/* v3.41.0 · toccare «Otro» sceglie E riapre la casella (anche se «Otro» era
+   gia' scelto: e' cosi' che si corregge un monto sbagliato). */
+function pagoOtroChip() {
+  if (!STATE.pago) return;
+  STATE.pago.prop = 'otro';
+  STATE.pago.otroEdit = true;
+  renderPago();
+  const el = $('pgOtroIn'); if (el) { try { el.focus(); } catch (e) {} }
+}
+/* finito di scrivere: la casella si chiude e il monto resta sotto il chip.
+   Se non ha scritto niente resta aperta — chiuderla vuota lascerebbe «Otro»
+   scelto e senza numero, cioe' una propina di zero che nessuno ha deciso. */
+function pagoOtroFin() {
+  if (!STATE.pago) return;
+  if (_pagoPropina() > 0) { STATE.pago.otroEdit = false; renderPago(); }
+}
 function pagoOtroIn(el) {
   if (!STATE.pago) return;
   STATE.pago.otro = el.value;
@@ -6762,11 +6778,15 @@ function renderPago() {
       '<div class="cs-psec">Propina</div>' +
       '<div class="cs-chips">' +
         cChip('sug', '10%', pg.prop === 'sug' ? fmtPrice(Math.round(pg.tot * 0.10)) : '') +
-        '<div class="cs-chip' + (pg.prop === 'otro' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'otro\')">Otro' +
+        '<div class="cs-chip' + (pg.prop === 'otro' ? ' sel' : '') + '" onclick="pagoOtroChip()">Otro' +
           '<small id="pgSubOtro">' + ((pg.prop === 'otro' && _pagoPropina() > 0) ? fmtPrice(_pagoPropina()) : 'monto') + '</small></div>' +
         cChip('sin', 'Sin', 'propina') + '</div>' +
-      (pg.prop === 'otro'
-        ? '<input class="cs-pin" style="margin-top:8px;text-align:center" inputmode="numeric" placeholder="Monto propina $" value="' + esc(pg.otro) + '" oninput="pagoOtroIn(this)">'
+      /* v3.41.0 · la casella sparisce appena il monto e' scritto (Alberto):
+         resta solo il numero sotto «Otro». Si riapre toccando «Otro» di nuovo.
+         Sparisce al BLUR, non alla prima cifra: nascondendola a ogni tasto non
+         si potrebbe scrivere «2000», solo «2». */
+      ((pg.prop === 'otro' && pg.otroEdit)
+        ? '<input class="cs-pin" id="pgOtroIn" style="margin-top:8px;text-align:center" inputmode="numeric" placeholder="Monto propina $" value="' + esc(pg.otro) + '" oninput="pagoOtroIn(this)" onblur="pagoOtroFin()">'
         : '') +
       '<div id="pgTotLinea" style="text-align:right;font-size:21px;font-weight:900;margin-top:10px">TOTAL ' + fmtPrice(tot) + '</div>' +
       '<div class="cs-captura">' +
@@ -6860,18 +6880,24 @@ function renderPago() {
           '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--cs-mut);margin-top:6px">' +
             '<span>del papelito del POS · «Operación #»</span>' +
             '<span id="pgVouN" style="font-weight:800;color:' + (vD.length === 6 ? '#3db876' : 'var(--cs-mut)') + '">' + vD.length + '/6</span></div>' +
-          /* la valvola: dichiarata, non nascosta — ma è un secondo tap, non il default */
-          '<div class="cs-chips" style="margin-top:10px"><div class="cs-chip" onclick="pagoSet(\'sinVoucher\',true)">No hay voucher<small>cierra igual</small></div></div>'
-        : '<div style="font-size:12.5px;margin:14px 0 6px">Sin voucher — <b>cierra igual</b>. Queda anotado que esta mesa se cerró sin número de operación.</div>' +
-          '<div class="cs-chips" style="margin-top:8px"><div class="cs-chip" onclick="pagoSet(\'sinVoucher\',false)">← Sí hay voucher</div></div>') +
+          ''
+        : '<div style="font-size:12.5px;margin:14px 0 6px">Sin voucher — <b>cierra igual</b>. Queda anotado que esta mesa se cerró sin número de operación.</div>') +
       /* la boleta lo dice qui, dove si chiude: è l'ultimo momento per stamparla */
       '<div style="margin-top:12px;padding:8px 10px;border-radius:10px;font-size:11px;text-align:center;' +
         ((pg.correo || '').trim()
           ? 'background:rgba(61,201,126,.1);border:1px solid rgba(61,201,126,.4);color:#8ff0bd">✉️ La boleta le llega al correo'
           : 'background:rgba(233,196,106,.12);border:1px solid rgba(233,196,106,.45);color:#f3e3b5">🖶 Sin correo: la boleta sale impresa en barra') +
       '</div>' +
+      /* 🔴 v3.41.0 · SCAMBIATI (Alberto): l'AZIONE sopra, la VALVOLA sotto.
+         «No hay voucher» stava sopra il verde, cioè la via d'uscita occupava
+         il posto della cosa che si fa nel 99% dei casi. Chi ha il papelito in
+         mano deve trovare il bottone di chiusura per primo; chi non ce l'ha
+         cerca, e trova. */
       '<button class="btn verde" id="pgVouBtn" style="margin-top:14px" ' + (listo ? '' : 'disabled') + ' onclick="pagoConfirmar(this)">' +
         (listo ? 'CERRAR MESA ' + esc(pg.mesa) : 'Faltan ' + (6 - vD.length) + ' cifras') + '</button>' +
+      (!pg.sinVoucher
+        ? '<div class="cs-chips" style="margin-top:10px"><div class="cs-chip" onclick="pagoSet(\'sinVoucher\',true)">No hay voucher<small>cierra igual</small></div></div>'
+        : '<div class="cs-chips" style="margin-top:10px"><div class="cs-chip" onclick="pagoSet(\'sinVoucher\',false)">← Sí hay voucher</div></div>') +
       '<div style="text-align:center;font-size:11.5px;color:var(--cs-mut);padding:12px 0 2px;text-decoration:underline;cursor:pointer" onclick="pagoVolverA2()">‹ volver</div>' +
       '</div></div>';
     return;
