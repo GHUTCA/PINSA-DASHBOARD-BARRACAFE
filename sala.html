@@ -947,7 +947,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.45.0</span>
+      <span class="ver" id="ver">sala v3.46.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2850,6 +2850,45 @@ function _modsDe(p){
   if (o.length === 1) o = ['Como viene'].concat(o);
   return o.length >= 2 ? o : null;
 }
+/* ═══ v3.46.0 · [AUT-0127] · IL PREZZO NEL NOME NON MUORE PIÙ QUI ══════════
+   Fossile mesa 20, notte 28→29-ago: STESSA opzione "Michelada sin Inglesa",
+   97 secondi di distanza — prima con `mods`+delta ($7.000, corretto), poi
+   senza ($5.500, mancano $1.500). `nuevoResponder` cade su questa via
+   (vocabolario vecchio) quando `mods2GruposDe(p)` torna vuoto — cosa che
+   succede sia quando il prodotto non ha davvero opzioni prezzate, sia
+   quando il vocabolario mods2 non è (ancora/più) disponibile sul telefono:
+   le due cose sono indistinguibili, e finora la seconda perdeva silenziosa
+   il prezzo — la STESSA ferita del reperto 16-ago (r.2879-2895), mai chiusa
+   alla radice, solo aggirata col cancello `mods2_on`.
+   🔑 La radice: qui il prezzo è già scritto, in chiaro, dentro il testo
+   («Michelada +$1.500» — verificato sul foglio vero, PRODUCTOS_SEED). Non
+   serve indovinarlo: si LEGGE. Tre esiti, mai un quarto silenzioso:
+     ① nessun «+$» nel testo (es. "Sola")     → legittimamente $0, come oggi
+     ② «+$N» leggibile                        → si addebita, riga marcata
+        `parseado:true` (si conta domattina quante volte la via è servita)
+     ③ «+$» presente ma NON si legge un numero → SI BLOCCA con un avviso:
+        indovinare un prezzo è peggio di non venderlo (Alberto, 29-ago)
+   La ✕ della scheda resta sempre lì: un blocco non è un vicolo cieco.
+   Interruttore `?mods_parse=0` (per apparecchio, ricordato): spento, torna
+   ESATTAMENTE al comportamento di ieri — testo senza prezzo, come sempre. */
+const MODS_PARSE_KEY = 'sala_mods_parse';
+const MODS_PARSE_ON = (function () {
+  const q = QS.get('mods_parse');
+  try {
+    if (q === '1') { localStorage.setItem(MODS_PARSE_KEY, '1'); return true; }
+    if (q === '0') { localStorage.setItem(MODS_PARSE_KEY, '0'); return false; }
+    return localStorage.getItem(MODS_PARSE_KEY) !== '0';
+  } catch (e) { return q !== '0'; }
+})();
+function _modsDeltaTexto(op){
+  const s = (op || '').toString().trim();
+  if (!/\+\s*\$/.test(s)) return { ok: true, label: s, d: 0 };
+  const m = /^(.*?)\s*\+\s*\$\s*([\d]{1,3}(?:\.\d{3})*)\s*$/.exec(s);
+  if (!m) return { ok: false };
+  const d = parseInt(m[2].replace(/\./g, ''), 10);
+  if (!(d > 0)) return { ok: false };
+  return { ok: true, label: m[1].trim(), d: d };
+}
 
 /* ═══════════════════════════════════════════════════════════════════════
    v3.10 · MODS2 · IL MODIFICADOR È UN FATTO ECONOMICO (tappa ⑥ · 05-ago)
@@ -3694,7 +3733,18 @@ function nuevoResponder(i){
         opciones:(STATE.menuOpciones||[]).map(function(o){ return o.nombre; }) };
       _cmRedibujar(); return;
     }
-    _cmPoner(p, opFinal, e.n);
+    /* v3.46.0 · [AUT-0127] · vedi _modsDeltaTexto — legge il prezzo scritto
+       nel nome invece di lasciarlo morire in silenzio. */
+    let _pdMods;
+    if (MODS_PARSE_ON && !MODS2_FRENO) {
+      const pd = _modsDeltaTexto(opFinal);
+      if (!pd.ok) {
+        toast('err', '⚠️ No leí el precio de "'+opFinal+'" — avisa al JL o reintenta en un segundo');
+        return;
+      }
+      if (pd.d > 0) _pdMods = [{ g:'', gn:'', oid:'', o:pd.label, d:pd.d, cl:'ajuste', parseado:true }];
+    }
+    _cmPoner(p, (_pdMods ? _pdMods[0].o : opFinal), e.n, undefined, _pdMods);
   }
   // 🔴 v3.6.2 · la stessa rete di `_mods2Avanza`: la via vecchia dei mods e
   // quella della bebida chiamano `_cmPoner` e poi azzeravano — su un piatto di
