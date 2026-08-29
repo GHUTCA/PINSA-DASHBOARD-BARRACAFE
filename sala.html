@@ -947,7 +947,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.44.0</span>
+      <span class="ver" id="ver">sala v3.45.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1111,6 +1111,60 @@ if (CM_CRONO_ON) {
     document.addEventListener('visibilitychange', function () { if (document.hidden) _cmCronoFlush(); });
     window.addEventListener('pagehide', _cmCronoFlush);
   } catch (e) {}
+}
+/* ═══ v3.45.0 · [AUT-0126] · LA CURA CHIRURGICA DEL BOTTONE MORTO ═══════════
+   Alberto, 28-ago sera: Jurley davanti a lui, 2-3 tocchi morti sulla pregunta
+   forzada di Tabla Ganadera prima che uno passasse. Censimento 28-ago
+   (§2 rango 1): `mods2Toggle`/`mods2Elegir` rifanno il CAJÓN INTERO —
+   filtro su ≈132 prodotti + fino a 80 bottoni — per accendere UN check.
+   Qui si rifà SOLO `.cm-preg` (la scheda della domanda), non il cajón:
+   stesso `_cmPregHtml()` che già esiste, un `outerHTML` più piccolo.
+   🔴 Il fossile prima del deploy (obbligo di CONTROLLER, item 48 Q1): letti i
+   due pedidos VERI di Jurley/Tabla Ganadera del 28-ago (mesa 16 e 22,
+   PEDIDOS via getTab) — `qty:1` su entrambi, un solo `op` sensato
+   ("Tres cuartos"), NESSUN segno di accumulo/doppione. Su un campione di 2
+   non è una prova definitiva, ma non giustifica un debounce che curerebbe
+   un rischio non confermato: nessun debounce aggiunto, solo la velocità.
+   🔴 Rilievo di 🛎 SALA, integrato prima del deploy: la via rapida deve
+   restare visibile al cronometro (AUT-0125) — altrimenti stanotte i tocchi
+   veloci sparirebbero dalla misura invece di confermarla. Marcata
+   `via:'rapida'` nel buffer; la via piena resta `{t,ms}` senza marca, invariata.
+     ?mods_fix=1  → accende E RICORDA su questo telefono
+     ?mods_fix=0  → spegne e ricorda: torna al ridisegno pieno di sempre
+     sin nulla    → ACCESO di default (fallback automatico a `_cmRedibujar()`
+                    anche se `.cm-preg` non si trova in pagina) */
+const MODS_FIX_KEY = 'sala_mods_fix';
+const MODS_FIX_ON = (function () {
+  const q = QS.get('mods_fix');
+  try {
+    if (q === '1') { localStorage.setItem(MODS_FIX_KEY, '1'); return true; }
+    if (q === '0') { localStorage.setItem(MODS_FIX_KEY, '0'); return false; }
+    return localStorage.getItem(MODS_FIX_KEY) !== '0';
+  } catch (e) { return q !== '0'; }
+})();
+function _cmPregRedibujar(){
+  if (!MODS_FIX_ON) { _cmRedibujar(); return; }
+  /* v3.45.1 · 🔴 rilievo di 🛎 SALA, PRIMA del deploy: con la carta aperta
+     `.cm-preg` esiste DUE volte — una nel banco (dietro, invisibile,
+     _cmSlotHtml r.3399) e una nel cajón (davanti, quella vera, r.3536) — la
+     STESSA condizione `n.eligiendo` le genera entrambe, e il banco viene
+     PRIMA nel markup (renderNuevo r.3558: banco poi cajón). Un querySelector
+     nudo prendeva sempre la prima: aggiornava la domanda che NESSUNO vede e
+     lasciava congelata quella sotto gli occhi del mesero — peggio del male
+     che doveva curare, perché lo stato (`e.sel[i]`) cambia comunque e il
+     vetro no: un secondo tocco per "farla vedere" la DESELEZIONA in silenzio,
+     e sui modificadores che muovono il prezzo è un errore di dato, non di
+     grafica. Con la carta chiusa `.cm-cajon` non esiste (`_cmCajonHtml`
+     ritorna '' — r.3481) e si cade sul banco, l'unica che c'è: giusto nei
+     due mondi. */
+  const cont = document.querySelector('.cm-cajon') || document;
+  const el = cont.querySelector('.cm-preg');
+  if (!el) { _cmRedibujar(); return; }
+  if (!CM_CRONO_ON) { el.outerHTML = _cmPregHtml(); return; }
+  const t0 = performance.now();
+  el.outerHTML = _cmPregHtml();
+  _cmCronoBuf.push({ t: Date.now(), ms: Math.round((performance.now() - t0) * 10) / 10, via: 'rapida' });
+  if (_cmCronoBuf.length >= 20) _cmCronoFlush();
 }
 /* il freno della libreta es CSS → viaja como clase; si el body aún no existe
    (script movido a <head> mañana) se reintenta al DOMContentLoaded */
@@ -3254,7 +3308,7 @@ function _mods2Avanza(elegidos){
     e.mods.push({ g: gr.g, gn: gr.gn, oid: op.oid, o: op.o, d: d, cl: op.cl, add: gr.tipo !== 'unica' });
   });
   e.sel = {}; e.gi++;
-  if(e.gi < e.g2.length){ _cmRedibujar(); return; }
+  if(e.gi < e.g2.length){ _cmPregRedibujar(); return; }   // v3.45.0 · [AUT-0126] · resta .cm-preg, prossimo gruppo
   const p = (STATE.catalogo||[]).find(function(x){ return x.id===e.id; });
   /* v3.11 · LA PAREJA DEL 2x1 (Alberto, 05-ago sera): «un 2x1 NON è uno
      sconto del 50%» — e perché resti vero, la seconda unità deve essere una
@@ -3265,7 +3319,7 @@ function _mods2Avanza(elegidos){
      Con q>1 il giro resta quello di oggi (una prep per tutte): il caso
      «2 schop, 4 unità, preparazioni miste» si fa un paio alla volta. */
   if(p && _cmEs2(p) && e.n === 1 && !e.pareja2){
-    if(!e.u1){ e.u1 = e.mods; e.mods = []; e.pareja = true; _cmRedibujar(); return; }
+    if(!e.u1){ e.u1 = e.mods; e.mods = []; e.pareja = true; _cmPregRedibujar(); return; }   // v3.45.0 · [AUT-0126] · resta .cm-preg (pareja)
   }
   if(p && e.u1){ e.u2 = e.mods; return _cm2Cuando(e); }   // v3.12 · manca il ¿cuándo? · v3.16.0 [AUT-0037]
   else if(p){
@@ -3273,7 +3327,7 @@ function _mods2Avanza(elegidos){
     /* 🔴 v3.6.2 · LA RETE: `_cmPoner` può aprire una domanda SUA (il término) e
        uscire senza scrivere la riga. Azzerare `eligiendo` qui la cancellava, e
        il piatto spariva senza lasciare traccia da nessuna parte. */
-    if(n.eligiendo && n.eligiendo !== e){ _cmRedibujar(); return; }
+    if(n.eligiendo && n.eligiendo !== e){ _cmPregRedibujar(); return; }   // v3.45.0 · [AUT-0126] · resta .cm-preg (nuova e, término)
   }
   n.eligiendo = null; _cmRedibujar(); if(!n.cajon) _cmFoco('nuevoQ');
 }
@@ -3347,7 +3401,7 @@ function mods2Elegir(i){ _mods2Avanza([i]); }
 function mods2Saltar(){ _mods2Avanza([]); }
 function mods2Toggle(i){
   const e = STATE.nuevo && STATE.nuevo.eligiendo; if(!e) return;
-  e.sel = e.sel || {}; e.sel[i] = !e.sel[i]; _cmRedibujar();
+  e.sel = e.sel || {}; e.sel[i] = !e.sel[i]; _cmPregRedibujar();   // v3.45.0 · [AUT-0126]
 }
 function mods2Listo(){
   const e = STATE.nuevo && STATE.nuevo.eligiendo; if(!e) return;
@@ -3576,16 +3630,24 @@ function _cmRedibujar(){
 }
 /* raccolta a fine serata, per apparecchio: `?crono=dump` fa un `prompt()`
    col riassunto e il JSON grezzo (copiabile — un `alert()` non si copia da
-   telefono). Non tocca STATE, non tocca la rete. */
+   telefono). Non tocca STATE, non tocca la rete.
+   v3.45.0 · [AUT-0126] · il riassunto ora è SPACCATO per `via` (rapida/
+   completa), non un numero solo: senza il conteggio per via, un crollo dei
+   tempi medi sarebbe indistinguibile da uno spostamento dei tocchi verso la
+   via rapida (che li nasconderebbe, non li guarirebbe) — rilievo di 🛎 SALA. */
 function _cmCronoDump(){
   try {
     _cmCronoFlush();
     const datos = JSON.parse(localStorage.getItem('sala_crono_datos') || '[]');
-    const ms = datos.map(function(d){ return d.ms; }).sort(function(a,b){ return a-b; });
-    const n = ms.length;
-    const pct = function(p){ return n ? ms[Math.min(n-1, Math.floor(n*p))] : 0; };
-    const resumen = 'n=' + n + ' · p50=' + pct(0.5) + 'ms · p90=' + pct(0.9) + 'ms · max=' + (n?ms[n-1]:0) + 'ms';
-    prompt(resumen + ' — copia y manda:', JSON.stringify(datos));
+    const porVia = function(via){
+      const ms = datos.filter(function(d){ return (d.via || 'completa') === via; })
+        .map(function(d){ return d.ms; }).sort(function(a,b){ return a-b; });
+      const n = ms.length;
+      const pct = function(p){ return n ? ms[Math.min(n-1, Math.floor(n*p))] : 0; };
+      return 'n=' + n + ' · p50=' + pct(0.5) + 'ms · p90=' + pct(0.9) + 'ms · max=' + (n?ms[n-1]:0) + 'ms';
+    };
+    const resumen = 'completa: ' + porVia('completa') + '\nrapida:   ' + porVia('rapida');
+    prompt(resumen + '\n\ncopia y manda:', JSON.stringify(datos));
   } catch (e) { alert('crono: ' + e.message); }
 }
 if (QS.get('crono') === 'dump') { window.addEventListener('load', _cmCronoDump); }
