@@ -7112,6 +7112,11 @@ function c4Css() {
       'justify-content:center;border:none}' +
     '.c4 .c4chip small{display:block;font-size:12.5px;font-weight:500;color:#4A5A67;margin-top:2px}' +
     '.c4 .c4chip.n{flex:1 1 calc(25% - 8px);min-width:60px;font-size:20px}' +
+    /* i domini: 2×2, non 4 in fila — a 4 in fila «@hotmail.com» si spezza o
+       rimpicciolisce sotto il leggibile su un telefono stretto, e questo lo
+       tocca un cliente in piedi, di notte. Due righe di due stanno dentro lo
+       schermo senza scroll (D9). */
+    '.c4 .c4chip.dom{flex:1 1 calc(50% - 8px);font-size:14.5px;padding:11px 6px;margin-top:0}' +
     '.c4 .c4chip.sel{background:var(--cs-cyan,#3fe0f0);color:#06222a}' +
     '.c4 .c4chip.sel small{color:#0a3540}' +
     '.c4 .c4resta{border-radius:12px;padding:11px 13px;margin-top:13px;text-align:center;' +
@@ -7238,6 +7243,72 @@ function c4CorrigeMail() {
   }, 30);
 }
 
+/* ═══ I CHIP DEL DOMINIO ═════════════════════════════════════════════════════
+   🔑 QUESTA NON È VALIDAZIONE. La validazione (`c4MailOk`) corregge un errore
+   dopo che è stato fatto; i chip TOLGONO L'OCCASIONE DI FARLO: il cliente
+   scrive `mario.rossi` e tocca — il dominio non lo scrive, quindi non può
+   sbagliarlo. Le due cose convivono e nessuna sostituisce l'altra.
+   📊 I quattro non sono un'opinione, sono la misura del CONTROLLER sul fossile
+   (39 correo veri, 14→31 ago): gmail 66% · hotmail 74% · outlook 82% ·
+   icloud 87%… e i quattro insieme fanno il 95% dei clienti. Il quinto non
+   esiste — c'è una coda di uno ciascuno, e per quelli resta la tastiera.
+   ⚠️ `ghutca.com` compare 2 volte nel fossile ed è ALBERTO, non un cliente:
+   fuori. Un chip si conquista con la frequenza dei CLIENTI, non con quella
+   delle righe.
+   🩹 Il caso vero che ha aperto il cantiere: una boleta emessa verso
+   `ga***@gmail` — SENZA il `.com`. `MailApp` non solleva niente, l'audit scrive
+   `enviado`, e il libro afferma una consegna che non poteva avvenire. Toccare
+   il chip su quell'indirizzo lo ripara: sostituisce il dominio monco.
+   ⏱ D7 · il tocco NON passa da `renderPago`: riscrive il valore del campo e
+   la selezione dei chip, e basta. Un re-render qui perderebbe il cursore di
+   chi sta scrivendo, che è l'opposto dello scopo. */
+var C4_DOMS = ['gmail.com', 'hotmail.com', 'outlook.com', 'icloud.com'];
+
+/* separa `mario.rossi` da `gmail.com`. Usa l'ULTIMA @, non la prima: se il
+   cliente ha battuto due volte il tasto (`a@@gmail`) la parte buona è quella
+   davanti alla prima, ma il dominio da sostituire è dietro l'ultima — e il
+   risultato deve restare un indirizzo solo. */
+function _c4MailPartes(m) {
+  m = String(m || '').trim();
+  var i = m.lastIndexOf('@');
+  if (i < 0) return { loc: m, dom: '' };
+  return { loc: m.slice(0, i).replace(/@+$/, ''), dom: m.slice(i + 1) };
+}
+/* il dominio attualmente scritto coincide con un chip? (per accenderlo) */
+function c4DomSel(m, d) {
+  var p = _c4MailPartes(m);
+  return !!p.loc && p.dom.toLowerCase() === d;
+}
+function c4Dom(d) {
+  var pg = STATE.pago; if (!pg) return;
+  var p = _c4MailPartes(pg.correo);
+  /* 🔴 senza la parte davanti alla @ il chip produrrebbe `@gmail.com`, che è
+     un indirizzo falso con l'aria di uno vero — cioè esattamente il difetto
+     che siamo qui a chiudere. Per questo i chip non si disegnano affatto
+     finché il campo è vuoto: un bottone che non fa niente si tocca due volte. */
+  if (!p.loc) return;
+  pg.correo = p.loc + '@' + d;                       // sostituisce, non concatena
+  var e = document.getElementById('c4Mail');
+  if (e) e.value = pg.correo;
+  c4PintaDoms(pg.correo);
+}
+/* ridisegna SOLO le quattro pastiglie — niente altro tocca lo schermo. */
+function c4PintaDoms(m) {
+  for (var i = 0; i < C4_DOMS.length; i++) {
+    var b = document.getElementById('c4dom' + i);
+    if (b) b.className = 'c4chip dom' + (c4DomSel(m, C4_DOMS[i]) ? ' sel' : '');
+  }
+}
+/* il campo scritto a mano deve accendere/spegnere i chip come li accende il
+   tocco: se il cliente digita `…@gmail.com` da solo, il chip si illumina. */
+function c4Mail(v) {
+  var pg = STATE.pago; if (!pg) return;
+  pagoInput('correo', v);
+  var fila = document.getElementById('c4doms');
+  if (fila) fila.style.display = _c4MailPartes(v).loc ? 'flex' : 'none';
+  c4PintaDoms(v);
+}
+
 /* ── IL RENDER DEI PASSI ────────────────────────────────────────────────────
    🔴 SCOSTAMENTO DAL PROTOTIPO, DICHIARATO — deciso da me, Alberto può dire no:
    il modal v4 disegna i passi NUOVI (inicio · bivio · lomio · iguales · datos ·
@@ -7340,7 +7411,16 @@ function c4Render(w, pg) {
         '<input class="cs-pin" id="c4Tel" inputmode="numeric" maxlength="8" placeholder="+56 9 · 0000 0000" ' +
           'value="' + esc(_c4Tel8(pg.celular)) + '" oninput="c4Tel(this.value)">' +
         '<input class="cs-pin" id="c4Mail" inputmode="email" placeholder="Email" value="' + esc(pg.correo || '') + '" ' +
-          'oninput="pagoInput(\'correo\',this.value)">';
+          'oninput="c4Mail(this.value)">' +
+        /* le pastiglie stanno SOTTO il campo e appaiono solo quando c'è
+           qualcosa da completare: prima non servono a niente e occuperebbero
+           lo schermo mentre il cliente scrive il nome. */
+        '<div class="c4chips" id="c4doms" style="margin-top:8px;display:' +
+          (_c4MailPartes(pg.correo).loc ? 'flex' : 'none') + '">' +
+          C4_DOMS.map(function (d, i) {
+            return '<button class="c4chip dom' + (c4DomSel(pg.correo, d) ? ' sel' : '') +
+              '" id="c4dom' + i + '" onclick="c4Dom(\'' + d + '\')">@' + d + '</button>';
+          }).join('') + '</div>';
     /* «Listo» è l'unica uscita, e vale anche a mani vuote — nessun «prefiero no
        dejar mis datos» da toccare: quella funzione la compie questo bottone
        senza dirlo (D5, Alberto: «i dati sono troppo importanti per noi»). */
