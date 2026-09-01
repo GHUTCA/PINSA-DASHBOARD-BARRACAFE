@@ -7332,8 +7332,13 @@ function c4Render(w, pg) {
         '<div class="c4lab">🧾 Te mandamos tu boleta</div>' +
         '<input class="cs-pin" id="c4Nom" placeholder="Nombre" value="' + esc(pg.nombreCli || '') + '" ' +
           'oninput="pagoInput(\'nombreCli\',this.value)">' +
+        /* 🔴 il celular passa da `c4Tel`, NON da `pagoInput` diretto — e non è
+           un dettaglio: il pannello v3 compone `'+569' + t` (r.6920), il mio
+           campo scriveva le 8 cifre nude. Due flussi che mandano al server due
+           forme diverse dello stesso dato: chi legge PAGOS non saprebbe quale
+           aspettarsi. Qui si compone la stessa forma di sempre. */
         '<input class="cs-pin" id="c4Tel" inputmode="numeric" maxlength="8" placeholder="+56 9 · 0000 0000" ' +
-          'value="' + esc(pg.celular || '') + '" oninput="pagoInput(\'celular\',this.value)">' +
+          'value="' + esc(_c4Tel8(pg.celular)) + '" oninput="c4Tel(this.value)">' +
         '<input class="cs-pin" id="c4Mail" inputmode="email" placeholder="Email" value="' + esc(pg.correo || '') + '" ' +
           'oninput="pagoInput(\'correo\',this.value)">';
     /* «Listo» è l'unica uscita, e vale anche a mani vuote — nessun «prefiero no
@@ -7382,6 +7387,29 @@ function c4AlMesero() {
   c4Sync(pg); pg.c4.paso = 'medio'; pg.cliente = false; renderPago();
 }
 function c4Papel() { var pg = STATE.pago; if (pg) { pg.imprimir = true; toast('ok', '🖨 Sale en barra'); } }
+/* ═══ IL CELULAR · le 8 cifre nel campo, la forma completa verso il server ═══
+   Il campo mostra e accetta SOLO le 8 cifre del cliente: il `+56 9` è fisso e
+   non si digita, così muore l'ambiguità `+569…` / `+56…` / `9…`.
+   🔴 E c'era un difetto mio: il campo scriveva le 8 cifre NUDE in `pg.celular`,
+   mentre il pannello v3 compone `'+569' + t` (r.6920) — due flussi che mandano
+   al server due forme diverse dello stesso dato, e chi legge PAGOS non saprebbe
+   quale aspettarsi. Qui si compone la stessa forma di sempre.
+   🔴 E un difetto più grande, trovato da 🎟 LA LISTA misurando il fossile: dei
+   celular già catturati, **i 7 col prefisso sono arrivati nel foglio come
+   NUMERO e il `+` è sparito** — per Google Sheets `+569XXXXXXXX` è
+   un'espressione aritmetica, non un testo.
+   👉 È lo STESSO meccanismo del difetto di `_logAudit` trovato stamattina (una
+   nota che comincia per `+` diventa formula e si distrugge): **stessa causa —
+   `appendRow` che lascia interpretare il contenuto — due sintomi diversi.**
+   ⚠️ La cura vera è di là, il GAS deve scrivere quel campo come TESTO, e non è
+   la mia penna. Qui si fa l'unica cosa che tocca a me: mandare sempre la stessa
+   forma. **Il `+` continuerà a sparire finché il GAS non è curato.** */
+function _c4Tel8(v) { return String(v || '').replace(/[^0-9]/g, '').slice(-8); }
+function c4Tel(v) {
+  var pg = STATE.pago; if (!pg) return;
+  var t = String(v || '').replace(/[^0-9]/g, '').slice(0, 8);
+  pg.celular = (t.length === 8) ? '+569' + t : '';   // identico al pannello v3
+}
 
 function renderPago() {
   let w = $('pagoWrap');
