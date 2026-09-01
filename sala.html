@@ -565,6 +565,19 @@
   .cs-pin{width:100%;box-sizing:border-box;background:var(--cs-card);border:1.5px solid var(--cs-line);
     border-radius:12px;color:var(--cs-ink);padding:12px 14px;font-size:16px;outline:none;margin-top:8px}
   .cs-pin:focus{border-color:var(--cs-cyan)}
+  /* ═══ v3.48.0 · IL CAMPO DEL PIN — la cura di due difetti insieme ═══════════
+     ① «quel bottone è piccolo e invisibile» (Alberto, 31-ago): il campo PIN
+        ereditava lo sfondo della card con un bordo tenue, e su fondo scuro
+        spariva — era letteralmente «una riga scura che si vede a malapena».
+        Qui è chiaro, alto e con le cifre grandi, come la norma di COBRAR.
+     ② «il PIN non rimane mai visibile quando si digita e non può mai essere
+        registrato dalla funzione guardar clave»: la maschera la fa il CSS e
+        NON `type=password` — così nessun gestore del telefono lo riconosce
+        come password e non offre mai di salvarlo. */
+  .mv-pin{background:#FFFFFF;border:2px solid #8a7a55;color:#1d1608;
+    min-height:62px;padding:14px;font-size:28px;text-align:center;font-weight:700;
+    letter-spacing:.42em;-webkit-text-security:disc;text-security:disc}
+  .mv-pin:focus{border-color:#2BC4D6}
 
   /* la línea della libreta si edita APRENDOLA (mockup §libreta): línea compatta,
      tocco → stepper 44px + Quitar. Gli stepper piccoli di prima si ritirano. */
@@ -5019,14 +5032,88 @@ let _mvDe = '', _mvA = '';
    pesi diversi. DENTRO LA TUA PLAZA · AHORA MISMO: le mese libere come chip,
    un tap e via. A OTRA PLAZA: il tastierino, e si dichiara che il consumo (e
    la propina) escono dalle tue mani. La mesa si muove INTERA. */
-function vMoverSala(de) { _mvDe = de; _mvA = ''; _vMoverPinta(); }
+/* il pannello riparte SEMPRE pulito: senza azzerare il passo e il PIN, chi
+   riapre MOVER dopo un gesto fuori plaza si ritroverebbe la schermata del PIN
+   con dentro le cifre di prima. */
+function vMoverSala(de) { _mvDe = de; _mvA = ''; _mvPin = ''; _mvPaso = 1; _vMoverPinta(); }
 function _mvLibres() {
   const vive = {};
   (STATE.mesasModel || []).forEach(function (m) { vive[m.mesa] = true; });
   return _plazaLista().filter(function (m) { return m !== _mvDe && !vive[m]; });
 }
 function _mvChip(m) { _mvA = m; _mvHacer(null); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ↔ MOVER v2 — approvato da Alberto il 31-ago sul mockup che ha toccato
+   (`4_CANTIERE_CONSOLA/MOCKUP_MOVER_31AGO2026.html`).
+   Ordine suo, testuale: «dovrebbe poter farsi SOLO con il PIN JL. Dentro la
+   plaza è un caso normale, non si possono spostare prodotti singoli, solo la
+   mesa completa.»
+
+   COSA CAMBIA rispetto a oggi:
+     · DENTRO la tua plaza → identico a prima: chip, un tap, via. Nessun PIN.
+     · FUORI plaza        → 🔑 serve il PIN del JL. Oggi si può fare SENZA
+                            chiedere niente a nessuno, ed è il buco che cura.
+   COSA NON CAMBIA: il verbo, il payload, l'eco locale, il resto del pannello.
+
+   🔴 DUE COSE CHE QUESTA METÀ NON PUÒ FARE, e vanno dette perché il vetro da
+      solo non è una guardia:
+      ① il PIN qui è ATTRITO, non una porta. La porta vera è `moverMesa` nel
+         GAS, che oggi non valida nessun PIN (verificato: valida solo il codigo
+         del turno). Finché non ha la sua metà, chi conosce il gesto passa.
+      ② il blocco «plaza senza mesero» NON è implementabile qui: il telefono
+         non sa chi tiene le altre plaze — quella mappa vive solo nel server.
+         Nel mockup si blocca; qui NON si blocca ancora. Aspetta il GAS.
+   🧯 Nasce SPENTO: `?moverpin=1` accende e ricorda nell'apparecchio, `=0` spegne.
+      Senza il flag, il pannello è byte a byte quello di oggi. */
+const MOVER_PIN_KEY = 'sala_moverpin';
+const MOVER_PIN_ON = (function () {
+  const q = QS.get('moverpin');
+  try {
+    if (q === '1') { localStorage.setItem(MOVER_PIN_KEY, '1'); return true; }
+    if (q === '0') { localStorage.setItem(MOVER_PIN_KEY, '0'); return false; }
+    return localStorage.getItem(MOVER_PIN_KEY) === '1';   // di fabbrica: SPENTO
+  } catch (e) { return q === '1'; }
+})();
+var _mvPin = '', _mvPaso = 1;
+function _mvFuera() {
+  if (!_mvA) return false;
+  return PERIM_ON ? !_mesaDentro(_mvA, (STATE.plazaMesas || '').toString())
+                  : _plazaLista().indexOf(_mvA) < 0;
+}
+/* il PIN si chiede SOLO fuori plaza: dentro è il gesto di sempre, e mettere un
+   permesso su un gesto sano è solo attrito (succede ~10 volte a sera). */
+function _mvQuierePin() { return MOVER_PIN_ON && _mvFuera(); }
+function _mvAlPin() { _mvPaso = 2; _mvPin = ''; _vMoverPinta(); }
+function _mvPinIn(v) {
+  _mvPin = String(v || '').replace(/[^0-9]/g, '').slice(0, 4);
+  const b = document.getElementById('mvGo');
+  if (b) {                       // solo il bottone: ridisegnare toglierebbe il cursore
+    b.disabled = _mvPin.length !== 4;
+    b.textContent = _mvPin.length === 4 ? 'MOVER ' + _mvDe + ' → ' + _mvA : 'Escribe el PIN del JL';
+  }
+}
+/* la schermata del PIN: campo grande, mascherato, e che il telefono NON possa
+   salvare — ordine di Alberto: «il PIN non rimane mai visibile quando si digita
+   e non può mai essere registrato dalla funzione guardar clave».
+   Non è `type=password` apposta: così nessun gestore lo riconosce come tale.
+   La maschera la fa il CSS, e il `name` cambia a ogni disegno. */
+function _mvPintaPin() {
+  vhoja('<h3>PIN del JL</h3>' +
+    '<div class="cs-psub">Mesa <b>' + esc(_mvDe) + '</b> → <b>' + esc(_mvA) + '</b> · sale de tu plaza</div>' +
+    '<input class="cs-pin mv-pin" id="mvPin" inputmode="numeric" maxlength="4" ' +
+      'autocomplete="off" name="mv' + Math.random().toString(36).slice(2) + '" ' +
+      'data-1p-ignore data-lpignore="true" data-form-type="other" ' +
+      'oninput="_mvPinIn(this.value)">' +
+    '<div style="text-align:center;font-size:12.5px;color:var(--cs-mut);margin-top:7px">no se guarda en el teléfono</div>' +
+    '<button class="btn" id="mvGo" disabled onclick="_mvHacer(this)">Escribe el PIN del JL</button>' +
+    '<div style="text-align:center;font-size:12px;color:var(--cs-mut);padding:12px 0 2px;' +
+      'text-decoration:underline;cursor:pointer" onclick="_mvPaso=1;_vMoverPinta()">‹ volver</div>');
+  setTimeout(function () { const e = document.getElementById('mvPin'); if (e) e.focus(); }, 30);
+}
+
 function _vMoverPinta() {
+  if (_mvPaso === 2) return _mvPintaPin();
   /* v3.17.0 · [AUT-0034] · secondo DIRITTO: «la mesa di destino è mia?».
      Stessa cura del primo — sugli intervalli, senza tetti. */
   const mia = PERIM_ON ? _mesaDentro(_mvA, (STATE.plazaMesas || '').toString())
@@ -5053,8 +5140,13 @@ function _vMoverPinta() {
       '<button class="acc" onclick="_mvTecla(\'B\')">←</button>' +
       '<button onclick="_mvTecla(\'0\')">0</button>' +
       '<button class="acc" onclick="_mvTecla(\'C\')">C</button></div>' +
-    '<button class="btn" ' + (valido ? '' : 'disabled') + ' onclick="_mvHacer(this)">' +
-      (valido ? 'MOVER ' + esc(_mvDe) + ' → ' + esc(_mvA) : 'Escribe la mesa destino') + '</button>');
+    /* fuori plaza il bottone non muove: porta al PIN. Dentro plaza muove,
+       identico a prima — e col flag spento è identico in tutti e due i casi. */
+    '<button class="btn" ' + (valido ? '' : 'disabled') +
+      ' onclick="' + (_mvQuierePin() ? '_mvAlPin()' : '_mvHacer(this)') + '">' +
+      (!valido ? 'Escribe la mesa destino'
+       : _mvQuierePin() ? 'Seguir · PIN del JL'
+       : 'MOVER ' + esc(_mvDe) + ' → ' + esc(_mvA)) + '</button>');
 }
 function _mvTecla(k) {
   if (k === 'B') _mvA = _mvA.slice(0, -1);
@@ -5076,7 +5168,14 @@ async function _mvHacer(btn) {
   try {
     const gid = _gid('gm');
     const _uapDe = _uuidsAperti(deL);   // idem: il segnale di successo sono questi uuid su `a`
-    const r = await staffPost('moverMesa', { codigo: STATE.codigo, nombre: STATE.nombre, de: _mvDe, a: _mvA, gid: gid });
+    /* v3.48.0 · il PIN del JL viaggia col gesto quando la mesa esce dalla plaza.
+       Additivo: campo assente = payload identico a ieri, e il GAS che non ha
+       ancora la sua metà lo ignora senza rompersi.
+       🔴 Ma finché il GAS non lo VALIDA, questo è un attrito sul vetro e non
+       una porta: chi salta il pannello passa lo stesso. La guardia vera è di là. */
+    const _mvBody = { codigo: STATE.codigo, nombre: STATE.nombre, de: _mvDe, a: _mvA, gid: gid };
+    if (_mvQuierePin() && _mvPin) _mvBody.pin_jl = _mvPin;
+    const r = await staffPost('moverMesa', _mvBody);
     /* v3.27.0 · [AUT-0078] · il conflitto viene PRIMA del successo: `ok` con
        zero righe mosse e senza `duplicado` non è un successo, è un altro
        mesero che è arrivato prima. Qui NON si disegna e NON si applica l'eco
