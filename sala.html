@@ -7066,12 +7066,34 @@ function c4Parte(pg) { return Math.min(c4Bruto(pg), c4Falta(pg)); }
 function c4Resta(pg) { return Math.max(0, c4Falta(pg) - c4Parte(pg)); }
 function c4Cierra(pg) { return c4Resta(pg) <= 0; }
 
-/* il monto della parte viaggia nei campi che `pagoConfirmar` GIÀ legge:
-   montoOn + montoCustom. Nessun campo nuovo verso il server. */
+/* ═══ 🔴 LA CORREZIONE PIÙ IMPORTANTE DI QUESTO PEZZO ════════════════════════
+   La prima stesura scriveva la parte in `montoOn`+`montoCustom`, «i campi che
+   pagoConfirmar già legge». **Era sbagliato, e avrebbe rotto la funzione
+   centrale del modal al PRIMO uso vero.**
+   Trovato da 💰 DINERO come seconda testa, e da me nello stesso momento per
+   un'altra strada: due teste sullo stesso punto, arrivate separate.
+
+   Il perché, con le righe. In `pagoConfirmar` ci sono DUE rami, non uno:
+     r.7931  if (pg.parte && !pg.montoOn) → body.parcial = 1        ← la PARTE
+     r.7932  if (pg.montoOn && monto !== tot) → body.monto_manual=1
+                                                + body.pin_jl       ← lo SCONTO del JL
+   `montoOn` porta DUE significati diversi, e accendendolo il modal finiva
+   sempre nel secondo: ogni parziale del cliente partiva come **sconto manuale
+   di un JL**, con `pin_jl` VUOTO — perché in un flusso del cliente nessun JL
+   è mai coinvolto. Lato GAS `monto_manual:1` chiama sempre `_validarPinJL`
+   (r.18036) ⇒ **il server avrebbe RIFIUTATO ogni «partes iguales» e ogni
+   «lo mío». Non a volte: sempre.**
+   🎓 E la lezione che mi porto: avevo scritto «riuso i campi che il server già
+   legge» come se fosse prudenza. Ma **riusare un campo non è riusare un
+   significato** — quel campo dichiarava *chi* stava scontando, non *quanto*.
+   ⇒ la parte del cliente esce dalla porta SUA (`parcial:1`, v3.132.0: senza
+   PIN, con la guardia del residuo, e la mesa resta aperta finché non è
+   coperta). Vedi il ramo dedicato in `pagoConfirmar`.
+   ⚠️ Perciò questa funzione NON tocca più `montoOn`: se lo accendesse,
+   riaprirebbe la porta del JL. Resta come punto unico dove il modal dichiara
+   di aver cambiato la parte — e come cartello, perché nessuno ce lo rimetta. */
 function c4Sync(pg) {
-  var p = c4Parte(pg);
-  pg.montoOn = !c4Cierra(pg) || p !== (pg.tot || 0);
-  pg.montoCustom = pg.montoOn ? String(p) : '';
+  if (pg.montoOn) { pg.montoOn = false; pg.montoCustom = ''; }
 }
 function c4Go(p) { var pg = STATE.pago; if (!pg) return; pg.c4.paso = p; renderPago(); }
 function c4Set(k, v) {
@@ -7929,6 +7951,19 @@ async function pagoConfirmar(btn) {
        coperta). Se il JL ha anche ritoccato il monto a mano, comanda la sua
        porta: le due non si sommano mai in silenzio. */
     if (pg.parte && !pg.montoOn) { body.parcial = 1; body.monto = _pagoMonto(); }
+    /* v3.47.0 · COBRAR v4 · LA PARTE DEL CLIENTE ESCE DALLA PORTA DELLA PARTE.
+       Il flusso `pg.parte` qui sopra è il cobro a dedo del JL: nasce all'APERTURA
+       del pannello, dove `pg.tot` viene già sostituito con l'importo della parte
+       (r.6707-6709). In v4 la parte si decide DOPO — è il cliente che sceglie nel
+       bivio — quindi quella via non è percorribile e serve questo ramo.
+       🔴 Senza di esso il parziale finiva in `monto_manual` (il ramo sotto) con
+       `pin_jl` vuoto, e il GAS lo rifiutava SEMPRE: era la funzione centrale del
+       modal, morta al primo uso vero. Trovato dalla seconda testa (💰 DINERO).
+       `parcial:1` è la porta giusta (GAS v3.132.0): niente PIN — non è uno
+       sconto, è una parte — guardia del residuo lato server, e la mesa resta
+       aperta finché la somma non copre. Se la parte COPRE tutto, il server
+       chiude da solo: non serve distinguere qui. */
+    else if (pg.c4) { body.parcial = 1; body.monto = c4Parte(pg); }
     if (pg.montoOn && _pagoMonto() !== pg.tot) {
       body.monto = _pagoMonto(); body.monto_manual = 1; body.pin_jl = (pg.pinJL || '').trim();
     }
