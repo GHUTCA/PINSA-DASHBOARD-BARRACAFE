@@ -960,7 +960,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.52.0</span>
+      <span class="ver" id="ver">sala v3.53.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -7886,6 +7886,21 @@ function c4Css() {
        tocca un cliente in piedi, di notte. Due righe di due stanno dentro lo
        schermo senza scroll (D9). */
     '.c4 .c4chip.dom{flex:1 1 calc(50% - 8px);font-size:14.5px;padding:11px 6px;margin-top:0}' +
+    /* 🔴 IL DIFETTO PIÙ GRAVE DEI QUATTRO, e stava in una riga di CSS.
+       `.c4chip` nasce `flex:1 1 100%` — **ogni pastiglia si prende una riga
+       intera**. Le varianti `.n` (i numeri delle partes) e `.dom` (i domini)
+       la correggono; la propina non aveva la sua ⇒ i tre bottoni uscivano
+       incolonnati e spingevano il campo del correo **sotto il bordo**.
+       Alberto: *«questo è un problema serio»* — e lo è più di un difetto di
+       bellezza: il cliente col telefono in mano NON scrolla, ridà l'apparecchio
+       senza aver scritto la mail, e **la boleta elettronica non parte.**
+       🎓 Il mockup era giusto e il codice se n'era allontanato in silenzio:
+       *una riga condivisa che va bene a tre casi su quattro non fallisce, si
+       limita a non essere giusta dove nessuno ha guardato.* */
+    '.c4 .c4chip.prop{flex:1 1 0;min-width:0}' +
+    /* «Sin propina» più stretto degli altri due, come nel mockup: non è
+       simmetria, è gerarchia — le due scelte che pagano hanno più superficie. */
+    '.c4 .c4chip.prop.chico{flex:.62 1 0;padding-left:4px;padding-right:4px}' +
     '.c4 .c4chip.sel{background:var(--cs-cyan,#3fe0f0);color:#06222a}' +
     '.c4 .c4chip.sel small{color:#0a3540}' +
     '.c4 .c4resta{border-radius:12px;padding:11px 13px;margin-top:13px;text-align:center;' +
@@ -8121,8 +8136,52 @@ function c4Mail(v) {
   var pg = STATE.pago; if (!pg) return;
   pagoInput('correo', v);
   var fila = document.getElementById('c4doms');
-  if (fila) fila.style.display = _c4MailPartes(v).loc ? 'flex' : 'none';
+  if (fila) fila.style.display = c4DomsVerse(v) ? 'flex' : 'none';
   c4PintaDoms(v);
+}
+/* 🔴 QUANDO SI VEDONO LE PASTIGLIE DEI DOMINI (Alberto: «non spariscono dopo
+   aver inserito la mail»). Servono a **completare** un indirizzo, quindi
+   esistono solo mentre c'è qualcosa da completare:
+     · niente parte davanti alla @  → non c'è niente da completare
+     · indirizzo già valido         → **non c'è più niente da completare**
+   Prima mancava la seconda: restavano lì a occupare lo schermo sopra il
+   bottone «Listo», e per il cliente un bottone che resta acceso vuol dire
+   «devi ancora toccarmi». Se cancella una lettera e l'indirizzo torna monco,
+   tornano da sole. */
+function c4DomsVerse(m) {
+  return !!_c4MailPartes(m).loc && !c4MailOk(m);
+}
+
+/* ── «OTRO» · scegliere, scrivere, chiudere ─────────────────────────────────
+   🔴 I numeri qui si calcolano sulla PARTE (`c4Parte`), mai su `_pagoMonto()`:
+   quello è il totale del tavolo, e col pago parziale — che Alberto ha
+   dichiarato **il caso normale** — mostrerebbe al cliente un totale che non è
+   il suo. È lo stesso bug che `_pagoPropina` ha già chiuso per il 10%.
+   Per questo NON riuso `pagoOtroIn` del pannello vecchio: aggiorna un totale
+   costruito su `_pagoMonto()`. *Riusare una funzione non è riusare il suo
+   contesto.* */
+function c4OtroChip() {
+  var pg = STATE.pago; if (!pg) return;
+  pg.prop = 'otro';
+  pg.otroEdit = true;
+  renderPago();
+  var el = document.getElementById('c4OtroBox');
+  if (el) { try { el.focus(); } catch (e) {} }
+}
+/* mentre scrive si ritoccano SOLO i due numeri: un renderPago a ogni tasto
+   ricostruirebbe la casella e le porterebbe via il fuoco dopo una cifra. */
+function c4OtroIn(el) {
+  var pg = STATE.pago; if (!pg) return;
+  pg.otro = el.value;
+  var p = _pagoPropina();
+  var s = document.getElementById('c4OtroSub');
+  if (s) s.textContent = p > 0 ? fmtPrice(p) : 'monto';
+  var t = document.getElementById('c4TotPag');
+  if (t) t.textContent = fmtPrice(c4Parte(pg) + p);
+}
+function c4OtroFin() {
+  var pg = STATE.pago; if (!pg) return;
+  if (_pagoPropina() > 0) { pg.otroEdit = false; renderPago(); }
 }
 
 /* ── IL RENDER DEI PASSI ────────────────────────────────────────────────────
@@ -8207,16 +8266,36 @@ function c4Render(w, pg) {
         /* 🔴 UN SOLO IMPORTO ALLA VOLTA: scelto «Otro», il 10% sparisce — due
            numeri accanto si leggono come una somma, e chi sta per pagare non
            deve interpretare (correzione di Alberto sul prototipo). */
-        (pg.prop === 'otro'
-          ? '<div class="c4chips"><button class="c4chip sel" onclick="pagoSet(\'prop\',\'otro\')">Otro' +
-              '<small>' + (pg.otro ? fmtPrice(_pagoPropina()) : 'escribe el monto') + '</small></button></div>'
-          : '<div class="c4chips">' +
-              '<button class="c4chip' + (pg.prop === 'sug' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'sug\')">10%' +
-                '<small>' + fmtPrice(Math.round(parte * 0.10)) + '</small></button>' +
-              '<button class="c4chip" onclick="pagoSet(\'prop\',\'otro\')">Otro<small>monto</small></button>' +
-              '<button class="c4chip' + (pg.prop === 'sin' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'sin\')">Sin propina</button></div>') +
+        /* 🔑 I TRE SEMPRE IN FILA, e la regola di Alberto rispettata lo stesso.
+           La stesura di prima, per non mostrare due cifre, nascondeva gli altri
+           due bottoni quando sceglievi «Otro»: così però **spariva anche la via
+           di ritorno** — chi si pentiva non poteva più tornare al 10%.
+           Qui i tre restano tutti, e a portare un numero è **solo quello
+           scelto**: la regola era «un importo alla volta», non «un bottone alla
+           volta». Il 10% mostra la sua cifra tranne quando comanda «Otro». */
+        '<div class="c4chips">' +
+          '<button class="c4chip prop' + (pg.prop === 'sug' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'sug\')">10%' +
+            '<small>' + (pg.prop === 'otro' ? '&nbsp;' : fmtPrice(Math.round(parte * 0.10))) + '</small></button>' +
+          '<button class="c4chip prop' + (pg.prop === 'otro' ? ' sel' : '') + '" onclick="c4OtroChip()">Otro' +
+            '<small id="c4OtroSub">' + ((pg.prop === 'otro' && prop > 0) ? fmtPrice(prop) : 'monto') + '</small></button>' +
+          '<button class="c4chip prop chico' + (pg.prop === 'sin' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'sin\')">Sin' +
+            '<small>propina</small></button></div>' +
+        /* 🔴 LA CASELLA CHE MANCAVA (Alberto): «Otro» si poteva scegliere e poi
+           non c'era dove scrivere il monto — un bottone che chiede una cifra e
+           non offre la tastiera. C'era nel pannello vecchio (`pgOtroIn`) e non
+           ha traslocato nel modal nuovo: **N9, le cure non traslocano da sole.**
+           Sparisce al BLUR, non alla prima cifra — nascondendola a ogni tasto
+           non si potrebbe scrivere «2000», solo «2». Si riapre toccando «Otro». */
+        ((pg.prop === 'otro' && pg.otroEdit)
+          /* ⚠️ l'id NON si chiama `c4OtroIn` come la funzione: il browser mette
+             gli id su `window`, e un id omonimo di una funzione globale se la
+             ombreggia. Un difetto che non si vede leggendo, solo toccando. */
+          ? '<input class="cs-pin" id="c4OtroBox" style="margin-top:8px;text-align:center" inputmode="numeric" ' +
+            'autocomplete="off" placeholder="Monto propina $" value="' + esc(pg.otro || '') + '" ' +
+            'oninput="c4OtroIn(this)" onblur="c4OtroFin()">'
+          : '') +
         '<div class="c4resta zero" style="margin-top:14px"><span>Total a pagar</span>' +
-          '<b style="color:var(--cs-ink)">' + fmtPrice(parte + prop) + '</b></div>' +
+          '<b id="c4TotPag" style="color:var(--cs-ink)">' + fmtPrice(parte + prop) + '</b></div>' +
         '<div class="c4lab">🧾 Te mandamos tu boleta</div>' +
         '<input class="cs-pin" id="c4Nom" placeholder="Nombre" value="' + esc(pg.nombreCli || '') + '" ' +
           'oninput="pagoInput(\'nombreCli\',this.value)">' +
@@ -8225,15 +8304,33 @@ function c4Render(w, pg) {
            campo scriveva le 8 cifre nude. Due flussi che mandano al server due
            forme diverse dello stesso dato: chi legge PAGOS non saprebbe quale
            aspettarsi. Qui si compone la stessa forma di sempre. */
-        '<input class="cs-pin" id="c4Tel" inputmode="numeric" maxlength="8" placeholder="+56 9 · 0000 0000" ' +
-          'value="' + esc(_c4Tel8(pg.celular)) + '" oninput="c4Tel(this.value)">' +
-        '<input class="cs-pin" id="c4Mail" inputmode="email" placeholder="Email" value="' + esc(pg.correo || '') + '" ' +
-          'oninput="c4Mail(this.value)">' +
+        /* 🔴 IL NUMERO NON SI COMPILAVA DA SOLO (Alberto). Tre cose mancavano,
+           e c'erano tutte nel pannello vecchio — **N9 di nuovo: non hanno
+           traslocato.**
+             · il **+56 9 fisso a sinistra**: prima viveva solo nel placeholder,
+               cioè spariva alla prima cifra e il cliente non vedeva più a quale
+               paese stesse scrivendo;
+             · lo **spazio dopo la quarta cifra** mentre digita;
+             · il **contatore x/8**, che diventa verde quando è completo.
+           ⚠️ E `autocomplete="off"`: l'apparecchio è del MESERO. Senza, il
+           browser offre il numero salvato di chi lo usa tutti i giorni — e un
+           tocco distratto manderebbe la boleta del cliente al cameriere. */
+        '<div style="display:flex;align-items:stretch;gap:0;margin-top:6px;border:1.5px solid #CBB99B;' +
+          'border-radius:10px;overflow:hidden;background:#fff">' +
+          '<span style="background:#EFE7D3;color:#5B4A22;font-weight:800;font-size:13px;display:flex;' +
+            'align-items:center;padding:0 10px;border-right:1.5px solid #CBB99B">🇨🇱 +56 9</span>' +
+          '<input class="cs-pin" id="c4Tel" style="margin:0;border:none;border-radius:0;flex:1;min-width:0" ' +
+            'inputmode="numeric" autocomplete="off" placeholder="0000 0000" value="' +
+            esc(_c4TelVista(pg.celular)) + '" oninput="c4Tel(this.value, this)"></div>' +
+        '<div id="c4TelN" style="text-align:right;font-size:9.5px;color:#8a7a52;margin-top:2px">' +
+          _c4Tel8(pg.celular).length + '/8</div>' +
+        '<input class="cs-pin" id="c4Mail" inputmode="email" autocomplete="off" placeholder="Email" ' +
+          'value="' + esc(pg.correo || '') + '" oninput="c4Mail(this.value)">' +
         /* le pastiglie stanno SOTTO il campo e appaiono solo quando c'è
            qualcosa da completare: prima non servono a niente e occuperebbero
            lo schermo mentre il cliente scrive il nome. */
         '<div class="c4chips" id="c4doms" style="margin-top:8px;display:' +
-          (_c4MailPartes(pg.correo).loc ? 'flex' : 'none') + '">' +
+          (c4DomsVerse(pg.correo) ? 'flex' : 'none') + '">' +
           C4_DOMS.map(function (d, i) {
             return '<button class="c4chip dom' + (c4DomSel(pg.correo, d) ? ' sel' : '') +
               '" id="c4dom' + i + '" onclick="c4Dom(\'' + d + '\')">@' + d + '</button>';
@@ -8328,10 +8425,24 @@ function c4Papel() { var pg = STATE.pago; if (pg) { pg.imprimir = true; toast('o
    la mia penna. Qui si fa l'unica cosa che tocca a me: mandare sempre la stessa
    forma. **Il `+` continuerà a sparire finché il GAS non è curato.** */
 function _c4Tel8(v) { return String(v || '').replace(/[^0-9]/g, '').slice(-8); }
-function c4Tel(v) {
+/* le 8 cifre come si LEGGONO: `9876 5432`. Il fossile riceve `+5698765432`,
+   il cliente vede il numero spaziato — due forme dello stesso dato, e quella
+   che viaggia resta una sola. */
+function _c4TelVista(v) {
+  var t = _c4Tel8(v);
+  return t.length > 4 ? t.slice(0, 4) + ' ' + t.slice(4) : t;
+}
+function c4Tel(v, el) {
   var pg = STATE.pago; if (!pg) return;
   var t = String(v || '').replace(/[^0-9]/g, '').slice(0, 8);
+  /* lo spazio si mette mentre digita, come già faceva `pagoTelIn` nel pannello
+     vecchio: la stessa meccanica, provata da mesi sul telefono dei meseros. */
+  if (el) el.value = t.length > 4 ? t.slice(0, 4) + ' ' + t.slice(4) : t;
+  /* 🔑 al fossile va il numero canonico e SOLO se è completo: mezzo numero non
+     è un dato incompleto, è un dato FALSO. Il contatore lo dice a voce. */
   pg.celular = (t.length === 8) ? '+569' + t : '';   // identico al pannello v3
+  var c = document.getElementById('c4TelN');
+  if (c) { c.textContent = t.length + '/8'; c.style.color = (t.length === 8) ? '#2f8f5a' : '#8a7a52'; }
 }
 
 function renderPago() {
