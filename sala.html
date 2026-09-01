@@ -5266,171 +5266,456 @@ const DESCONTAR_V2_ON = (function () {
   } catch (e) { return q === '1'; }
 })();
 
-/* la tariffa. `esc:1` = vuole la spiegazione scritta prima di procedere. */
+/* ═══════════════════════════════════════════════════════════════════════════
+   🏷 DESCONTAR v3 · IL PANNELLO APPROVATO DA ALBERTO IL 31-AGO
+   Validato schermata per schermata sul mockup, e poi codificato — non il
+   contrario. Cinque porte vive, una card sola, il PIN dentro.
+   🎨 NON HA UN CSS SUO: usa quello di COBRAR (`c4Css`, classi `.c4*`).
+   Ordine di Alberto: *«per tutte le card ripeti colori e formati usati in
+   cobrar, così l'occhio si abitua e riconosce il pattern.»* Riusare il
+   foglio invece di copiarne i valori è l'unico modo perché resti vero: una
+   copia diverge al primo ritocco.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── LE LISTE · tutte provvisorie, tutte in UN posto ─────────────────────────
+   🔴 Nessuna di queste dovrebbe stare nel telefono. Stanno qui perché il posto
+   dove dovrebbero stare non esiste ancora, e ognuna dichiara quale sia. */
+
+/* la tariffa dello sconto — dettata da Alberto, cambiabile qui e solo qui */
 var DTO_MOTIVOS = [
   { k: 'atraso_cocina',    n: 'Atraso cocina',     pct: 10 },
   { k: 'atraso_barra',     n: 'Atraso barra',      pct: 10 },
   { k: 'reclamo_servicio', n: 'Reclamo servicio',  pct: 10 },
   { k: 'otro_reclamo',     n: 'Otro reclamo',      pct: 20, esc: 1 }
 ];
-var _dt = null;   // { mesa, tot, mot, texto, acu }
+/* 🤝 i convenios — Alberto, 31-ago: *«devono essere attivati e creati da
+   qualche parte: Falabella magari a settembre non è, e si attiva Ripley.»*
+   ⇒ vogliono una tabella `CONVENIOS` (nome · % · attivo · da/a) **e una
+   schermata dove crearli**: un convenio che si accende editando una cella è
+   ciò che `_LA_LEGGE_DELLE_INTERFACCE` vieta. Assegnata a 💰 DINERO.
+   📌 Finché non c'è, la lista è QUESTA, ed è una sola riga perché oggi esiste
+   un convenio solo. (Un secondo nome «per far vedere che la lista cresce» è
+   già stato tolto una volta: dentro un mockup approvato un esempio diventa
+   indistinguibile da un dato.) */
+var DTO_CONVENIOS = [
+  { k: 'falabella', n: 'Banco Falabella', pct: 20, d: '20% · tarjeta del banco' }
+];
+/* 👨‍👩‍👧 la famiglia · 🍱 i JL che hanno diritto alla colación (Alberto, 31-ago).
+   🔴 Il vetro VIVO oggi mostra tutto lo staff del turno per la colación
+   (`getStaffSala`): non è un bug, è una regola che non era mai stata detta.
+   Quando il cargo «JL» sarà leggibile dal server, queste liste vengono di là —
+   *una lista di persone scritta a mano invecchia il giorno che qualcuno cambia
+   ruolo, e non lo dice a nessuno.* Girata a 👥 RRHH. */
+var DTO_FAMILIA = ['Daniela', 'Elisa', 'Ale', 'Kele', 'Nea', 'Alberto'];
+/* 🍱 I JL NON SI SCRIVONO A MANO — reperto di 👥 RRHH, arrivato mentre scrivevo
+   questo blocco: **`getStaffSala` restituisce già `rol` per ogni persona**, e
+   `_dtoColacion` quella chiamata la fa già. *Il cargo non lo stiamo chiedendo:
+   sta arrivando e nessuno lo guarda.*
+   ⇒ la lista dei due nomi sarebbe stata **il dato, ricopiato** — e tre modi di
+   guastarsi (un JL nuovo senza diritto, uno uscito che lo tiene, e nessuno dei
+   due che fa rumore). Filtrando per `rol` spariscono tutti e tre: **non perché
+   qualcuno aggiornerà la lista, ma perché la lista smette di esistere.**
+   ⚠️ LIMITE DICHIARATO, ed è di RRHH: **filtrare nel vetro non è la guardia.**
+   Il server non sa chi ha diritto — `_staffLookup` non restituisce il rol —
+   quindi chi salta il pannello passa lo stesso. La guardia vera è un campo lato
+   GAS, cantiere di RRHH, non un effetto collaterale di questo.
+   *Un tampone dichiarato è una cura; uno non dichiarato diventa l'architettura.* */
+var DTO_ROL_COLACION = 'jefe local';
+var _dtJefes = null;      // cache del turno: null = non ancora chiesto
+/* 🎫 la franquicia: porta NASCOSTA, codice vivo (Alberto: «invisibile o
+   togli»). Nascerà nella Lista — cancellarla vorrebbe dire riscriverla. */
+var DTO_FRANQ_ON = false;
+/* 🔴 il tetto del SERVER, non nostro: `registrarPago` rifiuta con
+   `descuento_max` sopra `DESC_MAX_PCT` (default 30, Script Property per
+   locale). Sta qui per poter FERMARE il JL prima della cassa — ma è una copia,
+   e una copia diverge: il giorno che il server passa a 40, questo dirà ancora
+   30 e negherà una cosa lecita **senza che nessuno cerchi il difetto nel
+   telefono**. Va letto dal server appena c'è un modo. */
+var DTO_MAX_PCT = 30;
+
+var _dt = null;   // { mesa, tot, promo, tipo, conv, mot, txt, fam, col, cob, pin }
 
 function _dtMot(k) {
   for (var i = 0; i < DTO_MOTIVOS.length; i++) if (DTO_MOTIVOS[i].k === k) return DTO_MOTIVOS[i];
   return null;
 }
-/* 🤝 ACUERDOS — era «franquicia», il nome l'ha cambiato Alberto il 31-ago.
-   È un consumo libero concordato (con un fornitore, con un'azienda): fino a
-   $N non paga, sopra paga il resto.
-   🔑 E la regola che lo separa dallo sconto, dettata da lui: **l'acuerdo vale
-   su TUTTO il conto, con qualsiasi prodotto ci sia dentro — promozioni
-   comprese.** Lo sconto no: sullo sconto le promozioni non si toccano.
-   *Non sono due varianti della stessa cosa: uno è un prezzo più basso, l'altro
-   è qualcuno che ha già pagato una parte.*
-   ⚠️ Nasce SENZA identità: oggi il JL scrive l'importo a mano. Il giorno che
-   LA LISTA sa chi è il cliente, l'importo lo porta lei — e questo bottone
-   diventa il suo ingresso, non un doppione. */
-function _dtCalc() {
-  if (!_dt) return 0;
-  if (_dt.acu != null) return Math.max(0, _dt.tot - _dt.acu);       // acuerdo
-  var m = _dtMot(_dt.mot);
-  return m ? Math.round(_dt.tot * (100 - m.pct) / 100) : _dt.tot;
-}
-/* la consegna al pannello del pago: le stesse tre righe di `_dtoPct`, che sono
-   collaudate dal 12-ago. Non riscrivo il pago — cambio solo COSA lo apre. */
-function _dtAplicar(etiqueta) {
-  /* 🔴 31-ago · LA FINESTRA CHE AVEVO ALLARGATO IO — reperto di 🛎 SALA V17.
-     `montoCustom` è un numero CONGELATO: se al tavolo arriva un altro giro fra
-     il momento in cui si sceglie lo sconto e quello in cui si incassa, si
-     incassa il vecchio importo **e non si vede**. Il difetto è vivo anche nel
-     `_dtoPct` di oggi — ma lì `tot` si legge un istante prima di aprire il pago.
-     🔴 QUI la finestra era più lunga, e l'avevo allargata io aggiungendo i
-     passi: il JL apre il pannello, legge i motivi, e su «otro reclamo» SCRIVE
-     il racconto. Un minuto intero in cui il tavolo può ordinare ancora.
-     👉 Quindi si rilegge il consumo ADESSO, e se è cambiato NON si applica in
-     silenzio: si torna al pannello coi numeri nuovi. Il JL ha visto «queda en
-     $42.840» — applicare un altro numero senza dirglielo è peggio che fermarsi. */
-  var totFresco = _vpTot(_dt.mesa);
-  if (totFresco !== _dt.tot) {
-    var era = _dt.tot; _dt.tot = totFresco;
-    toast('warn', '🔄 La mesa cambió: ' + fmtPrice(era) + ' → ' + fmtPrice(totFresco) + ' · mira de nuevo');
-    return _dtPinta();
-  }
-  var monto = _dtCalc(), mesa = _dt.mesa;
-  vhojaCerrar(); abrirPago(mesa);
-  if (!STATE.pago) return;
-  STATE.pago.jl = true; STATE.pago.pinAsk = true;
-  STATE.pago.montoOn = true;
-  STATE.pago.montoCustom = String(monto);
-  /* resta nel vetro: il server non ha dove metterlo (v. il blocco qui sopra).
-     🔴 E porta con sé il CONSUMO DI PARTENZA, non solo l'etichetta: senza
-     quello la schermata d'arrivo può dire «cobras $42.840» ma non «di quanto»
-     e «meno quanto» — cioè le due cose che il JL deve poter leggere davanti al
-     cliente. Un numero senza il suo prima non si può controllare a occhio. */
-  STATE.pago.dto = { et: etiqueta, tot: _dt.tot, monto: monto, acu: _dt.acu != null };
-  STATE.pago.dtoEdit = false;
-  renderPago();
-  toast('ok', '🏷 ' + etiqueta + ' → ' + fmtPrice(monto) + ' · escribe el PIN del JL');
+function _dtConv(k) {
+  for (var i = 0; i < DTO_CONVENIOS.length; i++) if (DTO_CONVENIOS[i].k === k) return DTO_CONVENIOS[i];
+  return null;
 }
 
-function vDescontar2(mesa) {
-  const tot = _vpTot(mesa);
+/* ── QUANTO SI SCONTA, E SU COSA ─────────────────────────────────────────────
+   🔑 LA BASE NON È UNA SOLA: dipende dal verbo, ed è la regola che Alberto ha
+   sciolto il 31-ago quando sembrava una contraddizione fra due suoi ordini.
+     🤝 CONVENIO  → conto MENO le promozioni. È una VENDITA: non si impila lo
+        sconto del banco sopra un 2x1 che è già uno sconto nostro.
+     🏷 DESCUENTO → TUTTO il conto. È un RISARCIMENTO — testuale: *«un problema
+        non si deve spiegare nulla, si sconta sul totale e ciao»*.
+     🎫 FRANQUICIA → copre tutto: non è una percentuale, è un importo già
+        pagato da un terzo.
+   ⇒ la domanda che genera le tre basi: **stiamo VENDENDO, CHIEDENDO SCUSA, o
+   incassando da un TERZO?** */
+function _dtPromo(mesa) {
+  /* le righe in promozione si riconoscono nel vetro: `promo` ('2x1') e
+     `es_menu` viaggiano dentro `items_json` da quando il pedido nasce.
+     ⚠️ Del 2x1 si esclude la coppia INTERA — la unità pagata e il regalo. È la
+     lettura stretta di «lo sconto non si applica sulle promozioni»: chi ha già
+     avuto due per uno non prende anche il 20% del banco. Se un giorno si vorrà
+     escludere solo il regalo, si cambia questa riga e nient'altro. */
+  var t = 0;
+  try {
+    var det = _vpItemsDet(mesa), its = (det.items || det || []);
+    its.forEach(function (it) { if (it.promo || it.es_menu) t += (it.pu || 0) * (it.q || 1); });
+  } catch (e) {}
+  return Math.round(t);
+}
+function _dtBase() {
+  if (!_dt) return 0;
+  return _dt.tipo === 'conv' ? Math.max(0, _dt.tot - _dt.promo) : _dt.tot;
+}
+function _dtQuita() {                       // quanto si toglie dal conto
+  if (!_dt) return 0;
+  if (_dt.tipo === 'fam' || _dt.tipo === 'coln') return _dt.tot;        // chiudono a $0
+  if (_dt.tipo === 'franq') return Math.min(_dtBase(), 100000);
+  if (_dt.tipo === 'otro')  return Math.max(0, _dt.tot - (_dt.cob || 0));
+  var p = _dt.tipo === 'conv' ? (_dtConv(_dt.conv) || {}).pct : (_dtMot(_dt.mot) || {}).pct;
+  return p ? Math.round(_dtBase() * p / 100) : 0;
+}
+function _dtCobra() {                       // quanto resta da incassare
+  if (!_dt) return 0;
+  if (_dt.tipo === 'otro') return _dt.cob || 0;
+  return Math.max(0, _dt.tot - _dtQuita());
+}
+/* il minimo che il server accetta su «cobré otro monto» */
+function _dtMin() { return _dt ? Math.ceil(_dt.tot * (100 - DTO_MAX_PCT) / 100) : 0; }
+
+/* ── I CANCELLI ──────────────────────────────────────────────────────────────
+   `_dtHay` = ci sono abbastanza dati per calcolare un numero (⇒ si mostra il
+   riepilogo e compare il PIN). `_dtListo` = si può applicare (⇒ verde acceso).
+   Sono due cose diverse: il riepilogo serve PRIMA della firma, non dopo. */
+function _dtHay() {
+  if (!_dt || !_dt.tipo) return false;
+  if (_dt.tipo === 'conv')  return !!_dt.conv;
+  if (_dt.tipo === 'dto')   { var m = _dtMot(_dt.mot); return !!m && (!m.esc || (_dt.txt || '').trim().length >= 12); }
+  if (_dt.tipo === 'fam')   return !!_dt.fam;
+  if (_dt.tipo === 'coln')  return !!_dt.col;
+  if (_dt.tipo === 'otro')  return (_dt.cob || 0) > 0 && _dt.cob >= _dtMin() && (_dt.txt || '').trim().length >= 12;
+  if (_dt.tipo === 'franq') return true;
+  return false;
+}
+function _dtListo() { return _dtHay() && (_dt.pin || '').length === 4; }
+function _dtFalta() {
+  if (!_dt) return '';
+  /* 🔴 senza porta scelta il bottone diceva «Escribe el PIN del JL» — cioè
+     chiedeva la firma di un gesto che non era ancora stato scelto. Cadeva nel
+     `return` finale perché nessun ramo lo copriva: **il caso zero non era un
+     caso.** Trovato guardando il render, non leggendo il codice. */
+  if (!_dt.tipo) return 'Elige qué aplicas';
+  if (_dt.tipo === 'conv' && !_dt.conv) return 'Elige el convenio';
+  if (_dt.tipo === 'dto'  && !_dtMot(_dt.mot)) return '¿Qué pasó?';
+  if (_dt.tipo === 'dto'  && _dt.mot === 'otro_reclamo' && (_dt.txt || '').trim().length < 12)
+    return 'Escribe qué pasó';
+  if (_dt.tipo === 'fam'  && !_dt.fam) return '¿Quién es?';
+  if (_dt.tipo === 'coln' && !_dt.col) return '¿Para quién es?';
+  if (_dt.tipo === 'otro' && !(_dt.cob > 0)) return '¿Cuánto cobraste?';
+  /* 🔴 non basta AVVISARE del tetto: bisogna FERMARE. Un avviso rosso accanto a
+     un bottone acceso lascia il JL digitare il PIN, toccare Aplicar e prendere
+     il rifiuto **in cassa, davanti al cliente** — dove non si può spiegare
+     niente. *Una verifica che non cambia l'esito è una nota accanto alla
+     casella, e il riassunto conserva la casella e perde la nota.* */
+  if (_dt.tipo === 'otro' && _dt.cob < _dtMin())
+    return 'Máximo ' + DTO_MAX_PCT + '% · mínimo ' + fmtPrice(_dtMin());
+  if (_dt.tipo === 'otro' && (_dt.txt || '').trim().length < 12) return 'Escribe qué pasó';
+  return _dt.tipo === 'fam' ? 'Que teclee su código' : 'Escribe el PIN del JL';
+}
+
+/* ── LO STATO ────────────────────────────────────────────────────────────── */
+function vDescontar3(mesa) {
+  var tot = _vpTot(mesa);
   if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
-  _dt = { mesa: mesa, tot: tot, mot: '', texto: '', acu: null };
+  _dt = { mesa: mesa, tot: tot, promo: _dtPromo(mesa), tipo: '',
+          conv: '', mot: '', txt: '', fam: '', col: '', cob: 0, pin: '' };
   _dtPinta();
 }
+function _dtCerrar() { _dt = null; _dtPinta(); }
+/* 🔴 il consumo si rilegge al momento di aprire una porta: fra il pannello e
+   l'incasso può arrivare un altro giro, e uno sconto calcolato sul vecchio
+   totale si incassa più basso **senza che si veda**. */
+function _dtTipo(t) {
+  if (!_dt) return;
+  var fresco = _vpTot(_dt.mesa);
+  if (fresco !== _dt.tot) {
+    toast('warn', '🔄 La mesa cambió: ' + fmtPrice(_dt.tot) + ' → ' + fmtPrice(fresco));
+    _dt.tot = fresco; _dt.promo = _dtPromo(_dt.mesa);
+  }
+  _dt.tipo = t; _dt.conv = ''; _dt.mot = ''; _dt.txt = '';
+  _dt.fam = ''; _dt.col = ''; _dt.cob = 0; _dt.pin = '';
+  _dtPinta();
+  if (t === 'coln') _dtCargaJefes();
+}
+/* ⏱ la lista dei JL si chiede SOLO quando si apre la colación, non all'apertura
+   del pannello: è una chiamata di rete, e le altre cinque porte non ne hanno
+   bisogno. E non blocca niente — la schermata si disegna subito e dice «cerco»,
+   poi si ridisegna da sola. *Nessuna schermata aspetta la rete* (N1). */
+function _dtCargaJefes() {
+  if (_dtJefes && _dtJefes.length) return;      // già in mano per questo turno
+  _dtJefes = null;
+  gasPost('getStaffSala', { codigo: STATE.codigo }).then(function (r) {
+    var rol = DTO_ROL_COLACION;
+    _dtJefes = (r && r.ok && r.staff ? r.staff : [])
+      .filter(function (s) { return (s.rol || '').toString().trim().toLowerCase() === rol; })
+      .map(function (s) { return s.nombre; });
+    if (_dt && _dt.tipo === 'coln') _dtPinta();
+  }).catch(function () {
+    _dtJefes = [];
+    if (_dt && _dt.tipo === 'coln') _dtPinta();
+  });
+}
+/* ogni scelta azzera la firma: un PIN vale per il numero che ha firmato, mai
+   per quello arrivato dopo. */
+function _dtSet(campo, val) {
+  if (!_dt) return;
+  if (_dt[campo] === val && (campo === 'conv' || campo === 'mot' || campo === 'fam' || campo === 'col'))
+    val = '';                                    // toccare la scelta la riapre
+  _dt[campo] = val; _dt.pin = '';
+  if (campo === 'mot' && val !== 'otro_reclamo') _dt.txt = '';
+  _dtPinta();
+}
+/* ⏱ i campi che si scrivono NON ridisegnano a ogni tasto — perderebbero il
+   cursore. Si ridisegna solo quando la condizione cambia (compare il PIN, si
+   accende il verde): un ridisegno per gesto, non uno per lettera.
+   🔴 È la cura di un difetto trovato da Alberto sul mockup: `soloFoot` teneva
+   fermo il corpo, e il campo del PIN non compariva MAI. *Una cura che protegge
+   una parte dello schermo la rende anche cieca.* */
+var _dtEraHay = null;
+function _dtEscribe(campo, v, id) {
+  if (!_dt) return;
+  _dt[campo] = (campo === 'cob') ? (parseInt(String(v || '').replace(/[^0-9]/g, ''), 10) || 0) : v;
+  var ahora = _dtHay();
+  if (ahora !== _dtEraHay) {
+    var e = document.getElementById(id), pos = e ? e.selectionStart : null;
+    _dtPinta();
+    var e2 = document.getElementById(id);
+    if (e2 && pos !== null) { e2.focus(); try { e2.setSelectionRange(pos, pos); } catch (x) {} }
+  } else { _dtPie(); }
+}
+function _dtPinIn(v) {
+  if (!_dt) return;
+  _dt.pin = String(v || '').replace(/[^0-9]/g, '').slice(0, 4);
+  _dtPie();                                       // solo il bottone: il campo non si tocca
+}
+
+/* ── IL DISEGNO ──────────────────────────────────────────────────────────── */
+function _dtPie() {
+  var f = document.getElementById('dtFoot');
+  if (!f || !_dt) return;
+  var ok = _dtListo();
+  f.innerHTML = '<button class="c4cta" ' + (ok ? '' : 'disabled') + ' onclick="_dtGo()">' +
+      (ok ? 'Aplicar · cobras ' + fmtPrice(_dtCobra()) : esc(_dtFalta())) + '</button>' +
+    '<button class="c4cta sec" onclick="' + (_dt.tipo ? '_dtTipo(\'\')' : '_dtCerrar()') + '">' +
+      (_dt.tipo ? '‹ Volver' : 'Cancelar') + '</button>';
+}
+function _dtResumen() {
+  if (!_dtHay() || _dt.tipo === 'franq' && false) return '';
+  var q = _dtQuita(), c = _dtCobra();
+  var lbl = _dt.tipo === 'conv'  ? 'Descontable <i>sin promos</i>'
+          : 'Consumo';
+  var lbl2 = _dt.tipo === 'franq' ? 'Cubre la franquicia'
+           : _dt.tipo === 'fam'   ? 'Familia · ' + esc(_dt.fam)
+           : _dt.tipo === 'coln'  ? 'Colación · ' + esc(_dt.col)
+           : _dt.tipo === 'otro'  ? 'Diferencia'
+           : 'Descuento';
+  return '<div class="c4resta' + (c === 0 ? ' zero' : '') + '" style="text-align:left">' +
+    '<div style="display:flex;justify-content:space-between;font-size:14px;padding:2px 0">' +
+      '<span>' + lbl + '</span><b style="color:var(--cs-ink);font-weight:600">' + fmtPrice(_dtBase()) + '</b></div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:14px;padding:2px 0">' +
+      '<span>' + lbl2 + '</span><b style="color:var(--cs-ink);font-weight:600">−' + fmtPrice(q) + '</b></div>' +
+    '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:7px;' +
+      'padding-top:8px;border-top:1px solid rgba(224,169,74,.35)">' +
+      '<span style="font-size:14px">' + (_dt.tipo === 'otro' ? 'Cobraste' : 'Total a pagar') + '</span>' +
+      '<b style="display:inline;font-size:22px">' + fmtPrice(c) + '</b></div></div>';
+}
+/* una lista che, una volta scelta, mostra SOLO la scelta — e la scelta si tocca
+   per riaprirla. Alberto: *«una volta scelto il motivo nasconderei gli altri
+   per mantenere la vista nella schermata senza scroll»* — e la ragione vera è
+   che **una schermata che scorre nasconde il bottone verde**, cioè la cosa che
+   il JL sta cercando. */
+function _dtLista(campo, items, id, nom, sub) {
+  var sel = _dt[campo];
+  var vis = sel ? items.filter(function (x) { return id(x) === sel; }) : items;
+  return '<div class="c4chips">' + vis.map(function (x) {
+    var k = id(x);
+    return '<button class="c4pick' + (sel === k ? ' on' : '') + '" style="margin:5px 0" ' +
+      'onclick="_dtSet(\'' + campo + '\',\'' + k + '\')">' +
+      '<span class="c4nm">' + esc(nom(x)) + '</span>' +
+      (sub ? '<span class="p">' + esc(sub(x)) + '</span>' : '') + '</button>';
+  }).join('') + '</div>' +
+  (sel ? '<div class="c4expl" style="font-size:12.5px">toca para cambiar</div>' : '');
+}
+
 function _dtPinta() {
-  const tot = _dt.tot;
-  vhoja('<h3>Descontar · Mesa ' + esc(_dt.mesa) + '</h3>' +
-    '<div class="cs-psub">Consumo <b>' + fmtPrice(tot) + '</b></div>' +
-    '<div class="cs-psec">¿Qué pasó?</div>' +
-    /* il motivo porta il suo prezzo scritto accanto: chi tocca sa già dove
-       finisce il conto, e non deve fare il conto in testa davanti al cliente. */
-    DTO_MOTIVOS.map(function (m) {
-      return '<button class="opt2" onclick="_dtElige(\'' + m.k + '\')">' +
-        '<b>' + esc(m.n) + ' · −' + m.pct + '%</b>' +
-        '<small>Queda en ' + fmtPrice(Math.round(tot * (100 - m.pct) / 100)) +
-        (m.esc ? ' · hay que escribir qué pasó' : '') + '</small></button>';
-    }).join('') +
-    '<div class="cs-psec">Otros</div>' +
-    '<button class="opt2" onclick="_dtAcuPinta()"><b>🤝 Acuerdos</b>' +
-      '<small>Consumo libre acordado — vale sobre <b>todo</b> el consumo</small></button>' +
-    '<button class="opt2" onclick="_dtoOtroMonto(\'' + esc(_dt.mesa) + '\')"><b>💵 Cobré otro monto</b>' +
-      '<small>El fósil lleva <b>lo realmente cobrado</b> · PIN del JL</small></button>' +
-    '<button class="opt2" onclick="_dtoProducto(\'' + esc(_dt.mesa) + '\')"><b>🍽 Un producto</b>' +
-      '<small>Se cayó, lo devolvió — se quita esa línea sola, con motivo</small></button>' +
-    '<button class="opt2" onclick="_dtoColacion(\'' + esc(_dt.mesa) + '\')"><b>🍱 Colación · deja en $0</b>' +
-      '<small>Comida del personal — se elige para quién · firma JL</small></button>' +
-    '<button class="opt2" onclick="_dtoFam(\'' + esc(_dt.mesa) + '\')"><b>👨‍👩‍👧 Desc FAM · deja en $0</b>' +
-      '<small>La familia pone <b>su código</b> en tu teléfono</small></button>');
-}
-function _dtElige(k) {
-  const m = _dtMot(k); if (!m || !_dt) return;
-  _dt.mot = k; _dt.acu = null;
-  if (m.esc) return _dtEscPinta();
-  _dtAplicar(m.n + ' −' + m.pct + '%');
-}
-/* «Otro reclamo» senza il racconto è una scatola vuota che vale il doppio degli
-   altri: −20%. Perciò il bottone non si accende finché non c'è scritto qualcosa
-   — è la stessa cintura di ELIMINAR, dove il JL deve scrivere e non può
-   scegliere da una lista. */
-function _dtEscPinta() {
-  const m = _dtMot('otro_reclamo');
-  vhoja('<h3>Otro reclamo · −' + m.pct + '%</h3>' +
-    '<div class="cs-psub">Mesa <b>' + esc(_dt.mesa) + '</b> · queda en <b>' +
-      fmtPrice(Math.round(_dt.tot * (100 - m.pct) / 100)) + '</b></div>' +
-    '<div class="cs-psec">¿Qué pasó?</div>' +
-    '<textarea class="cs-pin" id="dtTx" rows="3" style="resize:none;font-size:16px" ' +
-      'placeholder="Se cayó de la escalera…" oninput="_dtTxIn(this.value)"></textarea>' +
-    '<button class="btn" id="dtGo" disabled onclick="_dtAplicar(\'Otro reclamo −' + m.pct + '%\')">' +
-      'Escribe qué pasó</button>' +
-    '<div style="text-align:center;font-size:12px;color:var(--cs-mut);padding:12px 0 2px;' +
-      'text-decoration:underline;cursor:pointer" onclick="_dtPinta()">‹ volver</div>');
-  setTimeout(function () { const e = document.getElementById('dtTx'); if (e) e.focus(); }, 30);
-}
-function _dtTxIn(v) {
-  if (!_dt) return;
-  _dt.texto = String(v || '').trim();
-  const b = document.getElementById('dtGo');
-  if (b) {                       // solo il bottone: ridisegnare toglierebbe il cursore
-    b.disabled = _dt.texto.length < 4;
-    b.textContent = _dt.texto.length < 4 ? 'Escribe qué pasó' : 'Aplicar −20% · PIN del JL';
+  var w = document.getElementById('dtoWrap');
+  if (!w) { w = document.createElement('div'); w.id = 'dtoWrap'; document.body.appendChild(w); }
+  if (!_dt) { w.innerHTML = ''; return; }
+  c4Css();
+  var b = '', tt = 'Descontar';
+
+  if (!_dt.tipo) {
+    b = '<button class="c4pick" style="margin:5px 0" onclick="_dtTipo(\'conv\')">' +
+          '<span class="c4nm">🤝 Convenio<small style="display:block;font-size:12.5px;font-weight:400;' +
+          'color:var(--cs-ink2)">Banco Falabella · <b>no</b> sobre promociones</small></span></button>' +
+        '<button class="c4pick" style="margin:5px 0" onclick="_dtTipo(\'dto\')">' +
+          '<span class="c4nm">🏷 Descuento<small style="display:block;font-size:12.5px;font-weight:400;' +
+          'color:var(--cs-ink2)">el motivo define cuánto · sobre el <b>total</b></small></span></button>' +
+        (DTO_FRANQ_ON ? '<button class="c4pick" style="margin:5px 0" onclick="_dtTipo(\'franq\')">' +
+          '<span class="c4nm">🎫 Franquicia<small style="display:block;font-size:12.5px;font-weight:400;' +
+          'color:var(--cs-ink2)">consumo libre hasta ' + fmtPrice(100000) + '</small></span></button>' : '') +
+        '<button class="c4pick" style="margin:5px 0" onclick="_dtTipo(\'fam\')">' +
+          '<span class="c4nm">👨‍👩‍👧 Familia<small style="display:block;font-size:12.5px;font-weight:400;' +
+          'color:var(--cs-ink2)">deja en $0 · código de la familia</small></span></button>' +
+        '<button class="c4pick" style="margin:5px 0" onclick="_dtTipo(\'coln\')">' +
+          '<span class="c4nm">🍱 Colación<small style="display:block;font-size:12.5px;font-weight:400;' +
+          'color:var(--cs-ink2)">comida del JL · deja en $0</small></span></button>' +
+        '<button class="c4pick" style="margin:5px 0" onclick="_dtTipo(\'otro\')">' +
+          '<span class="c4nm">⚠️ Cobré otro monto<small style="display:block;font-size:12.5px;' +
+          'font-weight:400;color:var(--cs-ink2)">situación excepcional</small></span></button>' +
+        /* 🍽 «Un producto» resta dov'era: apre la correzione del pedido, che è
+           un altro verbo (ELIMINAR) e ha già la sua schermata. */
+        '<button class="c4pick" style="margin:5px 0" onclick="_dtCerrar();_dtoProducto(\'' + esc(_dt.mesa) + '\')">' +
+          '<span class="c4nm">🍽 Un producto<small style="display:block;font-size:12.5px;' +
+          'font-weight:400;color:var(--cs-ink2)">se quita esa línea sola, con motivo</small></span></button>';
+  } else {
+    tt = { conv: 'Convenio', dto: 'Descuento', franq: 'Franquicia',
+           fam: 'Familia', coln: 'Colación', otro: 'Otro monto' }[_dt.tipo];
+    /* il descontable si scrive una volta sola: prima della scelta sta in cima
+       (solo dove è DIVERSO dal totale della barra), dopo è la prima riga del
+       riepilogo. */
+    if (_dt.tipo === 'conv' && !_dt.conv)
+      b += '<div class="c4resta" style="margin-top:0;text-align:left;display:flex;' +
+           'justify-content:space-between"><span style="font-size:15px;font-weight:700">' +
+           'Descontable <i>sin promos</i></span><b style="display:inline;font-size:17px">' +
+           fmtPrice(_dtBase()) + '</b></div>';
+
+    if (_dt.tipo === 'conv') {
+      b += '<div class="c4lab">¿Cuál?</div>' +
+        _dtLista('conv', DTO_CONVENIOS,
+          function (c) { return c.k; }, function (c) { return c.n; }, function (c) { return c.d; });
+      if (_dt.conv) b += '<div class="c4expl" style="font-size:12.5px">Se paga con esa tarjeta. ' +
+        'Queda registrado.</div>';
+    }
+    if (_dt.tipo === 'dto') {
+      b += '<div class="c4lab">¿Qué pasó?</div>' +
+        _dtLista('mot', DTO_MOTIVOS,
+          function (m) { return m.k; }, function (m) { return m.n; },
+          function (m) { return '−' + m.pct + '%'; });
+      /* «Otro reclamo» vale il doppio degli altri: senza il racconto è una
+         scatola vuota che costa il 20%. Stessa cintura di ELIMINAR — il JL
+         scrive, non sceglie da una lista. */
+      if (_dt.mot === 'otro_reclamo')
+        b += '<textarea class="cs-pin" id="dtTx" rows="2" maxlength="200" style="resize:none;font-size:16px" ' +
+             'placeholder="¿Qué pasó? Escríbelo con tus palabras" ' +
+             'oninput="_dtEscribe(\'txt\',this.value,\'dtTx\')">' + esc(_dt.txt) + '</textarea>';
+    }
+    if (_dt.tipo === 'fam')
+      b += '<div class="c4lab">¿Quién?</div>' +
+        _dtLista('fam', DTO_FAMILIA,
+          function (n) { return n; }, function (n) { return n; }, null);
+    if (_dt.tipo === 'coln') {
+      b += '<div class="c4lab">¿Para quién?</div>';
+      if (_dtJefes === null) b += '<div class="c4expl">Buscando el turno…</div>';
+      else if (!_dtJefes.length) b += '<div class="c4expl">No llegó la lista del turno — ' +
+        'cierra y reintenta</div>';
+      else b += _dtLista('col', _dtJefes,
+          function (n) { return n; }, function (n) { return n; }, null) +
+        (_dt.col ? '' : '<div class="c4expl" style="font-size:12.5px">solo los JL tienen derecho</div>');
+    }
+    if (_dt.tipo === 'otro') {
+      b += '<div class="c4lab">¿Cuánto cobraste?</div>' +
+        '<input class="cs-pin" id="dtCob" inputmode="numeric" placeholder="$" ' +
+          'style="font-size:23px;font-weight:700;color:var(--cs-cyan,#3fe0f0)" ' +
+          'value="' + (_dt.cob ? fmtPrice(_dt.cob) : '') + '" ' +
+          'oninput="_dtEscribe(\'cob\',this.value,\'dtCob\')">' +
+        '<div class="c4lab">¿Qué pasó?</div>' +
+        '<textarea class="cs-pin" id="dtTx" rows="2" maxlength="200" style="resize:none;font-size:16px" ' +
+          'placeholder="Escríbelo con tus palabras" ' +
+          'oninput="_dtEscribe(\'txt\',this.value,\'dtTx\')">' + esc(_dt.txt) + '</textarea>';
+      /* il tetto del server, mostrato PRIMA della cassa (v. `_dtFalta`) */
+      if (_dt.cob && _dt.cob < _dtMin())
+        b += '<div class="c4expl" style="font-size:12.5px;color:#E0574A">El servidor no acepta más de ' +
+             DTO_MAX_PCT + '% · mínimo ' + fmtPrice(_dtMin()) + '</div>';
+    }
+    b += _dtResumen();
+    /* il PIN compare solo quando c'è qualcosa da firmare — prima è un campo che
+       chiede una password per un gesto che non esiste ancora.
+       🔴 Sulla FAM non firma il JL: firma la famiglia, col proprio codice, sul
+       telefono del mesero. Stesso campo, due nomi, due gesti diversi. */
+    if (_dtHay()) {
+      b += '<div class="c4lab">' + (_dt.tipo === 'fam' ? 'Código de la familia' : 'PIN del JL') + '</div>' +
+        '<input class="cs-pin mv-pin" id="dtPin" inputmode="numeric" maxlength="4" ' +
+          'value="' + esc(_dt.pin) + '" autocomplete="off" ' +
+          'name="dt' + Math.random().toString(36).slice(2) + '" ' +
+          'data-1p-ignore data-lpignore="true" data-form-type="other" ' +
+          'oninput="_dtPinIn(this.value)">' +
+        '<div class="c4expl" style="font-size:12.5px">no se guarda en el teléfono</div>';
+    }
   }
+
+  /* 🔴 LA BARRA PORTA IL TOTALE (Alberto, 31-ago): *«se copre tutta la pagina
+     non si vede il totale del tavolo, quindi metterlo accanto al num de mesa —
+     e così grigio non è molto visibile.»* Il modal è a schermo intero: senza
+     questa riga il JL decide quanto scontare **senza avere davanti la cifra su
+     cui sta decidendo**. Ed essendo la barra una sola, il totale c'è in ogni
+     passo, PIN compreso. */
+  w.innerHTML = '<div class="c4">' +
+    '<div class="c4bar"><span><span class="c4tt" style="display:block;margin-bottom:3px">' + esc(tt) + '</span>' +
+      '<span style="display:block;font-size:17px;font-weight:700;color:var(--cs-ink)">Mesa ' +
+        esc(_dt.mesa) + ' · <span style="color:var(--cs-cyan,#3fe0f0);font-variant-numeric:tabular-nums">' +
+        fmtPrice(_dt.tot) + '</span></span></span>' +
+      '<button class="c4salir" onclick="_dtCerrar()">✕ Salir</button></div>' +
+    '<div class="c4body">' + b + '</div>' +
+    '<div class="c4foot" id="dtFoot"></div></div>';
+  _dtPie();
+  _dtEraHay = _dtHay();
 }
-function _dtAcuPinta() {
-  vhoja('<h3>🤝 Acuerdos · Mesa ' + esc(_dt.mesa) + '</h3>' +
-    '<div class="cs-psub">Consumo <b>' + fmtPrice(_dt.tot) + '</b> · vale sobre todo, ' +
-      'también sobre las promociones</div>' +
-    '<div class="cs-psec">¿Cuánto cubre el acuerdo?</div>' +
-    '<input class="cs-pin" id="dtAcu" inputmode="numeric" placeholder="0" ' +
-      'oninput="_dtAcuIn(this.value)">' +
-    '<div id="dtAcuR" class="cs-psub" style="margin-top:9px">El cliente paga <b>' +
-      fmtPrice(_dt.tot) + '</b></div>' +
-    '<button class="btn" id="dtAcuGo" disabled onclick="_dtAplicar(\'Acuerdo\')">Escribe el monto</button>' +
-    '<div style="text-align:center;font-size:12px;color:var(--cs-mut);padding:12px 0 2px;' +
-      'text-decoration:underline;cursor:pointer" onclick="_dtPinta()">‹ volver</div>');
-  setTimeout(function () { const e = document.getElementById('dtAcu'); if (e) e.focus(); }, 30);
-}
-function _dtAcuIn(v) {
-  if (!_dt) return;
-  var n = parseInt(String(v || '').replace(/[^0-9]/g, ''), 10);
-  _dt.acu = isNaN(n) ? null : n;
-  _dt.mot = 'acuerdo';
-  var r = document.getElementById('dtAcuR'), b = document.getElementById('dtAcuGo');
-  var paga = _dtCalc();
-  /* 🔴 un acuerdo più grande del consumo NON è un errore da respingere: è il
-     caso normale ($100.000 di franchigia su un conto da $40.000). Il cliente
-     paga $0 e il resto NON si porta dietro — qui non c'è credito. */
-  if (r) r.innerHTML = 'El cliente paga <b>' + fmtPrice(paga) + '</b>' +
-    ((_dt.acu != null && _dt.acu > _dt.tot) ? ' · el acuerdo cubre todo' : '');
-  if (b) {
-    b.disabled = _dt.acu == null || _dt.acu <= 0;
-    b.textContent = b.disabled ? 'Escribe el monto' : 'Aplicar · el cliente paga ' + fmtPrice(paga);
+
+/* ── APPLICARE ───────────────────────────────────────────────────────────────
+   Il gesto finisce nel pannello del pago, che è dove il denaro si è sempre
+   incassato: qui si decide QUANTO e PERCHÉ, lì si sceglie il medio.
+   🔑 Il PIN è già stato digitato, quindi `pinAsk` NON si riaccende — un passo
+   in meno del flusso di oggi, e la firma resta quella del numero mostrato. */
+function _dtGo() {
+  if (!_dt || !_dtListo()) return;
+  var d = _dt, monto = _dtCobra(), mesa = d.mesa;
+  var et = d.tipo === 'conv'  ? (_dtConv(d.conv) || {}).n + ' ' + (_dtConv(d.conv) || {}).pct + '%'
+         : d.tipo === 'dto'   ? (_dtMot(d.mot) || {}).n + ' −' + (_dtMot(d.mot) || {}).pct + '%'
+         : d.tipo === 'franq' ? 'Franquicia'
+         : d.tipo === 'fam'   ? 'Familia · ' + d.fam
+         : d.tipo === 'coln'  ? 'Colación · ' + d.col
+         : 'Cobré otro monto';
+  _dt = null; _dtPinta();
+  abrirPago(mesa);
+  var pg = STATE.pago; if (!pg) return;
+  if (d.tipo === 'fam') { pg.famAsk = true; pg.pinFam = d.pin; }
+  else {
+    pg.jl = true; pg.pinAsk = false; pg.pinJL = d.pin;
+    pg.montoOn = true; pg.montoCustom = String(monto);
   }
+  /* ⛔ NON si manda al server: `PAGOS` non ha una colonna per il motivo e
+     `registrarPago` non lo accetta. Spedire un campo che il server ignora
+     farebbe CREDERE che sia registrato — la stessa bugia che togliamo dal
+     libro altrove. La patch di 💰 (`Motivo`/`Motivo_Detalle`) è su branch;
+     il giorno che è viva, qui si aggiunge una riga e si manda `et` + `d.txt`.
+     🔑 E si manderà il NOME e la % — mai l'indice della lista: il fossile deve
+     PORTARSI DENTRO il convenio, non referenziarlo. Se dicesse «convenio #3»,
+     il giorno che la tabella cambia agosto cambierebbe di significato. */
+  pg.dto = { et: et, tot: d.tot, monto: monto, acu: d.tipo === 'franq', txt: d.txt || '' };
+  pg.dtoEdit = false;
+  renderPago();
+  toast('ok', '🏷 ' + et + ' → ' + fmtPrice(monto));
 }
 
 function vDescontarSala(mesa) {
-  if (DESCONTAR_V2_ON) return vDescontar2(mesa);
+  if (DESCONTAR_V2_ON) return vDescontar3(mesa);
   const tot = _vpTot(mesa);
   if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
   vhoja('<h3>Descontar · Mesa ' + esc(mesa) + '</h3>' +
@@ -7965,7 +8250,7 @@ function renderPago() {
        il cliente aspetta. *Un verbo si giudica da dove atterra, non da dove
        parte.*
        ⛔ PERIMETRO: questo ramo si accende SOLO con `pg.dto`, che nasce solo
-       da `_dtAplicar` (DESCONTAR v2, spento di fabbrica). Per ogni altro
+       da `_dtGo` (DESCONTAR v3, spento di fabbrica). Per ogni altro
        cammino — `_dtoOtroMonto`, il JL che apre le opzioni a mano, il pannello
        vecchio — il codice qui sotto è identico a ieri, byte per byte. */
     if (pg.dto) {
