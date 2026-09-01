@@ -960,7 +960,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.48.0</span>
+      <span class="ver" id="ver">sala v3.49.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -5320,8 +5320,21 @@ var DTO_FAMILIA = ['Daniela', 'Elisa', 'Ale', 'Kele', 'Nea', 'Alberto'];
    quindi chi salta il pannello passa lo stesso. La guardia vera è un campo lato
    GAS, cantiere di RRHH, non un effetto collaterale di questo.
    *Un tampone dichiarato è una cura; uno non dichiarato diventa l'architettura.* */
-var DTO_ROL_COLACION = 'jefe local';
-var _dtJefes = null;      // cache del turno: null = non ancora chiesto
+/* ═══ 🍱 CHI HA DIRITTO ALLA COLACIÓN — dettato da Alberto, 1-set ═══════════
+   *«Non complichiamoci con il turno, ti do io i nomi.»* Dopo il primo giro sul
+   vivo, dove la lista dal turno è stata **l'unica delle sei porte a non
+   funzionare**. Sostituisce `getStaffSala` + il filtro sul rol: tre nomi che
+   non cambiano, letti senza rete.
+   🔴 **«Guía Turística» non è nel roster e non ha un cargo** — è chi porta il
+   gruppo. *Un elenco costruito dai ruoli non poteva contenerla: il diritto alla
+   colación non segue l'organigramma, e cercare di dedurlo dai cargos era il
+   difetto, non l'implementazione.*
+   ⚠️ Resta vero il limite di RRHH, e non è questa lista a curarlo: **filtrare
+   nel vetro non è la guardia.** Il server esige il PIN del JL (verificato:
+   `_validarPinJL`, `MENU_GAS` r.17814) ma non sa chi ha diritto — chi salta il
+   pannello passa lo stesso. *Un tampone dichiarato è una cura; uno non
+   dichiarato diventa l'architettura.* */
+var DTO_COLACION = ['Pedro', 'Eduardo', 'Guía Turística'];
 /* 🎫 la franquicia: porta NASCOSTA, codice vivo (Alberto: «invisibile o
    togli»). Nascerà nella Lista — cancellarla vorrebbe dire riscriverla. */
 var DTO_FRANQ_ON = false;
@@ -5451,26 +5464,16 @@ function _dtTipo(t) {
   _dt.tipo = t; _dt.conv = ''; _dt.mot = ''; _dt.txt = '';
   _dt.fam = ''; _dt.col = ''; _dt.cob = 0; _dt.pin = '';
   _dtPinta();
-  if (t === 'coln') _dtCargaJefes();
 }
-/* ⏱ la lista dei JL si chiede SOLO quando si apre la colación, non all'apertura
-   del pannello: è una chiamata di rete, e le altre cinque porte non ne hanno
-   bisogno. E non blocca niente — la schermata si disegna subito e dice «cerco»,
-   poi si ridisegna da sola. *Nessuna schermata aspetta la rete* (N1). */
-function _dtCargaJefes() {
-  if (_dtJefes && _dtJefes.length) return;      // già in mano per questo turno
-  _dtJefes = null;
-  gasPost('getStaffSala', { codigo: STATE.codigo }).then(function (r) {
-    var rol = DTO_ROL_COLACION;
-    _dtJefes = (r && r.ok && r.staff ? r.staff : [])
-      .filter(function (s) { return (s.rol || '').toString().trim().toLowerCase() === rol; })
-      .map(function (s) { return s.nombre; });
-    if (_dt && _dt.tipo === 'coln') _dtPinta();
-  }).catch(function () {
-    _dtJefes = [];
-    if (_dt && _dt.tipo === 'coln') _dtPinta();
-  });
-}
+/* 🗑 QUI VIVEVA `_dtCargaJefes`, che chiedeva la lista a `getStaffSala` e la
+   filtrava per `rol='jefe local'`. **Tolta il 1-set, non spenta**: con
+   `DTO_COLACION` fissa non c'è più niente da chiedere, e lasciarla dietro un
+   flag avrebbe conservato l'unica chiamata di rete del pannello per una lista
+   di tre nomi che non cambiano.
+   🔑 *Il difetto non era il codice — era che il diritto alla colación non è un
+   cargo: «Guía Turística» non sarebbe mai uscita da un filtro sui ruoli.*
+   ⇒ ora **nessuna delle sei porte tocca la rete per disegnarsi**, e la
+   schermata non ha più uno stato «sto cercando» che possa restare appeso. */
 /* ogni scelta azzera la firma: un PIN vale per il numero che ha firmato, mai
    per quello arrivato dopo. */
 function _dtSet(campo, val) {
@@ -5623,14 +5626,27 @@ function _dtPinta() {
       b += '<div class="c4lab">¿Quién?</div>' +
         _dtLista('fam', DTO_FAMILIA,
           function (n) { return n; }, function (n) { return n; }, null);
+    /* ═══ 🍱 LA COLACIÓN: TRE NOMI FISSI, NON IL TURNO ═════════════════════════
+       Alberto, 1-set, dopo il primo giro sul vivo: *«non complichiamoci con il
+       turno, ti do io i nomi: Pedro · Eduardo · Guía Turística.»*
+       🔴 Nel giro vero questa era **l'unica porta su sei che non ha funzionato**:
+       la lista arrivava da `getStaffSala` filtrata per `rol='jefe local'`, e sul
+       telefono ha detto *«No llegó la lista del turno»*. Falliva chiusa e lo
+       diceva — comportamento giusto — **ma una porta che dipende dalla rete per
+       mostrare tre nomi che non cambiano mai è complessità che paga solo
+       guasti.** *La lista dinamica serviva a non scriverli a mano; il prezzo era
+       che senza rete non c'è nessuna colación.*
+       🎓 E il terzo nome dice perché il ruolo non bastava: **«Guía Turística»
+       non è un JL, non è nessuno del roster — è la persona che porta il gruppo.**
+       Un elenco costruito dai cargos non l'avrebbe potuta contenere: *il diritto
+       alla colación non segue l'organigramma.*
+       ✅ E il «di chi è» **si salva già**: il server mette `para` in
+       `Nombre_Cliente` e in `Ref_Externa` (`colacion:Pedro · jl:JL2 · consumo:…`)
+       — verificato in `MENU_GAS`, non dedotto. Quindi non serve altro. */
     if (_dt.tipo === 'coln') {
-      b += '<div class="c4lab">¿Para quién?</div>';
-      if (_dtJefes === null) b += '<div class="c4expl">Buscando el turno…</div>';
-      else if (!_dtJefes.length) b += '<div class="c4expl">No llegó la lista del turno — ' +
-        'cierra y reintenta</div>';
-      else b += _dtLista('col', _dtJefes,
-          function (n) { return n; }, function (n) { return n; }, null) +
-        (_dt.col ? '' : '<div class="c4expl" style="font-size:12.5px">solo los JL tienen derecho</div>');
+      b += '<div class="c4lab">¿Para quién?</div>' +
+        _dtLista('col', DTO_COLACION,
+          function (n) { return n; }, function (n) { return n; }, null);
     }
     if (_dt.tipo === 'otro') {
       b += '<div class="c4lab">¿Cuánto cobraste?</div>' +
