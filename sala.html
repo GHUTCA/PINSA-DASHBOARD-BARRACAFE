@@ -1071,6 +1071,41 @@ const PAGO_V3_ON = (function () {
     return localStorage.getItem(PAGO_V3_KEY) === '1';   // v3.43.0 · de fábrica: APAGADO (vuelta atrás)
   } catch (e) { return q === '1'; }   // modo privado: al menos la URL manda
 })();
+/* ═══ v3.47.0 · COBRAR v4 · IL MODAL APPROVATO DA ALBERTO (29-ago) ═══════════
+   Disegno chiuso: 4_CANTIERE_CONSOLA/DISENO_MODAL_COBRAR_29AGO2026.md
+   Prototipo che si tocca: PROTOTIPO_MODAL_COBRAR_29AGO2026.html
+   🔴 OGNI dettaglio qui dentro è una correzione di Alberto, data una alla
+      volta. Non si cambia un pezzo senza di lui.
+
+   È l'evoluzione del pago v3 (il telefono che cambia mano), non una cosa
+   accanto: quando questo si accende, quello non serve più. Il v3 catturava
+   propina e dati; questo aggiunge il BIVIO (todo · lo mío · partes iguales),
+   il pago PARZIALE come caso normale e la rilettura del correo.
+
+   🔑 MUOVE IL VETRO, NON LA CASSA — verificato prima di scrivere una riga:
+   `pagoConfirmar` manda già mesa · medio · propina · pago_uid · correo ·
+   celular · medios_json (mixto) · monto_manual+monto (che È il parziale) ·
+   voucher. Non serve toccarlo, e non lo tocco: il cammino del denaro resta
+   byte a byte quello verificato da 📖 MENU. Se questo modal sbaglia, sbaglia
+   su ciò che MOSTRA, mai su ciò che incassa.
+
+   NASCE SPENTO, e il default di fabbrica non cambia con questo deploy:
+     ?cobrar4=1  → accende E RICORDA in questo apparecchio
+     ?cobrar4=0  → spegne e ricorda (la salita, come `?pagov3=0`)
+     senza nulla → ciò che l'apparecchio ha salvato; di fabbrica SPENTO
+   🔴 Il flag si RICORDA nell'apparecchio e non nella URL: `sala.webmanifest`
+      apre `./sala.html?src=pwa` senza parametri, quindi chi entra dall'icona
+      non porterebbe mai il flag. È l'errore già pagato due volte — `?solo=mapa`
+      (23-lug) e `?pagov3` (27-ago). */
+const COBRAR_V4_KEY = 'sala_cobrar4';
+const COBRAR_V4_ON = (function () {
+  const q = QS.get('cobrar4');
+  try {
+    if (q === '1') { localStorage.setItem(COBRAR_V4_KEY, '1'); return true; }
+    if (q === '0') { localStorage.setItem(COBRAR_V4_KEY, '0'); return false; }
+    return localStorage.getItem(COBRAR_V4_KEY) === '1';   // di fabbrica: SPENTO
+  } catch (e) { return q === '1'; }   // modo privato: almeno la URL comanda
+})();
 /* ═══ v3.44.0 · [AUT-0125] · IL CRONOMETRO DEI CLICK — SOLA MISURA, ZERO CURA ══
    Censimento 28-ago (4_CANTIERE_MENU/CENSIMENTO_CLICK_28AGO2026.md §8.2): «il
    primo gesto della cura deve essere un performance.now() attorno a
@@ -6908,15 +6943,352 @@ function mxToca(el, k2) {
 }
 function _pagoPropina() {
   const pg = STATE.pago; if (!pg) return 0;
-  if (pg.prop === 'sug') return Math.round(pg.tot * 0.10);
+  /* ═══ v3.47.0 · IL 10% SI CALCOLA SULLA PARTE, NON SUL TAVOLO ══════════════
+     🔴 Bug trovato scrivendo COBRAR v4, e sarebbe finito in produzione.
+     Qui il 10% è sempre stato `pg.tot * 0.10` — giusto finché il pago era UNO
+     SOLO per tavolo. Col pago parziale (D2: «è il caso NORMALE») diventa falso
+     e caro: tavolo da $100.000 diviso in 4, il cliente vede propina $10.000
+     invece di $2.500 — **quattro volte tanto, e la vede il cliente, sul
+     telefono, mentre sta per pagare.**
+     La cura è additiva e vale SOLO col modal nuovo in gioco: senza `pg.c4` la
+     riga è identica a prima, byte per byte. Il cammino vecchio non cambia. */
+  if (pg.prop === 'sug') return Math.round((pg.c4 ? c4Parte(pg) : pg.tot) * 0.10);
   if (pg.prop === 'otro') return Math.max(0, Math.round(parseFloat(String(pg.otro).replace(/[^0-9]/g, '')) || 0));
   return 0;
 }
+/* ═══════════════════════════════════════════════════════════════════════════
+   💳 COBRAR v4 — IL MODAL APPROVATO · tutto il pezzo vive QUI, in un blocco solo
+   ───────────────────────────────────────────────────────────────────────────
+   Sta tutto insieme apposta: la seconda testa lo rivede senza cercarlo per il
+   file, e se va spento si toglie in un gesto. Nessuna riga fuori da qui, tranne
+   la costante del flag (sopra) e le TRE righe di innesto in `renderPago`.
+
+   I PASSI (dal prototipo, invariati):
+     inicio → bivio → (lomio | iguales) → datos → rilee → medio → voucher → hecho
+     └ mesero        └────────── cliente ──────────┘      └──── mesero ────┘
+
+   COSA RIUSA, invece di riscriverlo (meno codice nuovo = meno superficie):
+     _vpItemsDet(mesa)  gli item con la CHIAVE STABILE `kk` (uuid#i) — indispensabile
+                        per «pago lo mío»: la lista cambia a ogni poll e la posizione
+                        no, quindi si ricorda per `kk`, mai per indice.
+     _pagoPropina()     la propina che il mesero già usava — UNA sola variable
+     _pagoMonto()       legge montoOn+montoCustom, che è già il PARZIALE
+     pagoConfirmar()    il cammino del denaro, NON toccato
+   ═══════════════════════════════════════════════════════════════════════════ */
+var C4_CSS_ON = false;
+function c4Css() {
+  if (C4_CSS_ON) return; C4_CSS_ON = true;
+  var s = document.createElement('style');
+  s.textContent =
+    '.c4{position:fixed;inset:0;z-index:60;background:var(--cs-bg,#141726);display:flex;flex-direction:column}' +
+    '.c4 .c4bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;' +
+      'border-bottom:1px solid var(--cs-line);flex:0 0 auto}' +
+    '.c4 .c4tt{font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--cs-ink2)}' +
+    '.c4 .c4salir{background:var(--cs-card);border:1px solid var(--cs-line);color:var(--cs-ink);' +
+      'border-radius:10px;padding:9px 14px;font-size:14.5px;font-weight:600}' +
+    '.c4 .c4body{flex:1 1 auto;overflow-y:auto;padding:14px}' +
+    '.c4 .c4foot{flex:0 0 auto;padding:12px 14px;border-top:1px solid var(--cs-line)}' +
+    '.c4 .c4mesa{font-size:25px;font-weight:700;text-align:center}' +
+    '.c4 .c4firma{font-size:15px;color:var(--cs-ink2);text-align:center;margin-top:4px}' +
+    '.c4 .c4firma b{color:var(--cs-cyan,#3fe0f0)}' +
+    '.c4 .c4expl{font-size:14.5px;color:var(--cs-ink2);text-align:center;margin-top:4px}' +
+    '.c4 .c4tot{font-size:36px;font-weight:700;text-align:center;margin:10px 0 2px;font-variant-numeric:tabular-nums}' +
+    '.c4 .c4lab{font-size:14px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;' +
+      'color:var(--cs-ink2);margin:16px 0 8px}' +
+    '.c4 .c4rows{border-top:1px solid var(--cs-line);border-bottom:1px solid var(--cs-line);padding:5px 0;margin:12px 0}' +
+    '.c4 .c4row{display:flex;justify-content:space-between;padding:7px 0;font-size:15px}' +
+    '.c4 .c4row .p{color:var(--cs-ink2);font-variant-numeric:tabular-nums}' +
+    /* bottoni GRANDI e lettere grandi — «lavoriamo di notte, poca luce» (Alberto) */
+    '.c4 .c4pick{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:12px;' +
+      'border-radius:11px;border:1.5px solid var(--cs-line);margin:7px 0;background:var(--cs-card);' +
+      'font-size:15.5px;color:var(--cs-ink);min-height:52px}' +
+    '.c4 .c4pick.on{border-color:var(--cs-cyan,#3fe0f0);background:rgba(63,224,240,.13)}' +
+    '.c4 .c4tick{width:23px;height:23px;border-radius:6px;border:1.5px solid var(--cs-ink2);flex:0 0 23px;' +
+      'display:grid;place-items:center;font-size:14px;color:transparent}' +
+    '.c4 .c4pick.on .c4tick{background:var(--cs-cyan,#3fe0f0);border-color:var(--cs-cyan,#3fe0f0);color:#06222a}' +
+    '.c4 .c4nm{flex:1}.c4 .c4pick .p{color:var(--cs-ink2);font-variant-numeric:tabular-nums}' +
+    '.c4 .c4chips{display:flex;gap:8px;flex-wrap:wrap}' +
+    '.c4 .c4chip{flex:1 1 100%;background:#EDEBE6;color:#1E2A33;border-radius:12px;padding:14px 7px;' +
+      'text-align:center;font-size:16.5px;font-weight:600;min-height:58px;display:flex;flex-direction:column;' +
+      'justify-content:center;border:none}' +
+    '.c4 .c4chip small{display:block;font-size:12.5px;font-weight:500;color:#4A5A67;margin-top:2px}' +
+    '.c4 .c4chip.n{flex:1 1 calc(25% - 8px);min-width:60px;font-size:20px}' +
+    '.c4 .c4chip.sel{background:var(--cs-cyan,#3fe0f0);color:#06222a}' +
+    '.c4 .c4chip.sel small{color:#0a3540}' +
+    '.c4 .c4resta{border-radius:12px;padding:11px 13px;margin-top:13px;text-align:center;' +
+      'background:rgba(224,169,74,.13);border:1.5px solid #E0A94A}' +
+    '.c4 .c4resta.zero{background:rgba(53,196,126,.13);border-color:#35C47E}' +
+    '.c4 .c4resta span{font-size:13.5px;color:var(--cs-ink2)}' +
+    '.c4 .c4resta b{display:block;font-size:22px;color:#E0A94A;font-variant-numeric:tabular-nums;margin-top:2px}' +
+    '.c4 .c4resta.zero b{color:#35C47E}' +
+    '.c4 .c4cta{width:100%;background:#35C47E;color:#04231a;border-radius:13px;padding:16px 12px;text-align:center;' +
+      'font-size:18px;font-weight:700;line-height:1.25;min-height:58px;border:none}' +
+    '.c4 .c4cta small{display:block;font-size:13px;font-weight:500;opacity:.82;margin-top:3px}' +
+    '.c4 .c4cta.amber{background:#E0A94A;color:#2c1e04}' +
+    '.c4 .c4cta:disabled{background:#2a4a3c;color:#7f9a8d;border:1.5px dashed #4a6b5c}' +
+    '.c4 .c4cta.sec{background:transparent;border:1.5px solid var(--cs-line);color:var(--cs-ink);' +
+      'font-size:15px;font-weight:600;margin-top:9px;min-height:48px}' +
+    /* la rilettura del correo: fondo chiaro, testo grande, l'ultima cosa in mano al cliente */
+    '.c4 .c4rb{background:#F5EDDD;color:#2E2618;border-radius:14px;padding:20px 15px;text-align:center;margin-top:6px}' +
+    '.c4 .c4rb .ic{font-size:40px;line-height:1}' +
+    '.c4 .c4rb .q{font-size:16.5px;font-weight:700;margin-top:8px}' +
+    '.c4 .c4rb .dir{font-size:20px;font-weight:600;margin:13px 0 4px;word-break:break-all;line-height:1.3;color:#1d1608}' +
+    '.c4 .c4rb .sub{font-size:13.5px;color:#7a5f2a;font-weight:600}' +
+    '.c4 .c4rb.mal{background:#fdecd2}' +
+    '.c4 .c4rb.mal .dir{color:#8a3d0b;text-decoration:underline wavy #c0562a 2px}' +
+    '.c4 .c4clock{display:block;width:fit-content;margin:10px auto 0;padding:7px 16px;border-radius:99px;' +
+      'background:rgba(63,224,240,.10);border:1px solid rgba(63,224,240,.45);font-size:16px;font-weight:700;' +
+      'color:var(--cs-cyan,#3fe0f0);font-variant-numeric:tabular-nums}';
+  document.head.appendChild(s);
+}
+
+/* ── LO STATO. Vive dentro `pg` (non accanto): quando il pannello si chiude
+      muore con lui, e non resta un secondo posto che ricorda cose vecchie. */
+function c4Init(pg) {
+  if (pg.c4) return pg.c4;
+  pg.c4 = { paso: 'inicio', modo: '', sel: {}, partes: 0, pagadoAntes: 0 };
+  return pg.c4;
+}
+/* 🔑 il totale NON è congelato: chi resta al tavolo continua a ordinare.
+   `falta` = consumo di ADESSO − ciò che è già stato pagato in questa sessione. */
+function c4Falta(pg) { return Math.max(0, (pg.tot || 0) - (pg.c4.pagadoAntes || 0)); }
+function c4Bruto(pg) {
+  var c = pg.c4;
+  if (c.modo === 'todo') return c4Falta(pg);
+  if (c.modo === 'iguales') return c.partes ? Math.round(c4Falta(pg) / c.partes) : 0;
+  var det = _vpItemsDet(pg.mesa), s = 0;
+  (det.items || det || []).forEach(function (it) { if (c.sel[it.kk]) s += (it.pu || 0) * (it.q || 1); });
+  return s;
+}
+/* non si può pagare più di ciò che manca: il cap sta QUI, non nella UI —
+   una guardia che vive solo nel bottone non è una guardia. */
+function c4Parte(pg) { return Math.min(c4Bruto(pg), c4Falta(pg)); }
+function c4Resta(pg) { return Math.max(0, c4Falta(pg) - c4Parte(pg)); }
+function c4Cierra(pg) { return c4Resta(pg) <= 0; }
+
+/* il monto della parte viaggia nei campi che `pagoConfirmar` GIÀ legge:
+   montoOn + montoCustom. Nessun campo nuovo verso il server. */
+function c4Sync(pg) {
+  var p = c4Parte(pg);
+  pg.montoOn = !c4Cierra(pg) || p !== (pg.tot || 0);
+  pg.montoCustom = pg.montoOn ? String(p) : '';
+}
+function c4Go(p) { var pg = STATE.pago; if (!pg) return; pg.c4.paso = p; renderPago(); }
+function c4Set(k, v) {
+  var pg = STATE.pago; if (!pg) return;
+  if (k === 'modo') { pg.c4.modo = v; c4Go(v === 'todo' ? 'datos' : v); return; }
+  if (k === 'partes') pg.c4.partes = parseInt(v, 10) || 0;
+  c4Sync(pg); renderPago();
+}
+function c4Tog(kk) {
+  var pg = STATE.pago; if (!pg) return;
+  if (pg.c4.sel[kk]) delete pg.c4.sel[kk]; else pg.c4.sel[kk] = 1;
+  c4Sync(pg); renderPago();
+}
+/* un indirizzo sbagliato NON è «nessun indirizzo»: entra nella statistica di
+   cattura come buono e non consegna MAI. Il refuso plausibile (`gmial`) la
+   macchina non lo vede — solo l'occhio del cliente, e solo mentre ha il
+   telefono in mano. Dopo non esiste nessun momento in cui possa. */
+function c4MailOk(m) {
+  m = (m || '').trim();
+  return /^[^\s@,]+@[^\s@,.]+(\.[^\s@,.]+)+$/.test(m) && m.length <= 120;
+}
+function c4MailPorQue(m) {
+  m = (m || '').trim();
+  if (!m) return 'Está vacío';
+  if (m.indexOf('@') < 0) return 'Falta el @';
+  if (m.split('@').length > 2) return 'Tiene dos @';
+  if (!m.split('@')[0]) return 'Falta lo de antes del @';
+  var dom = m.split('@')[1] || '';
+  if (!dom) return 'Falta lo de después del @';
+  if (dom.indexOf('.') < 0) return 'Al dominio le falta el punto';
+  if (/\.$/.test(dom)) return 'Termina en punto';
+  if (/\s/.test(m)) return 'Tiene un espacio';
+  return 'No parece un correo';
+}
+/* «Corregir» NON è «torna ai datos»: è «torna AL CAMPO». Chi ha appena visto
+   il proprio refuso non deve ricercarsi il campo — atterra dentro, col cursore
+   in fondo a ciò che ha scritto. È la differenza fra correggere e ricominciare. */
+function c4CorrigeMail() {
+  c4Go('datos');
+  setTimeout(function () {
+    var e = document.getElementById('c4Mail');
+    if (e) { e.focus(); try { e.setSelectionRange(e.value.length, e.value.length); } catch (x) {} }
+  }, 30);
+}
+
+/* ── IL RENDER DEI PASSI ────────────────────────────────────────────────────
+   🔴 SCOSTAMENTO DAL PROTOTIPO, DICHIARATO — deciso da me, Alberto può dire no:
+   il modal v4 disegna i passi NUOVI (inicio · bivio · lomio · iguales · datos ·
+   rilee) e poi CONSEGNA al pannello del mesero che già esiste, con la parte
+   scritta in `montoCustom`. Non riscrivo `medio`+`voucher`+`mixto`.
+   Perché: quel pezzo contiene le cinture già collaudate sul DENARO (la somma
+   mixto esatta, il voucher, il doppio cobro, la cortesía). Riscriverlo
+   duplicherebbe la parte più rischiosa del sistema per una differenza di
+   aspetto. La differenza col prototipo è ESTETICA, non di flusso: gli stessi
+   medios, lo stesso PAGAR, lo stesso resto. */
+function c4Render(w, pg) {
+  c4Css();
+  var c = pg.c4, det = _vpItemsDet(pg.mesa), items = (det.items || det || []);
+  var falta = c4Falta(pg), parte = c4Parte(pg), resta = c4Resta(pg);
+  var esCli = (c.paso === 'bivio' || c.paso === 'lomio' || c.paso === 'iguales' ||
+               c.paso === 'datos' || c.paso === 'rilee');
+  var tit = { inicio: 'Cobrar', bivio: 'Tu cuenta', lomio: 'Lo mío', iguales: 'Partes iguales',
+              datos: 'Tu cuenta', rilee: 'Tu boleta' }[c.paso] || 'Cobrar';
+  var b = '', f = '';
+
+  if (c.paso === 'inicio') {
+    b = '<div class="c4mesa">Mesa ' + esc(pg.mesa) + '</div>' +
+        (STATE.nombre ? '<div class="c4firma">cobra <b>' + esc(STATE.nombre) + '</b></div>' : '') +
+        '<div class="c4lab">Falta por pagar</div>' +
+        '<div class="c4tot" style="margin-top:0">' + fmtPrice(falta) + '</div>';
+    f = '<button class="c4cta" onclick="c4Go(\'bivio\')">📱 Mostrar la cuenta al cliente' +
+          '<small>él elige qué paga y escribe sus datos</small></button>' +
+        '<button class="c4cta sec" onclick="c4Papel()">🖨 Imprimir la cuenta en papel</button>';
+  }
+
+  else if (c.paso === 'bivio') {
+    b = '<div class="c4mesa" style="font-size:22px">Mesa ' + esc(pg.mesa) + '</div>' +
+        (STATE.nombre ? '<div class="c4expl">te atiende <b>' + esc(STATE.nombre) + '</b></div>' : '') +
+        /* l'orologio coi secondi che scorrono — anti-screenshot (D6, Alberto) */
+        '<span class="c4clock" id="pgRelojH">' + _pgReloj0() + '</span>' +
+        '<div class="c4rows">' + items.map(function (it) {
+          return '<div class="c4row"><span>' + (it.q > 1 ? it.q + 'x ' : '') + esc(it.n) +
+                 '</span><span class="p">' + fmtPrice((it.pu || 0) * (it.q || 1)) + '</span></div>';
+        }).join('') + '</div>' +
+        '<div class="c4tot">' + fmtPrice(falta) + '</div>' +
+        '<div class="c4lab">¿Qué pagas?</div><div class="c4chips">' +
+        '<button class="c4chip" onclick="c4Set(\'modo\',\'todo\')">Pago todo<small>' + fmtPrice(falta) + '</small></button>' +
+        '<button class="c4chip" onclick="c4Set(\'modo\',\'lomio\')">👆 Pago lo mío<small>elijo mis productos</small></button>' +
+        '<button class="c4chip" onclick="c4Set(\'modo\',\'iguales\')">➗ Partes iguales<small>dividimos entre varios</small></button></div>';
+  }
+
+  else if (c.paso === 'lomio') {
+    b = '<div class="c4lab" style="margin-top:0">Toca lo que es tuyo</div>' +
+        items.map(function (it) {
+          return '<button class="c4pick' + (c.sel[it.kk] ? ' on' : '') + '" onclick="c4Tog(\'' + esc(it.kk) + '\')">' +
+            '<span class="c4tick">✓</span><span class="c4nm">' + (it.q > 1 ? it.q + 'x ' : '') + esc(it.n) +
+            '</span><span class="p">' + fmtPrice((it.pu || 0) * (it.q || 1)) + '</span></button>';
+        }).join('') +
+        '<div class="c4tot" style="font-size:30px">' + fmtPrice(parte) + '</div>';
+    f = '<button class="c4cta" onclick="c4Go(\'datos\')"' + (parte > 0 ? '' : ' disabled') + '>' +
+          (parte > 0 ? 'Seguir · ' + fmtPrice(parte) : 'Toca al menos un producto') + '</button>' +
+        '<button class="c4cta sec" onclick="c4Go(\'bivio\')">‹ Volver</button>';
+  }
+
+  else if (c.paso === 'iguales') {
+    b = '<div class="c4lab" style="margin-top:0">¿Entre cuántos dividimos?</div><div class="c4chips">' +
+        [2, 3, 4, 5, 6, 8].map(function (n) {
+          return '<button class="c4chip n' + (c.partes === n ? ' sel' : '') + '" onclick="c4Set(\'partes\',' + n + ')">' + n + '</button>';
+        }).join('') + '</div>' +
+        (c.partes ? '<div class="c4lab">Tu parte</div><div class="c4tot" style="margin-top:0">' + fmtPrice(parte) + '</div>' +
+                    '<div class="c4expl">' + fmtPrice(falta) + ' entre ' + c.partes + '</div>' : '');
+    f = '<button class="c4cta" onclick="c4Go(\'datos\')"' + (c.partes ? '' : ' disabled') + '>' +
+          (c.partes ? 'Seguir · ' + fmtPrice(parte) : 'Elige entre cuántos') + '</button>' +
+        '<button class="c4cta sec" onclick="c4Go(\'bivio\')">‹ Volver</button>';
+  }
+
+  else if (c.paso === 'datos') {
+    var prop = _pagoPropina();
+    b = '<div class="c4mesa" style="font-size:22px">Mesa ' + esc(pg.mesa) + '</div>' +
+        '<span class="c4clock" id="pgRelojH">' + _pgReloj0() + '</span>' +
+        '<div class="c4lab">Tu parte</div>' +
+        '<div class="c4tot" style="margin-top:0;font-size:26px;color:var(--cs-ink2)">' + fmtPrice(parte) + '</div>' +
+        '<div class="c4lab">Propina</div>' +
+        /* 🔴 UN SOLO IMPORTO ALLA VOLTA: scelto «Otro», il 10% sparisce — due
+           numeri accanto si leggono come una somma, e chi sta per pagare non
+           deve interpretare (correzione di Alberto sul prototipo). */
+        (pg.prop === 'otro'
+          ? '<div class="c4chips"><button class="c4chip sel" onclick="pagoSet(\'prop\',\'otro\')">Otro' +
+              '<small>' + (pg.otro ? fmtPrice(_pagoPropina()) : 'escribe el monto') + '</small></button></div>'
+          : '<div class="c4chips">' +
+              '<button class="c4chip' + (pg.prop === 'sug' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'sug\')">10%' +
+                '<small>' + fmtPrice(Math.round(parte * 0.10)) + '</small></button>' +
+              '<button class="c4chip" onclick="pagoSet(\'prop\',\'otro\')">Otro<small>monto</small></button>' +
+              '<button class="c4chip' + (pg.prop === 'sin' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'sin\')">Sin propina</button></div>') +
+        '<div class="c4resta zero" style="margin-top:14px"><span>Total a pagar</span>' +
+          '<b style="color:var(--cs-ink)">' + fmtPrice(parte + prop) + '</b></div>' +
+        '<div class="c4lab">🧾 Te mandamos tu boleta</div>' +
+        '<input class="cs-pin" id="c4Nom" placeholder="Nombre" value="' + esc(pg.nombreCli || '') + '" ' +
+          'oninput="pagoInput(\'nombreCli\',this.value)">' +
+        '<input class="cs-pin" id="c4Tel" inputmode="numeric" maxlength="8" placeholder="+56 9 · 0000 0000" ' +
+          'value="' + esc(pg.celular || '') + '" oninput="pagoInput(\'celular\',this.value)">' +
+        '<input class="cs-pin" id="c4Mail" inputmode="email" placeholder="Email" value="' + esc(pg.correo || '') + '" ' +
+          'oninput="pagoInput(\'correo\',this.value)">';
+    /* «Listo» è l'unica uscita, e vale anche a mani vuote — nessun «prefiero no
+       dejar mis datos» da toccare: quella funzione la compie questo bottone
+       senza dirlo (D5, Alberto: «i dati sono troppo importanti per noi»). */
+    f = '<button class="c4cta" onclick="c4Listo()">Listo — devolver el teléfono</button>';
+  }
+
+  else if (c.paso === 'rilee') {
+    var m = (pg.correo || '').trim(), bien = c4MailOk(m);
+    b = '<div class="c4mesa" style="font-size:22px">Mesa ' + esc(pg.mesa) + '</div>' +
+        '<div class="c4rb' + (bien ? '' : ' mal') + '">' +
+          '<div class="ic">' + (bien ? '🧾' : '✋') + '</div>' +
+          '<div class="q">' + (bien ? 'Tu boleta va a' : 'Revisa tu correo') + '</div>' +
+          '<div class="dir">' + esc(m) + '</div>' +
+          (bien ? '<div class="sub">¿está bien escrito?</div>'
+                : '<div class="sub">' + esc(c4MailPorQue(m)) + ' — así no te va a llegar</div>') +
+        '</div>';
+    f = bien
+      ? '<button class="c4cta" onclick="c4AlMesero()">Sí, está bien — devolver el teléfono</button>' +
+        '<button class="c4cta sec" onclick="c4CorrigeMail()">✏️ Corregir mi correo</button>'
+      : '<button class="c4cta amber" onclick="c4CorrigeMail()">✏️ Corregir mi correo</button>' +
+        '<button class="c4cta sec" onclick="c4AlMesero()">Déjalo así — devolver el teléfono</button>';
+  }
+
+  w.innerHTML = '<div class="c4">' +
+    '<div class="c4bar"><span class="c4tt">' + tit + '</span>' +
+      /* 🔒 mentre il telefono è in mano al cliente NON si esce: né al salone,
+         né a un'altra mesa, né al corte. È la stessa condizione di sicurezza
+         del pago v3 — senza, si consegna la consola del locale a uno sconosciuto. */
+      (esCli ? '' : '<button class="c4salir" onclick="pagoCerrar()">✕ Salir</button>') + '</div>' +
+    '<div class="c4body">' + b + '</div>' +
+    (f ? '<div class="c4foot">' + f + '</div>' : '') + '</div>';
+  if (c.paso === 'bivio' || c.paso === 'datos') _pgRelojOn(); else _pgRelojOff();
+}
+/* «Listo» a mani vuote salta la rilettura: non c'è niente da rileggere. */
+function c4Listo() {
+  var pg = STATE.pago; if (!pg) return;
+  c4Sync(pg);
+  c4Go((pg.correo || '').trim() ? 'rilee' : 'medio');
+}
+/* consegna al pannello del mesero, con la parte già scritta nei campi che
+   `pagoConfirmar` legge. Da qui in poi è il codice di sempre. */
+function c4AlMesero() {
+  var pg = STATE.pago; if (!pg) return;
+  c4Sync(pg); pg.c4.paso = 'medio'; pg.cliente = false; renderPago();
+}
+function c4Papel() { var pg = STATE.pago; if (pg) { pg.imprimir = true; toast('ok', '🖨 Sale en barra'); } }
+
 function renderPago() {
   let w = $('pagoWrap');
   if (!w) { w = document.createElement('div'); w.id = 'pagoWrap'; document.body.appendChild(w); }
   const pg = STATE.pago;
   if (!pg) { w.innerHTML = ''; _pgRelojOff(); return; }
+  /* ═══ v3.47.0 · L'INNESTO DI COBRAR v4 — tre righe, e le condizioni contano ══
+     🔴 NON basta il flag. Il pannello del pago lo aprono anche i gesti del JL
+     (descuento %, otro monto, cortesía, colación, FAM): quelli arrivano qui
+     con `jl`/`pinAsk`/`famAsk`/`medio='cortesia'` già impostati e un monto
+     loro. Se il modal se li prendesse, il JL si troverebbe il bivio del
+     cliente al posto del suo pannello — e il suo sconto sparirebbe.
+     ⇒ v4 vale SOLO per il cobro normale. Ogni gesto del JL passa dritto al
+     pannello di sempre, come se questo blocco non esistesse.
+     🔑 E `paso==='medio'` esce di qui apposta: dopo la rilettura il flusso
+     CONSEGNA al pannello del mesero (vedi `c4AlMesero`). */
+  if (COBRAR_V4_ON && !pg.jl && !pg.pinAsk && !pg.famAsk && pg.medio !== 'cortesia') {
+    /* 🔴 `montoOn` guarda solo l'INGRESSO, mai i render successivi — e questa
+       riga è una correzione a me stessa: la prima stesura lo metteva nella
+       condizione grande, ma `c4Sync` ACCENDE `montoOn` per portare la parte al
+       server ⇒ dal primo tocco su «lo mío» la condizione diventava falsa e il
+       modal spariva a metà flusso, restituendo il pannello vecchio.
+       Un flag che il tuo stesso codice accende non può essere anche la guardia
+       che decide se sei tu: qui distingue chi APRE il pannello (il JL apre già
+       con un monto suo), e finisce lì. */
+    if (!pg.c4 && !pg.montoOn) c4Init(pg);
+    if (pg.c4 && pg.c4.paso !== 'medio') return c4Render(w, pg);
+  }
   /* ═══ v3.31.0 · [AUT-0113] · LA PANTALLA DEL CLIENTE ══════════════════════
      Sale ANTES que todo lo demás y no comparte una línea con el panel del
      mesero: no lleva el onclick del backdrop (no se sale tocando fuera), no
