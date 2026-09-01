@@ -960,7 +960,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.50.0</span>
+      <span class="ver" id="ver">sala v3.51.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -5256,6 +5256,27 @@ async function _mvHacer(btn) {
    essere pronta **quando partono la migrazione e la app nuova**. Sta scritta in
    `_CANTIERI_SPENTI.md`, non solo qui — una dichiarazione dentro la cosa non è
    una dichiarazione. */
+/* ═══ 🍽 IL FRENO DELLA SESTA PORTA — separato, e la ragione è il rollback ═══
+   `AUT-0147`. Senza un flag suo erediterebbe `DESCONTAR_V2_ON`, che da stasera
+   è **acceso per tutta la sala**:
+   > **sei porte e un freno solo — un guaio sulla sesta si spegnerebbe soltanto
+   > spegnendo l'accensione di stasera.**
+   *Il rollback per apparecchio è ciò che rende sicura quell'accensione, e
+   funziona perché è granulare: una porta che lo annulla ci toglierebbe la rete
+   mentre camminiamo sul filo.* (Condizione del 🎛, 1-set 17:46.)
+   ⚖️ **Nasce SPENTA**: a interruttore giù «Un producto» resta la porta di
+   prima, che apre l'editor della comanda — vecchia di vestito ma viva, e i
+   meseros la usano già. */
+const CORR2_KEY = 'pinsita_corr2';
+const CORR_V2_ON = (function () {
+  const q = QS.get('corr2');
+  try {
+    if (q === '1') { localStorage.setItem(CORR2_KEY, '1'); return true; }
+    if (q === '0') { localStorage.setItem(CORR2_KEY, '0'); return false; }
+    return localStorage.getItem(CORR2_KEY) === '1';    // di fabbrica: SPENTO
+  } catch (e) { return q === '1'; }
+})();
+
 const DESC2_KEY = 'pinsita_desc2';
 const DESCONTAR_V2_ON = (function () {
   const q = QS.get('desc2');
@@ -5423,8 +5444,71 @@ function _dtMin() { return _dt ? Math.ceil(_dt.tot * (100 - DTO_MAX_PCT) / 100) 
    `_dtHay` = ci sono abbastanza dati per calcolare un numero (⇒ si mostra il
    riepilogo e compare il PIN). `_dtListo` = si può applicare (⇒ verde acceso).
    Sono due cose diverse: il riepilogo serve PRIMA della firma, non dopo. */
+/* ═══════════════════════════════════════════════════════════════════════════
+   🍽 LA SESTA PORTA · UN PRODUCTO — dentro la card, 1-set-2026
+   ───────────────────────────────────────────────────────────────────────────
+   Alberto, dopo il primo giro sul vivo: *«l'unica che non va bene, e sembra la
+   vecchia, è la eliminar un producto.»* **Aveva ragione, e non era un difetto:
+   quella porta non era mai stata disegnata.** Le altre cinque vivono nella
+   card; questa usciva dal pannello e apriva `abrirCorreccion`, l'editor
+   generale della comanda — quantità, «agregar producto», i quattro motivi.
+   *Fa più cose di quel che serve qui, e ha il vestito di un'altra epoca.*
+   👉 Qui c'è il percorso stretto che quella porta promette da sempre:
+   **prodotto → perché → PIN del JL → applica**, senza uscire dalla card.
+
+   🔴 E LA COSA CHE NON SI PUÒ SBAGLIARE, imparata da 📖 MENU sul ferro:
+   **`corregirPedido` NON riceve un delta — riceve la QUANTITÀ FINALE di ogni
+   riga e la confronta con l'`Items_Json` che legge in quel momento.** Un
+   secondo colpo calcolato su uno stato vecchio — quello che il telefono
+   *crede*, non quello vero — colpisce un bersaglio sbagliato: *«un altro −1»
+   diventa «−1 su un altro prodotto».*
+   ⇒ perciò si manda **tutta la comanda** con la riga toccata al valore nuovo,
+   e **dopo l'applicazione il pannello SI CHIUDE**: nessun secondo colpo può
+   nascere da uno stato che nel frattempo è invecchiato.
+
+   ♻️ I motivi sono `CORR_MOTIVOS`, **gli stessi della via vecchia, riusati e
+   non ricopiati**: due liste per lo stesso fossile divergono al primo ritocco,
+   e i quattro codici (`cambio_producto`…) sono ciò che il libro conterà. */
+function _dtProdRighe() {
+  if (!_dt) return [];
+  var m = (STATE.mesasModel || []).filter(function (x) { return x.mesa === _dt.mesa; })[0];
+  if (!m) return [];
+  var out = [];
+  [].concat(m.pend || [], m.mios || [], m.limpiar || []).forEach(function (p) {
+    itemsDe(p).forEach(function (it) {
+      /* 🔴 SENZA `id` NON SI PUÒ TOGLIERE, quindi non si offre.
+         `corregirPedido` identifica le righe per `id`: una voce senza id non è
+         indirizzabile, e metterla in lista darebbe **un bottone che non fa
+         niente** — trovato provando la vetrina, dove i prodotti finti non ne
+         avevano. *Un tasto morto in un pannello che tocca il conto insegna al
+         mesero che il pannello non funziona, e quella lezione non si disimpara.*
+         ⇒ meglio una riga in meno e una spiegazione, che una riga muta. */
+      if (!it.id) return;
+      out.push({ uuid: p.uuid, ped: p.id_pedido || '', id: it.id,
+        n: it.nombre || it.id || '?', q: parseInt(it.qty, 10) || 1,
+        pu: parseFloat(it.precio) || 0 });
+    });
+  });
+  return out;
+}
+/* scegliere una riga azzera il perché e la firma: un PIN vale per il prodotto
+   che ha firmato, mai per quello scelto dopo. */
+function _dtProdSet(uuid, id) {
+  var r = _dtProdRighe().filter(function (x) { return x.uuid === uuid && x.id === id; })[0];
+  if (!r) return;
+  _dt.pr = { uuid: r.uuid, id: r.id, n: r.n, q: r.q, pu: r.pu, ped: r.ped, quita: r.q };
+  _dt.pmot = ''; _dt.pin = '';
+  _dtPinta();
+}
+function _dtProdQ(n) { if (_dt.pr) { _dt.pr.quita = n; _dt.pin = ''; _dtPinta(); } }
+function _dtProdMot(k) { _dt.pmot = k; _dt.pin = ''; _dtPinta(); }
+function _dtProdVuelve() { _dt.pr = null; _dt.pmot = ''; _dt.pin = ''; _dtPinta(); }
+/* quanto scende il conto: le unità tolte per il loro prezzo */
+function _dtProdMonto() { return _dt && _dt.pr ? Math.round(_dt.pr.pu * _dt.pr.quita) : 0; }
+
 function _dtHay() {
   if (!_dt || !_dt.tipo) return false;
+  if (_dt.tipo === 'prod')  return !!(_dt.pr && _dt.pmot);
   if (_dt.tipo === 'conv')  return !!_dt.conv;
   if (_dt.tipo === 'dto')   { var m = _dtMot(_dt.mot); return !!m && (!m.esc || (_dt.txt || '').trim().length >= 12); }
   if (_dt.tipo === 'fam')   return !!_dt.fam;
@@ -5447,6 +5531,8 @@ function _dtFalta() {
     return 'Escribe qué pasó';
   if (_dt.tipo === 'fam'  && !_dt.fam) return '¿Quién es?';
   if (_dt.tipo === 'coln' && !_dt.col) return '¿Para quién es?';
+  if (_dt.tipo === 'prod' && !_dt.pr)   return '¿Cuál producto?';
+  if (_dt.tipo === 'prod' && !_dt.pmot) return '¿Por qué vuelve?';
   if (_dt.tipo === 'otro' && !(_dt.cob > 0)) return '¿Cuánto cobraste?';
   /* 🔴 non basta AVVISARE del tetto: bisogna FERMARE. Un avviso rosso accanto a
      un bottone acceso lascia il JL digitare il PIN, toccare Aplicar e prendere
@@ -5530,13 +5616,31 @@ function _dtPie() {
   var f = document.getElementById('dtFoot');
   if (!f || !_dt) return;
   var ok = _dtListo();
+  /* 🍽 il bottone dice quello che SUCCEDE, e per «un producto» non è «cobras
+     X»: quella porta non fissa quanto si incassa — **toglie una riga**, e il
+     conto scende di conseguenza. *Un bottone che promette un numero che non
+     decide lui è una promessa che il vetro non mantiene* — trovato girando la
+     vetrina, dove diceva «cobras $47.870» sopra un riepilogo che diceva
+     «la cuenta baja −$13.800». Due frasi vere separatamente, contraddittorie
+     insieme: chi legge crede a quella grande. */
+  var eti = !ok ? esc(_dtFalta())
+    : _dt.tipo === 'prod'
+      ? 'Sacar · ' + ((_dt.pr.quita > 1 ? _dt.pr.quita + '× ' : '') + esc(_dt.pr.n))
+      : 'Aplicar · cobras ' + fmtPrice(_dtCobra());
   f.innerHTML = '<button class="c4cta" ' + (ok ? '' : 'disabled') + ' onclick="_dtGo()">' +
-      (ok ? 'Aplicar · cobras ' + fmtPrice(_dtCobra()) : esc(_dtFalta())) + '</button>' +
+      eti + '</button>' +
     '<button class="c4cta sec" onclick="' + (_dt.tipo ? '_dtTipo(\'\')' : '_dtCerrar()') + '">' +
       (_dt.tipo ? '‹ Volver' : 'Cancelar') + '</button>';
 }
 function _dtResumen() {
   if (!_dtHay() || _dt.tipo === 'franq' && false) return '';
+  /* 🔴 «un producto» ha il suo riepilogo, dentro il suo ramo. Senza questa riga
+     ne comparivano DUE: il mio («la cuenta baja −$13.800») e questo generico
+     («Descuento −$0 · Total a pagar $47.870»), che per questa porta è falso —
+     lo sconto non è zero, è che non passa da uno sconto.
+     *Due riepiloghi veri separatamente e contraddittori insieme sono peggio di
+     nessuno: chi legge crede a quello più grande.* */
+  if (_dt.tipo === 'prod') return '';
   var q = _dtQuita(), c = _dtCobra();
   var lbl = _dt.tipo === 'conv'  ? 'Descontable <i>sin promos</i>'
           : 'Consumo';
@@ -5602,14 +5706,19 @@ function _dtPinta() {
         '<button class="c4pick" style="margin:5px 0" onclick="_dtTipo(\'otro\')">' +
           '<span class="c4nm">⚠️ Cobré otro monto<small style="display:block;font-size:12.5px;' +
           'font-weight:400;color:var(--cs-ink2)">situación excepcional</small></span></button>' +
-        /* 🍽 «Un producto» resta dov'era: apre la correzione del pedido, che è
-           un altro verbo (ELIMINAR) e ha già la sua schermata. */
-        '<button class="c4pick" style="margin:5px 0" onclick="_dtCerrar();_dtoProducto(\'' + esc(_dt.mesa) + '\')">' +
+        /* 🍽 1-set: **non esce più dal pannello.** Prima faceva
+           `_dtCerrar();_dtoProducto(mesa)` e apriva l'editor generale della
+           comanda — *«sembra la vecchia»*, e lo era: era un'altra schermata.
+           Ora entra nella card come le altre cinque. */
+        '<button class="c4pick" style="margin:5px 0" onclick="' +
+          (CORR_V2_ON ? '_dtTipo(\'prod\')'
+                      : '_dtCerrar();_dtoProducto(\'' + esc(_dt.mesa) + '\')') + '">' +
           '<span class="c4nm">🍽 Un producto<small style="display:block;font-size:12.5px;' +
           'font-weight:400;color:var(--cs-ink2)">se quita esa línea sola, con motivo</small></span></button>';
   } else {
     tt = { conv: 'Convenio', dto: 'Descuento', franq: 'Franquicia',
-           fam: 'Familia', coln: 'Colación', otro: 'Otro monto' }[_dt.tipo];
+           fam: 'Familia', coln: 'Colación', otro: 'Otro monto',
+           prod: 'Un producto' }[_dt.tipo];
     /* il descontable si scrive una volta sola: prima della scelta sta in cima
        (solo dove è DIVERSO dal totale della barra), dopo è la prima riga del
        riepilogo. */
@@ -5664,6 +5773,56 @@ function _dtPinta() {
       b += '<div class="c4lab">¿Para quién?</div>' +
         _dtLista('col', DTO_COLACION,
           function (n) { return n; }, function (n) { return n; }, null);
+    }
+    /* 🍽 la sesta porta, dentro la card. Due stati soli: scegli la riga, poi
+       dici perché. Niente quantità da comporre, niente «agregar producto»:
+       quella è l'altra strada e resta dov'è. */
+    if (_dt.tipo === 'prod') {
+      if (!_dt.pr) {
+        var righe = _dtProdRighe();
+        b += '<div class="c4lab">¿Cuál vuelve?</div>';
+        b += righe.length
+          ? righe.map(function (r) {
+              return '<button class="c4pick" style="margin:5px 0" onclick="_dtProdSet(\'' +
+                esc(r.uuid) + '\',\'' + esc(r.id) + '\')">' +
+                '<span class="c4nm">' + (r.q > 1 ? r.q + '× ' : '') + esc(r.n) +
+                '<small style="display:block;font-size:12.5px;font-weight:400;' +
+                'color:var(--cs-ink2)">' + fmtPrice(r.pu * r.q) +
+                (r.ped ? ' · ' + esc(r.ped) : '') + '</small></span></button>';
+            }).join('')
+          /* 🔴 fallisce CHIUSA e dice quale delle due cose è: «non ci sono
+             prodotti» non è «non ho potuto leggerli». */
+          : '<div class="c4expl">Esta mesa no tiene productos para devolver.</div>';
+      } else {
+        b += '<div class="c4lab">Vuelve</div>' +
+          '<button class="c4pick on" style="margin:5px 0" onclick="_dtProdVuelve()">' +
+            '<span class="c4nm">' + esc(_dt.pr.n) +
+            '<small style="display:block;font-size:12.5px;font-weight:400;' +
+            'color:var(--cs-ink2)">toca para cambiar</small></span></button>';
+        /* la scelta di QUANTE compare solo se c'è davvero una scelta: una riga
+           da uno non deve far decidere niente a nessuno. */
+        if (_dt.pr.q > 1) {
+          b += '<div class="c4lab">¿Cuántas?</div><div class="c4chips">' +
+            [1, _dt.pr.q].filter(function (n, i, a) { return a.indexOf(n) === i; })
+              .map(function (n) {
+                return '<button class="c4chip' + (_dt.pr.quita === n ? ' sel' : '') +
+                  '" onclick="_dtProdQ(' + n + ')">' + n +
+                  '<small>' + (n === _dt.pr.q ? 'toda la línea' : 'solo una') + '</small></button>';
+              }).join('') + '</div>';
+        }
+        b += '<div class="c4lab">¿Por qué vuelve?</div>' +
+          _dtLista('pmot', CORR_MOTIVOS,
+            function (m) { return m[0]; }, function (m) { return m[1]; }, null);
+        if (_dt.pmot) {
+          b += '<div class="c4resta" style="text-align:left">' +
+            '<div style="display:flex;justify-content:space-between;font-size:14px;padding:2px 0">' +
+              '<span>Sale de la comanda</span><b style="color:var(--cs-ink);font-weight:600">' +
+              (_dt.pr.quita > 1 ? _dt.pr.quita + '× ' : '') + esc(_dt.pr.n) + '</b></div>' +
+            '<div style="display:flex;justify-content:space-between;font-size:14px;padding:2px 0">' +
+              '<span>La cuenta baja</span><b style="color:var(--cs-verde);font-weight:600">−' +
+              fmtPrice(_dtProdMonto()) + '</b></div></div>';
+        }
+      }
     }
     if (_dt.tipo === 'otro') {
       b += '<div class="c4lab">¿Cuánto cobraste?</div>' +
@@ -5742,6 +5901,44 @@ function _dtGo() {
      🎓 *Il banco diceva 51/51 e aveva ragione: provava i NUMERI e i CANCELLI.
      Questo pezzo è il CAMMINO, che nessuna asserzione stava guardando —
      l'assenza di rosso non è la presenza di verde.* */
+  /* ═══ 🍽 UN PRODUCTO — un altro verbo ancora, e un'altra ragione ══════════
+     Come la colación non è un pago, questo non è nemmeno uno sconto: **non
+     toglie soldi dal conto, toglie una RIGA dalla comanda** — e il conto scende
+     di conseguenza. Verbo suo, `corregirPedido`, quello che la sala usa già.
+     🔴 Si manda **la quantità finale di TUTTE le righe di quel pedido**, non la
+     riga toccata: il server confronta con l'`Items_Json` che legge in quel
+     momento. E **il pannello si chiude prima della risposta**, perché un
+     secondo colpo calcolato su uno stato vecchio colpirebbe un altro prodotto.
+     *La chiusura non è cortesia: è la guardia.* */
+  if (d.tipo === 'prod') {
+    var pr = d.pr;
+    var mm = (STATE.mesasModel || []).filter(function (x) { return x.mesa === mesa; })[0];
+    var ped = mm ? [].concat(mm.pend || [], mm.mios || [], mm.limpiar || [])
+      .filter(function (p) { return p.uuid === pr.uuid; })[0] : null;
+    if (!ped) { toast('warn', 'Ese pedido ya no está — vuelve a abrir la mesa'); return; }
+    var finales = itemsDe(ped).map(function (it) {
+      var q = parseInt(it.qty, 10) || 1;
+      return { id: it.id, qty: (it.id === pr.id) ? Math.max(0, q - pr.quita) : q };
+    });
+    _dt = null; _dtPinta();
+    gasPost('corregirPedido', { codigo: STATE.codigo, nombre: STATE.nombre,
+      uuid: pr.uuid, items: finales, motivo: d.pmot, pin_jl: (d.pin || '').trim() })
+      .then(function (r) {
+        if (r && r.ok) {
+          toast('ok', '🍽 ' + (pr.quita > 1 ? pr.quita + '× ' : '') + pr.n + ' fuera · mesa ' + mesa);
+          refrescar();
+        } else {
+          /* 🔴 e se non si sa, si dice che NON SI SA — non che è fallito.
+             Rimandare «ha fallito» quando la comanda potrebbe essere già
+             cambiata è il modo di far ripetere il gesto su uno stato vecchio. */
+          toast('warn', (r && r.error === 'pin_jl_invalid') ? 'PIN del JL incorrecto'
+            : 'No se pudo confirmar — abre la mesa y mira antes de repetir');
+        }
+      }).catch(function () {
+        toast('warn', 'No se pudo confirmar — abre la mesa y mira antes de repetir');
+      });
+    return;
+  }
   if (d.tipo === 'coln') {
     _dt = null; _dtPinta();
     /* la chiave la conia il CLIENT, una per gesto: il retry non duplica */
@@ -7771,7 +7968,32 @@ function c4Cierra(pg) { return c4Resta(pg) <= 0; }
 function c4Sync(pg) {
   if (pg.montoOn) { pg.montoOn = false; pg.montoCustom = ''; }
 }
-function c4Go(p) { var pg = STATE.pago; if (!pg) return; pg.c4.paso = p; renderPago(); }
+/* ═══ 🔴 CHI HA IN MANO IL TELEFONO — la seconda cucitura, 1-set ═════════════
+   Trovata confrontando i gesti equivalenti, non leggendo a caso: la via
+   vecchia, per aprire la schermata del cliente, scriveva **`pg.cliente = true`**;
+   v4 no. E `pg.cliente` non è un'etichetta: **è la guardia di due cose**, e in
+   v4 erano tutte e due cieche.
+     ① `pagoCerrar()` rifiuta di chiudere il pannello mentre il cliente ce l'ha
+        in mano ⇒ senza il flag, **il mesero poteva chiuderglielo sotto le dita**
+        mentre scriveva il correo.
+     ② il kick-out della sessione **si rimanda** finché il cliente ha il telefono
+        (r.10001) ⇒ senza il flag, **un'espulsione poteva cadergli addosso a metà
+        pagamento** — e quello è uno stato che nessuno ha disegnato.
+   🎓 *Nessuna delle due si vede provando il flusso: succedono solo se qualcuno
+   tocca «Cancelar» in quel momento, o se la sessione scade proprio lì. Sono i
+   difetti che si trovano confrontando due cammini, non percorrendone uno.*
+   ⚖️ E la lista dei passi del cliente vive in **un posto solo**: due copie
+   divergono al primo passo nuovo, e la divergenza qui vale una guardia spenta. */
+function c4EsCliente(paso) {
+  return paso === 'bivio' || paso === 'lomio' || paso === 'iguales' ||
+         paso === 'datos' || paso === 'rilee';
+}
+function c4Go(p) {
+  var pg = STATE.pago; if (!pg) return;
+  pg.c4.paso = p;
+  pg.cliente = c4EsCliente(p);     // ← chi ha il telefono, detto al pannello vecchio
+  renderPago();
+}
 function c4Set(k, v) {
   var pg = STATE.pago; if (!pg) return;
   if (k === 'modo') { pg.c4.modo = v; c4Go(v === 'todo' ? 'datos' : v); return; }
@@ -7899,8 +8121,9 @@ function c4Render(w, pg) {
   c4Css();
   var c = pg.c4, det = _vpItemsDet(pg.mesa), items = (det.items || det || []);
   var falta = c4Falta(pg), parte = c4Parte(pg), resta = c4Resta(pg);
-  var esCli = (c.paso === 'bivio' || c.paso === 'lomio' || c.paso === 'iguales' ||
-               c.paso === 'datos' || c.paso === 'rilee');
+  /* una lista sola, condivisa con `c4Go`: due copie divergono al primo passo
+     nuovo, e qui la divergenza varrebbe una guardia spenta. */
+  var esCli = c4EsCliente(c.paso);
   var tit = { inicio: 'Cobrar', bivio: 'Tu cuenta', lomio: 'Lo mío', iguales: 'Partes iguales',
               datos: 'Tu cuenta', rilee: 'Tu boleta' }[c.paso] || 'Cobrar';
   var b = '', f = '';
@@ -8038,9 +8261,36 @@ function c4Listo() {
 }
 /* consegna al pannello del mesero, con la parte già scritta nei campi che
    `pagoConfirmar` legge. Da qui in poi è il codice di sempre. */
+/* ═══ 🔴 IL «LISTO» DI v4 DEVE DIRE LE STESSE TRE COSE DI QUELLO VECCHIO ═════
+   Difetto trovato dalle foto di Alberto, 1-set, sul suo telefono. Il flusso:
+   il cliente scrive correo e celular in v4, tocca «Listo — devolver el
+   teléfono» — **e il pannello del mesero gli offre di nuovo «📱 Mostrar
+   precuenta al cliente», cioè la schermata cliente VECCHIA**, che glieli
+   richiede da capo. Toccandola, i campi ripartono vuoti e i dati si perdono:
+   al medio de pago compariva **«sin datos — la boleta saldrá impresa»**.
+   > **E quello è l'OPPOSTO della decisione di Alberto di stamattina:** senza
+   > correo il server aggiunge `:papel` e la carta ESCE. *Il cancello della
+   > carta è soddisfatto nel server — ma solo se il correo ci arriva.*
+
+   🔑 LA CAUSA, ed è di una riga: il «Listo» della via vecchia
+   (`pagoClienteListo`, r.7771) fa **tre** cose — `cliente=false`,
+   **`clienteHecho=true`**, `_pgRelojOff()` — e questo ne faceva **due**.
+   `clienteHecho` è il flag che dice al pannello del mesero *«il cliente ha già
+   fatto la sua parte»*: senza, r.8383 gli riproponeva la schermata vecchia,
+   r.8642 non mostrava il totale col suo dettaglio e r.8855 nascondeva il
+   bottone «Imprimir — solo si la pide».
+   🎓 *Avevo scritto un nuovo cammino verso una porta esistente e non ho
+   elencato cosa faceva chi passava dalla vecchia — è la N9, «quando apri una
+   porta nuova, elenca chi passava dalla vecchia», e l'ho pagata sul flusso che
+   decide se una boleta si stampa.* */
 function c4AlMesero() {
   var pg = STATE.pago; if (!pg) return;
-  c4Sync(pg); pg.c4.paso = 'medio'; pg.cliente = false; renderPago();
+  c4Sync(pg);
+  pg.c4.paso = 'medio';
+  pg.cliente = false;
+  pg.clienteHecho = true;      // ← la riga che mancava
+  _pgRelojOff();               // ← e l'orologio anti-screenshot va spento
+  renderPago();
 }
 function c4Papel() { var pg = STATE.pago; if (pg) { pg.imprimir = true; toast('ok', '🖨 Sale en barra'); } }
 /* ═══ IL CELULAR · le 8 cifre nel campo, la forma completa verso il server ═══
