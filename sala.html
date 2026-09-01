@@ -5322,8 +5322,13 @@ function _dtAplicar(etiqueta) {
   STATE.pago.jl = true; STATE.pago.pinAsk = true;
   STATE.pago.montoOn = true;
   STATE.pago.montoCustom = String(monto);
-  /* resta nel vetro: il server non ha dove metterlo (v. il blocco qui sopra) */
-  STATE.pago.dtoMotivo = etiqueta;
+  /* resta nel vetro: il server non ha dove metterlo (v. il blocco qui sopra).
+     🔴 E porta con sé il CONSUMO DI PARTENZA, non solo l'etichetta: senza
+     quello la schermata d'arrivo può dire «cobras $42.840» ma non «di quanto»
+     e «meno quanto» — cioè le due cose che il JL deve poter leggere davanti al
+     cliente. Un numero senza il suo prima non si può controllare a occhio. */
+  STATE.pago.dto = { et: etiqueta, tot: _dt.tot, monto: monto, acu: _dt.acu != null };
+  STATE.pago.dtoEdit = false;
   renderPago();
   toast('ok', '🏷 ' + etiqueta + ' → ' + fmtPrice(monto) + ' · escribe el PIN del JL');
 }
@@ -7451,9 +7456,13 @@ function c4CorrigeMail() {
    scrive `mario.rossi` e tocca — il dominio non lo scrive, quindi non può
    sbagliarlo. Le due cose convivono e nessuna sostituisce l'altra.
    📊 I quattro non sono un'opinione, sono la misura del CONTROLLER sul fossile
-   (39 correo veri, 14→31 ago): gmail 66% · hotmail 74% · outlook 82% ·
-   icloud 87%… e i quattro insieme fanno il 95% dei clienti. Il quinto non
-   esiste — c'è una coda di uno ciascuno, e per quelli resta la tastiera.
+   (39 correo, 14→31 ago): gmail 25 · hotmail 3 · outlook 3 · icloud 2.
+   🔴 CORREZIONE (31-ago sera, trovata da una seconda testa): avevo scritto
+   «il 95%», ed è FALSO. I quattro fanno 33 su 39 = **85%** — 89% se si tolgono
+   i 2 di `ghutca.com`, che è Alberto e non un cliente. Il 95% l'avevo ripreso
+   da un riassunto senza rifare la divisione: *chi rilancia diventa la fonte.*
+   Il quinto dominio non esiste comunque — c'è una coda di uno ciascuno, e per
+   quelli resta la tastiera. **La decisione non cambia; il numero sì.**
    ⚠️ `ghutca.com` compare 2 volte nel fossile ed è ALBERTO, non un cliente:
    fuori. Un chip si conquista con la frequenza dei CLIENTI, non con quella
    delle righe.
@@ -7942,6 +7951,54 @@ function renderPago() {
        resta aperta per chiunque conosca il payload.
        Tornerà quando avrà la sua misura: monto massimo, contatore del giorno
        e il nome di chi la concede. Allora sarà una decisione, non un buco. */
+    /* ═══ 🏷 31-ago · L'ARRIVO DELLO SCONTO — la seconda metà di DESCONTAR ═════
+       🔴 IL DIFETTO, ed è la lamentela di Alberto del 28-ago letta bene:
+       *«20%, pagaste otro monto è molto confusa, non si capisce nulla»* — non
+       erano DUE lamentele, era UNA. Chi tocca «20% de descuento» atterra qui,
+       e l'unica etichetta che vede dice **«¿Cobraste otro monto?»** con dentro
+       un numero. Della parola *descuento*, del motivo, del consumo di partenza
+       non resta niente: due porte diverse nel menu, una sola schermata
+       all'arrivo. (Diagnosi di 🛎 SALA V17, confermata aprendo il codice.)
+       🎓 E la lezione su di me: **`DESCONTAR v2` ha curato la SCELTA e non
+       l'ARRIVO.** Ho riscritto il menu dei motivi e lasciato intatta la
+       schermata dove il gesto finisce — cioè l'unica che il JL guarda mentre
+       il cliente aspetta. *Un verbo si giudica da dove atterra, non da dove
+       parte.*
+       ⛔ PERIMETRO: questo ramo si accende SOLO con `pg.dto`, che nasce solo
+       da `_dtAplicar` (DESCONTAR v2, spento di fabbrica). Per ogni altro
+       cammino — `_dtoOtroMonto`, il JL che apre le opzioni a mano, il pannello
+       vecchio — il codice qui sotto è identico a ieri, byte per byte. */
+    if (pg.dto) {
+      var _dq = Math.max(0, pg.dto.tot - pg.dto.monto);
+      /* 🤝 un ACUERDO non è uno sconto, e la schermata non deve chiamarlo così.
+         Alberto, 31-ago: *«uno è un prezzo più basso, l'altro è qualcuno che ha
+         già pagato una parte»* — e vale su TUTTO il conto, promozioni comprese,
+         mentre lo sconto no. **Se l'arrivo li chiama con lo stesso nome, la
+         distinzione muore proprio nel punto in cui il JL guarda.** */
+      var _dAcu = !!pg.dto.acu;
+      jlHtml = '<div class="cs-psec" style="color:var(--cs-cyan,#22d3ee)">' +
+          (_dAcu ? '🤝 Acuerdo aplicado' : '🏷 Descuento aplicado') + '</div>' +
+        '<div style="background:rgba(63,224,240,.10);border:1.5px solid rgba(63,224,240,.45);' +
+          'border-radius:12px;padding:12px 13px;margin-top:6px">' +
+          '<div style="font-size:16px;font-weight:700;color:var(--cs-ink)">' + esc(pg.dto.et) + '</div>' +
+          '<div style="display:flex;justify-content:space-between;font-size:14px;margin-top:9px;' +
+            'color:var(--cs-mut)"><span>Consumo</span><span>' + fmtPrice(pg.dto.tot) + '</span></div>' +
+          '<div style="display:flex;justify-content:space-between;font-size:14px;margin-top:3px;' +
+            'color:var(--cs-mut)"><span>' + (_dAcu ? 'Cubre el acuerdo' : 'Descuento') + '</span>' +
+            '<span>−' + fmtPrice(_dq) + '</span></div>' +
+          '<div style="display:flex;justify-content:space-between;font-size:19px;font-weight:700;' +
+            'margin-top:8px;padding-top:8px;border-top:1px solid rgba(63,224,240,.3)">' +
+            '<span>Cobras</span><span>' + fmtPrice(pg.dto.monto) + '</span></div>' +
+        '</div>' +
+        /* la correzione esiste ma non occupa il posto della cosa che si legge:
+           il numero è già giusto nel 99% dei casi, e chi deve cambiarlo lo cerca. */
+        (pg.dtoEdit
+          ? '<input class="cs-pin" inputmode="numeric" placeholder="Monto cobrado $" value="' +
+              esc(pg.montoCustom) + '" oninput="pagoInput(\'montoCustom\',this.value)" onchange="renderPago()">'
+          : '<div style="text-align:center;font-size:12.5px;color:var(--cs-mut);padding:10px 0 2px;' +
+              'text-decoration:underline;cursor:pointer" onclick="STATE.pago.dtoEdit=true;renderPago()">' +
+              'corregir el monto</div>');
+    } else {
     jlHtml = '<div class="cs-psec" style="color:var(--cs-cyan,#22d3ee)">🔐 Opciones del JL</div>' +
       '<div class="cs-chips">' +
         '<div class="cs-chip' + (pg.montoOn ? ' sel' : '') + '" onclick="pagoMontoToggle()">¿Cobraste otro monto?<small>el fósil lleva lo cobrado</small></div>' +
@@ -7949,6 +8006,7 @@ function renderPago() {
       (!esCort && pg.montoOn
         ? '<input class="cs-pin" inputmode="numeric" placeholder="Monto cobrado $" value="' + esc(pg.montoCustom) + '" oninput="pagoInput(\'montoCustom\',this.value)" onchange="renderPago()">'
         : '');
+    }
   } else if (pg.pinAsk) {
     jlHtml = '<div class="cs-psec">PIN del JL</div>' +
       '<input class="cs-pin" id="pinJLInput" type="password" inputmode="numeric" autocomplete="new-password" name="pin-no-guardar" data-1p-ignore="true" data-lpignore="true" placeholder="PIN" value="' + esc(pg.pinJL) + '" oninput="pagoInput(\'pinJL\',this.value)">' +
