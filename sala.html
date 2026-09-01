@@ -5223,7 +5223,192 @@ async function _mvHacer(btn) {
    lista chiusa): si apre lo sheet del tavolo, dov'è già cablato.
    ⚠️ FAM per-persona (ALE·DC·AAG·NEA·KELE): il GAS ha UN codice solo →
    la mappa per persona è nella patch. Qui c'è la porta FAM che esiste. */
+/* ═══ 🏷 DESCONTAR v2 · IL MOTIVO PRIMA DELLA PERCENTUALE ═════════════════════
+   Deciso da Alberto il 31-ago, e il ribaltamento è suo: *«noi mettiamo lo sconto
+   prima e poi il perché — e se lo ribaltiamo? un reclamo −10%, un ritardo −15%…
+   perché il JL potrebbe dare sconti diversi per gli stessi motivi»*.
+   👉 Oggi il JL sceglie QUANTO e la ragione resta nella sua testa. Qui sceglie
+   PERCHÉ e il quanto viene dietro, uguale per tutti. **Non è un'altra
+   schermata: è l'unica che toglie la trattativa dal tavolo.**
+
+   📋 LA TARIFFA — dettata da Alberto, e sta qui in un posto solo perché ha
+   chiesto di poterla cambiare in futuro senza cercarla in mezzo al codice.
+   🔴 NON è quella che avevo proposto io: gliel'ho chiesto e ha risposto «la
+   lista vera», che è questa. *I quattro motivi che ho inventato per il mockup
+   erano plausibili; questi sono osservati.*
+
+   ⛔ CORTESÍA NON C'È PIÙ (ordine di Alberto, 31-ago, risposta ③a): era spenta
+   dal 10-ago perché la si usava come scopa. «Regalo» e «sconto dichiarato» sono
+   la stessa cosa con due nomi, e due porte per un gesto solo è come è diventata
+   una scopa. **DESCONTAR la sostituisce; la Cortesía resta spenta.**
+
+   🔴 E IL BUCO CHE QUESTA SCHERMATA **NON** CHIUDE, dichiarato qui perché non
+   finisca in una nota che nessuno legge: **il motivo non arriva al libro.**
+   `PAGOS` non ha una colonna per il perché (`PAGOS_HEADERS`, MENU_GAS r.17621)
+   e `registrarPago` non accetta un `motivo` (contratto a r.18057). Quindi:
+     · il gesto migliora OGGI — tariffa fissa, niente trattativa, PIN
+     · il fossile registra ancora solo QUANTO, mai PERCHÉ
+   ⚠️ Perciò `_dt.mot` **resta nel vetro e NON si manda al server**: spedire un
+   campo che il server ignora farebbe credere che sia registrato, ed è
+   esattamente la bugia che stiamo togliendo dal libro altrove oggi.
+   👉 La metà mancante è **una colonna in PAGOS + un campo in `registrarPago`**,
+   ed è la (a) che Alberto ha chiesto «dichiarata e chiara per tutti»: deve
+   essere pronta **quando partono la migrazione e la app nuova**. Sta scritta in
+   `_CANTIERI_SPENTI.md`, non solo qui — una dichiarazione dentro la cosa non è
+   una dichiarazione. */
+const DESC2_KEY = 'pinsita_desc2';
+const DESCONTAR_V2_ON = (function () {
+  const q = QS.get('desc2');
+  try {
+    if (q === '1') { localStorage.setItem(DESC2_KEY, '1'); return true; }
+    if (q === '0') { localStorage.setItem(DESC2_KEY, '0'); return false; }
+    return localStorage.getItem(DESC2_KEY) === '1';    // di fabbrica: SPENTO
+  } catch (e) { return q === '1'; }
+})();
+
+/* la tariffa. `esc:1` = vuole la spiegazione scritta prima di procedere. */
+var DTO_MOTIVOS = [
+  { k: 'atraso_cocina',    n: 'Atraso cocina',     pct: 10 },
+  { k: 'atraso_barra',     n: 'Atraso barra',      pct: 10 },
+  { k: 'reclamo_servicio', n: 'Reclamo servicio',  pct: 10 },
+  { k: 'otro_reclamo',     n: 'Otro reclamo',      pct: 20, esc: 1 }
+];
+var _dt = null;   // { mesa, tot, mot, texto, acu }
+
+function _dtMot(k) {
+  for (var i = 0; i < DTO_MOTIVOS.length; i++) if (DTO_MOTIVOS[i].k === k) return DTO_MOTIVOS[i];
+  return null;
+}
+/* 🤝 ACUERDOS — era «franquicia», il nome l'ha cambiato Alberto il 31-ago.
+   È un consumo libero concordato (con un fornitore, con un'azienda): fino a
+   $N non paga, sopra paga il resto.
+   🔑 E la regola che lo separa dallo sconto, dettata da lui: **l'acuerdo vale
+   su TUTTO il conto, con qualsiasi prodotto ci sia dentro — promozioni
+   comprese.** Lo sconto no: sullo sconto le promozioni non si toccano.
+   *Non sono due varianti della stessa cosa: uno è un prezzo più basso, l'altro
+   è qualcuno che ha già pagato una parte.*
+   ⚠️ Nasce SENZA identità: oggi il JL scrive l'importo a mano. Il giorno che
+   LA LISTA sa chi è il cliente, l'importo lo porta lei — e questo bottone
+   diventa il suo ingresso, non un doppione. */
+function _dtCalc() {
+  if (!_dt) return 0;
+  if (_dt.acu != null) return Math.max(0, _dt.tot - _dt.acu);       // acuerdo
+  var m = _dtMot(_dt.mot);
+  return m ? Math.round(_dt.tot * (100 - m.pct) / 100) : _dt.tot;
+}
+/* la consegna al pannello del pago: le stesse tre righe di `_dtoPct`, che sono
+   collaudate dal 12-ago. Non riscrivo il pago — cambio solo COSA lo apre. */
+function _dtAplicar(etiqueta) {
+  var monto = _dtCalc(), mesa = _dt.mesa;
+  vhojaCerrar(); abrirPago(mesa);
+  if (!STATE.pago) return;
+  STATE.pago.jl = true; STATE.pago.pinAsk = true;
+  STATE.pago.montoOn = true;
+  STATE.pago.montoCustom = String(monto);
+  /* resta nel vetro: il server non ha dove metterlo (v. il blocco qui sopra) */
+  STATE.pago.dtoMotivo = etiqueta;
+  renderPago();
+  toast('ok', '🏷 ' + etiqueta + ' → ' + fmtPrice(monto) + ' · escribe el PIN del JL');
+}
+
+function vDescontar2(mesa) {
+  const tot = _vpTot(mesa);
+  if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
+  _dt = { mesa: mesa, tot: tot, mot: '', texto: '', acu: null };
+  _dtPinta();
+}
+function _dtPinta() {
+  const tot = _dt.tot;
+  vhoja('<h3>Descontar · Mesa ' + esc(_dt.mesa) + '</h3>' +
+    '<div class="cs-psub">Consumo <b>' + fmtPrice(tot) + '</b></div>' +
+    '<div class="cs-psec">¿Qué pasó?</div>' +
+    /* il motivo porta il suo prezzo scritto accanto: chi tocca sa già dove
+       finisce il conto, e non deve fare il conto in testa davanti al cliente. */
+    DTO_MOTIVOS.map(function (m) {
+      return '<button class="opt2" onclick="_dtElige(\'' + m.k + '\')">' +
+        '<b>' + esc(m.n) + ' · −' + m.pct + '%</b>' +
+        '<small>Queda en ' + fmtPrice(Math.round(tot * (100 - m.pct) / 100)) +
+        (m.esc ? ' · hay que escribir qué pasó' : '') + '</small></button>';
+    }).join('') +
+    '<div class="cs-psec">Otros</div>' +
+    '<button class="opt2" onclick="_dtAcuPinta()"><b>🤝 Acuerdos</b>' +
+      '<small>Consumo libre acordado — vale sobre <b>todo</b> el consumo</small></button>' +
+    '<button class="opt2" onclick="_dtoOtroMonto(\'' + esc(_dt.mesa) + '\')"><b>💵 Cobré otro monto</b>' +
+      '<small>El fósil lleva <b>lo realmente cobrado</b> · PIN del JL</small></button>' +
+    '<button class="opt2" onclick="_dtoProducto(\'' + esc(_dt.mesa) + '\')"><b>🍽 Un producto</b>' +
+      '<small>Se cayó, lo devolvió — se quita esa línea sola, con motivo</small></button>' +
+    '<button class="opt2" onclick="_dtoColacion(\'' + esc(_dt.mesa) + '\')"><b>🍱 Colación · deja en $0</b>' +
+      '<small>Comida del personal — se elige para quién · firma JL</small></button>' +
+    '<button class="opt2" onclick="_dtoFam(\'' + esc(_dt.mesa) + '\')"><b>👨‍👩‍👧 Desc FAM · deja en $0</b>' +
+      '<small>La familia pone <b>su código</b> en tu teléfono</small></button>');
+}
+function _dtElige(k) {
+  const m = _dtMot(k); if (!m || !_dt) return;
+  _dt.mot = k; _dt.acu = null;
+  if (m.esc) return _dtEscPinta();
+  _dtAplicar(m.n + ' −' + m.pct + '%');
+}
+/* «Otro reclamo» senza il racconto è una scatola vuota che vale il doppio degli
+   altri: −20%. Perciò il bottone non si accende finché non c'è scritto qualcosa
+   — è la stessa cintura di ELIMINAR, dove il JL deve scrivere e non può
+   scegliere da una lista. */
+function _dtEscPinta() {
+  const m = _dtMot('otro_reclamo');
+  vhoja('<h3>Otro reclamo · −' + m.pct + '%</h3>' +
+    '<div class="cs-psub">Mesa <b>' + esc(_dt.mesa) + '</b> · queda en <b>' +
+      fmtPrice(Math.round(_dt.tot * (100 - m.pct) / 100)) + '</b></div>' +
+    '<div class="cs-psec">¿Qué pasó?</div>' +
+    '<textarea class="cs-pin" id="dtTx" rows="3" style="resize:none;font-size:16px" ' +
+      'placeholder="Se cayó de la escalera…" oninput="_dtTxIn(this.value)"></textarea>' +
+    '<button class="btn" id="dtGo" disabled onclick="_dtAplicar(\'Otro reclamo −' + m.pct + '%\')">' +
+      'Escribe qué pasó</button>' +
+    '<div style="text-align:center;font-size:12px;color:var(--cs-mut);padding:12px 0 2px;' +
+      'text-decoration:underline;cursor:pointer" onclick="_dtPinta()">‹ volver</div>');
+  setTimeout(function () { const e = document.getElementById('dtTx'); if (e) e.focus(); }, 30);
+}
+function _dtTxIn(v) {
+  if (!_dt) return;
+  _dt.texto = String(v || '').trim();
+  const b = document.getElementById('dtGo');
+  if (b) {                       // solo il bottone: ridisegnare toglierebbe il cursore
+    b.disabled = _dt.texto.length < 4;
+    b.textContent = _dt.texto.length < 4 ? 'Escribe qué pasó' : 'Aplicar −20% · PIN del JL';
+  }
+}
+function _dtAcuPinta() {
+  vhoja('<h3>🤝 Acuerdos · Mesa ' + esc(_dt.mesa) + '</h3>' +
+    '<div class="cs-psub">Consumo <b>' + fmtPrice(_dt.tot) + '</b> · vale sobre todo, ' +
+      'también sobre las promociones</div>' +
+    '<div class="cs-psec">¿Cuánto cubre el acuerdo?</div>' +
+    '<input class="cs-pin" id="dtAcu" inputmode="numeric" placeholder="0" ' +
+      'oninput="_dtAcuIn(this.value)">' +
+    '<div id="dtAcuR" class="cs-psub" style="margin-top:9px">El cliente paga <b>' +
+      fmtPrice(_dt.tot) + '</b></div>' +
+    '<button class="btn" id="dtAcuGo" disabled onclick="_dtAplicar(\'Acuerdo\')">Escribe el monto</button>' +
+    '<div style="text-align:center;font-size:12px;color:var(--cs-mut);padding:12px 0 2px;' +
+      'text-decoration:underline;cursor:pointer" onclick="_dtPinta()">‹ volver</div>');
+  setTimeout(function () { const e = document.getElementById('dtAcu'); if (e) e.focus(); }, 30);
+}
+function _dtAcuIn(v) {
+  if (!_dt) return;
+  var n = parseInt(String(v || '').replace(/[^0-9]/g, ''), 10);
+  _dt.acu = isNaN(n) ? null : n;
+  _dt.mot = 'acuerdo';
+  var r = document.getElementById('dtAcuR'), b = document.getElementById('dtAcuGo');
+  var paga = _dtCalc();
+  /* 🔴 un acuerdo più grande del consumo NON è un errore da respingere: è il
+     caso normale ($100.000 di franchigia su un conto da $40.000). Il cliente
+     paga $0 e il resto NON si porta dietro — qui non c'è credito. */
+  if (r) r.innerHTML = 'El cliente paga <b>' + fmtPrice(paga) + '</b>' +
+    ((_dt.acu != null && _dt.acu > _dt.tot) ? ' · el acuerdo cubre todo' : '');
+  if (b) {
+    b.disabled = _dt.acu == null || _dt.acu <= 0;
+    b.textContent = b.disabled ? 'Escribe el monto' : 'Aplicar · el cliente paga ' + fmtPrice(paga);
+  }
+}
+
 function vDescontarSala(mesa) {
+  if (DESCONTAR_V2_ON) return vDescontar2(mesa);
   const tot = _vpTot(mesa);
   if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
   vhoja('<h3>Descontar · Mesa ' + esc(mesa) + '</h3>' +
