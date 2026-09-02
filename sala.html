@@ -960,7 +960,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.55.0</span>
+      <span class="ver" id="ver">sala v3.56.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -5974,11 +5974,53 @@ function _dtGo() {
     }).catch(function () { toast('err', 'Sin conexión — reintenta'); });
     return;
   }
+  /* ═══ 👨‍👩‍👧 FAM — il verde FINISCE il lavoro, non consegna al modal vecchio ═
+     🔴 Alberto, 1-set, chiudendo il SUO tavolo: il verde apriva `famAsk` — il
+     modal vecchio — col código trascinato in una casella piccola «con quattro
+     asterischi che ho dovuto cancellare e ridigitare». Il pannello nuovo ha
+     GIÀ tutto (chi + código): qui si chiama il server e basta, come la
+     colación — che con lo stesso disegno ha chiuso pulita al primo giorno.
+     ♻️ Il CAMMINO è quello di `pagoFamConfirmar`, gesto per gesto (N9: chi
+     passava dalla porta vecchia): stesso verbo (`registrarPago` medio='fam'),
+     stessa pulizia locale, stesso testimone al bordo, stessi errori parlanti,
+     stesso avviso sul timeout. Cambia solo DA DOVE si parte.
+     🔒 A differenza di coln/prod il pannello resta APERTO fino alla risposta:
+     un código FAM sbagliato si corregge lì, senza rifare tutto il giro — e il
+     doppio tap lo ferma `d.env`, non la fortuna. Un retry qui non duplica:
+     un secondo `medio='fam'` sulla stessa mesa chiude una mesa già chiusa. */
+  if (d.tipo === 'fam') {
+    if (d.env) return;
+    d.env = 1;
+    gasPost('registrarPago', { codigo: STATE.codigo, nombre: STATE.nombre,
+      registrado_por: STATE.nombre, mesa: mesa, medio: 'fam', fam: 1,
+      pin_fam: (d.pin || '').trim() }).then(function (r) {
+      if (r && r.ok) {
+        _dt = null; _dtPinta();
+        _limpiarMesaLocal(mesa);
+        bordeHecho('pago_gas', { mesa: mesa, monto: 0 });
+        toast('ok', '👨‍👩‍👧 Mesa FAM ✓ mesa ' + mesa + ' · $0' +
+          (r.en_vuelo ? ' · ' + r.en_vuelo + ' cerrados sin marcar entrega' : ''));
+        refrescar(false); return;
+      }
+      d.env = 0;
+      var errFam = { pin_fam_requerido: 'Falta el código FAM', pin_fam_invalido: 'Código FAM incorrecto',
+        pin_fam_bloqueado: 'Código bloqueado 10 min (5 intentos)', pin_fam_no_configurado: 'Código FAM no configurado — avisa a Alberto' };
+      if (r && errFam[r.error]) { d.pin = ''; toast('err', '👨‍👩‍👧 ' + errFam[r.error]); }
+      else toast('err', 'No se pudo: ' + ((r && r.error) || '?'));
+      _dtPinta();
+    }).catch(function (e) {
+      d.env = 0;
+      toast('err', (e && e.message === 'timeout')
+        ? 'Sin respuesta — PUEDE haber entrado igual. Verifica antes de repetir.'
+        : 'Sin conexión — reintenta');
+      _dtPinta();
+    });
+    return;
+  }
   _dt = null; _dtPinta();
   abrirPago(mesa);
   var pg = STATE.pago; if (!pg) return;
-  if (d.tipo === 'fam') { pg.famAsk = true; pg.pinFam = d.pin; }
-  else {
+  {
     pg.jl = true; pg.pinAsk = false; pg.pinJL = d.pin;
     pg.montoOn = true; pg.montoCustom = String(monto);
   }
