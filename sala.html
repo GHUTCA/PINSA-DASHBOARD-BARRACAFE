@@ -960,7 +960,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.56.0</span>
+      <span class="ver" id="ver">sala v3.57.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -5289,6 +5289,24 @@ const CORR_V2_ON = (function () {
   } catch (e) { return q !== '0'; }
 })();
 
+/* ═══ 🅱 LA «B» — la metà del MESERO come era disegnata (2-set) ═════════════
+   Ordine di Alberto, testuale: «possiamo lasciare tutto come deve essere e
+   come era disegnato? se questo significa fare la B falla, implementala e
+   andiamo avanti». Con l'interruttore su, la schermata `medio` del mockup
+   del 29-ago prende il posto del pannello vecchio per TUTTI i cammini che
+   ci cadevano dentro (c4→medio · ELIMINAR conv/dto/otro · cobro diretto).
+   ⚖️ Nasce SPENTO: si prova sul vetro di Alberto (`?pagob=1`), la sala lo
+   riceve solo col suo ok. `?pagob=0` lo spegne su un apparecchio solo. */
+const PAGO_B_KEY = 'pinsita_pagob';
+const PAGO_B_ON = (function () {
+  const q = QS.get('pagob');
+  try {
+    if (q === '1') { localStorage.setItem(PAGO_B_KEY, '1'); return true; }
+    if (q === '0') { localStorage.setItem(PAGO_B_KEY, '0'); return false; }
+    return localStorage.getItem(PAGO_B_KEY) === '1';    // di fabbrica: SPENTO
+  } catch (e) { return q === '1'; }
+})();
+
 const DESC2_KEY = 'pinsita_desc2';
 const DESCONTAR_V2_ON = (function () {
   const q = QS.get('desc2');
@@ -7960,6 +7978,9 @@ function c4Css() {
     /* «Sin propina» più stretto degli altri due, come nel mockup: non è
        simmetria, è gerarchia — le due scelte che pagano hanno più superficie. */
     '.c4 .c4chip.prop.chico{flex:.62 1 0;padding-left:4px;padding-right:4px}' +
+    /* 🅱 le card del MEDIO: 2×2 grandi, min 58px — «lavoriamo di notte, poca
+       luce» (le accortezze di Alberto nel disegno del 29-ago) */
+    '.c4 .c4chip.b2{flex:1 1 calc(50% - 8px);min-width:0;min-height:58px;font-size:17px}' +
     '.c4 .c4chip.sel{background:var(--cs-cyan,#3fe0f0);color:#06222a}' +
     '.c4 .c4chip.sel small{color:#0a3540}' +
     '.c4 .c4resta{border-radius:12px;padding:11px 13px;margin-top:13px;text-align:center;' +
@@ -8253,6 +8274,136 @@ function c4OtroFin() {
    duplicherebbe la parte più rischiosa del sistema per una differenza di
    aspetto. La differenza col prototipo è ESTETICA, non di flusso: gli stessi
    medios, lo stesso PAGAR, lo stesso resto. */
+/* ═══ 🅱 IL MEDIO COME NEL MOCKUP — la schermata che mancava ════════════════
+   Il voucher (③, r.8680) NON si riscrive: quella schermata è GIÀ il mockup,
+   plasmata dalle correzioni di Alberto sul vetro (v3.40/41). E la ricevuta
+   COBRADO esiste già (`_recibo`, mockup v6). Mancava solo QUESTA.
+   🔒 Il denaro non passa di qui: il CTA chiama `pagoAlPaso3`/`pagoConfirmar`,
+   identici — muove il vetro, non la cassa. */
+function _bMonto() {
+  var pg = STATE.pago; if (!pg) return 0;
+  /* lo stesso ordine di `pagoConfirmar` (r.9256-9258): se il JL ha messo mano
+     al monto comanda la SUA porta, altrimenti la parte del flusso c4 */
+  return (pg.c4 && !pg.montoOn) ? c4Parte(pg) : _pagoMonto();
+}
+/* il tocco sul campo vuoto del mixto scrive il resto — come `mxToca`, ma
+   l'obiettivo è il monto che DAVVERO si sta cobrando: `mxToca` usa
+   `_pagoMonto()`, che su un flusso a parti è il totale del TAVOLO — il resto
+   sbaglierebbe proprio dove serve di più. */
+function bMxToca(el, k2) {
+  var pg = STATE.pago; if (!pg || !pg.mixto) return;
+  if (String(pg.mixto[k2] || '').trim()) return;          // già scritto: mano ferma
+  var suma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k3) {
+    return s + (Math.round(parseFloat(String(pg.mixto[k3]).replace(/[^0-9]/g, '')) || 0)); }, 0);
+  var resto = _bMonto() - suma;
+  if (resto <= 0) return;
+  pg.mixto[k2] = String(resto);
+  el.value = resto; try { el.select(); } catch (e) {}
+}
+function bMedio(w, pg) {
+  c4Css();
+  var mB = _bMonto(), prop = _pagoPropina(), totB = mB + prop;
+  /* il 10% del chip DEVE essere il numero che `_pagoPropina` userà davvero:
+     due calcoli diversi mostrerebbero una cifra e ne cobrerebbero un'altra */
+  var prop10 = Math.round((pg.c4 ? c4Parte(pg) : pg.tot) * 0.10);
+  var queda = (pg.c4 && !pg.montoOn) ? c4Resta(pg) : 0;
+  if (!pg.enviando) {   // l'aviso si può solo GUADAGNARE, mai perdere (v2.0.1)
+    var yaF = _pagadaAviso(pg.mesa);
+    if (yaF && !pg.ya) { pg.ya = yaF; pg.okDoble = false; } else if (yaF) pg.ya = yaF;
+  }
+  var chipM = function (val, lbl, sub) {
+    return '<button class="c4chip b2' + (pg.medio === val ? ' sel' : '') + '" onclick="pagoSet(\'medio\',\'' + val + '\')">' +
+      lbl + '<small>' + (sub || '&nbsp;') + '</small></button>';
+  };
+  var b = '<div class="c4mesa" style="font-size:22px">Mesa ' + esc(pg.mesa) + '</div>' +
+    (STATE.nombre ? '<div class="c4firma">cobra <b>' + esc(STATE.nombre) + '</b></div>' : '') +
+    (pg.dto ? '<div class="c4expl" style="text-align:center">🏷 ' + esc(pg.dto.et) + '</div>' : '') +
+    '<div class="c4expl" style="text-align:center;margin-top:4px">' +
+      ((pg.c4 && !pg.c4.b) ? 'su parte' : 'consumo') + ' <b style="color:var(--cs-ink)">' + fmtPrice(mB) + '</b>' +
+      ' · propina <b style="color:var(--cs-ink)">' + fmtPrice(prop) + '</b></div>' +
+    /* la propina si tocca ANCHE qui: nel pannello vecchio i chip c'erano, e un
+       mesero che cobra diretto non avrebbe altrimenti dove metterla o toglierla */
+    '<div class="c4chips" style="margin-top:6px">' +
+      '<button class="c4chip prop' + (pg.prop === 'sug' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'sug\')">10%<small>' + (pg.prop === 'otro' ? '&nbsp;' : fmtPrice(prop10)) + '</small></button>' +
+      '<button class="c4chip prop' + (pg.prop === 'otro' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'otro\')">Otro<small>' + ((pg.prop === 'otro' && prop > 0) ? fmtPrice(prop) : 'monto') + '</small></button>' +
+      '<button class="c4chip prop chico' + (pg.prop === 'sin' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'sin\')">Sin<small>propina</small></button></div>' +
+    (pg.prop === 'otro'
+      ? '<input class="cs-pin" style="margin-top:6px;text-align:center" inputmode="numeric" autocomplete="off" ' +
+        'placeholder="Monto propina $" value="' + esc(pg.otro || '') + '" oninput="pagoInput(\'otro\',this.value)" onblur="renderPago()">'
+      : '') +
+    '<div class="c4resta' + (queda === 0 ? ' zero' : '') + '" style="margin-top:10px"><span>después de este pago queda</span>' +
+      '<b>' + fmtPrice(queda) + '</b></div>' +
+    /* il contesto del doppio cobro, versione DEBOLE (v3.39: grigio, non muro) */
+    ((pg.ya && !pg.ya.sesion)
+      ? '<div style="text-align:center;font-size:11.5px;color:var(--cs-mut);margin-top:6px">esta mesa cobró a las ' +
+        esc(pg.ya.hora) + ' · ' + fmtPrice(pg.ya.monto) + '</div>' : '') +
+    '<div class="c4lab">Medio de pago</div>' +
+    /* Fintoc: promesso, spento — identico al pannello vecchio (v3.36) */
+    '<div style="border:1.5px dashed rgba(255,255,255,.2);border-radius:14px;padding:10px;text-align:center;' +
+      'color:var(--cs-mut);font-size:14px;font-weight:800;margin-bottom:8px">🏦 Fintoc' +
+      '<small style="display:block;font-size:10.5px;font-weight:700;opacity:.8">Próximamente</small></div>' +
+    '<div class="c4chips">' + chipM('debito', 'Débito', 'tarjeta') + chipM('credito', 'Crédito', 'tarjeta') + '</div>' +
+    '<div class="c4chips" style="margin-top:8px">' + chipM('efectivo', 'Efectivo', '') + chipM('mixto', '🔀 Mixto', '2+ medios') + '</div>' +
+    /* ⚠️ Transfer RESTA, contro il mockup — stessa dichiarazione del v3.36:
+       il mockup lo toglie perché «è Fintoc», ma Fintoc NON è attivo. */
+    '<div class="c4chips" style="margin-top:8px">' + chipM('transferencia', 'Transfer', 'bancaria') + '</div>';
+  var mxResto = 0, mxSuma = 0;
+  if (pg.medio === 'mixto') {
+    pg.mixto = pg.mixto || { efectivo: '', debito: '', credito: '', transferencia: '' };
+    mxSuma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k2) {
+      return s + (Math.round(parseFloat(String(pg.mixto[k2]).replace(/[^0-9]/g, '')) || 0)); }, 0);
+    mxResto = mB - mxSuma;
+    var fila = function (k2, lbl) {
+      var vacio = !String(pg.mixto[k2] || '').trim();
+      return '<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="flex:0 0 96px;font-size:13px">' + lbl + '</span>' +
+        '<input class="cs-pin" style="margin:0" inputmode="numeric" placeholder="' +
+        (vacio && mxResto > 0 ? '$' + _fmtMiles(mxResto) + ' — toca y listo' : '$0') + '" value="' + esc(pg.mixto[k2]) + '"' +
+        ' onfocus="bMxToca(this,\'' + k2 + '\')"' +
+        ' oninput="STATE.pago.mixto[\'' + k2 + '\']=this.value" onchange="renderPago()"></div>';
+    };
+    b += '<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.35)">' +
+      '<div class="c4lab" style="margin-top:0">¿Cuánto con cada uno?</div>' +
+      fila('efectivo', 'Efectivo') + fila('debito', 'Débito') + fila('credito', 'Crédito') + fila('transferencia', 'Transfer') +
+      '<div style="margin-top:8px;font-size:12.5px;' + (mxResto === 0 && mxSuma > 0 ? 'color:#3db876' : 'color:#f5a623') + '">' +
+      (mxResto === 0 && mxSuma > 0 ? '✓ cuadra: $' + _fmtMiles(mxSuma)
+        : mxResto > 0 ? 'faltan <b>$' + _fmtMiles(mxResto) + '</b> de $' + _fmtMiles(mB)
+        : 'sobran <b>$' + _fmtMiles(-mxResto) + '</b> — baja alguna cifra') + '</div></div>';
+  }
+  /* dove va la boleta — la stessa riga della ③, detta PRIMA di scegliere */
+  b += '<div style="margin-top:10px;padding:8px 10px;border-radius:10px;font-size:11px;text-align:center;' +
+    ((pg.correo || '').trim()
+      ? 'background:rgba(61,201,126,.1);border:1px solid rgba(61,201,126,.4);color:#8ff0bd">✉️ La boleta le llega al correo'
+      : 'background:rgba(233,196,106,.12);border:1px solid rgba(233,196,106,.45);color:#f3e3b5">🖶 Sin correo: la boleta sale impresa en barra') + '</div>';
+  var f;
+  if (pg.ya && pg.ya.sesion && !pg.okDoble) {
+    /* il muro FORTE del doppio cobro — stessa soglia del pannello vecchio */
+    f = '<div style="text-align:center;font-size:12.5px;color:#ff9c9c;margin-bottom:8px">✋ Esta mesa YA cobró en esta sesión: ' +
+        fmtPrice(pg.ya.monto) + ' a las ' + esc(pg.ya.hora) + '</div>' +
+      '<button class="c4cta" style="background:#e24b4a;color:#fff" onclick="pagoSet(\'okDoble\',true)">Lo vi — es otro cliente, cobrar igual</button>';
+  } else {
+    var mixtoMal = pg.medio === 'mixto' && !(mxResto === 0 && mxSuma > 0);
+    var alPaso3 = _pagoQuiereVoucher();
+    var off = pg.enviando || !pg.medio || mixtoMal;
+    f = '<button class="c4cta" ' + (off ? 'disabled ' : '') +
+      'onclick="' + (alPaso3 ? 'pagoAlPaso3()' : 'pagoConfirmar(this)') + '">' +
+      (pg.enviando ? 'Registrando…'
+        : !pg.medio ? 'Elige el medio de pago'
+        : mixtoMal ? 'La suma no cuadra todavía'
+        : alPaso3 ? 'PAGAR ' + fmtPrice(totB) + ' — pasa la tarjeta'
+        : 'PAGAR Y CERRAR ' + fmtPrice(totB)) + '</button>' +
+      '<button class="c4cta sec" onclick="pagoSet(\'imprimir\',' + (pg.imprimir ? 'false' : 'true') + ')">' +
+        (pg.imprimir ? '🖶 Imprimir en papel · SÍ' : '🖶 Imprimir — solo si la pide') + '</button>' +
+      ((pg.c4 && !pg.c4.b)
+        ? '<button class="c4cta sec" onclick="c4Go(\'inicio\')">‹ Volver a mostrárselo al cliente</button>' : '');
+  }
+  w.innerHTML = '<div class="c4">' +
+    '<div class="c4bar"><span class="c4tt">Cobrar</span>' +
+      '<button class="c4salir" onclick="pagoCerrar()">✕ Salir</button></div>' +
+    '<div class="c4body">' + b + '</div>' +
+    '<div class="c4foot">' + f + '</div></div>';
+  _pgRelojOff();
+}
+
 function c4Render(w, pg) {
   c4Css();
   var c = pg.c4, det = _vpItemsDet(pg.mesa), items = (det.items || det || []);
@@ -8519,7 +8670,14 @@ function renderPago() {
      pannello di sempre, come se questo blocco non esistesse.
      🔑 E `paso==='medio'` esce di qui apposta: dopo la rilettura il flusso
      CONSEGNA al pannello del mesero (vedi `c4AlMesero`). */
-  if (COBRAR_V4_ON && !pg.jl && !pg.pinAsk && !pg.famAsk && pg.medio !== 'cortesia') {
+  /* 🅱 2-set · CON LA «B» ACCESA la stessa porta si allarga: entra anche chi
+     prima cadeva nel pannello vecchio — l'handoff di ELIMINAR (`pg.jl` CON
+     `pg.dto`), il ritorno del cliente (`clienteHecho`), il cobro diretto.
+     Restano FUORI, dichiarati: cortesía (non è nel disegno approvato — lo
+     scostamento stavolta si dice ad Alberto sul vetro, non solo qui) · il JL
+     che apre le opzioni A MANO (`jl` senza `dto`) · pinAsk/famAsk · la ③ del
+     voucher (`paso3`), che è GIÀ il mockup e non si copre. */
+  if ((COBRAR_V4_ON || PAGO_B_ON) && !(pg.jl && !(PAGO_B_ON && pg.dto)) && !pg.pinAsk && !pg.famAsk && pg.medio !== 'cortesia') {
     /* 🔴 `montoOn` guarda solo l'INGRESSO, mai i render successivi — e questa
        riga è una correzione a me stessa: la prima stesura lo metteva nella
        condizione grande, ma `c4Sync` ACCENDE `montoOn` per portare la parte al
@@ -8529,6 +8687,11 @@ function renderPago() {
        che decide se sei tu: qui distingue chi APRE il pannello (il JL apre già
        con un monto suo), e finisce lì. */
     if (!pg.c4 && !pg.montoOn) c4Init(pg);
+    /* 🅱 chi arriva col monto già scritto (lo sconto di ELIMINAR) non ha un
+       flusso cliente da fare: gli si dà un c4 sintetico che parte dal medio.
+       `b:1` lo marca: i calcoli della parte NON si applicano (comanda
+       `_pagoMonto()`, cioè la porta del JL — stesso ordine di pagoConfirmar). */
+    if (PAGO_B_ON && !pg.c4) pg.c4 = { paso: 'medio', modo: 'todo', sel: {}, partes: 0, pagadoAntes: 0, b: 1 };
     /* 🔴 31-ago · `!pg.paso3` — LA CONVIVENZA COL VOUCHER, resa STRUTTURALE
        invece che dedotta. Stanotte si riaccende `VOUCHER_ON_BKS`, e la ③ dopo
        lo swipe (r.7838) è la schermata dove si battono le 6 cifre del POS: se
@@ -8544,6 +8707,9 @@ function renderPago() {
        niente, non cambia nessun cammino di oggi, e il collaudo la può provare
        — un ragionamento no. */
     if (pg.c4 && pg.c4.paso !== 'medio' && !pg.paso3) return c4Render(w, pg);
+    /* 🅱 e il `medio` — la schermata che il v4 consegnava al pannello vecchio —
+       adesso ha la sua casa. Solo con la B accesa: senza, tutto come ieri. */
+    if (PAGO_B_ON && pg.c4 && pg.c4.paso === 'medio' && !pg.paso3) return bMedio(w, pg);
   }
   /* ═══ v3.31.0 · [AUT-0113] · LA PANTALLA DEL CLIENTE ══════════════════════
      Sale ANTES que todo lo demás y no comparte una línea con el panel del
