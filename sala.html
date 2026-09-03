@@ -960,7 +960,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.63.0</span>
+      <span class="ver" id="ver">sala v3.64.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2884,7 +2884,52 @@ function _gestoRiconcilia(list) {
       // ripiego se non avevo gli uuid (modello non ancora popolato al gesto)
       if (!(g.uuids || []).length && vive[String(g.a)] && !vive[String(g.de)]) { _gestoOk(gid); return; }
     }
-    if (Date.now() - g.t0 > 90000) { _gFail[gid] = { tipo: g.tipo, de: g.de, a: g.a, ts: Date.now() }; delete _gPend[gid]; _gFailSalva(); }
+    /* ═══ 🔴 [AUT-0168] · 3-set · IL BADGE ROSSO SMETTE DI GRIDARE AL LUPO ═══
+       IL FATTO: il gesto si dichiarava FALLITO dopo 90 s se la foto non lo
+       confermava — ma la conferma può venire SOLO dalla foto (r.2862), la foto
+       nasce dal libro, e il libro riceve i gesti a **p50 190 s · p90 1.424 s**
+       (≈24 min). ⇒ **in più della metà dei casi il rosso compariva su un mover
+       PERFETTAMENTE RIUSCITO.** Non è teoria: è successo davanti ad Alberto il
+       2-set — badge «NO SE MOVIÓ 50 → 54», e l'AUDIT_LOG mostrava quattro
+       `mesa_movida` atterrate, $23.150 al peso. Mezz'ora di caccia a un guasto
+       che non c'era: **il difetto era l'allarme, non il gesto.**
+       ⚖️ E NON INDEBOLISCE la condizione del 24-ago che permise di accendere
+       `MOVER_BORDE_ON` («l'ottimismo si compra con la visibilità»): la RIPARA.
+       Quella condizione chiedeva che un fallimento fosse VISIBILE, non che
+       qualcosa fosse ROSSO — *una visibilità che mente non è visibilità, e un
+       allarme vero e tardivo batte uno falso e rapido: il secondo si spegne da
+       solo nella testa di chi lo guarda* (N8, dal lato giusto).
+       📐 IL TETTO È 30 MIN, NON 15: il p90 del libro è ≈24 min — un tetto a 15
+       lascerebbe scoperta proprio la coda, cioè quando il sistema soffre, cioè
+       venerdì sera. *Non si sceglie il numero perché è tondo.* Il ramo NON
+       timbrato resta a 90 s: lì l'incertezza è vera.
+       ⛔ TAMPONE DICHIARATO (`_SOLO_SOLUZIONI_DEFINITIVE`), tre righe:
+         ① RIMANDA: sposta la soglia, non fa tornare veloce il libro.
+         ② LA UCCIDE `AUT-0166` (`STAFF_PER_PASSATA` 12→N, la capacità della
+            fila): se il libro torna a confermare in secondi, il timeout non
+            serve più. **NON `AUT-0145`, esonerata il 3-set col `git show`.**
+         ③ 🔑 E LA CURA VERA NON È IL TIMEOUT — la nomino perché non la
+            scriverebbe nessun altro: **il badge confonde DUE stati in un solo
+            rosso** — «non ancora confermato» e «fallito». Il timeout sposta la
+            soglia FRA i due; la cura è che gli stati siano DUE
+            (`pendente → ⏳ in attesa di conferma → ✅ | 🔴`). *Un mesero che
+            legge «in attesa» aspetta; uno che legge «non è passato» rifà il
+            gesto — ed è la stessa situazione.* **Data: dopo venerdì, quando si
+            può toccare il disegno del vetro senza servizio addosso.**
+       🧯 Stesso interruttore dell'eco (`eco_largo_off` dal poll): il JL li
+       spegne insieme per tutta la sala, senza deploy. */
+    /* 🔴 CORREZIONE MIA, prima del collaudo: la prima stesura guardava
+       `BORDE_W.ok[gid]` — ma quel registro è indicizzato per **uuid** (r.1524)
+       e il mover non manda uuid: la condizione sarebbe stata SEMPRE FALSA e la
+       cura non avrebbe curato niente, restando verde a occhio.
+       ✅ Il fatto vero è più semplice e sta due funzioni sopra: `_gestoAttendi`
+       si chiama SOLO dentro `if (r.borde === true && r.ok)` (r.2978 e r.5468)
+       ⇒ **un gesto che sta in `_gPend` è timbrato dal bordo per costruzione.**
+       Non serve chiederlo: serve non dimenticarlo, e per questo è scritto qui. */
+    const _tetto = (ECO_LARGO_ON && !(list && list._eco_largo_off))
+      ? 30 * 60 * 1000
+      : 90000;
+    if (Date.now() - g.t0 > _tetto) { _gFail[gid] = { tipo: g.tipo, de: g.de, a: g.a, ts: Date.now() }; delete _gPend[gid]; _gFailSalva(); }
   });
 }
 function _gestoAvvisoHtml() {
