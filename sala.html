@@ -63,6 +63,10 @@
     --bg:#0f0f16; --card:#1a1a24; --card2:#222230; --bord:rgba(255,255,255,.09);
     --t1:#f2ead8; --t2:#b8b0a0; --t3:#8a8577;
     --acc:#d9a441; --ok:#3db876; --warn:#f5a623; --bad:#e05252;
+    /* v3.67.0 · quanto schermo copre il teclado, in pixel. Lo scrive `_tecladoMide`
+       e lo leggono i pannelli fissi. 🔒 Nasce a ZERO e ci resta se il JS non gira
+       o se `visualViewport` non c'è ⇒ il comportamento di ieri è il fallback. */
+    --kb:0px;
   }
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;
     font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
@@ -511,11 +515,17 @@
   .cs-stot b{font-size:22px}
 
   /* 💳 il pannello del pago */
-  .cs-pago{position:fixed;inset:0;z-index:80;background:rgba(3,6,10,.8);
+  /* v3.67.0 · `bottom:var(--kb)` DOPO `inset:0` (che l'ha già messo a 0): il
+     fondo del pannello sale sopra il teclado invece di finirci sotto.
+     A teclado chiuso `--kb` è `0px` ⇒ riga per riga identico a ieri. */
+  .cs-pago{position:fixed;inset:0;bottom:var(--kb,0px);z-index:80;background:rgba(3,6,10,.8);
     display:flex;align-items:flex-end;justify-content:center}
   .cs-pcard{width:100%;max-width:430px;background:var(--cs-bg2);border-radius:24px 24px 0 0;
     border-top:1px solid var(--cs-line-hi);padding:10px 20px calc(26px + env(safe-area-inset-bottom,0));
-    max-height:92dvh;overflow-y:auto}
+    /* il `min()` tiene i 92dvh di ieri quando il teclado è chiuso e cede solo
+       quando c'è: senza, la card resterebbe alta 92dvh dentro un contenitore
+       che ora è più basso — e traboccherebbe di nuovo sotto il teclado. */
+    max-height:min(92dvh, calc(100dvh - var(--kb,0px) - 6px));overflow-y:auto}
   .cs-pcard h3{font-size:17px;margin:6px 0 2px}
 
   /* v1.24 · EL CIERRE DEL MESERO — una superficie por vez, como la comandera.
@@ -960,7 +970,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.66.0</span>
+      <span class="ver" id="ver">sala v3.67.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1003,6 +1013,70 @@ const QS = new URLSearchParams(location.search);
    con gli altri flag: `_tickRender` lo legge, e una const dichiarata dopo la
    sua prima chiamata esploderebbe in TDZ a locale aperto. */
 const TICK_FIJO = QS.get('tick') !== 'nastro';
+
+/* ═══ v3.67.0 · IL VETRO SA QUANT'È ALTO IL TECLADO ═════════════════════════
+   🔬 IL DIFETTO, riferito da Alberto il 2-set dopo il collaudo della B:
+      «il teclado del telefono si sovrappone al modal e quindi devi scrollare
+      per vedere». Succede sulla schermata dei DATI (celular · correo), che è
+      l'ultimo gesto prima di cobrar: il momento peggiore per far scrollare
+      qualcuno che ha un cliente davanti.
+   🌳 LA RADICE — e NON è del pannello del pago: un overlay `position:fixed`
+      si ancora al viewport di **LAYOUT**, e il teclado non lo accorcia (né su
+      iOS, né su Android col default `resizes-visual`). Il pannello continua a
+      credere di essere alto tutto lo schermo mentre metà è coperta. È una
+      malattia di TUTTI i nostri pannelli fissi, non di quello del pago:
+      curare il pannello sarebbe curare il sintomo, e la stessa cosa
+      ricomparirebbe alla prossima schermata con un campo dentro.
+   ✅ LA CURA STA SULLA RADICE: il vetro misura UNA volta quanto gli copre il
+      teclado e lo pubblica in `--kb`. Ogni pannello che finisce in basso si
+      accorcia di quel tanto — una riga a testa, oggi e per sempre.
+   🔒 A PROVA DI GUASTO: `--kb` nasce `0px` (vedi `:root`) e resta `0px` se il
+      JS non gira o se `visualViewport` non esiste ⇒ **il comportamento di ieri
+      NON è un caso da gestire: è il fallback**.
+   ⚠️ NON è un tampone e non rimanda niente: dopo questa riga la misura c'è.
+      Restano SCOPERTI, dichiarati per nome perché nessuno li ha segnalati e
+      non ci si digita dentro: `.mesa-sheet` · `.nuevo-overlay` · `#accSheet`
+      · `.vpanel` · `.pc-grande` · la comandera (`.cm-`). Sono UNA RIGA
+      ciascuno il giorno che qualcuno ci mette un campo — non un cantiere.
+   🎚 NASCE SPENTA — condizione di `AUT-0177`, e la ragione è il POSTO, non il
+      codice: questa cura sta sulla schermata dell'**ultimo gesto prima di
+      cobrar**, dove si muove il denaro. Si accende per apparecchio con
+      `?tecl=1` (e si ricorda), si spegne con `?tecl=0`. Girato in tutte e due
+      le direzioni, con un ricaricamento in mezzo, prima di dichiararlo.
+   🔴 E «accendere per la sala» qui è **il link con `?tecl=1` sui telefoni**,
+      NON un secondo deploy e NON un flag del bordo. Lo scrivo perché ieri ho
+      fatto l'errore opposto: ho messo nel vetro un `r.enllegada_on` che
+      **nessuno scriveva**, e sembrava una leva. Meglio un interruttore che
+      chiede un giro di link che uno che sembra automatico e non c'è. */
+const TECLADO_ON = (function () {
+  const q = QS.get('tecl');
+  /* memoria col nome POSITIVO (`sala_tecl` = '1'|'0'), non `..._off`: un flag
+     col nome negato si legge al contrario la volta che si ha fretta. */
+  try {
+    if (q === '1') { localStorage.setItem('sala_tecl', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_tecl', '0'); return false; }
+    return localStorage.getItem('sala_tecl') === '1';
+  } catch (e) { return q === '1'; }
+})();
+(function _tecladoMide() {
+  const vv = window.visualViewport;
+  if (!TECLADO_ON || !vv) return;
+  /* 🔴 LA SOGLIA, e non è cosmetica: la barra dell'indirizzo che si nasconde
+     muove il viewport di 60-90 px e NON è un teclado. Senza questa soglia il
+     pannello ballerebbe a ogni scroll — un difetto peggiore di quello curato. */
+  const MIN_KB = 120;
+  let _ultimo = -1;
+  function pinta() {
+    const cop = Math.round(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    const kb = cop >= MIN_KB ? cop : 0;
+    if (kb === _ultimo) return;          // il DOM si tocca solo se cambia davvero
+    _ultimo = kb;
+    document.documentElement.style.setProperty('--kb', kb + 'px');
+  }
+  vv.addEventListener('resize', pinta);
+  vv.addEventListener('scroll', pinta);
+  pinta();
+})();
 const CFG = {
   GAS_URL: 'https://script.google.com/macros/s/AKfycbzZkS3bBaYc34uJ6wXP9FG13i58-NT0FJp964vqkUYbRObUxryeRb9l_Fz24kb42f5t/exec',
   LOCAL: (QS.get('l') || localStorage.getItem('sala_local') || 'BKS').trim().toUpperCase(),
@@ -1636,8 +1710,20 @@ const ECO_LARGO_ON = QS.get('ecolargo') !== '0';
    riga in PARAMETROS — una decisione, non una corsa.
    🔑 TRE LIVELLI, dal più forte al più debole: ① il parametro nell'URL (e si
    RICORDA nell'apparecchio) ② la memoria di questo telefono ③ il default che
-   il SERVER dice a tutti (`enllegada_on` nel poll). E `eco_largo_off` resta
-   sopra tutto: spegne l'intera famiglia con una chiave sola. */
+   il SERVER dice a tutti (`enllegada_sala_on` nel poll). E `eco_largo_off`
+   resta sopra tutto: spegne l'intera famiglia con una chiave sola.
+   🔴 v3.67.0 · IL NOME È CAMBIATO, e la ragione va scritta qui perché è una
+   trappola che stavamo per costruire in due. Ieri leggevo `enllegada_on` e
+   **non lo scriveva nessuno**: l'ho verificato prima di annunciare che era
+   acceso, e non c'era — né nel GAS né fra i flag del bordo. Chiedendo a ⚙️ di
+   esporlo è saltato fuori che al bordo esiste già `ENLLEGADA_OFF` ("0" = la
+   rotta risponde): due leve sullo stesso oggetto, nomi quasi uguali e
+   **polarità opposte**. Chi le trovava fra un mese spegneva la rotta credendo
+   di spegnere il vetro. ⇒ il campo si chiama `enllegada_sala_on` («il vetro
+   mostra a tutta la sala»), `"0"` di default, ed è l'unico esposto.
+   🎓 E il nome vecchio non si è difeso col «era già in produzione»: era in
+   produzione ma **non aveva un solo utente**, perché quell'`if` non era mai
+   stato vero. Un nome si protegge per chi lo usa, non per la sua data. */
 const ENLL_KEY = 'pinsita_enll';
 const ENLLEGADA_ON = (function () {
   const q = QS.get('enll');
@@ -1656,7 +1742,7 @@ const ENLLEGADA_ON = (function () {
 function _enllAttiva(r) {
   if (ENLLEGADA_ON === true) return true;
   if (ENLLEGADA_ON === false) return false;
-  return !!(r && r.enllegada_on === true);
+  return !!(r && r.enllegada_sala_on === true);
 }
 var _ENLL = [];        // gli «in arrivo» dell'ultimo giro
 var _ENLL_TRONC = 0;   // quanti la rotta ha tagliato (mai un tetto muto)
@@ -8354,7 +8440,10 @@ function c4Css() {
   if (C4_CSS_ON) return; C4_CSS_ON = true;
   var s = document.createElement('style');
   s.textContent =
-    '.c4{position:fixed;inset:0;z-index:60;background:var(--cs-bg,#141726);display:flex;flex-direction:column}' +
+    /* v3.67.0 · stessa riga del pannello del pago: qui dentro vivono il campo
+       del MAIL del cliente (`c4Mail`), il PIN del mover e le porte dello
+       sconto — tutto ciò che il mesero digita passa da `.cs-pago` o da qui. */
+    '.c4{position:fixed;inset:0;bottom:var(--kb,0px);z-index:60;background:var(--cs-bg,#141726);display:flex;flex-direction:column}' +
     '.c4 .c4bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;' +
       'border-bottom:1px solid var(--cs-line);flex:0 0 auto}' +
     '.c4 .c4tt{font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--cs-ink2)}' +
