@@ -960,7 +960,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.58.0</span>
+      <span class="ver" id="ver">sala v3.59.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1507,7 +1507,13 @@ async function staffPost(action, body) {
     const r = await fetch(u, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {})),
+      /* ⏱ [AUT-0159] · il muro e la via viaggiano col primo POST utile: campi
+         piatti, additivi, e se mancano il ricevitore non fa rumore. Il muro
+         misura il VETRO, non la strada di questo POST — quindi un campione può
+         viaggiare su un POST diverso da quello del gesto che ha misurato, ed è
+         corretto così: altrimenti i gesti con porte (che vanno dritti al GAS)
+         non sarebbero mai misurati, e sono proprio quelli lenti. */
+      body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {}, _muroCampi())),
       signal: ctrl.signal, cache: 'no-store',
     });
     clearTimeout(to);
@@ -1516,9 +1522,13 @@ async function staffPost(action, body) {
     // (sin_gate 503, rate_limit 429, token, rete) → la via di sempre.
     if (j && j.borde === true) {
       if (j.ok && body && body.uuid) BORDE_W.ok[body.uuid] = Date.now();
+      /* i contatori si svuotano SOLO qui: il POST è arrivato e timbrato. Se
+         fallisce, restano e ripartono col prossimo — niente conteggi persi. */
+      _pennaSvuota(_MURO_VOLO); _MURO_VOLO = null;
       _pennaDice('borde');
       return j;
     }
+    _MURO_VOLO = null;   // non consegnato: i conteggi restano, riproveranno
     /* v3.21.0 · il ripiego DICE il suo motivo. Fino a oggi taceva: il 22-ago
        ci è costato mezza giornata di diagnosi a scatola chiusa. */
     _pennaDice('gas:' + ((j && (j.error || j.motivo)) || ('http' + r.status)));
@@ -1531,8 +1541,96 @@ async function staffPost(action, body) {
    passato l'ultimo gesto. ✍ verde = bordo · ⚠ ambra = ripiego, col motivo.
    Non cambia NIENTE nel comportamento: guarda e basta. */
 let _PENNA_ULT = '';
+/* ═══ 🔴 3-set · LA VIA DEL GESTO SMETTE DI MORIRE SULLO SCHERMO ═══════════
+   `_pennaDice` dipingeva un'etichetta e basta: la via presa (`borde` o il
+   motivo della ricaduta) viveva in RAM e moriva al gesto successivo. Per
+   questo NESSUNO ha mai potuto dire quante volte una sera siamo caduti sulla
+   via lenta — la domanda che ieri ha tenuto tre stanze fino a mezzanotte.
+   👉 Ora la via si ACCUMULA per motivo (`_PENNA_N`) e viaggia col primo POST
+   utile dentro `muro_via`, accanto al muro (contratto con ⚙️, 2-set 22:5x):
+   lui la collassa a `borde|gas` per i secchi e tiene i sette motivi come
+   contatore piatto — perché `sin_gate` e `timeout` vogliono cure diverse.
+   ⚖️ Perché serve accanto al muro e non da sola: un p50 che mescola gesti da
+   180 ms (bordo) e da 12 s (ripiego GAS) non descrive nessuno dei due mondi.
+   🧯 Freno proprio: `?muro=0` (o `pinsita_muro=0`) — spegne la raccolta e la
+   spedizione, l'etichetta sullo schermo resta. */
+/* ═══ ⏱ IL CRONOMETRO DEL MURO · [AUT-0159] · 3-set ════════════════════════
+   La domanda che sta in `CLAUDE.md` dal 23-ago in maiuscolo — «PASSO ZERO:
+   QUALE OROLOGIO?» — e che questa casa ha posto tre volte in dieci giorni
+   senza mai rispondere. Ieri sera la risposta è arrivata: la penna del mesero
+   passa dal BORDO (`staffPost`, leva `mesero_borde_write_on=True`), quindi
+   `T_MS` del GAS misura la fossilizzazione DIETRO le quinte, non l'attesa di
+   nessuno. ⇒ **nessun orologio del server può misurare quanto aspetta il
+   mesero: solo questo.**
+   📐 COSA MISURA: dal TOCCO al FRAME DIPINTO (doppio rAF dopo il render) —
+   non «la funzione è tornata», che sarebbe di nuovo l'orologio del vetro.
+   🔑 E dove il pannello chiude OTTIMISTA prima della risposta, il campione si
+   chiude alla CONFERMA VERA: altrimenti misuriamo quanto siamo bravi a
+   nascondere l'attesa invece di quanta ne resta. *Il muro finisce dove
+   finisce l'incertezza della persona, non dove cambia il pixel.*
+   🏷 Dieci etichette, lista CHIUSA (concordata con ⚙️): arranque · abrir_mesa
+   · abrir_pago · pago · eliminar · mover · unir · separar · precuenta · corte
+   — tutto il resto va in `altro`, contato. `refresco` è FUORI apposta: un
+   poll non ha nessuno in attesa davanti, e un campione senza dito sporcherebbe
+   proprio i secchi che devono dire sì o no ai 250 ms.
+   ⚠️ `arranque` è un AVVIO, non un gesto: il criterio dei 250 ms NON si
+   applica. L'atteso numerico si scrive DOPO la prima settimana, dai dati —
+   una soglia scelta a tavolino stanotte sarebbe il numero plausibile che poi
+   nessuno riverifica. **Atteso: da scrivere coi dati della settimana 3-9.**
+   🚫 I gesti nati dalla CODA offline non producono campione (il frame si
+   dipinge subito, la verità arriva minuti dopo) — ma si CONTANO nella via
+   `cola`: un troncamento dichiarato è una misura, uno silenzioso diventa
+   l'architettura. */
+const MURO_KEY = 'pinsita_muro';
+const MURO_ON = (function () {
+  const q = QS.get('muro');
+  try {
+    if (q === '1') { localStorage.setItem(MURO_KEY, '1'); return true; }
+    if (q === '0') { localStorage.setItem(MURO_KEY, '0'); return false; }
+    return localStorage.getItem(MURO_KEY) !== '0';      // di fabbrica: ACCESO (è solo una misura)
+  } catch (e) { return q !== '0'; }
+})();
+const MURO_ETIQ = { arranque: 1, abrir_mesa: 1, abrir_pago: 1, pago: 1, eliminar: 1,
+  mover: 1, unir: 1, separar: 1, precuenta: 1, corte: 1 };
+var _MURO_T0 = 0, _MURO_G = '', _MURO_LISTO = null;
+/* il dito tocca: si apre il cronometro. Se un gesto ne apre un altro senza
+   chiudere il primo, vince l'ULTIMO — è quello che l'umano sta guardando. */
+function muroT0(gesto) {
+  if (!MURO_ON) return;
+  _MURO_G = MURO_ETIQ[gesto] ? gesto : 'altro';
+  _MURO_T0 = (window.performance && performance.now) ? performance.now() : Date.now();
+}
+/* la schermata è cambiata: si chiude al FRAME DIPINTO, non al return. */
+function muroFin() {
+  if (!MURO_ON || !_MURO_T0) return;
+  const g = _MURO_G, t0 = _MURO_T0;
+  _MURO_T0 = 0; _MURO_G = '';
+  try {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        const ms = Math.round(((window.performance && performance.now) ? performance.now() : Date.now()) - t0);
+        if (ms > 0 && ms < 120000) _MURO_LISTO = { g: g, ms: ms };   // fuori range: si butta, non si finge
+      });
+    });
+  } catch (e) {}
+}
+
+var _PENNA_N = {};                                   // via → quante volte
+/* i campi che viaggiano: il campione del muro (uno per volta, l'ultimo
+   compiuto) + il conteggio delle vie. Se non c'è niente, non si manda niente
+   — un payload che porta chiavi vuote insegna al ricevitore a ignorarle. */
+var _MURO_VOLO = null;
+function _muroCampi() {
+  if (!MURO_ON) return {};
+  const out = {};
+  if (_MURO_LISTO) { out.muro_g = _MURO_LISTO.g; out.muro_ms = _MURO_LISTO.ms; _MURO_LISTO = null; }
+  const vie = _pennaPack();
+  if (vie) { out.muro_via = vie; _MURO_VOLO = vie; }
+  return out;
+}
 function _pennaDice(v) {
   _PENNA_ULT = v || '';
+  if (MURO_ON && _PENNA_ULT) _PENNA_N[_PENNA_ULT] = (_PENNA_N[_PENNA_ULT] || 0) + 1;
   try {
     const el = document.getElementById('verw');
     if (!el) return;
@@ -1540,6 +1638,23 @@ function _pennaDice(v) {
     el.textContent = ok ? '✍ borde' : ('⚠ ' + _PENNA_ULT);
     el.style.color = ok ? '#22c55e' : '#f5a623';
   } catch (e) {}
+}
+/* i contatori si svuotano SOLO quando sono partiti: se il POST che li porta
+   fallisce, restano e ripartono col prossimo — un conteggio che si perde
+   silenziosamente è peggio di nessun conteggio (la lezione della coda). */
+function _pennaPack() {
+  if (!MURO_ON) return null;
+  const ks = Object.keys(_PENNA_N);
+  if (!ks.length) return null;
+  const cp = {}; ks.forEach(function (k) { cp[k] = _PENNA_N[k]; });
+  return cp;
+}
+function _pennaSvuota(inviato) {
+  if (!inviato) return;
+  Object.keys(inviato).forEach(function (k) {
+    _PENNA_N[k] = Math.max(0, (_PENNA_N[k] || 0) - inviato[k]);
+    if (!_PENNA_N[k]) delete _PENNA_N[k];
+  });
 }
 
 /* ═════ v3.24.0 · [AUT-0058] · IL TESTIMONE — il bordo viene a sapere ══════
@@ -2043,6 +2158,7 @@ function _cieUid(monto) {
 function _cieCerrar() { CIE.paso = 0; CIE.res = null; CIE.motivo = ''; $('cierreWrap').innerHTML = ''; }
 
 async function cierreAbrir() {
+  muroT0('corte');   // ⏱ [AUT-0159] è la lettura più pesante del vetro
   if (!STATE.codigo || !STATE.nombre) { salir(); return; }
   CIE.paso = 1; CIE.data = null; CIE.res = null; CIE.motivo = '';
   /* l'uid vive UN flusso: dentro (retry compresi) resta lo stesso — il server
@@ -2254,6 +2370,7 @@ function _cieListo() { _cieCerrar(); salir(); }
 function _cieSalirSinCerrar() { _cieCerrar(); salir(); }
 
 function _cieRender(inner) {
+  try { muroFin(); } catch (e) {}   // ⏱ [AUT-0159] · il corte
   $('cierreWrap').innerHTML =
     '<div class="cs-pago" onclick="if(event.target===this)_cieCerrar()"><div class="cs-pcard cie-card">' +
     '<div class="cs-asa"></div>' + inner + '</div></div>';
@@ -4504,6 +4621,10 @@ function _recibo(d) {
 
 /* ═════ v2.1 · UNA HOJA SOLA per i verbi (la ✕ la mette la porta) ═════ */
 function vhoja(h) {
+  /* ⏱ [AUT-0159] il muro si chiude QUI: è il punto unico dove atterrano i
+     fogli della sala (mover, eliminar, le liste). `muroFin` aspetta il frame
+     DIPINTO, non il return di questa funzione. */
+  try { muroFin(); } catch (e) {}
   let w = $('vhojaWrap');
   if (!w) { w = document.createElement('div'); w.id = 'vhojaWrap'; document.body.appendChild(w); }
   w.innerHTML = '<div class="cs-pago" onclick="if(event.target===this)vhojaCerrar()"><div class="cs-pcard">' +
@@ -5042,7 +5163,7 @@ let _mvDe = '', _mvA = '';
 /* il pannello riparte SEMPRE pulito: senza azzerare il passo e il PIN, chi
    riapre MOVER dopo un gesto fuori plaza si ritroverebbe la schermata del PIN
    con dentro le cifre di prima. */
-function vMoverSala(de) { _mvDe = de; _mvA = ''; _mvPin = ''; _mvPaso = 1; _vMoverPinta(); }
+function vMoverSala(de) { muroT0('mover'); _mvDe = de; _mvA = ''; _mvPin = ''; _mvPaso = 1; _vMoverPinta(); }
 function _mvLibres() {
   const vive = {};
   (STATE.mesasModel || []).forEach(function (m) { vive[m.mesa] = true; });
@@ -5136,17 +5257,38 @@ function _vMoverPinta() {
         return '<div class="cs-chip" onclick="_mvChip(\'' + esc(m) + '\')">' + esc(m) + '</div>'; }).join('') + '</div>' : '') +
     '<div class="cs-psec">A otra mesa · escribe el número</div>' +
     '<div class="visor2 ' + (_mvA ? '' : 'vacio') + '">' + (_mvA || 'número de mesa') + '</div>' +
+    /* ═══ 🔴 3-set · L'AVVISO SCENDE SOTTO I TASTI — difetto trovato da Alberto
+       col dito, provato con due screenshot a 25 s di distanza ═══════════════
+       Stava QUI, fra il visore e la griglia: scritta la PRIMA cifra l'avviso
+       nasceva e **spingeva giù il tastierino di una riga**. Il dito, già in
+       volo verso la seconda cifra, atterrava sul tasto della riga SOPRA:
+       `5-4 → 5-1` (mesa 50→51, salvata solo perché la 51 era occupata) e
+       `6-9 → 6-6`, riprodotto. **Il danno non è una cifra: è un tavolo
+       spostato sul numero sbagliato, cioè il consumo di un cliente sul conto
+       di un altro** — e chi digita piano non lo vede mai, perché riguarda lo
+       schermo dopo che l'avviso è comparso. *Il difetto puniva chi lavora in
+       fretta ed era invisibile a chi lo provava con calma.*
+       👉 CURA ① della norma di 🎨 DESIGN (`NORMA_FAMIGLIA_SALA_02SET2026` §4-bis):
+       **niente che possa apparire o sparire sta SOPRA una superficie che si
+       tocca.** L'avviso va sotto la griglia, nella zona che già cambia da sola
+       (il bottone che passa da «Escribe la mesa destino» a «Seguir · PIN del
+       JL») senza spostare niente, perché è sotto. Scartata la cura ② (spazio
+       riservato): l'avviso può andare a capo, e riservare UNA riga per un
+       messaggio che a volte ne occupa DUE ricrea il difetto in forma rara e
+       intermittente — cioè peggio dell'originale.
+       ⚠️ E il messaggio NON si tocca: «el consumo sale de tus manos» dice una
+       cosa vera a chi sta per spostare un consumo fuori dalle proprie mani. */
+    '<div class="tecl2">' + [1,2,3,4,5,6,7,8,9].map(function (n) {
+      return '<button onclick="_mvTecla(\'' + n + '\')">' + n + '</button>'; }).join('') +
+      '<button class="acc" onclick="_mvTecla(\'B\')">←</button>' +
+      '<button onclick="_mvTecla(\'0\')">0</button>' +
+      '<button class="acc" onclick="_mvTecla(\'C\')">C</button></div>' +
     (_mvA ? '<div class="quien2 ' + (valido ? '' : 'mala') + '">' +
       (_mvA === _mvDe ? '⚠️ Es la <b>misma mesa</b>'
         : ocupada2 ? '⚠️ La mesa <b>' + esc(_mvA) + '</b> ya tiene gente'
         : mia ? 'Mesa <b>' + esc(_mvA) + '</b> · <b>tu plaza</b> — se mueve al toque'
               : 'Mesa <b>' + esc(_mvA) + '</b> · <b>fuera de tu plaza</b> — el consumo sale de tus manos') +
       '</div>' : '') +
-    '<div class="tecl2">' + [1,2,3,4,5,6,7,8,9].map(function (n) {
-      return '<button onclick="_mvTecla(\'' + n + '\')">' + n + '</button>'; }).join('') +
-      '<button class="acc" onclick="_mvTecla(\'B\')">←</button>' +
-      '<button onclick="_mvTecla(\'0\')">0</button>' +
-      '<button class="acc" onclick="_mvTecla(\'C\')">C</button></div>' +
     /* fuori plaza il bottone non muove: porta al PIN. Dentro plaza muove,
        identico a prima — e col flag spento è identico in tutti e due i casi. */
     '<button class="btn" ' + (valido ? '' : 'disabled') +
@@ -5577,6 +5719,7 @@ function _dtFalta() {
 
 /* ── LO STATO ────────────────────────────────────────────────────────────── */
 function vDescontar3(mesa) {
+  muroT0('eliminar');   // ⏱ [AUT-0159]
   var tot = _vpTot(mesa);
   if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
   _dt = { mesa: mesa, tot: tot, promo: _dtPromo(mesa), tipo: '',
@@ -7365,6 +7508,7 @@ async function fintocRegistrar(mesa) {
 }
 
 function abrirMesa(mesa) {
+  muroT0('abrir_mesa');   // ⏱ [AUT-0159]
   STATE.mesaAbierta = mesa;
   $('mesaOvl').classList.add('on');
   $('mesaSheet').classList.add('on');
@@ -7616,6 +7760,7 @@ function liberarMesa(uuid, mesa, tsEnt, btn) {
       qualcosa (`mesa_abierta`): sparisce solo quando è coperta.
    Senza `parte` è il pago di sempre, riga per riga. */
 function abrirPago(mesa, parte) {
+  muroT0('abrir_pago');   // ⏱ [AUT-0159]
   /* v2.0.1 · IL DENARO NON SI FIDA DELLA FOTO LOCALE (reperto ROSSO del
      collaudo): su una foto di boot fino a 30 min vecchia, mesas_pagadas può
      non contenere un pago appena entrato → fascia rossa assente → seconda
