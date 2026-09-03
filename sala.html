@@ -960,7 +960,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.65.0</span>
+      <span class="ver" id="ver">sala v3.66.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1618,17 +1618,59 @@ const ECO_LARGO_ON = QS.get('ecolargo') !== '0';
    secondi. Un `failed` non si mostra MAI.
    🧯 Stesso interruttore della famiglia (`eco_largo_off` dal poll) + `?enll=0`
    per il collaudo. NASCE SPENTA: si accende domattina, guardandola. */
-/* NASCE SPENTA: `?enll=1` la accende su un apparecchio (il collaudo di
-   stasera), e la leva vera per tutta la sala resta `eco_largo_off` dal poll —
-   la stessa della famiglia, così il JL li spegne insieme con una chiave. */
-const ENLLEGADA_ON = QS.get('enll') === '1';
+/* ═══ 🧯 L'INTERRUTTORE · corretto la sera del 3-set, a locale chiuso ═══════
+   🔴 LA PRIMA STESURA ERA `QS.get('enll') === '1'` e basta — senza memoria.
+   Difetto trovato guardando il mio flag accanto agli altri della casa
+   (`pagob`·`desc2`·`corr2`·`muro`, che tutti ricordano): chi apriva `?enll=1`
+   e poi RICARICAVA tornava spento senza che nessuno l'avesse spento — e se in
+   quel momento non vedeva l'«in arrivo», concludeva «non funziona».
+   🎓 LA FORMA DELL'ERRORE, che vale oltre questa riga: **ho scritto un
+   interruttore guardando come si SPEGNE e non come si ACCENDE.** «Nasce
+   spenta, si accende col link» e mi sono fermata lì — senza chiedermi cosa
+   succede al SECONDO caricamento, che è il primo caso reale.
+   *Il primo caricamento è quello che immagina chi scrive; il secondo è quello
+   che vive chi usa — e tutti i collaudi guardano il primo.*
+   ⚖️ E la ragione per cui si correggeva STANOTTE e non domattina non è la
+   persistenza: è che senza il default server-side, «accendiamo per la sala?»
+   sarebbe stato un DEPLOY deciso di corsa la mattina di venerdì. Adesso è una
+   riga in PARAMETROS — una decisione, non una corsa.
+   🔑 TRE LIVELLI, dal più forte al più debole: ① il parametro nell'URL (e si
+   RICORDA nell'apparecchio) ② la memoria di questo telefono ③ il default che
+   il SERVER dice a tutti (`enllegada_on` nel poll). E `eco_largo_off` resta
+   sopra tutto: spegne l'intera famiglia con una chiave sola. */
+const ENLL_KEY = 'pinsita_enll';
+const ENLLEGADA_ON = (function () {
+  const q = QS.get('enll');
+  try {
+    if (q === '1') { localStorage.setItem(ENLL_KEY, '1'); return true; }
+    if (q === '0') { localStorage.setItem(ENLL_KEY, '0'); return false; }
+    const m = localStorage.getItem(ENLL_KEY);
+    if (m === '1') return true;
+    if (m === '0') return false;
+    return null;      // nessuna scelta su questo apparecchio: decide il server
+  } catch (e) { return q === '1' ? true : (q === '0' ? false : null); }
+})();
+/* `null` = «non deciso qui» ⇒ comanda il server. Finché il server non dice
+   niente, resta SPENTA: chi non ha parametro né memoria vede esattamente la
+   sala di oggi, byte per byte. */
+function _enllAttiva(r) {
+  if (ENLLEGADA_ON === true) return true;
+  if (ENLLEGADA_ON === false) return false;
+  return !!(r && r.enllegada_on === true);
+}
 var _ENLL = [];        // gli «in arrivo» dell'ultimo giro
 var _ENLL_TRONC = 0;   // quanti la rotta ha tagliato (mai un tetto muto)
 /* La lettura: stessa serratura di `sala_vista` (nessun token nuovo nel vetro).
    ⛔ Fallisce SEMPRE CHIUSA: qualunque intoppo → lista vuota, cioè il vetro di
    ieri. Non deve poter peggiorare niente, mai — è una cintura, non un motore. */
 async function _enllegadaLee(codigo, nombre) {
-  if (!ENLLEGADA_ON || !BORDE_SALA.ON || !BORDE_SALA.URL) { _ENLL = []; _ENLL_TRONC = 0; return; }
+  /* 🔑 la LETTURA non conosce ancora la risposta del poll (viaggiano in
+     parallelo), quindi qui basta che non sia spenta ESPLICITAMENTE: se il
+     server la accende, il dato c'è già quando serve. Chi decide se MOSTRARE
+     è `_enllegadaDaMostrare`, che la risposta ce l'ha. *Leggere un dato che
+     poi non si mostra costa una fetch da 3 s in parallelo; NON averlo quando
+     il server accende costerebbe un giro intero di ritardo.* */
+  if (ENLLEGADA_ON === false || !BORDE_SALA.ON || !BORDE_SALA.URL) { _ENLL = []; _ENLL_TRONC = 0; return; }
   try {
     const u = BORDE_SALA.URL + '/enllegada/' + encodeURIComponent(CFG.LOCAL || 'BKS')
       + '?t=' + encodeURIComponent(BORDE_SALA.T)
@@ -1654,7 +1696,7 @@ async function _enllegadaLee(codigo, nombre) {
    ha, spariscono da qui e restano solo nella loro riga vera — è la stessa
    regola dell'eco (`AUT-0165`): si molla per CONFERMA, non a timer. */
 function _enllegadaDaMostrare(r) {
-  if (!ENLLEGADA_ON || !_ENLL.length) return [];
+  if (!_enllAttiva(r) || !_ENLL.length) return [];
   if (r && r._eco_largo_off) return [];   // l'interruttore unico della famiglia
   const visti = {};
   ['mios', 'pendientes', 'por_limpiar', 'sin_dueno'].forEach(function (k) {
