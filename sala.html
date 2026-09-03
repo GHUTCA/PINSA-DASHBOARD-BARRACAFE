@@ -960,7 +960,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.64.0</span>
+      <span class="ver" id="ver">sala v3.65.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1588,6 +1588,101 @@ let _PENNA_ULT = '';
    INTERO, non un vetro). Il `?ecolargo=0` qui sotto resta come cacciavite del
    collaudo di stanotte, non come rollback di servizio. */
 const ECO_LARGO_ON = QS.get('ecolargo') !== '0';
+
+/* ═══ 📥 [AUT-0173] · L'ECO DEL BORDO — gli ordini che il libro non ha ancora
+   ════════════════════════════════════════════════════════════════════════
+   Alberto, 3-set, la priorità sopra tutte: *«l'unica cosa che ci giudicherà è
+   che nel vetro ci siano sempre gli ordini e la sala. Se gli ordini dal QR
+   spariscono sarà un problemone.»*
+   🔬 LA MISURA CHE L'HA APERTA (mia, n=158 pedidos QR, fossile): p50 80 s ·
+   **p90 1.326 s (22 min)** · max 5.715 s (95 min) · **34% presi oltre i 5
+   minuti**. La causa è strutturale: l'eco del vetro copre SOLO i gesti di
+   QUESTO telefono (`STATE.tomando` da `marcarPedido`, `_marcarLocal` da
+   digitado/entregado/limpia) — **un ordine nato dal QR non passa da nessuna
+   delle due e arriva solo dentro la FOTO**, che oscilla fino a 375 s. E il
+   push notifica ma non porta il pedido (`showNotification`, nessun listener).
+   ⚠️ E `MAX_EDAD_MS` a 15 min è una decisione di Alberto del 23-ago — «se vede
+   la foto vecchia non è tanto problema, il problema è non vederla» — **presa
+   quando non sapevamo che il QR ci sarebbe passato dentro**. Giusta per il suo
+   mondo, diventata insufficiente quando è entrato un caso nuovo.
+   👉 LA CURA: il bordo SA già quali pedidos ha accettato. Il vetro glieli
+   chiede e li mostra **marcati come provvisori**, finché la foto non li porta.
+   🔴 CONDIZIONE DEL 🎛, non negoziabile: **un ordine fantasma è PEGGIO di uno
+   mancante** — il mancante lo scopre il cliente e si ripara, il fantasma
+   produce cibo che nessuno ha ordinato e nessuno paga. Quindi si vede che NON
+   è ancora un fatto, e sparisce appena la foto lo conferma.
+   ⚖️ E LA GERARCHIA DEL RISCHIO, che si rovescia rispetto all'intuizione
+   (reperto di ⚙️ + mia lettura): un `fosil` — già scritto nel libro, solo non
+   ancora nella foto — **NON PUÒ diventare fantasma**, ed è l'insieme grosso,
+   quello dei 22 minuti. Un `aceptado` (non ancora inoltrato) sì, ma dura
+   secondi. Un `failed` non si mostra MAI.
+   🧯 Stesso interruttore della famiglia (`eco_largo_off` dal poll) + `?enll=0`
+   per il collaudo. NASCE SPENTA: si accende domattina, guardandola. */
+/* NASCE SPENTA: `?enll=1` la accende su un apparecchio (il collaudo di
+   stasera), e la leva vera per tutta la sala resta `eco_largo_off` dal poll —
+   la stessa della famiglia, così il JL li spegne insieme con una chiave. */
+const ENLLEGADA_ON = QS.get('enll') === '1';
+var _ENLL = [];        // gli «in arrivo» dell'ultimo giro
+var _ENLL_TRONC = 0;   // quanti la rotta ha tagliato (mai un tetto muto)
+/* La lettura: stessa serratura di `sala_vista` (nessun token nuovo nel vetro).
+   ⛔ Fallisce SEMPRE CHIUSA: qualunque intoppo → lista vuota, cioè il vetro di
+   ieri. Non deve poter peggiorare niente, mai — è una cintura, non un motore. */
+async function _enllegadaLee(codigo, nombre) {
+  if (!ENLLEGADA_ON || !BORDE_SALA.ON || !BORDE_SALA.URL) { _ENLL = []; _ENLL_TRONC = 0; return; }
+  try {
+    const u = BORDE_SALA.URL + '/enllegada/' + encodeURIComponent(CFG.LOCAL || 'BKS')
+      + '?t=' + encodeURIComponent(BORDE_SALA.T)
+      + '&vista=' + encodeURIComponent(_slugSalaJS(nombre))
+      + '&codigo=' + encodeURIComponent(codigo);
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 3000);   // corto: non deve MAI ritardare il poll
+    const r = await fetch(u, { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    const j = await r.json();
+    if (!r.ok || !j || !Array.isArray(j.pedidos)) { _ENLL = []; _ENLL_TRONC = 0; return; }
+    /* 🔴 `failed` NON entra: quello sarebbe il fantasma vero — il bordo l'ha
+       rifiutato e mostrarlo manderebbe il mesero a servire il nulla. Si tiene
+       ciò che il libro ha già (`fosil`, l'insieme dei 22 minuti) e ciò che il
+       bordo ha appena preso (`aceptado`, finestra di secondi). */
+    _ENLL = j.pedidos.filter(function (p) {
+      return p && p.uuid && (p.estado === 'fosil' || p.estado === 'aceptado');
+    });
+    _ENLL_TRONC = parseInt(j.troncato_n, 10) || (j.troncato ? -1 : 0);
+  } catch (e) { _ENLL = []; _ENLL_TRONC = 0; }
+}
+/* Quali mostrare: solo quelli che la FOTO NON PORTA ancora. Appena la foto li
+   ha, spariscono da qui e restano solo nella loro riga vera — è la stessa
+   regola dell'eco (`AUT-0165`): si molla per CONFERMA, non a timer. */
+function _enllegadaDaMostrare(r) {
+  if (!ENLLEGADA_ON || !_ENLL.length) return [];
+  if (r && r._eco_largo_off) return [];   // l'interruttore unico della famiglia
+  const visti = {};
+  ['mios', 'pendientes', 'por_limpiar', 'sin_dueno'].forEach(function (k) {
+    (r && r[k] || []).forEach(function (p) { if (p && p.uuid) visti[p.uuid] = 1; });
+  });
+  /* 🔴 LA LISTA CHIUSA SI RIPETE QUI, e non è ridondanza — trovata dal banco:
+     prima il `failed` era escluso SOLO in lettura (`_enllegadaLee`). Bastava
+     che `_ENLL` si popolasse da un'altra strada — un domani, un ripiego, una
+     riga di collaudo — e un pedido RIFIUTATO sarebbe finito sul vetro: cioè
+     esattamente il fantasma che questa cura esiste per non produrre.
+     *Una guardia sul denaro (o sul cibo) non si mette sul cammino: si mette
+     sull'ULTIMO cancello prima dell'occhio.* */
+  return _ENLL.filter(function (p) {
+    if (!p || !p.uuid) return false;
+    if (p.estado !== 'fosil' && p.estado !== 'aceptado') return false;
+    return !visti[p.uuid] && !STATE.tomando[p.uuid];
+  }).sort(function (a, b) {
+    /* 🔴 IL PIÙ VECCHIO IN CIMA — dal caso mesa 33 di oggi (🍳 + 🎛): il chit
+       era nato in 30 s ed era STAMPATO; il piatto era pronto alle 12:29 e il
+       mesero se n'è accorto alle 12:48. **Non perdiamo ordini: produciamo
+       piatti che restano fermi al pass mentre nessuno sa che quel tavolo
+       esiste.** E dal passe un piatto pronto da venti minuti è indistinguibile
+       da uno appena uscito. ⇒ in una lista di «in arrivo», quello che aspetta
+       da di più è il più urgente, e deve stare dove l'occhio cade per primo —
+       l'ordine di arrivo qui sarebbe l'ordine sbagliato. */
+    return (new Date(a.ts || 0).getTime() || 0) - (new Date(b.ts || 0).getTime() || 0);
+  });
+}
 const MURO_KEY = 'pinsita_muro';
 const MURO_ON = (function () {
   const q = QS.get('muro');
@@ -4500,7 +4595,14 @@ async function refrescar(conSkeleton) {
   const _pollT0 = Date.now();
   if (conSkeleton) $('secPend').innerHTML = '<div class="h">Cargando sala…</div><div class="card cargando" style="height:70px"></div>';
   try {
-    const r = await leerSala(STATE.codigo, STATE.nombre);
+    /* 📥 [AUT-0173] · la lettura degli «in arrivo» viaggia IN PARALLELO alla
+       sala: `Promise.all` e non `await` in fila — la sala non deve aspettare
+       una cintura nemmeno di 200 ms. E `_enllegadaLee` non lancia mai: se
+       inciampa, la lista resta vuota e il vetro è quello di ieri. */
+    const [r] = await Promise.all([
+      leerSala(STATE.codigo, STATE.nombre),
+      _enllegadaLee(STATE.codigo, STATE.nombre),
+    ]);
     if (!r || !r.ok) {
       if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) {
         _strikeTurno(); return;   // v1.11 · si esce solo al 3° consecutivo
@@ -10018,9 +10120,58 @@ function render(r) {
 
   // SIN DUEÑO
   const sd = (r.sin_dueno || []).filter(p => !STATE.tomando[p.uuid]);   // v1.16 · anti-flicker
-  $('secSinDueno').innerHTML = sd.length
-    ? '<div class="h bad">Sin dueño · nadie lo tomó — ' + sd.length + '</div>' + sd.map(p => cardPedido(p, umb, 'Mío — lo tomo yo', 'mio', true)).join('')
+  /* ═══ 📥 [AUT-0173] · GLI «IN ARRIVO» — il bordo li ha, la foto no ═══════
+       🔴 VISIBILMENTE PROVVISORI, condizione non negoziabile del 🎛: un ordine
+       fantasma è PEGGIO di uno mancante — il mancante lo scopre il cliente e
+       si ripara, il fantasma produce cibo che nessuno paga. Quindi: tratteggio
+       invece di bordo pieno, etichetta «EN CAMINO · aún no está en el libro»,
+       e NESSUN bottone — non si può prendere ciò che non è ancora un fatto: si
+       prende quando la foto lo porta, cioè fra pochi secondi.
+       ⚖️ E il mesero ci guadagna la cosa che gli serve davvero: **sa che il
+       tavolo ha ordinato**, che è l'informazione che oggi gli manca per 22
+       minuti. */
+  const enll = _enllegadaDaMostrare(r);
+  const enllHtml = enll.length
+    ? '<div class="h" style="color:#7dd3fc">📥 En camino · el libro aún no los tiene — ' + enll.length +
+        (_ENLL_TRONC ? ' <span style="opacity:.7;font-weight:400">(y ' + (_ENLL_TRONC > 0 ? _ENLL_TRONC : 'más') + ' que no caben)</span>' : '') + '</div>' +
+      enll.map(function (p) {
+        const it = itemsDe(p);
+        const n = it.reduce(function (s, x) { return s + (parseInt(x.qty, 10) || 1); }, 0);
+        const hace = p.ts ? Math.max(0, Math.round((Date.now() - new Date(p.ts).getTime()) / 1000)) : 0;
+        /* 🔴 oltre i 3 minuti il piatto è quasi certamente GIÀ PRONTO al pass
+           (mesa 33: chit in 30 s, piatto pronto a 1 min, mesero a 20 min) —
+           quindi non è più «sta arrivando», è «qualcuno lo sta aspettando».
+           Il colore cambia perché cambia il MESTIERE della riga, non per
+           decorazione: sotto i 3 min informa, sopra chiama. */
+        const fermo = hace >= 180;
+        const col = fermo ? '#f5a623' : '#7dd3fc';
+        return '<div class="card" style="border:1.5px dashed ' + col + ';background:rgba(' +
+            (fermo ? '245,166,35' : '125,211,252') + ',.06);opacity:.92">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
+            '<span class="mesa">MESA ' + esc(p.mesa) + '</span>' +
+            '<span style="font-size:11px;font-weight:800;color:' + col + '">' +
+              (fermo ? '⏳ ESPERANDO' : 'EN CAMINO') +
+              (hace ? ' · hace ' + (hace < 120 ? hace + ' s' : Math.round(hace / 60) + ' min') : '') + '</span></div>' +
+          /* `productos` arriva come ARRAY dal contratto di ⚙️ (03-set 17:5x) —
+             ma si accetta anche una stringa: un contratto può cambiare, e una
+             riga che si rompe sul tipo lascerebbe il mesero senza l'unica cosa
+             che gli serve, cioè COSA hanno ordinato. Se non c'è né l'uno né
+             l'altro, si dice quanti sono invece di mentire con un vuoto. */
+          '<div style="font-size:13.5px;margin-top:5px;line-height:1.4">' +
+            esc(Array.isArray(p.productos)
+                  ? p.productos.map(function (x) {
+                      return typeof x === 'string' ? x
+                        : ((x && x.qty > 1 ? x.qty + '× ' : '') + ((x && (x.nombre || x.n)) || ''));
+                    }).filter(Boolean).join(' · ')
+                  : (p.productos || (n + ' producto' + (n > 1 ? 's' : '')))) + '</div>' +
+          (p.total ? '<div style="font-size:12.5px;opacity:.75;margin-top:3px">' + fmtPrice(p.total) + '</div>' : '') +
+          '<div style="font-size:11px;opacity:.7;margin-top:6px">aún no está en el libro · aparece solo cuando el libro lo confirma</div>' +
+        '</div>';
+      }).join('')
     : '';
+  $('secSinDueno').innerHTML = enllHtml + (sd.length
+    ? '<div class="h bad">Sin dueño · nadie lo tomó — ' + sd.length + '</div>' + sd.map(p => cardPedido(p, umb, 'Mío — lo tomo yo', 'mio', true)).join('')
+    : '');
 
   // v2.0 · i MÍOS vivono nella griglia MIS MESAS + sheet: la vecchia lista
   // si spegne. cardMio() (sotto) resta il renderer, usato dallo sheet.
