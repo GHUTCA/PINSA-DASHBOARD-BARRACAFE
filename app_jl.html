@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.0.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.1.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -117,7 +117,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.0.0</span>
+<span class="ver" id="ver">app_jl v1.1.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -196,7 +196,7 @@ async function staffPost(action, body) {
 /* ═════ IL GIRO DEI DATI — ognuno col suo ritmo, MAI davanti a un dito ═════
    veloce (bordo):  vista sala · /pedidos (rechazos) · /salud · /sdp-cola
    lento (GAS):     getTurnoAdmin (al login + ogni 5 min) · getCaja (60 s
-                    quando la scheda Caja è davanti) · getAgotados (a domanda) */
+                    quando la scheda Caja è davanti) · adminListProducts (per il 86) */
 async function giroVeloce() {
   if (DEMO) return;
   const cod = STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo;
@@ -232,11 +232,13 @@ async function giroCaja() {
     if (r && r.ok) { STATE.caja = r; STATE.ts.caja = Date.now(); salva(); pintaTesta(); pintaTab(); }
   } catch (e) {}
 }
-async function giroAgotados() {
-  if (DEMO) return;
+async function giroProds() {
+  /* il catalogo del pannello (adminListProducts): serve al 🚫 86 — ricerca
+     client e conteggio agotados. Lento → dietro, cache 10 min. */
+  if (DEMO || !STATE.pin) return;
   try {
-    const r = await gasPost('getAgotados', {});
-    if (r && r.ok) { STATE.agotados = r; STATE.ts.agotados = Date.now(); salva(); if (TAB === -1) ochenta(); }
+    const r = await gasPost('adminListProducts', { pin: STATE.pin });
+    if (r && r.ok) { STATE.prods = r.products || []; STATE.ts.prods = Date.now(); salva(); pintaTesta(); if (TAB === -1) ochenta(); }
   } catch (e) {}
 }
 
@@ -282,7 +284,7 @@ function pintaTesta() {
   if (rz) A.push('<button onclick="tab(2)">💳 rechazos <i>' + rz.n + '</i></button>');
   const sp = _sinPapel();
   if (sp) A.push('<button>🖨 ' + esc(sp.join(' · ')) + ' <i>sin retirar</i></button>');
-  const ag = STATE.agotados && STATE.agotados.items ? STATE.agotados.items.length : 0;
+  const ag = (STATE.prods || []).filter(p => p.agotado).length;
   if (ag) A.push('<button class="amb" onclick="ochenta()">🚫 86 <i>' + ag + '</i></button>');
   else A.push('<button class="amb" onclick="ochenta()">🚫 86</button>');
   $('hAlr').innerHTML = A.join('');
@@ -396,6 +398,15 @@ function vTurno() {
     h += '<div class="card"><h4>👥 Plazas <span class="pill ' + (sinD.length ? 'amb' : 'on') + '">' + ((t.plazas || []).length - sinD.length) + ' asignadas · ' + sinD.length + ' sin dueño</span></h4>' +
       '<p class="mini">Vienen del plan (RRHH). Aquí se toca solo para <b>cambiar</b>.</p>' +
       '<button class="btn gh" onclick="tabAsig()">Cambiar una asignación</button></div>';
+    /* el menú — la leva vera: setLevaMenu {pin, escalon: esca|estandar|off}
+       (v3.61.0: la usano il Panel e il reloj; l'audit porta la firma) */
+    const lv = STATE.leva || null;
+    h += '<div class="card"><h4>📖 El menú' + (lv ? ' <span class="pill ' + (lv === 'off' ? 'off' : 'on') + '">' + esc(lv.toUpperCase()) + '</span>' : ' <span class="pill off">—</span>') + '</h4>' +
+      '<div class="row2">' +
+      '<button class="btn" onclick="leva(\'esca\')">Esca</button>' +
+      '<button class="btn" onclick="leva(\'estandar\')">Estándar</button>' +
+      '<button class="btn gh" onclick="leva(\'off\')">Apagar</button></div>' +
+      '<p class="mini">Doble confirmación. Queda firmado a tu nombre; el reloj lo devuelve solo al horario.</p></div>';
     /* cambio de turno */
     h += '<div class="card"><h4>🔄 Cambio de turno <span class="pill amb">EN SEMANA</span></h4>' +
       '<p class="mini">El entrante hace clock-in → sus mesas pasan solas, con todo. El saliente: corte y a casa. Excepción: «me quedo con la N».</p></div>';
@@ -410,6 +421,15 @@ function vTurno() {
   }
   h += '<p class="mini" style="margin:4px 2px">📷 turno ' + edadTxt('turno') + ' · caja ' + edadTxt('caja') + '</p>';
   return h;
+}
+async function leva(escalon) {
+  if (!confirm('¿Menú → ' + escalon.toUpperCase() + '?')) return;
+  if (!confirm('Segunda confirmación: ' + escalon.toUpperCase() + ' para TODO el local.')) return;
+  try {
+    const r = await gasPost('setLevaMenu', { pin: STATE.pin, escalon: escalon });
+    if (r && r.ok) { STATE.leva = r.escalon || escalon; salva(); toast('ok', '📖 Menú: ' + STATE.leva.toUpperCase()); pintaTab(); }
+    else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
+  } catch (e) { toast('err', 'Sin conexión — no cambió nada'); }
 }
 async function abrirT() {
   if (!confirm('¿Abrir el turno de hoy?')) return;
@@ -495,15 +515,23 @@ function _franja(hhmm) {
   if (h >= 20 && h < 22) return 'NOCHE';
   return 'TRASNOCHE';
 }
+/* i TURNI sono un raggruppamento delle franjas (ordine di Alberto, 05-set):
+   AM = Almuerzo(DÍA) + HH · PM = NOCHE + TRASNOCHE. Una definizione sola. */
+const TURNI = { AM: ['DÍA', 'HH'], PM: ['NOCHE', 'TRASNOCHE'] };
 function vVentas() {
   const c = STATE.caja;
-  let h = '<div class="card"><h4>📊 Venta por franja <span class="pill off">📷 ' + edadTxt('caja') + '</span></h4>';
+  let h = '<div class="card"><h4>📊 Venta por turno y franja <span class="pill off">📷 ' + edadTxt('caja') + '</span></h4>';
   const fr = (c && c.por_franja) || null;
   if (fr) {
-    h += '<table class="rep"><tr><th>franja</th><th>venta</th><th>ctas</th><th>prom</th></tr>';
-    ['DÍA', 'HH', 'NOCHE', 'TRASNOCHE'].forEach(f => {
-      const x = fr[f] || { venta: 0, ctas: 0 };
-      h += '<tr><td>' + f + '</td><td>' + fmt(x.venta) + '</td><td>' + x.ctas + '</td><td>' + (x.ctas ? fmt(x.venta / x.ctas) : '—') + '</td></tr>';
+    h += '<table class="rep"><tr><th>&nbsp;</th><th>venta</th><th>ctas</th><th>prom</th></tr>';
+    Object.keys(TURNI).forEach(tn => {
+      let tv = 0, tc = 0;
+      TURNI[tn].forEach(f => { const x = fr[f] || {}; tv += x.venta || 0; tc += x.ctas || 0; });
+      h += '<tr><td><b>Turno ' + tn + '</b></td><td><b>' + fmt(tv) + '</b></td><td><b>' + tc + '</b></td><td><b>' + (tc ? fmt(tv / tc) : '—') + '</b></td></tr>';
+      TURNI[tn].forEach(f => {
+        const x = fr[f] || { venta: 0, ctas: 0 };
+        h += '<tr><td style="padding-left:16px;color:#8f887a">' + f + '</td><td>' + fmt(x.venta || 0) + '</td><td>' + (x.ctas || 0) + '</td><td>' + (x.ctas ? fmt(x.venta / x.ctas) : '—') + '</td></tr>';
+      });
     });
     h += '</table>';
   } else {
@@ -521,40 +549,48 @@ function vVentas() {
   return h;
 }
 
-/* ═════ 🚫 86 ═════ */
+/* ═════ 🚫 86 — il verbo VERO è adminToggle86 {pin, prod_id, value}
+   (il pannello vecchio, menu_admin r.1124 — NON adminForzar, che è il
+   forzado per-prodotto dei gerenti. Errore trovato da Alberto in revisione). */
 let TAB = 0;
 function ochenta() {
   TAB = -1;
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', 'false'));
-  const ag = STATE.agotados && STATE.agotados.items ? STATE.agotados.items : [];
+  const q = (window._q86 || '').toLowerCase();
+  const ps = STATE.prods || [];
+  const ag = ps.filter(p => p.agotado);
   let h = '<div class="card rossa"><h4>🚫 Se acabó algo</h4>' +
-    '<input class="busca" id="q86" placeholder="escribe el producto…">' +
-    '<button class="btn" onclick="marcar86()">Marcar 86</button>' +
-    '<p class="mini">Un toque y sale del menú al instante.</p></div>';
+    '<input class="busca" id="q86" value="' + esc(window._q86 || '') + '" placeholder="escribe el producto…" oninput="window._q86=this.value;ochentaLista()">' +
+    '<div id="l86"></div>' +
+    '<p class="mini">Un toque y sale del menú al instante — el cliente deja de verlo en el QR.</p></div>';
   h += '<div class="card"><h4>Agotados ahora <span class="pill off">' + ag.length + '</span></h4>';
-  if (!ag.length) h += '<p class="mini">' + (STATE.ts.agotados ? 'Nada agotado.' : 'Cargando…') + '</p>';
+  if (!ag.length) h += '<p class="mini">' + (STATE.ts.prods ? 'Nada agotado.' : 'Cargando el catálogo detrás…') + '</p>';
   ag.forEach(a => {
-    h += '<div class="cob">' + esc(a.nombre || a.id || a) + '<button class="btn gh" style="width:auto;margin:0 0 0 auto;padding:5px 10px" onclick="volver86(\'' + esc(a.id || a.nombre || a) + '\')">volvió</button></div>';
+    h += '<div class="cob">' + esc(a.nombre || a.id) + '<button class="btn gh" style="width:auto;margin:0 0 0 auto;padding:5px 10px" onclick="toggle86(\'' + esc(a.id) + '\',false)">volvió</button></div>';
   });
   h += '<p class="mini" style="color:#FFB558">⏱ Vuelven solos al horario de corte — si algo sigue agotado, se remarca.</p></div>';
   $('body').innerHTML = h; $('body').scrollTop = 0;
-  giroAgotados();
+  ochentaLista();
+  if (!STATE.ts.prods || edadS('prods') > 600) giroProds();
 }
-async function marcar86() {
-  const q = ($('q86').value || '').trim();
-  if (!q) { toast('warn', '¿Qué producto?'); return; }
-  try {
-    const r = await gasPost('adminForzar', { pin: STATE.pin, code: '86_on', prod: q });
-    if (r && r.ok) { toast('ok', '🚫 ' + q + ' fuera del menú'); giroAgotados(); }
-    else toast('err', '✋ ' + ((r && r.error) || 'No se pudo — ¿nombre exacto?'));
-  } catch (e) { toast('err', 'Sin conexión'); }
+function ochentaLista() {
+  const el = $('l86'); if (!el) return;
+  const q = (window._q86 || '').toLowerCase().trim();
+  if (q.length < 2) { el.innerHTML = ''; return; }
+  const hits = (STATE.prods || []).filter(p => !p.agotado && (p.nombre || '').toLowerCase().indexOf(q) >= 0).slice(0, 6);
+  el.innerHTML = hits.map(p =>
+    '<div class="cob">' + esc(p.nombre) + '<button class="btn gh" style="width:auto;margin:0 0 0 auto;padding:5px 10px" onclick="toggle86(\'' + esc(p.id) + '\',true)">86 hoy</button></div>').join('') ||
+    '<p class="mini">' + (STATE.ts.prods ? 'Nada con ese nombre.' : 'Cargando el catálogo…') + '</p>';
 }
-async function volver86(id) {
+async function toggle86(id, value) {
   try {
-    const r = await gasPost('adminForzar', { pin: STATE.pin, code: '86_off', prod: id });
-    if (r && r.ok) { toast('ok', '✓ volvió'); giroAgotados(); }
-    else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
-  } catch (e) { toast('err', 'Sin conexión'); }
+    const r = await gasPost('adminToggle86', { pin: STATE.pin, prod_id: id, value: value });
+    if (r && r.ok) {
+      toast('ok', value ? '🚫 fuera del menú' : '✓ volvió');
+      (STATE.prods || []).forEach(p => { if (p.id === id) p.agotado = value; });
+      salva(); pintaTesta(); ochenta();
+    } else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
+  } catch (e) { toast('err', 'Sin conexión — no cambió nada'); }
 }
 
 /* ═════ TAB + BOOT ═════ */
@@ -585,7 +621,7 @@ async function entrar() {
 }
 function boot() {
   pintaTesta(); tab(0);
-  giroVeloce(); giroCaja(); giroAgotados();
+  giroVeloce(); giroCaja(); giroProds();
   setInterval(giroVeloce, CFG.POLL_MS);
   setInterval(() => { if (TAB === 2 || TAB === 0) giroCaja(); }, 60000);
   setInterval(giroTurno, 300000);
@@ -605,8 +641,15 @@ function bootDemo() {
     por_mesero: { Gabriel: { venta: 75001, cuentas: 17 }, Anthony: { venta: 49072, cuentas: 24 }, July: { venta: 38597, cuentas: 26 }, Nacho: { venta: 30851, cuentas: 19 } },
     propinas: { tarjeta: 412300, efectivo: 96500, desc_pct: 5, meseros_pct: 65, monto_meseros: 323600 },
     cierres: [{ nombre: 'Gabriel' }] };
-  STATE.agotados = { ok: true, items: [{ id: 'tabla', nombre: 'Tabla Ganadera' }] };
-  STATE.ts = { turno: Date.now(), caja: Date.now(), vista: Date.now(), agotados: Date.now() };
+  STATE.prods = [
+    { id: 'tabla', nombre: 'Tabla Ganadera', agotado: true },
+    { id: 'coyam', nombre: 'Coyam', agotado: false },
+    { id: 'rocas57', nombre: 'Emiliana 57 Rocas', agotado: false }];
+  STATE.leva = 'estandar';
+  STATE.caja.por_franja = {
+    'DÍA': { venta: 2145000, ctas: 62 }, 'HH': { venta: 987000, ctas: 28 },
+    'NOCHE': { venta: 2210340, ctas: 34 }, 'TRASNOCHE': { venta: 1170000, ctas: 16 } };
+  STATE.ts = { turno: Date.now(), caja: Date.now(), vista: Date.now(), prods: Date.now() };
   STATE.salud = { ok: true };
   $('gate').className = 'hide';
   pintaTesta(); tab(0);
