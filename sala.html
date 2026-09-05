@@ -985,7 +985,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.71.0</span>
+      <span class="ver" id="ver">sala v3.72.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1082,14 +1082,38 @@ tecl=1  ->  campo mail visibile · ✅ bottone VISIBILE
    Sta QUI, accanto agli altri flag e PRIMA del primo uso: una `const` letta
    sopra la sua dichiarazione esplode in TDZ a locale aperto — già pagato con
    `MURO_ON` il 3-set. */
-const RESTO_ON = (function () {
+/* 🔴 v3.72.0 · [AUT-0188b] · DA «PER APPARECCHIO» A «PER TUTTA LA SALA».
+   Regola dettata da Alberto stanotte: **«o si attiva per TUTTI o niente per
+   nessuno — in pieno servizio non si chiede a un mesero di aprire un link
+   speciale»**. Ha ragione, ed era la mia stessa regola di stamattina sul
+   `?tmo=`: *due meseros con due comportamenti diversi nella stessa sala è un
+   guasto che ci costruiamo da soli.*
+   🎓 E la diagnosi del mio errore: **avevo copiato la forma di `TECLADO_ON`
+   per riflesso.** Ma il teclado è dell'APPARECCHIO per natura (dipende dal
+   telefono e dalla sua tacca); **una regola di CONTO è del LOCALE.** *Prima di
+   copiare la forma di un interruttore si guarda di chi è l'oggetto che governa.*
+   ⇒ TRE STATI, come `enllegada`: l'URL vince sulla memoria del telefono, che
+   vince sul default del server. `null` = «non deciso qui» ⇒ comanda il server. */
+const RESTO_PREF = (function () {
   const q = QS.get('resto');
   try {
     if (q === '1') { localStorage.setItem('sala_resto', '1'); return true; }
     if (q === '0') { localStorage.setItem('sala_resto', '0'); return false; }
-    return localStorage.getItem('sala_resto') === '1';
-  } catch (e) { return q === '1'; }
+    const m = localStorage.getItem('sala_resto');
+    if (m === '1') return true;
+    if (m === '0') return false;
+    return null;
+  } catch (e) { return q === '1' ? true : (q === '0' ? false : null); }
 })();
+/* 🔴 `=== true` STRETTO: le leve del bordo sono scritte come STRINGHE, e `"0"`
+   è truthy — una lettura permissiva accenderebbe la cura a tutta la sala
+   proprio mentre la property dice di tenerla spenta. Stessa coppia
+   booleano/stretto concordata con ⚙️ stamattina per `enllegada_sala_on`. */
+function _restoAttivo(r) {
+  if (RESTO_PREF === true) return true;
+  if (RESTO_PREF === false) return false;
+  return !!(r && r.resto_on === true);
+}
 
 const TECLADO_ON = (function () {
   const q = QS.get('tecl');
@@ -10313,7 +10337,11 @@ async function pagoConfirmar(btn) {
           NASCE SPENTO: si accende dopo il canarino. */
     else if (r && r.error === 'parte_mayor_que_resto') {
       var _res = Math.round(Number(r.residuo));
-      if (RESTO_ON && pg.c4 && isFinite(_res) && _res > 0 && _res < (pg.tot || 0)) {
+      /* 🔴 `STATE.sala`, NON `r`: qui dentro `r` è la risposta del PAGO, non
+         la fetta della sala — `_restoAttivo(r)` leggerebbe `resto_on` su un
+         oggetto che non lo porta e sarebbe sempre spenta. `STATE.sala` è la
+         stessa fetta che riceve `_enllAttiva`. */
+      if (_restoAttivo(STATE.sala) && pg.c4 && isFinite(_res) && _res > 0 && _res < (pg.tot || 0)) {
         pg.c4.pagadoAntes = Math.max(0, Math.round((pg.tot || 0) - _res));
         toast('warn', '💡 Esta mesa ya pagó una parte: faltan $' + _fmtMiles(_res) +
           '. Ya lo corregí — vuelve a tocar.');
