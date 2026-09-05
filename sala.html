@@ -985,7 +985,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.70.0</span>
+      <span class="ver" id="ver">sala v3.71.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1077,6 +1077,20 @@ tecl=1  ->  campo mail visibile · ✅ bottone VISIBILE
    🧯 `?tecl=0` resta la via d'uscita per apparecchio, intatta e provata.
    🔒 E il fail-safe non è cambiato: `--kb` nasce `0px` nel `:root` ⇒ senza JS
       o senza `visualViewport` questo vetro è quello di ieri, riga per riga. */
+/* 🎚 v3.71.0 · [AUT-0188] · l'interruttore della cura del RESTO. NASCE SPENTO:
+   si accende col canarino (`?resto=1`, e si ricorda), si spegne con `?resto=0`.
+   Sta QUI, accanto agli altri flag e PRIMA del primo uso: una `const` letta
+   sopra la sua dichiarazione esplode in TDZ a locale aperto — già pagato con
+   `MURO_ON` il 3-set. */
+const RESTO_ON = (function () {
+  const q = QS.get('resto');
+  try {
+    if (q === '1') { localStorage.setItem('sala_resto', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_resto', '0'); return false; }
+    return localStorage.getItem('sala_resto') === '1';
+  } catch (e) { return q === '1'; }
+})();
+
 const TECLADO_ON = (function () {
   const q = QS.get('tecl');
   /* memoria col nome POSITIVO (`sala_tecl` = '1'|'0'), non `..._off`: un flag
@@ -10264,6 +10278,49 @@ async function pagoConfirmar(btn) {
        (0 collisioni legittime in 48 giorni misurati): si dice QUALE */
     else if (r && r.error === 'voucher_duplicado') {
       toast('err', '🧾 ' + (r.mensaje || ('Ese voucher ya se usó hoy' + (r.mesa_anterior ? ' en la mesa ' + r.mesa_anterior : ''))));
+    }
+    /* ═══ 🔴 v3.71.0 · [AUT-0188] · IL VETRO IMPARA IL RESTO DAL RIFIUTO ══════
+       🔬 IL CASO, venerdì 4-set in servizio: **70 `pago_rechazado` in una sera,
+       TRE TAVOLI SOLTANTO** (13 e 16 di Diego V, 97 di Anthony). Il mesero:
+       *«El sistema no está cerrando algunas mesas de mi plaza»* — e «algunas»
+       è esatto: **solo i conti PARZIALI.** Le righe del fossile sono identiche
+       a sé stesse, sette volte in undici minuti: `parte $53.000 > resto
+       $26.500 (consumo $53.000 · ya pagado $26.500)`.
+       **Non è un mesero che sbaglia: è uno a cui il pannello dà un numero che
+       il server non può accettare, e non ha altro da provare.**
+       🌳 LA RADICE, ed è nel vetro: `pagadoAntes` è inizializzato a 0 in due
+       posti e **non lo assegna nessuno** ⇒ il vetro non sa che il tavolo ha
+       già pagato in parte, e propone il consumo INTERO.
+       🟢 E ciò che rende la cura piccola: **il server il numero lo MANDA** —
+       `{error:'parte_mayor_que_resto', residuo: …}` (GAS r.18923) — **e il
+       vetro lo buttava via**, mostrando solo `mensaje`. In tutto `sala.html`
+       la parola `residuo` compariva UNA volta: nel finto server del demo.
+       ✅ Qui si ASSEGNA `pagadoAntes` e basta: `c4Falta = tot − pagadoAntes` è
+       già cablata in `c4Bruto` · `c4Parte` · `c4Resta` · il bottone verde ·
+       «después de este pago queda». **Nessuna formula toccata.**
+       🔒 GARANZIA STRUTTURALE, non da collaudo: **un tavolo senza pagos
+       parziali NON RICEVE MAI questo errore** ⇒ `pagadoAntes` resta 0 ⇒
+       `c4Falta = tot` ⇒ identico a ieri, riga per riga. *Non «non è successo
+       nei casi provati»: non PUÒ succedere.*
+       ⚠️ TAMPONE DICHIARATO — scritto adesso che la cura funziona, non quando
+       farà male (`_SOLO_SOLUZIONI_DEFINITIVE`, 24-ago):
+         · DI QUANTO RIMANDA · il PRIMO tentativo fallisce lo stesso: il vetro
+           impara DAL rifiuto. Da ~23 rifiuti per tavolo a UNO.
+         · COSA LA UCCIDE · `ya_pagado` dentro il payload di `sala_vista`,
+           così il vetro lo sa PRIMA di sbagliare.
+         · LA DATA · lunedì 7-set, cantiere di ⚙️ ARQUITECTURA.
+       🎚 `?resto=1` accende per apparecchio e si ricorda · `?resto=0` spegne.
+          NASCE SPENTO: si accende dopo il canarino. */
+    else if (r && r.error === 'parte_mayor_que_resto') {
+      var _res = Math.round(Number(r.residuo));
+      if (RESTO_ON && pg.c4 && isFinite(_res) && _res > 0 && _res < (pg.tot || 0)) {
+        pg.c4.pagadoAntes = Math.max(0, Math.round((pg.tot || 0) - _res));
+        toast('warn', '💡 Esta mesa ya pagó una parte: faltan $' + _fmtMiles(_res) +
+          '. Ya lo corregí — vuelve a tocar.');
+        renderPago();
+      } else {
+        toast('err', '✋ ' + (r.mensaje || 'Esta parte es mayor que lo que falta.'));
+      }
     }
     else toast('err', 'No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
