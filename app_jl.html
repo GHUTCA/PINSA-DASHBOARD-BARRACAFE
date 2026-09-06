@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.18.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.19.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -86,7 +86,9 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 .mesas{display:flex;flex-wrap:wrap;gap:5px;padding:2px 0 10px 40px}
 .mz{display:inline-block;min-width:34px;text-align:center;font-size:13px;font-weight:800;
   border-radius:8px;padding:4px 7px;background:#22222e;border:1px solid rgba(255,255,255,.22)}
-.mz.pend{background:#8a2430;border-color:#FF6B6B;color:#FFEDEE}
+.mz.pend{background:#8a2430;border-color:#FF6B6B;color:#FFEDEE}   /* sin mesero: rosso (fix 5) */
+.mz.ocupado{background:#6b4a15;border-color:#FFB558;color:#FFF3DF}   /* en servicio */
+.mz.cobrado{background:#1d4632;border-color:#3DC97E;color:#DFF7E9}   /* pagado, por liberar */
 .mz.mio{background:#1d4632;border-color:#3DC97E;color:#DFF7E9}
 .mz.limpiar{background:#6b4a15;border-color:#FFB558;color:#FFF3DF}
 .mesas-vacio{font-size:11.5px;color:#b9b2a4;padding:0 0 10px 40px}
@@ -179,7 +181,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.18.0</span>
+<span class="ver" id="ver">app_jl v1.19.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -519,9 +521,7 @@ function mesaAbrir(nombre, mesa) {
   peds.sort((a, b) => (b.hace_s || 0) - (a.hace_s || 0));
   peds.forEach(p => {
     tot += parseFloat(p.total) || 0;
-    const et = p._k === 'pendientes' ? '<span class="mz pend" style="min-width:0;padding:1px 6px;font-size:10px">por servir</span>'
-      : p._k === 'por_limpiar' ? '<span class="mz limpiar" style="min-width:0;padding:1px 6px;font-size:10px">por limpiar</span>'
-      : '<span class="mz mio" style="min-width:0;padding:1px 6px;font-size:10px">servida</span>';
+    const et = '<span class="mz ocupado" style="min-width:0;padding:1px 6px;font-size:10px">Ocupado</span>';
     /* [AUT-0216] con l'interruttore acceso ogni item ha il suo «−»:
        una unità per gesto, sempre attraverso motivo + conferma col denaro. */
     let dett;
@@ -631,10 +631,16 @@ function _mesasDe(nombre) {
   if (!ms) return null;
   const v = ms[_slugSalaJS(nombre)];
   if (!v || !v.ok) return null;
-  const mesas = {};   // mesa → stato peggiore (pendiente > mio > limpiar)
-  (v.por_limpiar || []).forEach(p => { if (p.mesa) mesas[p.mesa] = mesas[p.mesa] || 'limpiar'; });
-  (v.mios || []).forEach(p => { if (p.mesa) mesas[p.mesa] = 'mio'; });
-  (v.pendientes || []).forEach(p => { if (p.mesa) mesas[p.mesa] = 'pend'; });
+  /* [06-set · fix 2 di Alberto] gli stati del TAVOLO, non i miei tecnici:
+     OCUPADO = ha consumo vivo · COBRADO = pagato ma non ancora liberato
+     (da `mesas_pagadas`, che viaggia nella fetta — un dato vero, non dedotto).
+     «Libre» non si disegna: un tavolo libero non ha pastiglia. */
+  const pag = (v.mesas_pagadas && typeof v.mesas_pagadas === 'object') ? v.mesas_pagadas : {};
+  const mesas = {};
+  (v.por_limpiar || []).forEach(p => { if (p.mesa) mesas[p.mesa] = 'ocupado'; });
+  (v.mios || []).forEach(p => { if (p.mesa) mesas[p.mesa] = 'ocupado'; });
+  (v.pendientes || []).forEach(p => { if (p.mesa) mesas[p.mesa] = 'ocupado'; });
+  Object.keys(mesas).forEach(m => { if (pag[m]) mesas[m] = 'cobrado'; });
   return { plazas: v.plazas || [], mesas: mesas,
            n_pend: (v.pendientes || []).length, n_mios: (v.mios || []).length,
            n_limpiar: (v.por_limpiar || []).length };
@@ -680,7 +686,7 @@ function vSala() {
     h += '<div class="mip"><div class="t">👑 Mis plazas <span class="pil">' + nomi.length + ' hoy</span>' +
       (yo ? '<span style="margin-left:auto;font-weight:800;color:#3DC97E">' + fmt(yo.venta) + '</span>' : '') + '</div>' +
       (yo ? '<p class="mini" style="margin-top:2px">' + (yo.cobrado ? yo.ctas + ' cobros' : yo.ctas + ' cuentas · servidas') + '</p>' : '') +
-      '<p style="font-size:12.5px;margin-top:6px">' + nomi.map(esc).join(' · ') + '</p>' +
+      '<p style="font-size:12.5px;margin-top:6px">' + nomi.map(pz => '<span style="white-space:nowrap">' + esc(pz) + '</span>').join(' · ') + '</p>' +
       (mmio ? _mesasHtml(mmio) : '<div class="mesas-vacio">sin mesas abiertas</div>') +
       '</div>';
   }
@@ -699,16 +705,21 @@ function vSala() {
   } else {
     /* la legenda dei colori: la prima volta si legge, poi l'occhio la sa */
     h += '<p class="mini" style="margin:2px 2px 8px">' +
-      '<span class="mz pend" style="min-width:0;padding:1px 6px;font-size:10.5px">por servir</span> ' +
-      '<span class="mz mio" style="min-width:0;padding:1px 6px;font-size:10.5px">servida</span> ' +
-      '<span class="mz limpiar" style="min-width:0;padding:1px 6px;font-size:10.5px">por limpiar</span></p>';
+      '<span class="mz ocupado" style="min-width:0;padding:1px 6px;font-size:10.5px">Ocupado</span> ' +
+      '<span class="mz cobrado" style="min-width:0;padding:1px 6px;font-size:10.5px">Cobrado</span> ' +
+      '<span class="mz pend" style="min-width:0;padding:1px 6px;font-size:10.5px">sin mesero</span></p>';
     ms.forEach(m => {
       const cls = m.d > 8 ? 'up' : (m.d < -8 ? 'dn' : 'mid');
       const que = m.qr ? (m.ctas + ' pedidos · sin mesero')
         : m.cobrado ? (m.ctas + ' cobros') : (m.ctas + ' cuentas · servidas');
       /* il QR non si confronta con nessuno: non è una persona che vende poco */
+      /* [06-set · Alberto] sotto la venta: PROMEDIO por cuenta, poi ± vs media */
+      const prom = m.ctas ? fmt(m.venta / m.ctas) : '—';
+      /* [fix 4] se ha già fatto il corte, la riga lo dichiara */
+      const corteOk = !m.qr && (STATE.caja && STATE.caja.cierres || []).some(c => _slugSalaJS(c.nombre || c) === _slugSalaJS(m.n));
       const der = m.qr ? '<small class="mid">directo del cliente</small>'
-        : '<small class="' + cls + '">' + (m.d > 0 ? '+' : '') + m.d + '% vs media</small>';
+        : '<small style="display:block;color:#b9b2a4">prom ' + prom + '</small>' +
+          '<small class="' + cls + '">' + (m.d > 0 ? '+' : '') + m.d + '% vs media</small>';
       /* [06-set] anche il QR ha i suoi tavoli: i pedidos senza mesero vivono
          in `sin_dueno` nella fetta di CHIUNQUE (il bordo li mostra a tutti
          perché non sono di nessuno). Un QR pendiente è un cliente che ha
@@ -717,8 +728,8 @@ function vSala() {
       h += '<div class="pers">' +
         '<span class="av"' + (m.qr ? ' style="background:#6b7a8f"' : '') + '>' +
         esc((m.n || '?')[0].toUpperCase()) + '</span>' +
-        '<span class="nb"><b>' + esc(m.n) + '</b>' +
-        '<small>' + que + (mm && mm.plazas.length ? ' · ' + esc(mm.plazas.join(' · ')) : '') + '</small></span>' +
+        '<span class="nb"><b>' + esc(m.n) + '</b>' + (corteOk ? ' <span class="pill on" style="font-size:9.5px;padding:1px 7px">corte ✓</span>' : '') +
+        '<small>' + que + (mm && mm.plazas.length ? ' · ' + mm.plazas.map(pz => '<span style="white-space:nowrap">' + esc(pz) + '</span>').join(' · ') : '') + '</small></span>' +
         '<span class="val"><b>' + fmt(m.venta) + '</b>' + der + '</span></div>';
       if (mm) h += _mesasHtml(mm, m.n);
     });
@@ -732,26 +743,54 @@ function vSala() {
     }
   }
   /* MOVER — ordine di Alberto 05-set: il JL lo fa da qui. Verbo al bordo. */
+  /* [fix 6 · Alberto] sotto ogni casella si vede LA PLAZA della mesa digitata,
+     e la conferma dice tutto: «¿Mover la mesa 21 (T-ALTA 1 B) → 35 (SALÓN A)?» */
   h += '<div class="card"><h4>🔀 Mover una mesa</h4>' +
-    '<div class="row2"><input class="busca" id="mvDe" inputmode="numeric" placeholder="mesa"><input class="busca" id="mvA" inputmode="numeric" placeholder="a mesa"></div>' +
+    '<div class="row2">' +
+    '<span style="flex:1"><input class="busca" id="mvDe" inputmode="numeric" placeholder="mesa" oninput="mvPlaza(this,\'mvDeP\')"><small id="mvDeP" class="mini" style="display:block;min-height:14px"></small></span>' +
+    '<span style="flex:1"><input class="busca" id="mvA" inputmode="numeric" placeholder="a mesa" oninput="mvPlaza(this,\'mvAP\')"><small id="mvAP" class="mini" style="display:block;min-height:14px"></small></span>' +
+    '</div>' +
     '<button class="btn" onclick="moverJL()">Mover</button>' +
-    '<p class="mini">Pasa TODO: plata, propina, cobro (regla del 28-ago). Queda firmado a tu nombre.</p></div>';
+    '</div>';
   /* [06-set · Alberto: «switch El Menú e Colación»] EL MENÚ vive QUI, in
      Sala: la leva del menù è un gesto DI SERVIZIO (un 86 di tutto il locale),
      non di gestione del turno. La cobertura è andata in Turno, al suo posto. */
+  /* [fix 7 · Alberto] «abbiamo UN menù con due orari e due prezzi: se lo
+     attivo alle 15 il prezzo sarà 16.990 — deve rimanere chiaro». I prezzi
+     sono VERI: la leva risponde con entrambi (esca.precio / estandar.precio)
+     e si conservano. Prima del primo giro si mostra il default noto. */
   const lv = STATE.leva || null;
-  h += '<div class="card"><h4>📖 El menú' + (lv ? ' <span class="pill ' + (lv === 'off' ? 'off' : 'on') + '">' + esc(lv.toUpperCase()) + '</span>' : ' <span class="pill off">—</span>') + '</h4>' +
+  const pE = (STATE.levaInfo && STATE.levaInfo.esca) || 0;
+  const pS = (STATE.levaInfo && STATE.levaInfo.estandar) || 16990;
+  h += '<div class="card"><h4>📖 Menú del Día' + (lv ? ' <span class="pill ' + (lv === 'off' ? 'off' : 'on') + '">' + (lv === 'off' ? 'APAGADO' : 'ACTIVO · ' + (lv === 'esca' ? (pE ? fmt(pE) : 'escalonado') : fmt(pS))) + '</span>' : ' <span class="pill off">—</span>') + '</h4>' +
     '<div class="row2">' +
-    '<button class="btn" onclick="leva(\'esca\')">Esca</button>' +
-    '<button class="btn" onclick="leva(\'estandar\')">Estándar</button>' +
+    '<button class="btn" onclick="leva(\'esca\')">Activar almuerzo' + (pE ? '<small style="display:block;font-weight:400">' + fmt(pE) + '</small>' : '') + '</button>' +
+    '<button class="btn" onclick="leva(\'estandar\')">Activar tarde<small style="display:block;font-weight:400">' + fmt(pS) + '</small></button>' +
     '<button class="btn gh" onclick="leva(\'off\')">Apagar</button></div>' +
-    '<p class="mini">Doble confirmación. Queda firmado a tu nombre; el reloj lo devuelve solo al horario.</p></div>';
+    '</div>';
   return h;
+}
+/* [fix 6] la plaza di una mesa, dal piano del turno (plazas: {plaza, mesas}) */
+function _plazaDeMesa(mesa) {
+  const pls = (STATE.turno && STATE.turno.plazas) || [];
+  mesa = (mesa || '').toString().trim();
+  for (let i = 0; i < pls.length; i++) {
+    const lista = (pls[i].mesas || '').toString().split(/[\s,;·]+/);
+    if (lista.indexOf(mesa) >= 0) return pls[i].plaza;
+  }
+  return '';
+}
+function mvPlaza(inp, dst) {
+  const m = (inp.value || '').replace(/[^0-9]/g, '');
+  const pz = m ? _plazaDeMesa(m) : '';
+  $(dst).textContent = pz ? '↳ ' + pz : (m ? '↳ ¿plaza?' : '');
 }
 async function moverJL() {
   const de = ($('mvDe').value || '').replace(/[^0-9]/g, ''), a = ($('mvA').value || '').replace(/[^0-9]/g, '');
   if (!de || !a || de === a) { toast('warn', '¿De qué mesa a qué mesa?'); return; }
-  if (!confirm('¿Mover la mesa ' + de + ' → ' + a + '? Pasa todo: plata, propina, cobro.')) return;
+  const pzDe = _plazaDeMesa(de), pzA = _plazaDeMesa(a);
+  if (!confirm('¿Mover la mesa ' + de + (pzDe ? ' (' + pzDe + ')' : '') +
+    ' → ' + a + (pzA ? ' (' + pzA + ')' : '') + '?\n\nPasa todo: plata, propina, cobro.')) return;
   const cod = STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo;
   try {
     const r = await staffPost('moverMesa', { codigo: cod, nombre: STATE.user, de: de, a: a });
@@ -818,7 +857,12 @@ async function leva(escalon) {
   if (!confirm('Segunda confirmación: ' + escalon.toUpperCase() + ' para TODO el local.')) return;
   try {
     const r = await gasPost('setLevaMenu', { pin: STATE.pin, escalon: escalon });
-    if (r && r.ok) { STATE.leva = r.escalon || escalon; salva(); toast('ok', '📖 Menú: ' + STATE.leva.toUpperCase()); pintaTab(); }
+    if (r && r.ok) {
+      STATE.leva = r.escalon || escalon;
+      /* [fix 7] i PREZZI VERI arrivano nella risposta: si conservano */
+      STATE.levaInfo = { esca: (r.esca && r.esca.precio) || 0, estandar: (r.estandar && r.estandar.precio) || 0 };
+      salva(); toast('ok', '📖 Menú: ' + (STATE.leva === 'off' ? 'apagado' : 'activo')); pintaTab();
+    }
     else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
   } catch (e) { toast('err', 'Sin conexión — no cambió nada'); }
 }
