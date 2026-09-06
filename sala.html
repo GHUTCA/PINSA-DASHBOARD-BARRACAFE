@@ -985,7 +985,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.74.0</span>
+      <span class="ver" id="ver">sala v3.75.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1115,6 +1115,17 @@ function _restoAttivo(r) {
   return !!(r && r.resto_on === true);
 }
 
+/* [AUT-0214] la rete degli ordini fuori scala (v. _fueraEscala). Nasce SPENTA:
+   una CONFERMA a un tocco, mai un blocco. `?f57=1` accende, `?f57=0` spegne. */
+const F57_ON = (function () {
+  const q = QS.get('f57');
+  try {
+    if (q === '1') { localStorage.setItem('sala_f57', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_f57', '0'); return false; }
+    return localStorage.getItem('sala_f57') === '1';   // default SPENTA
+  } catch (e) { return q === '1'; }
+})();
+const F57_QTY = parseInt(QS.get('f57q'), 10) || 10;   // soglia larga (fossile 3gg: max legittimo 7)
 /* [AUT-0212] la cura della junta contro la foto vecchia (v. _juntasSync).
    ACCESA di fabbrica: cura un bug vivo che ieri ha prodotto gruppi doppi.
    `?jfx=0` (o localStorage sala_jfx=0) = riga di ieri, per telefono. */
@@ -4423,6 +4434,47 @@ function nuevoCuenta(){
   precuentaMesa(mesa, null);
 }
 
+/* [AUT-0214] scorre le linee e torna la PRIMA sospetta, o null. Due reti:
+   larga (qty ≥ soglia) e stretta (qty = un numero ≥20 nel NOME, riga non-promo
+   — la firma del «57 Rocas»). Solo qty PAGATA (`l.qty`), mai `llevar`. */
+function _fueraEscala(lineas) {
+  for (let i = 0; i < (lineas || []).length; i++) {
+    const l = lineas[i];
+    const q = parseInt(l.qty, 10) || 1;
+    const nombre = (l.nombre || '').toString();
+    const promo = !!(l.promo || l.dupla || l.regalo2x1);
+    // rete STRETTA: la qty combacia con un numero GRANDE presente nel nome
+    let firmaNome = false;
+    if (!promo && q >= 20) {
+      const nums = nombre.match(/\d+/g) || [];
+      for (let z = 0; z < nums.length; z++) { if (parseInt(nums[z], 10) === q) { firmaNome = true; break; } }
+    }
+    // rete LARGA: qty fuori scala rispetto al fossile
+    if (firmaNome || q >= F57_QTY) {
+      return { i: i, qty: q, nombre: nombre, precio: parseFloat(l.precio) || 0,
+               total: q * (parseFloat(l.precio) || 0), firma: firmaNome };
+    }
+  }
+  return null;
+}
+/* il dialog: UN tocco per proseguire («Sí, es así»), o correggere. Nessuna
+   spiegazione lunga — il conto scritto per esteso è l'argomento. */
+function _f57Preguntar(s, siga) {
+  let w = $('f57Wrap');
+  if (!w) { w = document.createElement('div'); w.id = 'f57Wrap'; document.body.appendChild(w); }
+  w.innerHTML = '<div class="cs-pago" onclick="if(event.target===this)f57Cerrar()"><div class="cs-pcard" style="max-width:340px;text-align:center;padding:20px 18px">' +
+    '<div style="font-size:34px">⚠️</div>' +
+    '<div style="font-size:16px;font-weight:800;margin:6px 0 4px">¿Seguro?</div>' +
+    '<div style="font-size:15px;color:#e9e9f2;margin-bottom:4px"><b>' + s.qty + ' × ' + esc(s.nombre) + '</b></div>' +
+    '<div style="font-size:22px;font-weight:800;color:#FF7A2F;margin-bottom:14px">$' + _fmtMiles(s.total) + '</div>' +
+    '<button class="btn verde" style="margin:0 0 8px" onclick="f57Si()">Sí, es así — enviar</button>' +
+    '<button class="btn" onclick="f57Cerrar()">Corregir</button>' +
+    '</div></div>';
+  window._f57Siga = siga;
+}
+function f57Si() { f57Cerrar(); const s = window._f57Siga; window._f57Siga = null; if (s) s(); }
+function f57Cerrar() { const w = $('f57Wrap'); if (w) w.innerHTML = ''; window._f57Siga = null; }
+
 async function nuevoEnviar(btn) {
   const n = STATE.nuevo; if (!n) return;
   const mesa = ($('nuevoMesa') ? $('nuevoMesa').value : n.mesa || '').replace(/[^0-9]/g, '');
@@ -4432,6 +4484,28 @@ async function nuevoEnviar(btn) {
   if (_mesaFuera(mesa)) { toast('err', '⛔ La ' + mesa + ' no es de tu plaza — no se puede comandar aquí. Cúbrela con el JL.'); return; }
   if (!n.lineas.length) { toast('warn', 'La libreta está en blanco'); return; }
   if (n.eligiendo) { toast('warn', 'Responde la pregunta de arriba primero'); return; }
+  /* ═══ [AUT-0214] · 06-set · LA RETE DEGLI ORDINI FUORI SCALA ══════════════
+     Il caso: 04-set mesa 127, «57 × Emiliana 57 Rocas» = $1.424.430 — il 57
+     DEL NOME finito nella qty (57 di 24.990). Confermato per riga da 🚚 su
+     Postgres, dove è ancora vivo ($1,4M mai esistiti). Il fossile PEDIDOS
+     (3 giorni, ven+sab dentro, 2.599 righe) dice: max qty legittima = 7,
+     ZERO righe ≥ 10 ⇒ soglia larga a 10 (Alberto: la scelse coi dati, non
+     col caso). È una CONFERMA a UN tocco, MAI un blocco: un tavolo da 12 che
+     ordina 12 acque è vero, e deve passare con un tocco solo — se costasse
+     due gesti, il mesero imparerebbe a schiacciare senza leggere.
+       · rete LARGA:  qty ≥ FUERA_ESCALA_QTY → conferma gentile
+       · rete STRETTA: qty combacia con un numero GRANDE (≥20) NEL NOME e la
+         riga non è promo → è la firma esatta del 57. Conferma forte.
+     🔴 la discordanza qty/llevar NON è segnale (il 2x1 la crea legittima, e
+        l'errore la propaga — 🚚): il segnale è solo qty vs nome, mai llevar.
+     🧯 Freno: `?f57=0` (o sala_f57=0). Nasce SPENTA finché non è collaudata. */
+  if (F57_ON && !n._okFueraEscala) {
+    const sospetta = _fueraEscala(n.lineas);
+    if (sospetta) {
+      _f57Preguntar(sospetta, function () { n._okFueraEscala = true; nuevoEnviar(btn); });
+      return;   // si ferma qui: riprende solo dopo il tocco di conferma
+    }
+  }
   // uuid FISSO dal primo intento: il retry non può mai duplicare (dedup GAS)
   if (!n.uuid) n.uuid = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   const items = n.lineas.map(function(l){
