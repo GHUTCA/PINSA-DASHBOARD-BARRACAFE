@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.9.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.10.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -100,10 +100,21 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 .btn.gh{background:transparent;color:#a8a8bd}
 .btn[disabled]{opacity:.45;cursor:default}
 /* [06-set · Alberto] «i bottoni non si vede che si cliccano»: ogni tocco deve
-   avere una risposta immediata, prima ancora della rete. */
-.btn:active,.alr button:active,.cob button:active{transform:scale(.97);filter:brightness(1.35)}
+   avere una risposta immediata, prima ancora della rete.
+   ↳ 2ª passata: sui bottoncini in riga («volvió», «86 hoy») il cambio era «un
+   millisecondo di bianco» — troppo poco. Ora il tocco INVERTE il bottone
+   (fondo chiaro, testo scuro) e resta finché il dito sta giù: inequivocabile
+   anche di sera, anche a chi ha la vista stanca. */
+.btn:active,.alr button:active{transform:scale(.97);filter:brightness(1.35)}
+.cob button:active,.btn.gh:active{background:#f0ece4;color:#12121a;border-color:#f0ece4;transform:scale(.94)}
 .tabs button:active{background:rgba(255,255,255,.06)}
 .pers:active{background:rgba(255,255,255,.04)}
+/* [06-set · norma di Alberto] MAI CHIUSI NEL VETRO SENZA VIA D'USCITA:
+   ogni app deve avere il suo «esci», sempre visibile. */
+.salir{display:block;width:100%;background:transparent;border:1px solid rgba(255,255,255,.18);
+  border-radius:10px;padding:12px;color:#b9b2a4;font:inherit;font-size:13px;font-weight:700;
+  cursor:pointer;margin:18px 0 4px;text-align:center;text-decoration:none}
+.salir:active{background:rgba(255,255,255,.08)}
 .row2{display:flex;gap:7px} .row2 .btn{margin-top:7px}
 .pill{display:inline-block;font-size:10.5px;font-weight:800;border-radius:999px;padding:2px 9px;margin-left:4px}
 .pill.on{background:rgba(61,201,126,.16);color:#3DC97E}
@@ -149,7 +160,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.9.0</span>
+<span class="ver" id="ver">app_jl v1.10.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -300,7 +311,11 @@ async function giroTurno() {
 async function giroCaja() {
   if (DEMO || !STATE.pin) return;
   try {
-    const r = await gasPost('getCaja', { pin: STATE.pin });
+    /* [06-set · Alberto: «i 4 numeri non si vedono ancora»] getCaja legge
+       `payload.pin_jl`, NON `payload.pin` (r.20192 del GAS): col nome
+       sbagliato rispondeva `pin_jl_requerido` e la testata restava muta.
+       Si mandano ENTRAMBI: il verbo prende quello che gli serve. */
+    const r = await gasPost('getCaja', { pin_jl: STATE.pin, pin: STATE.pin });
     if (r && r.ok) { STATE.caja = r; STATE.ts.caja = Date.now(); salva(); pintaTesta(); pintaTab(); }
   } catch (e) {}
 }
@@ -542,7 +557,7 @@ function tabAsig() {
     h += '<div class="cob">' + esc(p.plaza) + ' <small style="color:#b9b2a4">' + esc(p.mesas) + '</small>' +
       '<span class="st2 ' + (a ? 'up' : 'mid') + '">' + (a ? esc(a.mesero) : 'sin dueño') + '</span></div>';
   });
-  $('body').innerHTML = h; $('body').scrollTop = 0;
+  $('body').innerHTML = h + _salidaHtml(); $('body').scrollTop = 0;   // via d'uscita anche qui
 }
 async function asignar() {
   const m = ($('asMesero').value || '').trim(), p = ($('asPlaza').value || '').trim();
@@ -659,7 +674,7 @@ function ochenta() {
     h += '<div class="cob">' + esc(a.nombre || a.id) + '<button class="btn gh" style="width:auto;margin:0 0 0 auto;padding:5px 10px" onclick="toggle86(\'' + esc(a.id) + '\',false)">volvió</button></div>';
   });
   h += '<p class="mini" style="color:#FFB558">⏱ Vuelven solos al horario de corte — si algo sigue agotado, se remarca.</p></div>';
-  $('body').innerHTML = h; $('body').scrollTop = 0;
+  $('body').innerHTML = h + _salidaHtml(); $('body').scrollTop = 0;
   ochentaLista();
   if (!STATE.ts.prods || edadS('prods') > 600) giroProds();
 }
@@ -687,6 +702,7 @@ async function toggle86(id, value) {
     if (r && r.ok) {
       toast('ok', value ? '🚫 fuera del menú' : '✓ volvió');
       (STATE.prods || []).forEach(p => { if (p.id === id) p.agotado = value; });
+      window._q86 = '';   // [06-set · Alberto] la ricerca si pulisce da sola dopo il gesto
       salva(); pintaTesta(); ochenta();
     } else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
   } catch (e) { toast('err', 'Sin conexión — no cambió nada'); }
@@ -701,7 +717,19 @@ function tab(i) {
   if (i === 2 || i === 3 || i === 0) { if (!STATE.ts.caja || edadS('caja') > 60) giroCaja(); }
   if (i === 1) { if (!STATE.ts.turno || edadS('turno') > 300) giroTurno(); }
 }
-function pintaTab() { if (TAB >= 0) { $('body').innerHTML = VIS[TAB](); } }
+/* [06-set · norma di Alberto] la via d'uscita in FONDO a ogni scheda, non solo
+   la freccina in alto: «non rimanere mai chiusi nel vetro senza via d'uscita».
+   Due uscite dichiarate: tornare alla torre, o chiudere la sessione del JL. */
+function _salidaHtml() {
+  return '<a class="salir" href="atalaya.html">‹ Volver a ATALAYA</a>' +
+    '<button class="salir" onclick="salirJL()" style="margin-top:8px">Cerrar sesión</button>';
+}
+function salirJL() {
+  if (!confirm('¿Cerrar tu sesión de JL en este teléfono?')) return;
+  try { sessionStorage.removeItem('jl_pin'); sessionStorage.removeItem('jl_user'); } catch (e) {}
+  location.reload();
+}
+function pintaTab() { if (TAB >= 0) { $('body').innerHTML = VIS[TAB]() + _salidaHtml(); } }
 
 async function entrar() {
   const pin = ($('gPin').value || '').trim();
