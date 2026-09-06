@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.6.1 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.6.2 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -131,7 +131,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.6.1</span>
+<span class="ver" id="ver">app_jl v1.6.2</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -211,24 +211,37 @@ async function staffPost(action, body) {
    veloce (bordo):  vista sala · /pedidos (rechazos) · /salud · /sdp-cola
    lento (GAS):     getTurnoAdmin (al login + ogni 5 min) · getCaja (60 s
                     quando la scheda Caja è davanti) · adminListProducts (per il 86) */
+/* ── IL RITMO, dichiarato (condizione ② di AUT-0206, dopo la notte in cui la
+   sveglia del bordo è morta di carico): a REGIME, per apparecchio:
+     · sala_vista        1 GET / 20 s   (il battito del vetro)
+     · salud+pedidos+sdp 3 GET / 60 s   (un tick su tre)
+     · getCaja (GAS)     1 POST / 60 s  solo con Sala/Caja davanti
+     · getTurnoAdmin     1 POST / 5 min
+     · adminListProducts 1 POST / 10 min, a domanda
+   = ~0,10 richieste/s al bordo per telefono JL (1-2 apparecchi). N2 rispettata:
+   ogni poll ha nome, ritmo e questo commento come data di morte. */
+let _tick = 0;
 async function giroVeloce() {
   if (DEMO) return;
+  _tick++;
   const cod = STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo;
-  try { const s = await bordeGet('/salud'); STATE.salud = s; STATE.ts.salud = Date.now(); } catch (e) { STATE.salud = null; }
   if (cod) {
     try {
       const v = await bordeGet('/estado/' + encodeURIComponent(CFG.LOCAL) + '?seccion=sala_vista&codigo=' + encodeURIComponent(cod));
       if (v && v.ok && v.datos && v.datos.datos) { STATE.vista = v.datos.datos; STATE.ts.vista = Date.now(); }
     } catch (e) {}
   }
-  try {
-    const p = await bordeGet('/pedidos/' + encodeURIComponent(CFG.LOCAL));
-    if (p && p.stato) { STATE.rechazos = p.stato.pago_rechazo || null; STATE.ts.rechazos = Date.now(); }
-  } catch (e) {}
-  try {
-    const c = await bordeGet('/sdp-cola/' + encodeURIComponent(CFG.LOCAL));
-    if (c && c.ok) { STATE.sdp = c; STATE.ts.sdp = Date.now(); }
-  } catch (e) { /* SDP_COLA_OFF → 404: il chip resta muto, mai finto */ }
+  if (_tick % 3 === 1) {   // un tick su tre: le letture di contorno
+    try { const s = await bordeGet('/salud'); STATE.salud = s; STATE.ts.salud = Date.now(); } catch (e) { STATE.salud = null; }
+    try {
+      const p = await bordeGet('/pedidos/' + encodeURIComponent(CFG.LOCAL));
+      if (p && p.stato) { STATE.rechazos = p.stato.pago_rechazo || null; STATE.ts.rechazos = Date.now(); }
+    } catch (e) {}
+    try {
+      const c = await bordeGet('/sdp-cola/' + encodeURIComponent(CFG.LOCAL));
+      if (c && c.ok) { STATE.sdp = c; STATE.ts.sdp = Date.now(); }
+    } catch (e) { /* SDP_COLA_OFF → 404: il chip resta muto, mai finto */ }
+  }
   salva(); pintaTesta(); pintaTab();
 }
 async function giroTurno() {
