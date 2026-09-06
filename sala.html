@@ -985,7 +985,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.73.0</span>
+      <span class="ver" id="ver">sala v3.74.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1115,6 +1115,17 @@ function _restoAttivo(r) {
   return !!(r && r.resto_on === true);
 }
 
+/* [AUT-0212] la cura della junta contro la foto vecchia (v. _juntasSync).
+   ACCESA di fabbrica: cura un bug vivo che ieri ha prodotto gruppi doppi.
+   `?jfx=0` (o localStorage sala_jfx=0) = riga di ieri, per telefono. */
+const JFIX_ON = (function () {
+  const q = QS.get('jfx');
+  try {
+    if (q === '1') { localStorage.setItem('sala_jfx', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_jfx', '0'); return false; }
+    return localStorage.getItem('sala_jfx') !== '0';
+  } catch (e) { return q !== '0'; }
+})();
 const TECLADO_ON = (function () {
   const q = QS.get('tecl');
   /* memoria col nome POSITIVO (`sala_tecl` = '1'|'0'), non `..._off`: un flag
@@ -7288,9 +7299,29 @@ function _juntasSync(r) {
     out.push({ n: n, principal: principal, mesas: mesas, gid: g.gid || '', srv: true });
   });
   const ahora = Date.now();
-  prev.forEach(function (j) {   // la junta appena nata, finché il server non la conferma
-    if (j.srv || !j.ts || ahora - j.ts > 20000 || usati[j.n]) return;
+  /* ═══ [AUT-0212] · 06-set · LA FOTO VECCHIA NON SCIOGLIE LA JUNTA NUOVA ════
+     IL FATTO, riprodotto in diretta con Alberto alle 08:5x: junta fatta e
+     CONFERMATA dal server (gid) alle 08:51 → la foto del poll nasce 1-2 min
+     prima del gesto → non la contiene → la riga qui sotto la uccideva a 20 s
+     → lo schermo la mostra sciolta → l'umano la RIFÀ. I gruppi doppi del
+     05-set (103+104 G-5/G-6 · 124+125 · 109+110) sono questo giro: il server
+     non ha mai detto sì due volte (`mesa_en_grupo` — collaudato), è il vetro
+     che faceva rifare il gesto.
+     LA CURA: una junta col gid vive finché una foto NATA DOPO il gesto non la
+     esclude — allora è sciolta davvero e muore (niente juntas immortali: il
+     difetto gemello). L'età della foto è `_edad_dato_s` (bordo); sul cammino
+     GAS la foto è appena costruita (età 0) e giudica subito, com'è giusto:
+     l'unir scrive nel libro in modo sincrono. Senza gid: 20 s, come ieri.
+     🧯 Freno: `?jfx=0` (o `sala_jfx=0`) = riga di ieri, zero deploy. */
+  const fotoTs = ahora - ((r && r._edad_dato_s) ? r._edad_dato_s * 1000 : 0);
+  prev.forEach(function (j) {
+    if (j.srv || usati[j.n]) return;
     if (out.some(function (x) { return x.principal === j.principal; })) return;
+    if (JFIX_ON && j.gid && j.ts) {
+      if (fotoTs >= j.ts) return;             // foto nata DOPO e senza il grupo → sciolto davvero
+      usati[j.n] = true; out.push(j); return; // foto più VECCHIA del gesto → non è una prova
+    }
+    if (!j.ts || ahora - j.ts > 20000) return;
     usati[j.n] = true; out.push(j);
   });
   const firma = function (l) {
