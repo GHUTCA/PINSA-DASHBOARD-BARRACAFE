@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.14.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.15.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -81,6 +81,16 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 .pers .val b{font-size:13.5px;display:block}
 .pers .val small{font-size:11px;font-weight:800}
 .up{color:#3DC97E} .dn{color:#FF6B6B} .mid{color:#b9b2a4}
+/* [06-set] I TAVOLI · pastiglie con lo stato nel colore. Il rosso non è
+   decorazione: è un pedido che aspetta di essere servito. */
+.mesas{display:flex;flex-wrap:wrap;gap:5px;padding:2px 0 10px 40px}
+.mz{display:inline-block;min-width:34px;text-align:center;font-size:13px;font-weight:800;
+  border-radius:8px;padding:4px 7px;background:#22222e;border:1px solid rgba(255,255,255,.22)}
+.mz.pend{background:#8a2430;border-color:#FF6B6B;color:#FFEDEE}
+.mz.mio{background:#1d4632;border-color:#3DC97E;color:#DFF7E9}
+.mz.limpiar{background:#6b4a15;border-color:#FFB558;color:#FFF3DF}
+.mesas-vacio{font-size:11.5px;color:#b9b2a4;padding:0 0 10px 40px}
+.chev{float:right;color:#7d7d95;font-size:16px;font-weight:800;margin-left:6px}
 /* mi plaza */
 .mip{border:1px solid rgba(255,122,47,.5);border-radius:12px;padding:10px 11px;margin-bottom:11px;background:#171720}
 .mip .t{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:800}
@@ -161,7 +171,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.14.0</span>
+<span class="ver" id="ver">app_jl v1.15.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -452,6 +462,50 @@ function _porMesero() {
   out.sort((a, b) => (a.qr ? 1 : 0) - (b.qr ? 1 : 0) || b.venta - a.venta);
   return out;
 }
+/* ═══ [06-set · reperto di Alberto: «non vedo i tavoli»] ═══════════════════
+   I tavoli NON vengono da getCaja (che dà il denaro): vengono dalla VISTA
+   del bordo, che porta una fetta per OGNI mesero con `plazas`, `pendientes`
+   (da servire), `mios` (i suoi), `por_limpiar`. Le si legge dallo slug del
+   nome. Un mesero senza fetta non è un errore: è chi non è in turno. */
+/* [06-set · Alberto: «se clicco su uno di loro non apre la app dei tavoli»]
+   Il mondo del mesero È sala.html: non si ridisegna, si riusa. Si passano
+   nome e codigo del turno (che il JL ha già in mano); il login di sala.html
+   li valida come sempre — nessuna scorciatoia sull'autenticazione.
+   🔴 Entrare nella sala di un ALTRO chiede conferma: i gesti restano a nome
+   di chi li fa, e il JL deve saperlo prima, non scoprirlo dopo. */
+function mundoDe(nombre) {
+  const cod = STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo;
+  if (!cod) { toast('warn', 'Primero abre el turno'); return; }
+  const mio = _slugSalaJS(nombre) === _slugSalaJS(STATE.user);
+  if (!mio && !confirm('¿Entrar en la sala de ' + nombre + '?\n\nVerás sus mesas con tus poderes. Cada gesto queda a TU nombre.')) return;
+  location.href = 'sala.html?loc=' + encodeURIComponent(QS.get('loc') || 'bks') +
+    '&nombre=' + encodeURIComponent(nombre) + '&codigo=' + encodeURIComponent(cod);
+}
+function _slugSalaJS(s) {
+  return (s || '').toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+function _mesasDe(nombre) {
+  const ms = STATE.vista && STATE.vista.meseros;
+  if (!ms) return null;
+  const v = ms[_slugSalaJS(nombre)];
+  if (!v || !v.ok) return null;
+  const mesas = {};   // mesa → stato peggiore (pendiente > mio > limpiar)
+  (v.por_limpiar || []).forEach(p => { if (p.mesa) mesas[p.mesa] = mesas[p.mesa] || 'limpiar'; });
+  (v.mios || []).forEach(p => { if (p.mesa) mesas[p.mesa] = 'mio'; });
+  (v.pendientes || []).forEach(p => { if (p.mesa) mesas[p.mesa] = 'pend'; });
+  return { plazas: v.plazas || [], mesas: mesas,
+           n_pend: (v.pendientes || []).length, n_mios: (v.mios || []).length,
+           n_limpiar: (v.por_limpiar || []).length };
+}
+function _mesasHtml(mm) {
+  const nums = Object.keys(mm.mesas);
+  if (!nums.length) return '<div class="mesas-vacio">sin mesas abiertas</div>';
+  nums.sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+  return '<div class="mesas">' + nums.map(n =>
+    '<span class="mz ' + mm.mesas[n] + '">' + esc(n) + '</span>').join('') + '</div>';
+}
 function vSala() {
   const t = STATE.turno;
   let h = '';
@@ -463,8 +517,11 @@ function vSala() {
        credere che l'app non le vedesse. */
     const nomi = [];
     mia.forEach(a => { if (nomi.indexOf(a.plaza) < 0) nomi.push(a.plaza); });
+    const mmio = _mesasDe(STATE.user);
     h += '<div class="mip"><div class="t">👑 Mis plazas <span class="pil">' + nomi.length + ' hoy</span></div>' +
       '<p style="font-size:12.5px;margin-top:6px">' + nomi.map(esc).join(' · ') + '</p>' +
+      (mmio ? _mesasHtml(mmio) : '<div class="mesas-vacio">sin mesas abiertas</div>') +
+      '<button class="btn" style="margin-top:9px" onclick="mundoDe(\'' + esc(STATE.user) + '\')">Abrir mi sala ›</button>' +
       '</div>';
   }
   const ms = _porMesero();
@@ -477,6 +534,11 @@ function vSala() {
       (err ? '<button class="btn" onclick="giroCaja()">Reintentar</button>' : '') +
       '<p class="mini">📷 caja ' + edadTxt('caja') + '</p></div>';
   } else {
+    /* la legenda dei colori: la prima volta si legge, poi l'occhio la sa */
+    h += '<p class="mini" style="margin:2px 2px 8px">' +
+      '<span class="mz pend" style="min-width:0;padding:1px 6px;font-size:10.5px">por servir</span> ' +
+      '<span class="mz mio" style="min-width:0;padding:1px 6px;font-size:10.5px">servida</span> ' +
+      '<span class="mz limpiar" style="min-width:0;padding:1px 6px;font-size:10.5px">por limpiar</span></p>';
     ms.forEach(m => {
       const cls = m.d > 8 ? 'up' : (m.d < -8 ? 'dn' : 'mid');
       const que = m.qr ? (m.ctas + ' pedidos · sin mesero')
@@ -484,10 +546,14 @@ function vSala() {
       /* il QR non si confronta con nessuno: non è una persona che vende poco */
       const der = m.qr ? '<small class="mid">directo del cliente</small>'
         : '<small class="' + cls + '">' + (m.d > 0 ? '+' : '') + m.d + '% vs media</small>';
-      h += '<div class="pers"><span class="av"' + (m.qr ? ' style="background:#6b7a8f"' : '') + '>' +
+      const mm = m.qr ? null : _mesasDe(m.n);
+      h += '<div class="pers"' + (mm ? ' onclick="mundoDe(\'' + esc(m.n) + '\')"' : '') + '>' +
+        '<span class="av"' + (m.qr ? ' style="background:#6b7a8f"' : '') + '>' +
         esc((m.n || '?')[0].toUpperCase()) + '</span>' +
-        '<span class="nb"><b>' + esc(m.n) + '</b><small>' + que + '</small></span>' +
+        '<span class="nb"><b>' + esc(m.n) + '</b>' + (mm ? '<span class="chev">›</span>' : '') +
+        '<small>' + que + (mm && mm.plazas.length ? ' · ' + esc(mm.plazas.join(' · ')) : '') + '</small></span>' +
         '<span class="val"><b>' + fmt(m.venta) + '</b>' + der + '</span></div>';
+      if (mm) h += _mesasHtml(mm);
     });
     /* IL SUSSURRO — uno alla volta (N8): il più lontano dalla media, in giù.
        Solo fra PERSONE: il QR non si accusa di vendere poco. */
