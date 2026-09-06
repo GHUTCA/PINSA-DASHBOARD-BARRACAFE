@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.11.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.12.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -160,7 +160,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.11.0</span>
+<span class="ver" id="ver">app_jl v1.12.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -179,7 +179,12 @@ const CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
   T: '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ',
   POLL_MS: 20000,          // un client, UN poll (regola di velocità)
-  TIMEOUT_MS: 20000,
+  TIMEOUT_MS: 20000,      // per i verbi normali
+  TIMEOUT_LENTO_MS: 55000,  // [06-set] getCaja legge PAGOS+PEDIDOS interi: il
+  // solo RIFIUTO a vuoto costa 3,6 s misurati, il lavoro vero molto di piu'.
+  // 20 s tagliavano SEMPRE -> 'timeout' e testata muta. 55 s sta sotto il
+  // muro dei 60 di Apps Script. 🔴 E' un TAMPONE: la cura vera e' la sala
+  // fuori da Google (venerdi' 11), dove questa lettura non costa 20 s.
 };
 const DEMO = QS.get('demo') === '1' || location.hash === '#demo';   // #demo: regge anche su file://
 
@@ -208,9 +213,12 @@ function edadS(k) { return STATE.ts[k] ? Math.round((Date.now() - STATE.ts[k]) /
 function edadTxt(k) { const s = edadS(k); if (s == null) return '—'; if (s < 90) return 'hace ' + s + ' s'; return 'hace ' + Math.round(s / 60) + ' min'; }
 
 /* ═════ RETE — GAS dietro, bordo davanti ═════ */
+/* i verbi che leggono fogli interi hanno il loro tetto: con 20 s getCaja
+   tagliava SEMPRE (misurato: il solo rifiuto a vuoto costa 3,6 s). */
+const VERBI_LENTI = { getCaja: 1, getTurnoAdmin: 1, adminListProducts: 1 };
 async function gasPost(action, body) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), CFG.TIMEOUT_MS);
+  const t = setTimeout(() => ctrl.abort(), VERBI_LENTI[action] ? CFG.TIMEOUT_LENTO_MS : CFG.TIMEOUT_MS);
   try {
     const r = await fetch(CFG.GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {})),
@@ -230,7 +238,7 @@ async function gasPost(action, body) {
    GET→pin_invalid (arriva) · POST→Unknown action (non arriva). */
 async function gasGet(action, params) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), CFG.TIMEOUT_MS);
+  const t = setTimeout(() => ctrl.abort(), VERBI_LENTI[action] ? CFG.TIMEOUT_LENTO_MS : CFG.TIMEOUT_MS);
   try {
     const q = new URLSearchParams(Object.assign({ action: action, local: CFG.LOCAL }, params || {}));
     const r = await fetch(CFG.GAS_URL + '?' + q.toString(), { signal: ctrl.signal, cache: 'no-store', redirect: 'follow' });
@@ -432,13 +440,14 @@ function vSala() {
     mia.forEach(a => { if (nomi.indexOf(a.plaza) < 0) nomi.push(a.plaza); });
     h += '<div class="mip"><div class="t">👑 Mis plazas <span class="pil">' + nomi.length + ' hoy</span></div>' +
       '<p style="font-size:12.5px;margin-top:6px">' + nomi.map(esc).join(' · ') + '</p>' +
-      '<p class="mini">Los mismos verbos del mesero — aquí eres uno más. Ábrelas desde la app de sala.</p></div>';
+      '</div>';
   }
   const ms = _porMesero();
   if (!ms.length) {
     const err = STATE.cajaErr;
     h += '<div class="card' + (err ? ' rossa' : '') + '"><h4>👥 La sala</h4><p>' +
-      (err ? '⚠️ La caja no responde: <b>' + esc(err) + '</b>' :
+      (err === 'timeout' ? '⏳ La caja está tardando más de lo normal. <b>Google va lento</b> — no es tu teléfono.' :
+       err ? '⚠️ La caja no responde: <b>' + esc(err) + '</b>' :
         (STATE.ts.caja ? 'Sin ventas todavía.' : 'Cargando la caja detrás… la pantalla no espera.')) + '</p>' +
       (err ? '<button class="btn" onclick="giroCaja()">Reintentar</button>' : '') +
       '<p class="mini">📷 caja ' + edadTxt('caja') + '</p></div>';
