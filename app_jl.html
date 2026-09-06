@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.16.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.17.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -179,7 +179,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.16.0</span>
+<span class="ver" id="ver">app_jl v1.17.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -206,6 +206,30 @@ const CFG = {
   // fuori da Google (venerdi' 11), dove questa lettura non costa 20 s.
 };
 const DEMO = QS.get('demo') === '1' || location.hash === '#demo';   // #demo: regge anche su file://
+/* ═══ [AUT-0216] · ELIMINAR DALL'APP JL — nasce SPENTO ═══════════════════════
+   Il fatto (Alberto, 06-set): oggi il JL DIGITA LA SUA PASSWORD NEL TELEFONO
+   DEL MESERO, dieci volte a sera, davanti a chi guarda (sala.html r.2917:
+   «PIN incorrecto — que lo escriba el JL de nuevo»). Qui lo stesso verbo VIVO
+   (corregirPedido) parte DALLA SUA MANO: il PIN è già in sessione, mai più
+   digitato altrove. Non un potere nuovo: lo stesso, dal posto sicuro.
+   · FIRMA (Alberto: «se il mesero dice io non l'ho fatto, bisogna sapere chi
+     l'ha fatto»): nombre = IL JL, mai il mesero. Nel fossile la porta si
+     riconosce: dalla via vecchia nombre≠autorizador (due persone), da qui
+     COINCIDONO. `via:'app_jl'` viaggia nel payload per il campo esplicito.
+   · CONFERMA CHE MOSTRA IL DENARO (CONTROLLER): non un «sei sicuro?» che si
+     impara a schiacciare — l'importo in grande, prima del sì.
+   · UNA unità per gesto: il «−» toglie 1. Tre unità = tre tocchi, tre
+     conferme col conto davanti — mai una strage con un dito.
+   🧯 `?void=1` accende (per telefono) · default SPENTO · si accende domani a
+   locale chiuso col secondo collaudatore, mai stasera a sala piena. */
+const VOID_ON = (function () {
+  const q = QS.get('void');
+  try {
+    if (q === '1') { localStorage.setItem('jl_void', '1'); return true; }
+    if (q === '0') { localStorage.setItem('jl_void', '0'); return false; }
+    return localStorage.getItem('jl_void') === '1';   // default SPENTO
+  } catch (e) { return q === '1'; }
+})();
 
 /* ═════ STATE + CACHE — la schermata non aspetta MAI la rete (N1) ═════════ */
 const CK = 'jl_cache_' + CFG.LOCAL;
@@ -498,9 +522,25 @@ function mesaAbrir(nombre, mesa) {
     const et = p._k === 'pendientes' ? '<span class="mz pend" style="min-width:0;padding:1px 6px;font-size:10px">por servir</span>'
       : p._k === 'por_limpiar' ? '<span class="mz limpiar" style="min-width:0;padding:1px 6px;font-size:10px">por limpiar</span>'
       : '<span class="mz mio" style="min-width:0;padding:1px 6px;font-size:10px">servida</span>';
+    /* [AUT-0216] con l'interruttore acceso ogni item ha il suo «−»:
+       una unità per gesto, sempre attraverso motivo + conferma col denaro. */
+    let dett;
+    if (VOID_ON) {
+      let its = [];
+      try { its = JSON.parse(p.items_json || '[]'); } catch (e) {}
+      dett = its.map(i => {
+        const q = parseInt(i.qty, 10) || 1;
+        return '<div style="display:flex;align-items:center;gap:8px;margin-top:4px">' +
+          '<small style="flex:1;color:#b9b2a4">' + q + '× ' + esc(i.nombre || i.id || '?') + '</small>' +
+          (q > 0 ? '<button class="mz" style="min-width:30px;background:#8a2430;border-color:#FF6B6B;color:#FFEDEE" ' +
+            'onclick="voidPedir(\'' + esc(p.uuid) + '\',\'' + esc(mesa) + '\',\'' + esc(nombre) + '\',\'' + esc(i.id || i.nombre) + '\')">−</button>' : '') +
+          '</div>';
+      }).join('') || '<small style="color:#b9b2a4">—</small>';
+    } else {
+      dett = '<small style="display:block;color:#b9b2a4;margin-top:3px">' + _itemsTxt(p.items_json) + '</small>';
+    }
     lin += '<div class="cob" style="align-items:flex-start"><span style="flex:1">' + et +
-      ' <b>' + fmt(parseFloat(p.total) || 0) + '</b>' +
-      '<small style="display:block;color:#b9b2a4;margin-top:3px">' + _itemsTxt(p.items_json) + '</small>' +
+      ' <b>' + fmt(parseFloat(p.total) || 0) + '</b>' + dett +
       (p.nota ? '<small style="display:block;color:#FFB558">📝 ' + esc(p.nota) + '</small>' : '') +
       '</span><span class="st2 mid">' + _haceTxt(p.hace_s) + '</span></div>';
   });
@@ -515,6 +555,64 @@ function mesaAbrir(nombre, mesa) {
     '</div></div>';
 }
 function mesaCerrar() { const w = $('mesaWrap'); if (w) w.innerHTML = ''; }
+
+/* ═══ [AUT-0216] · il VOID, in tre passi: − → motivo → conferma col DENARO ══ */
+const VOID_MOTIVOS = [   // lista CHIUSA del server (MOTIVOS_CAMBIO, GAS r.9899)
+  ['cambio_producto', 'Cambió de producto'], ['no_le_gusto', 'No le gustó'],
+  ['mal_estado', 'Producto en mal estado'], ['error_mesero', 'Error del mesero']];
+let _VD = null;   // {uuid, mesa, nombreM, items[], it, motivo}
+function voidPedir(uuid, mesa, nombreM, itemId) {
+  const v = STATE.vista && STATE.vista.meseros;
+  let ped = null;
+  if (v) Object.keys(v).some(k => ['pendientes', 'mios', 'por_limpiar', 'sin_dueno'].some(kk =>
+    (v[k][kk] || []).some(p => { if (p.uuid === uuid) { ped = p; return true; } return false; })));
+  if (!ped) { toast('warn', 'Ese pedido ya no está en la foto — recarga'); return; }
+  let items = [];
+  try { items = JSON.parse(ped.items_json || '[]'); } catch (e) {}
+  const it = items.find(x => (x.id || x.nombre) === itemId);
+  if (!it) { toast('warn', 'Ese producto ya no está'); return; }
+  _VD = { uuid: uuid, mesa: mesa, items: items, it: it, motivo: '' };
+  const w = $('voidWrap') || (function () { const d = document.createElement('div'); d.id = 'voidWrap'; document.body.appendChild(d); return d; })();
+  w.innerHTML = '<div class="ovl" style="z-index:80" onclick="if(event.target===this)voidCerrar()"><div class="ovl-card">' +
+    '<div class="ovl-h"><b>¿Por qué sale?</b><button class="cx" onclick="voidCerrar()">✕</button></div>' +
+    '<p class="mini" style="margin:0 0 8px">1× ' + esc(it.nombre || it.id) + ' · mesa ' + esc(mesa) + '</p>' +
+    VOID_MOTIVOS.map(m => '<button class="btn" onclick="voidConfirmar(\'' + m[0] + '\')">' + m[1] + '</button>').join('') +
+    '</div></div>';
+}
+function voidConfirmar(motivo) {
+  if (!_VD) return;
+  _VD.motivo = motivo;
+  const it = _VD.it, precio = parseFloat(it.precio) || 0;
+  /* LA CONFERMA MOSTRA IL DENARO — l'importo in grande, prima del sì:
+     un importo diverso da quello atteso si nota sempre; un «sei sicuro?» no. */
+  $('voidWrap').innerHTML = '<div class="ovl" style="z-index:80" onclick="if(event.target===this)voidCerrar()"><div class="ovl-card" style="text-align:center">' +
+    '<div style="font-size:32px">🗑</div>' +
+    '<div style="font-size:15px;margin:6px 0 2px">Eliminas <b>1× ' + esc(it.nombre || it.id) + '</b></div>' +
+    '<div style="font-size:26px;font-weight:800;color:#FF6B6B;margin:6px 0">− ' + fmt(precio) + '</div>' +
+    '<div class="mini" style="margin-bottom:12px">de la mesa <b>' + esc(_VD.mesa) + '</b> · ' +
+    (VOID_MOTIVOS.find(m => m[0] === motivo) || ['', ''])[1] + '<br>Queda firmado a tu nombre.</div>' +
+    '<button class="btn" style="background:#8a2430;border-color:#FF6B6B;color:#FFEDEE" onclick="voidEjecutar()">Eliminar — ' + fmt(precio) + '</button>' +
+    '<button class="btn gh" onclick="voidCerrar()">No, volver</button>' +
+    '</div></div>';
+}
+async function voidEjecutar() {
+  if (!_VD) return;
+  const d = _VD; _VD = null; voidCerrar();
+  const cod = STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo;
+  /* corregirPedido vuole la QUANTITÀ FINALE di ogni item (mai un delta):
+     si manda la mappa INTERA del pedido col bersaglio ridotto di 1. */
+  const finales = d.items.map(x => ({ id: (x.id || x.nombre),
+    qty: (parseInt(x.qty, 10) || 1) - ((x === d.it) ? 1 : 0) }));
+  try {
+    const r = await gasPost('corregirPedido', { codigo: cod, nombre: STATE.user,
+      uuid: d.uuid, items: finales, motivo: d.motivo, pin_jl: STATE.pin, via: 'app_jl' });
+    if (r && r.ok) {
+      toast('ok', '🗑 Eliminado · − ' + fmt(parseFloat(d.it.precio) || 0) + ' de la mesa ' + d.mesa);
+      giroVeloce(); mesaCerrar();
+    } else toast('err', '✋ ' + ((r && (r.error === 'comanda_ya_salio' ? 'La comanda ya salió entera — no se puede partir' : r.error)) || 'No se pudo'));
+  } catch (e) { toast('err', 'Sin red — no se eliminó nada'); }
+}
+function voidCerrar() { const w = $('voidWrap'); if (w) w.innerHTML = ''; }
 function _haceTxt(s) { s = parseInt(s, 10) || 0; return s < 90 ? s + ' s' : Math.round(s / 60) + ' min'; }
 function _itemsTxt(js) {
   try {
