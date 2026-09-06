@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.21.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.22.0 · 06-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -181,7 +181,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.21.0</span>
+<span class="ver" id="ver">app_jl v1.22.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -769,13 +769,19 @@ function vSala() {
   const pS = (STATE.levaInfo && STATE.levaInfo.estandar) || 16990;
   const ON = 'background:#1d4632;border-color:#3DC97E;color:#DFF7E9';
   const RO = 'background:#5c2a31;border-color:#c85560;color:#FFE9EB';
+  /* fuori fascia (08-16 Cile) gli Activar sono MUTI: leva() li rifiuta comunque
+     (la guardia non dipende dal grigio), ma il dito non deve nemmeno provarci */
+  const fuoriOra = !_levaHoraOk();
+  const MUTO = 'opacity:.35;pointer-events:none';
   h += '<div class="card"><h4>📖 Menú del Día' +
     (lv === 'off' ? ' <span class="pill" style="background:rgba(200,85,96,.18);color:#e78a93">DESACTIVADO</span>'
+      : lv === 'mixto' ? ' <span class="pill" style="background:rgba(230,180,60,.18);color:#e6c05a">MIXTO ⚠️</span>'
       : lv ? ' <span class="pill on">ACTIVO · ' + fmt(lv === 'esca' ? pE : pS) + '</span>'
-      : ' <span class="pill off">—</span>') + '</h4>' +
+      : ' <span class="pill off">—</span>') +
+    (fuoriOra ? ' <span class="pill off" style="font-weight:400">fuera de horario 08-14</span>' : '') + '</h4>' +
     '<div class="row2">' +
-    '<button class="btn" style="' + (lv === 'esca' ? ON : '') + '" onclick="leva(\'esca\')">Activar<small style="display:block;font-weight:400">' + fmt(pE) + '</small></button>' +
-    '<button class="btn" style="' + (lv === 'estandar' ? ON : '') + '" onclick="leva(\'estandar\')">Activar<small style="display:block;font-weight:400">' + fmt(pS) + '</small></button>' +
+    '<button class="btn" style="' + (lv === 'esca' ? ON + ';' : '') + (fuoriOra ? MUTO : '') + '" onclick="leva(\'esca\')">Activar<small style="display:block;font-weight:400">' + fmt(pE) + '</small></button>' +
+    '<button class="btn" style="' + (lv === 'estandar' ? ON + ';' : '') + (fuoriOra ? MUTO : '') + '" onclick="leva(\'estandar\')">Activar<small style="display:block;font-weight:400">' + fmt(pS) + '</small></button>' +
     '<button class="btn" style="' + (lv === 'off' ? RO : '') + '" onclick="leva(\'off\')">Desactivar</button></div>' +
     '</div>';
   return h;
@@ -878,16 +884,60 @@ function vTurno() {
   h += '<p class="mini" style="margin:4px 2px">📷 turno ' + edadTxt('turno') + ' · caja ' + edadTxt('caja') + '</p>';
   return h;
 }
+/* ── la leva parla due lingue: il vetro dice esca|estandar|off, il server
+   risponde esca|estandar|mixto|apagado. Si traduce QUI, in un posto solo. */
+function _levaNorm(v) { return v === 'apagado' ? 'off' : (v || null); }
+function _levaAplica(r) {
+  STATE.leva = _levaNorm(r.escalon);
+  STATE.levaInfo = { esca: (r.esca && r.esca.precio) || 0, estandar: (r.estandar && r.estandar.precio) || 0 };
+}
+/* [06-set · Alberto] la fascia VERA vive in PARAMETROS (leva_auto_de=8:00 ·
+   leva_auto_hasta=14:00 · dias=TUTTI, letti sul foglio il 06-set) ma
+   getLevaMenu non la ritorna e il token dati non entra in una pagina
+   pubblica → il vetro la SPECCHIA. ⚠️ TOCCASANA dichiarato: se Alberto
+   cambia il foglio, questo specchio resta stantio. Lo uccide: getLevaMenu
+   che ritorna la fascia (un campo, materia 📖 — passato in bacheca 06-set).
+   Ora Cile via timeZone, DST-safe: mai un −4h cablato. E la guardia vera
+   (il server che RIFIUTA fuori fascia) è anch'essa di 📖: questa è cortesia
+   del vetro, il Panel non ce l'ha. */
+function _levaHoraOk() {
+  const hhmm = new Date().toLocaleString('sv-SE', { timeZone: 'America/Santiago' }).slice(11, 16);
+  return hhmm >= '08:00' && hhmm < '14:00';
+}
+/* lo stato all'apertura del tab si LEGGE dal server (getLevaMenu, GET),
+   non dalla memoria dell'ultimo click — uno stato letto invecchia. */
+let _levaLeyendo = false;
+async function levaRefresca() {
+  if (_levaLeyendo) return;
+  _levaLeyendo = true;
+  try { const r = await gasGet('getLevaMenu', { pin: STATE.pin }); if (r && r.ok) { _levaAplica(r); salva(); pintaTab(); } }
+  catch (e) { /* senza rete la card resta com'è: memoria dichiarata, non verità */ }
+  finally { _levaLeyendo = false; }
+}
 async function leva(escalon) {
+  if (escalon !== 'off' && !_levaHoraOk()) { toast('warn', '⏰ Fuera de horario (08-14) — el menú no se activa a esta hora.'); return; }
   if (!confirm('¿Menú → ' + escalon.toUpperCase() + '?')) return;
   if (!confirm('Segunda confirmación: ' + escalon.toUpperCase() + ' para TODO el local.')) return;
   try {
     const r = await gasPost('setLevaMenu', { pin: STATE.pin, escalon: escalon });
     if (r && r.ok) {
-      STATE.leva = r.escalon || escalon;
-      /* [fix 7] i PREZZI VERI arrivano nella risposta: si conservano */
-      STATE.levaInfo = { esca: (r.esca && r.esca.precio) || 0, estandar: (r.estandar && r.estandar.precio) || 0 };
-      salva(); toast('ok', '📖 Menú: ' + (STATE.leva === 'off' ? 'apagado' : 'activo')); pintaTab();
+      /* 🔴 [06-set · Alberto: «clicco Desactivar e si attiva 16.990»] il server
+         SPEGNEVA davvero, ma nella risposta parla il SUO lessico
+         (esca|estandar|mixto|apagado) — il vetro confrontava con 'off',
+         'apagado'≠'off' → dipingeva ACTIVO col prezzo di default. Il menú era
+         spento, il vetro mentiva. Cura: si TRADUCE (_levaNorm), e si mostra
+         lo stato che TORNA, mai quello che ho chiesto. */
+      _levaAplica(r);
+      salva(); pintaTab();
+      const real = STATE.leva;
+      if (real !== escalon && real !== 'mixto') {
+        toast('warn', '⚠️ Pedí «' + (escalon === 'off' ? 'desactivar' : escalon) + '» pero el menú quedó ' +
+          (real === 'off' ? 'apagado' : 'en ' + fmt(real === 'esca' ? (STATE.levaInfo.esca || 11990) : (STATE.levaInfo.estandar || 16990))) + '.');
+      } else if (real === 'mixto') {
+        toast('warn', '⚠️ Menú quedó MIXTO (dos precios activos a la vez) — avísale a MENU.');
+      } else {
+        toast('ok', '📖 Menú ' + (real === 'off' ? 'apagado' : 'activo · ' + fmt(real === 'esca' ? (STATE.levaInfo.esca || 11990) : (STATE.levaInfo.estandar || 16990))));
+      }
     }
     else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
   } catch (e) { toast('err', 'Sin conexión — no cambió nada'); }
@@ -1114,6 +1164,7 @@ function tab(i) {
   document.querySelectorAll('.tabs button').forEach((b, j) => b.setAttribute('aria-selected', j === i ? 'true' : 'false'));
   pintaTab();
   if (i === 2 || i === 3 || i === 0) { if (!STATE.ts.caja || edadS('caja') > 60) giroCaja(); }
+  if (i === 1 && !DEMO) levaRefresca(); /* lo stato della leva si LEGGE, non si ricorda */
   if (i === 1) { if (!STATE.ts.turno || edadS('turno') > 300) giroTurno(); }
 }
 /* [06-set · norma di Alberto] la via d'uscita in FONDO a ogni scheda, non solo
