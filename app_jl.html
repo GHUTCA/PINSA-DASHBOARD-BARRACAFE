@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.13.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.14.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -161,7 +161,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.13.0</span>
+<span class="ver" id="ver">app_jl v1.14.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -427,22 +427,29 @@ function _porMesero() {
      vuota del server letta come persona). */
   if (c && c.por_mesero) {
     Object.keys(c.por_mesero).forEach(n => {
-      const nome = (n || '').toString().trim();
-      if (!nome) return;                        // chiave vuota ≠ persona
+      /* 🔴 [06-set] la chiave VUOTA non è un errore: sono i pedidos che il
+         CLIENTE fa da solo col QR (`Via_Cliente: directa`, nessun mesero).
+         Verificato nel libro: mesa 21, 15:10, due iPhone diversi, $42.990.
+         Non si nasconde (è venta vera) e non si finge una persona: si chiama
+         col suo nome e va IN FONDO, fuori dal confronto fra meseros. */
+      let nome = (n || '').toString().trim();
+      const senzaMesero = !nome;
+      if (senzaMesero) nome = '📱 Pedidos del cliente (QR)';
       const m = c.por_mesero[n] || {};
       const cobrado = m.cobrado || 0, servido = m.venta || 0;
       const val = cobrado || servido;           // il denaro che è passato da lui
       const ctas = m.n_cobros || m.n || 0;
       if (!val && !ctas) return;                // chi non ha né servito né incassato
-      out.push({ n: nome, venta: val, ctas: ctas, cobrado: cobrado, servido: servido });
+      out.push({ n: nome, venta: val, ctas: ctas, cobrado: cobrado, servido: servido, qr: senzaMesero });
     });
   }
-  const tot = out.reduce((a, b) => a + b.venta, 0);
-  const media = out.length ? tot / out.length : 0;
-  out.forEach(m => { m.d = media ? Math.round((m.venta - media) / media * 100) : 0; });
+  const humanos = out.filter(m => !m.qr);
+  const tot = humanos.reduce((a, b) => a + b.venta, 0);
+  const media = humanos.length ? tot / humanos.length : 0;
+  out.forEach(m => { m.d = (m.qr || !media) ? null : Math.round((m.venta - media) / media * 100); });
   /* prima chi ha allarmi (rechazos sulle sue mesas — TODO quando il mapping
      mesa→mesero esce pulito), poi per venta */
-  out.sort((a, b) => b.venta - a.venta);
+  out.sort((a, b) => (a.qr ? 1 : 0) - (b.qr ? 1 : 0) || b.venta - a.venta);
   return out;
 }
 function vSala() {
@@ -472,13 +479,19 @@ function vSala() {
   } else {
     ms.forEach(m => {
       const cls = m.d > 8 ? 'up' : (m.d < -8 ? 'dn' : 'mid');
-      const que = m.cobrado ? (m.ctas + ' cobros') : (m.ctas + ' cuentas · servidas');
-      h += '<div class="pers"><span class="av">' + esc((m.n || '?')[0].toUpperCase()) + '</span>' +
+      const que = m.qr ? (m.ctas + ' pedidos · sin mesero')
+        : m.cobrado ? (m.ctas + ' cobros') : (m.ctas + ' cuentas · servidas');
+      /* il QR non si confronta con nessuno: non è una persona che vende poco */
+      const der = m.qr ? '<small class="mid">directo del cliente</small>'
+        : '<small class="' + cls + '">' + (m.d > 0 ? '+' : '') + m.d + '% vs media</small>';
+      h += '<div class="pers"><span class="av"' + (m.qr ? ' style="background:#6b7a8f"' : '') + '>' +
+        esc((m.n || '?')[0].toUpperCase()) + '</span>' +
         '<span class="nb"><b>' + esc(m.n) + '</b><small>' + que + '</small></span>' +
-        '<span class="val"><b>' + fmt(m.venta) + '</b><small class="' + cls + '">' + (m.d > 0 ? '+' : '') + m.d + '% vs media</small></span></div>';
+        '<span class="val"><b>' + fmt(m.venta) + '</b>' + der + '</span></div>';
     });
-    /* IL SUSSURRO — uno alla volta (N8): il più lontano dalla media, in giù */
-    const peor = ms.slice().sort((a, b) => a.d - b.d)[0];
+    /* IL SUSSURRO — uno alla volta (N8): il più lontano dalla media, in giù.
+       Solo fra PERSONE: il QR non si accusa di vendere poco. */
+    const peor = ms.filter(m => !m.qr && m.d != null).sort((a, b) => a.d - b.d)[0];
     if (peor && peor.d < -25 && peor.ctas >= 5) {
       h += '<div class="card sus" style="margin-top:10px"><h4>🔴 ' + esc(peor.n) + ' está ' + peor.d + '%</h4>' +
         '<p>' + peor.ctas + ' cuentas, ' + fmt(peor.venta / Math.max(1, peor.ctas)) + ' cada una. <b>Antes de mirarlo a él, mira su plaza.</b> ' +
