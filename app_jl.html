@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.7.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.8.0 · 05-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -19,7 +19,7 @@
      ⑤ OGNI GESTO È FIRMATO: due JL insieme (V/S) o in sostituzione non
         si pestano — lo stato è del LOCALE, la firma è della PERSONA.
      ── 🚂 PER CHI RIPUNTA (ordine di venerdì 11-set: la sala esce da Google) ──
-     TUTTE le chiamate passano da DUE porte sole: gasPost() e staffPost().
+     TUTTE le chiamate passano da TRE porte sole: gasPost() · gasGet() · staffPost().
      Il ripuntamento dell'app è cambiare QUELLE DUE funzioni (URL/strada),
      non toccare le 4 schede. 5 scritture su GAS (abrirTurno · cerrarTurno ·
      asignarPlaza · setLevaMenu · adminToggle86) + moverMesa già al bordo.
@@ -139,7 +139,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.7.0</span>
+<span class="ver" id="ver">app_jl v1.8.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -194,6 +194,25 @@ async function gasPost(action, body) {
     const r = await fetch(CFG.GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {})),
       signal: ctrl.signal, cache: 'no-store', redirect: 'follow' });
+    clearTimeout(t);
+    if (!r.ok) throw new Error('http_' + r.status);
+    return await r.json();
+  } catch (e) { clearTimeout(t); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+/* [06-set · riparazione] IL ROUTER HA DUE PORTE, e non sono intercambiabili:
+   `doPost` (r.254-482) e `doGet` (da r.483) hanno liste di `case` DIVERSE.
+   `getTurnoAdmin` e `adminListProducts` vivono SOLO su GET (parametri in
+   querystring); chiamati in POST rispondono «Unknown action» — e l'app lo
+   mostrava come «PIN no válido», facendo accusare il PIN del JL che era
+   giusto. 🎓 Ho letto la riga del router senza guardare in QUALE ramo stava:
+   il numero di riga c'era, il ramo no. Verificato sul vivo, non dedotto:
+   GET→pin_invalid (arriva) · POST→Unknown action (non arriva). */
+async function gasGet(action, params) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), CFG.TIMEOUT_MS);
+  try {
+    const q = new URLSearchParams(Object.assign({ action: action, local: CFG.LOCAL }, params || {}));
+    const r = await fetch(CFG.GAS_URL + '?' + q.toString(), { signal: ctrl.signal, cache: 'no-store', redirect: 'follow' });
     clearTimeout(t);
     if (!r.ok) throw new Error('http_' + r.status);
     return await r.json();
@@ -263,7 +282,7 @@ async function giroVeloce() {
 async function giroTurno() {
   if (DEMO || !STATE.pin) return;
   try {
-    const r = await gasPost('getTurnoAdmin', { pin: STATE.pin });
+    const r = await gasGet('getTurnoAdmin', { pin: STATE.pin });
     if (r && r.ok) { STATE.turno = r; STATE.ts.turno = Date.now(); salva(); pintaTesta(); pintaTab(); }
     else if (r && r.error === 'pin_invalid') { sessionStorage.removeItem('jl_pin'); location.reload(); }
   } catch (e) {}
@@ -280,7 +299,7 @@ async function giroProds() {
      client e conteggio agotados. Lento → dietro, cache 10 min. */
   if (DEMO || !STATE.pin) return;
   try {
-    const r = await gasPost('adminListProducts', { pin: STATE.pin });
+    const r = await gasGet('adminListProducts', { pin: STATE.pin });
     if (r && r.ok) { STATE.prods = r.products || []; STATE.ts.prods = Date.now(); salva(); pintaTesta(); if (TAB === -1) ochenta(); }
   } catch (e) {}
 }
@@ -666,7 +685,7 @@ async function entrar() {
   if (!pin) return;
   $('gErr').textContent = '';
   try {
-    const r = await gasPost('getTurnoAdmin', { pin: pin });
+    const r = await gasGet('getTurnoAdmin', { pin: pin });
     if (r && r.ok) {
       STATE.pin = pin; STATE.turno = r; STATE.ts.turno = Date.now();
       STATE.user = (r.turno && r.turno.abierto_by) || STATE.user || 'JL';
