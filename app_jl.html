@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.22.0 · 06-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.23.0 · 07-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -181,7 +181,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.22.0</span>
+<span class="ver" id="ver">app_jl v1.23.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -481,16 +481,30 @@ function _porMesero() {
       if (senzaMesero) nome = '📱 Pedidos del cliente (QR)';
       const m = c.por_mesero[n] || {};
       const cobrado = m.cobrado || 0, servido = m.venta || 0;
+      /* 🔴 [07-set · reperto di Alberto: «Wilbert non compare»] c'è un TERZO
+         fatto, e mancava: il server (v3.94.0) mette in `venta` solo i pedidos
+         di mesas GIÀ PAGATE — «la caja deve quadrare». Tutto il resto va in
+         `abierto`/`n_abierto`: PLATA IN SALA, non ancora in cassa. Il campo
+         viaggiava già e il vetro non lo guardava ⇒ un mesero con tavoli
+         aperti e nessun pago valeva zero e SPARIVA dalla lista.
+         🩸 Non è un fastidio da collaudo: venerdì alle 21 un mesero con 5
+         tavoli pieni e nessun cobro sarebbe stato invisibile al JL — proprio
+         quando c'è più da guardare. */
+      const abierto = m.abierto || 0, nAb = m.n_abierto || 0;
       const val = cobrado || servido;           // il denaro che è passato da lui
       const ctas = m.n_cobros || m.n || 0;
-      if (!val && !ctas) return;                // chi non ha né servito né incassato
-      out.push({ n: nome, venta: val, ctas: ctas, cobrado: cobrado, servido: servido, qr: senzaMesero });
+      if (!val && !ctas && !abierto && !nAb) return;   // chi non ha proprio niente
+      out.push({ n: nome, venta: val, ctas: ctas, cobrado: cobrado, servido: servido,
+                 abierto: abierto, n_abierto: nAb, qr: senzaMesero });
     });
   }
-  const humanos = out.filter(m => !m.qr);
+  /* la media si fa SOLO su chi ha denaro chiuso: chi ha solo tavoli aperti
+     non è «un mesero che vende poco», è un mesero la cui serata non è finita.
+     Metterlo nella media falserebbe il confronto di tutti gli altri. */
+  const humanos = out.filter(m => !m.qr && m.venta > 0);
   const tot = humanos.reduce((a, b) => a + b.venta, 0);
   const media = humanos.length ? tot / humanos.length : 0;
-  out.forEach(m => { m.d = (m.qr || !media) ? null : Math.round((m.venta - media) / media * 100); });
+  out.forEach(m => { m.d = (m.qr || !media || !m.venta) ? null : Math.round((m.venta - media) / media * 100); });
   /* prima chi ha allarmi (rechazos sulle sue mesas — TODO quando il mapping
      mesa→mesero esce pulito), poi per venta */
   out.sort((a, b) => (a.qr ? 1 : 0) - (b.qr ? 1 : 0) || b.venta - a.venta);
@@ -710,7 +724,11 @@ function vSala() {
       '<span class="mz pend" style="min-width:0;padding:1px 6px;font-size:10.5px">sin mesero</span></p>';
     ms.forEach(m => {
       const cls = m.d > 8 ? 'up' : (m.d < -8 ? 'dn' : 'mid');
+      /* [07-set] chi non ha ancora chiuso niente si racconta con ciò che HA:
+         i tavoli aperti. Mai un «$0» che sembra un mesero fermo. */
+      const soloAbierto = !m.venta && !m.ctas && (m.abierto || m.n_abierto);
       const que = m.qr ? (m.ctas + ' pedidos · sin mesero')
+        : soloAbierto ? (m.n_abierto + (m.n_abierto === 1 ? ' cuenta abierta' : ' cuentas abiertas'))
         : m.cobrado ? (m.ctas + ' cobros') : (m.ctas + ' cuentas · servidas');
       /* il QR non si confronta con nessuno: non è una persona che vende poco */
       /* [06-set · Alberto] sotto la venta: PROMEDIO por cuenta, poi ± vs media */
@@ -718,8 +736,11 @@ function vSala() {
       /* [fix 4] se ha già fatto il corte, la riga lo dichiara */
       const corteOk = !m.qr && (STATE.caja && STATE.caja.cierres || []).some(c => _slugSalaJS(c.nombre || c) === _slugSalaJS(m.n));
       const der = m.qr ? '<small class="mid">directo del cliente</small>'
+        : soloAbierto ? '<small style="display:block;color:#b9b2a4">' + fmt(m.abierto) + ' en sala</small>' +
+            '<small class="mid">sin cobrar todavía</small>'
         : '<small style="display:block;color:#b9b2a4">prom ' + prom + '</small>' +
-          '<small class="' + cls + '">' + (m.d > 0 ? '+' : '') + m.d + '% vs media</small>';
+          (m.d == null ? '<small class="mid">—</small>'
+                       : '<small class="' + cls + '">' + (m.d > 0 ? '+' : '') + m.d + '% vs media</small>');
       /* [06-set] anche il QR ha i suoi tavoli: i pedidos senza mesero vivono
          in `sin_dueno` nella fetta di CHIUNQUE (il bordo li mostra a tutti
          perché non sono di nessuno). Un QR pendiente è un cliente che ha
@@ -730,7 +751,8 @@ function vSala() {
         esc((m.n || '?')[0].toUpperCase()) + '</span>' +
         '<span class="nb"><b>' + esc(m.n) + '</b>' + (corteOk ? ' <span class="pill on" style="font-size:9.5px;padding:1px 7px">corte ✓</span>' : '') +
         '<small>' + que + (mm && mm.plazas.length ? ' · ' + mm.plazas.map(pz => '<span style="white-space:nowrap">' + esc(pz) + '</span>').join(' · ') : '') + '</small></span>' +
-        '<span class="val"><b>' + fmt(m.venta) + '</b>' + der + '</span></div>';
+        '<span class="val"><b' + (soloAbierto ? ' style="color:#b9b2a4"' : '') + '>' +
+          (soloAbierto ? fmt(m.abierto) : fmt(m.venta)) + '</b>' + der + '</span></div>';
       if (mm) h += _mesasHtml(mm, m.n);
     });
     /* IL SUSSURRO — uno alla volta (N8): il più lontano dalla media, in giù.
