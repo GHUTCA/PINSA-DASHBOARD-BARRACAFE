@@ -6,6 +6,9 @@
 <meta name="theme-color" content="#0f0f16">
 <title>BKS Sala</title>
 <!-- ════════════════════════════════════════════════════════════════════
+     sala.html · v3.76.0 · 07-set-2026 · [AUT-0216c] MODALITÀ JL (?jl=1): vista ≠ firma —
+       il JL entra dalla sua app sul tavolo di un mesero, senza codigo, e firma lui.
+       Verbi #2·#3·#4 nascosti. Senza ?jl=1: identica a v3.75.0 riga per riga.
      sala.html · v2.0.0 · 12-ago-2026 · LA SALA CHE OBBEDISCE (build)
      FORK di consola.html v1.25 (commit 9f87f29) — file NUOVO e ADDITIVO:
      consola.html resta il vivo di ogni giorno, questa è la pilota.
@@ -985,7 +988,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.82.0</span>
+      <span class="ver" id="ver">sala v3.83.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1186,6 +1189,54 @@ const CFG = {
 const GESTO_FORZA = QS.get('gf') !== '0';
 const BACKOFF_MS = QS.get('bo') === null ? 4000
                  : Math.max(0, parseInt(QS.get('bo'), 10) || 0) * 1000;
+
+/* ═══ v3.76.0 · [AUT-0216c] · LA SALA IN MODALITÀ JL — vista ≠ firma ═════════
+   Ordine di Alberto (07-set 14:3x, sui tre screenshot dell'app JL):
+   *«il JL apre un tavolo qualsiasi — suo o di un garzón — ed entra
+   DIRETTAMENTE nella schermata del tavolo, quella di Wilbert, e lì può fare
+   tutto. Perché scrivere nuove schermate?»* — e sull'errore del 06-set:
+   *«avevamo commesso l'errore di entrare nella sua app mesero facendogli
+   chiedere il codice, sbagliato: deve poter fare ping pong velocemente».*
+   🔑 IL CUORE È UNA SCISSIONE. Oggi `STATE.nombre` fa due mestieri: dice
+   QUALE FETTA guardo (la sala di Wilbert) e CHI FIRMA (Wilbert). In modalità
+   JL i due si separano: **vista = il mesero padrone del tavolo · firma = il
+   JL**. Il tavolo RESTA del mesero; il gesto esce firmato dal JL (la riga di
+   Alberto del 06-set: «se il mesero dice io non l'ho fatto, bisogna sapere
+   chi l'ha fatto»).
+   · L'identità NON si digita: arriva dalla sessione dell'app JL (stesso
+     dominio, `sessionStorage`): `jl_pin` · `jl_user` · `jl_codigo`. Il PIN
+     del JL vive sul telefono DEL JL — mai su quello del mesero.
+   · Il codigo del turno NON si chiede: l'ha aperto lui, la sua app lo ha.
+   · Senza `?jl=1` questo file è IDENTICO a ieri, riga per riga: l'URL è
+     l'interruttore per costruzione. Senza pin+user in sessione, `?jl=1` NON
+     accende niente (mai una mezza modalità): sala normale.
+   ⛔ VERBI NASCOSTI in modalità JL: PEDIR · PRECUENTA · COBRAR · MOVER ·
+     SEPARAR/JUNTAR, e ogni gesto di servizio dentro PEDIDOS (MÍO, digitado,
+     entregado, limpia). Sono i verbi #2·#3·#4 dell'ordine di Alberto
+     (eliminar → cobrar → pedir → mover), NON autorizzati: l'ordine non cambia
+     perché cambia la strada. Visibili: PEDIDOS (sola lettura) ed ELIMINAR
+     nella sola porta «Un producto» (AUT-0216: `corregirPedido`).
+   · ELIMINAR firma col PIN di sessione (mai richiesto), `nombre` = il JL,
+     `via:'app_jl'` come nelle predizioni sigillate di AUT-0216. */
+const JL = (function () {
+  if (QS.get('jl') !== '1') return null;
+  let pin = '', user = '', codigo = '';
+  try {
+    pin = sessionStorage.getItem('jl_pin') || '';
+    user = sessionStorage.getItem('jl_user') || '';
+    codigo = sessionStorage.getItem('jl_codigo') || '';
+  } catch (e) {}
+  if (!pin || !user) return null;
+  return { pin: pin, user: user, codigo: codigo,
+           vista: (QS.get('vista') || '').trim(), mesa: (QS.get('mesa') || '').trim(), _abierta: false };
+})();
+/* la fetta che si legge: in modalità JL è quella del mesero PADRONE, mai la
+   firma. Ovunque il poll chiedeva `STATE.nombre` per SAPERE, ora chiede qui. */
+function _vistaNombre() { return (JL && STATE.vista) ? STATE.vista : STATE.nombre; }
+function _jlBackUrl() {
+  const loc = ({ BKS: 'bks', RIESCO: 'rsc', CANDELARIA: 'cdl' })[CFG.LOCAL] || 'bks';
+  return 'app_jl.html?loc=' + loc;
+}
 
 /* ═══ v3.9.0 · [AUT-0012] · I FRENI DELLA LIBRETA NUOVA ═══════════════════
    Tre interruttori d'URL: si torna a ieri SENZA deploy, come ?poll= e ?tmo=.
@@ -1408,6 +1459,7 @@ if (QSC) { try { history.replaceState(null, '', location.pathname); } catch (e) 
 const STATE = {
   codigo: localStorage.getItem(CFG.SK.COD) || QSC,
   nombre: localStorage.getItem(CFG.SK.NOM) || '',
+  vista: '',           // v3.76.0 · [AUT-0216c] · il mesero PADRONE della fetta (solo in modalità JL); '' = la fetta è la mia
   tgLink: '',
   sala: null,          // último payload getSalaMesero
   enVuelo: {},         // uuid → true (tap in flight)
@@ -2253,6 +2305,9 @@ function esperaClass(s, umb) {
 
 /* ═════ ENTRADA ═════ */
 function showEntrada(msg) {
+  /* [AUT-0216c] il JL NON vede mai la tastiera del codigo: ogni strada che qui
+     chiederebbe il turno lo rimanda alla SUA app, che il codigo lo ha. */
+  if (JL) { location.replace(_jlBackUrl()); return; }
   $('vSala').classList.add('hide');
   $('fabNuevo').classList.add('hide');   // v1.17 · il FAB vive solo in sala
   STATE.nuevo = null; renderNuevo();
@@ -4646,7 +4701,12 @@ function entrarSala() {
      il banner ambra dice l'età, il poll la rimpiazza appena arriva. Il dito
      non aspetta la rete nemmeno al boot. */
   let pintado = false;
-  if (!STATE.sala) {
+  /* [AUT-0216c] in modalità JL: niente FAB del pedido a voce (PEDIR non è
+     autorizzato) e niente foto ottimista — la foto salvata su questo telefono è
+     di un'ALTRA fetta (l'ultimo mesero guardato): disegnarla sarebbe mostrare
+     la sala di uno mentre si crede di guardare quella di un altro. */
+  if (JL) $('fabNuevo').classList.add('hide');
+  if (!STATE.sala && !JL) {
     try {
       const f = JSON.parse(localStorage.getItem('sala_foto_v1') || 'null');
       /* v2.0.1 · la foto vale solo per LO STESSO mesero e LO STESSO local
@@ -4679,7 +4739,7 @@ function entrarSala() {
      il catalogo si scarica in silenzio appena entri — il primo ➕ PEDIDO
      apre all'istante invece di pagare la chiamata GAS davanti al cliente.
      Stessa cura del TTL (120s): se poi invecchia, il picker rinfresca. */
-  if (_catalogoViejo()) gasGet('getCatalogo', { codigo: STATE.codigo }).then(function (r) {
+  if (!JL && _catalogoViejo()) gasGet('getCatalogo', { codigo: STATE.codigo }).then(function (r) {
     if (r && r.ok && Array.isArray(r.productos)) {
       STATE.catalogo = r.productos; STATE.catalogoTs = Date.now();
       STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server
@@ -4902,9 +4962,11 @@ async function refrescar(conSkeleton) {
        sala: `Promise.all` e non `await` in fila — la sala non deve aspettare
        una cintura nemmeno di 200 ms. E `_enllegadaLee` non lancia mai: se
        inciampa, la lista resta vuota e il vetro è quello di ieri. */
+    /* [AUT-0216c] si LEGGE la fetta di `_vistaNombre()` (il padrone del tavolo
+       in modalità JL; me stesso altrimenti). La FIRMA resta `STATE.nombre`. */
     const [r] = await Promise.all([
-      leerSala(STATE.codigo, STATE.nombre),
-      _enllegadaLee(STATE.codigo, STATE.nombre),
+      leerSala(STATE.codigo, _vistaNombre()),
+      _enllegadaLee(STATE.codigo, _vistaNombre()),
     ]);
     if (!r || !r.ok) {
       if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) {
@@ -4955,7 +5017,7 @@ async function refrescar(conSkeleton) {
     /* v2.0 · L'ULTIMA FOTO SI SALVA: al prossimo boot la sala si apre con
        questa, PRIMA che la rete risponda (entrata ottimista). Best-effort:
        se localStorage è pieno, pazienza — si apre senza foto come oggi. */
-    if (!r._vieja_s) {
+    if (!r._vieja_s && !JL) {   // [AUT-0216c] la foto di un'altra fetta non si salva come mia
       try { localStorage.setItem('sala_foto_v1', JSON.stringify({ ts: Date.now(), nombre: STATE.nombre, local: CFG.LOCAL, r: r })); } catch (e) {}
     }
     /* v1.5 · l'avviso Fintoc suona UNA volta per pago (dedup mesa+ts) */
@@ -5063,6 +5125,13 @@ async function refrescar(conSkeleton) {
     }
     detectarNuevos(r);   // v1.4 · doble campana su arrivi nuovi
     render(r);
+    /* [AUT-0216c] il link profondo: al PRIMO poll fresco la mesa chiesta si
+       seleziona e il pannello dei verbi si apre — una volta sola, mai al
+       ritorno di ogni poll (il JL potrebbe averla già chiusa). */
+    if (JL && JL.mesa && !JL._abierta) {
+      JL._abierta = true;
+      try { STATE.selMesas = [String(JL.mesa)]; _mapaRepinta(); renderPanel(); } catch (e2) {}
+    }
   } catch (e) {
     // v2.14 · P1.3/R7: un timeout non è un errore finché non fallisce DUE
     // volte di fila — il singolo sforamento non urla più «sin conexión»
@@ -5124,6 +5193,15 @@ function salirPorCierre() {
 /* v2.1 · il nome in alto è un bottone: chi sei, e da dove esci */
 function quienSoy() {
   const r = STATE.sala || {};
+  /* [AUT-0216c] il JL non chiude turni né sessioni da qui: la sua uscita è
+     la sua app. Il ping-pong è un tap. */
+  if (JL) {
+    vhoja('<h3>👑 ' + esc(JL.user) + '</h3>' +
+      '<div class="cs-psub">Estás mirando la sala de <b>' + esc(STATE.vista || '—') + '</b>.<br>' +
+      '<span style="opacity:.7">Todo lo que hagas aquí queda firmado a TU nombre; la mesa sigue siendo del mesero.</span></div>' +
+      '<button class="opt2" onclick="location.href=_jlBackUrl()"><b>‹ Volver a mi app</b><small>Turno · Caja · Ventas · los otros meseros</small></button>');
+    return;
+  }
   vhoja('<h3>' + esc(r.nombre || STATE.nombre) + '</h3>' +
     '<div class="cs-psub">' + (r.plazas_detalle && r.plazas_detalle.length
       ? 'Plaza <b>' + esc(r.plazas_detalle.map(function (p) { return p.plaza; }).join(' · ')) + '</b>'
@@ -6253,7 +6331,9 @@ function _dtHay() {
   if (_dt.tipo === 'franq') return true;
   return false;
 }
-function _dtListo() { return _dtHay() && (_dt.pin || '').length === 4; }
+/* [AUT-0216c] in modalità JL la firma è in sessione: pronto appena c'è il gesto.
+   La FAM resta col codice della famiglia, che non è il PIN del JL. */
+function _dtListo() { return _dtHay() && ((JL && _dt.tipo !== 'fam') || (_dt.pin || '').length === 4); }
 function _dtFalta() {
   if (!_dt) return '';
   /* 🔴 senza porta scelta il bottone diceva «Escribe el PIN del JL» — cioè
@@ -6429,7 +6509,16 @@ function _dtPinta() {
      intitolano da sé più sotto (Convenio · Familia · Colación · …). */
   var b = '', tt = 'Eliminar';
 
-  if (!_dt.tipo) {
+  /* [AUT-0216c] in modalità JL il pannello ha UNA porta: «Un producto», cioè il
+     void di AUT-0216 (`corregirPedido`). Le altre cinque finiscono nel PAGO
+     (convenio/descuento/otro = COBRAR, #2) o in verbi propri non coperti
+     dall'AUT (familia, colación). Qui non si disegnano: non è un CSS. */
+  if (!_dt.tipo && JL) {
+    b = '<button class="c4pick" style="margin:5px 0" onclick="_dtTipo(\'prod\')">' +
+          '<span class="c4nm">🍽 Un producto<small style="display:block;font-size:12.5px;' +
+          'font-weight:400;color:var(--cs-ink2)">se quita esa línea sola, con motivo · firmas tú</small></span></button>' +
+        '<div class="c4expl" style="font-size:12.5px;margin-top:8px">Descuentos, convenios y colación se hacen desde el teléfono del mesero.</div>';
+  } else if (!_dt.tipo) {
     b = '<button class="c4pick" style="margin:5px 0" onclick="_dtTipo(\'conv\')">' +
           '<span class="c4nm">🤝 Convenio<small style="display:block;font-size:12.5px;font-weight:400;' +
           'color:var(--cs-ink2)">Banco Falabella · <b>no</b> sobre promociones</small></span></button>' +
@@ -6586,7 +6675,12 @@ function _dtPinta() {
        chiede una password per un gesto che non esiste ancora.
        🔴 Sulla FAM non firma il JL: firma la famiglia, col proprio codice, sul
        telefono del mesero. Stesso campo, due nomi, due gesti diversi. */
-    if (_dtHay()) {
+    if (_dtHay() && JL && _dt.tipo !== 'fam') {
+      /* [AUT-0216c] il PIN è già in sessione, sul telefono del JL: non si
+         ridigita e non si mostra. Si dice CHI firma, che è l'informazione. */
+      b += '<div class="c4lab">Firma</div>' +
+        '<div class="c4expl" style="font-size:14px">👑 <b>' + esc(JL.user) + '</b> · queda firmado a tu nombre</div>';
+    } else if (_dtHay()) {
       b += '<div class="c4lab">' + (_dt.tipo === 'fam' ? 'Código de la familia' : 'PIN del JL') + '</div>' +
         '<input class="cs-pin mv-pin" id="dtPin" inputmode="numeric" maxlength="4" ' +
           'value="' + esc(_dt.pin) + '" autocomplete="off" ' +
@@ -6663,8 +6757,13 @@ function _dtGo() {
       return { id: it.id, qty: (it.id === pr.id) ? Math.max(0, q - pr.quita) : q };
     });
     _dt = null; _dtPinta();
-    gasPost('corregirPedido', { codigo: STATE.codigo, nombre: STATE.nombre,
-      uuid: pr.uuid, items: finales, motivo: d.pmot, pin_jl: (d.pin || '').trim() })
+    /* [AUT-0216c] in modalità JL: `nombre` = il JL (è già STATE.nombre), il PIN
+       esce dalla SESSIONE e la porta si dichiara (`via:'app_jl'`, come nelle
+       predizioni sigillate di AUT-0216). Dal telefono del mesero: com'era. */
+    var _bodyCorr = { codigo: STATE.codigo, nombre: STATE.nombre,
+      uuid: pr.uuid, items: finales, motivo: d.pmot, pin_jl: JL ? JL.pin : (d.pin || '').trim() };
+    if (JL) _bodyCorr.via = 'app_jl';
+    gasPost('corregirPedido', _bodyCorr)
       .then(function (r) {
         if (r && r.ok) {
           toast('ok', '🍽 ' + (pr.quita > 1 ? pr.quita + '× ' : '') + pr.n + ' fuera · mesa ' + mesa);
@@ -7202,6 +7301,14 @@ function vpSoltar() { STATE.selMesas = []; STATE.vpMesa = ''; _mapaRepinta(); re
 function renderPanel() {
   const el = $('vpanel'); if (!el) return;
   const sel = STATE.selMesas || [];
+  /* [AUT-0216c] JUNTAR/SEPARAR sono gesti di mesa (famiglia MOVER, #4): in
+     modalità JL la multi-selezione non offre verbi — solo la via d'uscita. */
+  if (sel.length >= 2 && JL) {
+    el.innerHTML = '<div class="vp-h"><span class="tt">👆 ' + sel.length + ' mesas</span>' +
+      '<button class="cx" onclick="vpSoltar()">✕</button></div>' +
+      '<div class="vp-s">' + sel.join(' · ') + '<br><b style="color:#f5a623">Juntar y separar no están en la app del JL.</b> Toca una mesa sola.</div>';
+    return;
+  }
   /* più mese toccate: la barra della junta vive QUI, non sotto il mapa */
   if (sel.length >= 2) {
     let tot = 0; sel.forEach(function (m) { tot += _vpTot(m); });
@@ -7282,6 +7389,13 @@ function renderPanel() {
     { k: 'descontar', i: '🏷', n: (DESCONTAR_V2_ON ? 'ELIMINAR' : 'DESCONTAR'), cl: '', jl: 1 }
   ];
   if (j) V.push({ k: 'separar', i: '✂', n: 'SEPARAR', cl: 'peli' });
+  /* ═══ [AUT-0216c] · IN MODALITÀ JL RESTANO SOLO I VERBI AUTORIZZATI ═════════
+     PEDIDOS (sola lettura) ed ELIMINAR (la porta «Un producto», AUT-0216).
+     PEDIR · PRECUENTA · COBRAR · MOVER · SEPARAR sono i #2·#3·#4 dell'ordine di
+     Alberto: NON compaiono. 🔴 Il filtro è QUI, sulla lista che disegna i
+     bottoni, non su un CSS: un bottone che non esiste non si preme per sbaglio
+     e non si «scopre» ispezionando il DOM. */
+  const VJ = JL ? V.filter(function (b) { return b.k === 'pedidos' || b.k === 'descontar'; }) : V;
   el.innerHTML =
     '<div class="vp-h">' + (j ? '<span style="color:' + _juntaCol(j.n) + '">👥</span>' : '') +
       '<span class="tt">Mesa ' + esc(mesa) + '</span>' +
@@ -7305,7 +7419,7 @@ function renderPanel() {
     (its.length ? '<div class="vp-list">' + its.map(function (x) {
       return '<div class="vp-li"><span class="q">' + x.q + '×</span><span class="nm">' + esc(x.n) +
         '</span><span class="pv">$' + _fmtMiles(x.q * x.pu) + '</span></div>'; }).join('') + '</div>' : '') +
-    '<div class="verbos">' + V.map(function (b) {
+    '<div class="verbos">' + VJ.map(function (b) {
       return '<button class="vb ' + b.cl + '" data-v="' + b.k + '">' + (b.jl ? '<span class="lk">✓JL</span>' : '') +
         '<span class="vi">' + b.i + '</span><span class="vn">' + b.n + '</span></button>'; }).join('') + '</div>';
   el.querySelectorAll('[data-v]').forEach(function (b) {
@@ -8133,7 +8247,7 @@ function cerrarMesa() {
   $('mesaOvl').classList.remove('on');
   $('mesaSheet').classList.remove('on');
   // v1.3 · il FAB torna solo se la sala è davanti (mai sull'entrada/comandera)
-  if (!$('vSala').classList.contains('hide') && !STATE.nuevo) $('fabNuevo').classList.remove('hide');
+  if (!JL && !$('vSala').classList.contains('hide') && !STATE.nuevo) $('fabNuevo').classList.remove('hide');   // [AUT-0216c] mai per il JL
 }
 function renderMesaSheet(r) {
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === STATE.mesaAbierta; });
@@ -8265,6 +8379,19 @@ function renderMesaSheet(r) {
   h += '<div class="msh-row" style="text-align:center;margin-top:2px">' +
     '<a style="font-size:12px;opacity:.6;text-decoration:underline;cursor:pointer" onclick="moverMesaUI(\'' + esc(m.mesa) + '\')">🔀 El cliente se cambió de mesa</a></div>';
   $('mesaSheetContent').innerHTML = h;
+  /* [AUT-0216c] in modalità JL lo sheet PEDIDOS è SOLA LETTURA: i gesti di
+     servizio (MÍO · digitado · entregado · limpia · agregar · cobrar · mover)
+     firmerebbero il JL e — MÍO — gli passerebbero il tavolo. Si spengono TUTTI
+     i controlli con un'azione tranne la ✕, invece di inseguirli uno a uno:
+     un bottone nuovo aggiunto domani nasce già spento qui. */
+  if (JL) {
+    try {
+      $('mesaSheetContent').querySelectorAll('button, a[onclick]').forEach(function (b) {
+        if (b.classList && b.classList.contains('msh-x')) return;
+        b.style.display = 'none';
+      });
+    } catch (e) {}
+  }
 }
 
 /* v2.1 · CASO RUTH (22-lug, mesa 86 di Alberto): «✓ Mesa limpia» leggeva come
@@ -10524,7 +10651,7 @@ function render(r) {
   /* v2.1 · header del mockup: il NOME (è la conferma che il telefono sa chi
      sei, ed è la porta d'uscita) e la plaza nel titolo. L'ora è via: il
      telefono ce l'ha, e occupava il posto di un numero. */
-  const yoEl = $('salaYo'); if (yoEl) yoEl.textContent = r.nombre || STATE.nombre || '—';
+  const yoEl = $('salaYo'); if (yoEl) yoEl.textContent = JL ? ('👑 ' + JL.user) : (r.nombre || STATE.nombre || '—');   // [AUT-0216c] in alto c'è CHI FIRMA
   const plEl = $('salaPlaza');
   if (plEl) plEl.textContent = det.length ? det.map(function (p) { return p.plaza; }).join(' · ') : 'Sala';
   /* v3.4.2 · la riga sotto i KPI parla SOLO per eccezione (Alberto: «zona
@@ -11159,7 +11286,9 @@ if (DEMO) {
   };
 }
 function _demoSala() {
-  const it = function (n, p, q) { return JSON.stringify([{ nombre: n, precio: p, qty: q }]); };
+  /* [v3.76.0] gli item finti portano un `id`: senza, «Un producto» non li offre
+     (giusto: senza id non si toglie) e la vetrina non poteva mostrare il void */
+  const it = function (n, p, q) { return JSON.stringify([{ id: 'D-' + n.toLowerCase().replace(/[^a-z0-9]+/g, '-'), nombre: n, precio: p, qty: q }]); };
   /* v3.4.1 · IL DEMO È IL MEZZOGIORNO VERO (chiesto da Alberto: «una vista con
      15 tavoli, mettila nel demo e vediamo»): un garzón che copre 3 plazas —
      tutto il salón — con 12 mesas con gente su 15, e la coda piena: 2 llamadas,
@@ -11252,6 +11381,39 @@ function _demoSala() {
       'font-size:11.5px;font-weight:900;text-align:center;padding:5px;letter-spacing:.05em">' +
       '🎭 MODO PRUEBA — datos falsos · nada sale de este teléfono</div>');
     document.body.style.paddingTop = '26px';
+    /* [AUT-0216c] anche la modalità JL si guarda in DEMO (revisione senza PIN,
+       senza turno, senza rete): stessa striscia del vivo, sotto quella viola.
+       La sala finta è quella di PRUEBA; la firma è il JL della sessione demo. */
+    if (JL) {
+      STATE.nombre = JL.user;
+      STATE.vista = JL.vista || 'PRUEBA';
+      document.body.insertAdjacentHTML('afterbegin',
+        '<div id="jlStrip" style="position:fixed;top:26px;left:0;right:0;z-index:99;background:#5a4410;color:#ffe9b8;' +
+        'font-size:12px;font-weight:800;text-align:center;padding:5px 8px;letter-spacing:.02em;display:flex;gap:8px;align-items:center;justify-content:center">' +
+        '<a href="' + _jlBackUrl() + '&demo=1" style="color:#ffe9b8;text-decoration:none;font-weight:900">‹ Mi app</a>' +
+        '<span style="opacity:.55">·</span><span>👑 ' + esc(JL.user) + ' · mesa de <b>' + esc(STATE.vista) + '</b></span></div>');
+      document.body.style.paddingTop = '54px';
+    }
+    entrarSala();
+    return;
+  }
+  /* PORTA JL · [AUT-0216c] v3.76.0 · il JL entra dalla SUA app, già firmato:
+     identità dalla sessione (mai digitata qui), codigo del turno dalla sua app
+     (mai chiesto), fetta = il mesero padrone del tavolo che ha toccato.
+     🔴 NIENTE clockIn: il JL non marca l'entrata come mesero, non prende
+     plaza, non compare nelle asignaciones. Guarda e firma, non lavora in sala.
+     Senza codigo in sessione non si inventa niente: si torna all'app. */
+  if (JL) {
+    STATE.nombre = JL.user;
+    STATE.vista = JL.vista || JL.user;
+    if (JL.codigo) STATE.codigo = JL.codigo;
+    if (!STATE.codigo) { location.replace(_jlBackUrl()); return; }
+    document.body.insertAdjacentHTML('afterbegin',
+      '<div id="jlStrip" style="position:fixed;top:0;left:0;right:0;z-index:99;background:#5a4410;color:#ffe9b8;' +
+      'font-size:12px;font-weight:800;text-align:center;padding:5px 8px;letter-spacing:.02em;display:flex;gap:8px;align-items:center;justify-content:center">' +
+      '<a href="' + _jlBackUrl() + '" style="color:#ffe9b8;text-decoration:none;font-weight:900">‹ Mi app</a>' +
+      '<span style="opacity:.55">·</span><span>👑 ' + esc(JL.user) + ' · mesa de <b>' + esc(STATE.vista) + '</b></span></div>');
+    document.body.style.paddingTop = '28px';
     entrarSala();
     return;
   }
