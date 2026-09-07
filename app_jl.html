@@ -4,7 +4,7 @@
 <title>Pinsita · JL</title>
 <!-- DEVICE-CLASS: 1 · cattura in movimento (mobile-only) -->
 <!-- ═══════════════════════════════════════════════════════════════════════
-     APP JL · v1.23.0 · 07-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
+     APP JL · v1.24.0 · 07-set-2026 · 🛎 SALA V18 · cantiere AUT-0043
      Validazione finale con Alberto: VALIDAZIONE_FINALE_APP_JL_05SET2026.md
      ── LE LEGGI DI QUESTO FILE ─────────────────────────────────────────────
      ① NESSUNA SCHERMATA ASPETTA LA RETE (N1): si dipinge dall'ultimo stato
@@ -181,7 +181,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.23.0</span>
+<span class="ver" id="ver">app_jl v1.24.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -498,6 +498,32 @@ function _porMesero() {
                  abierto: abierto, n_abierto: nAb, qr: senzaMesero });
     });
   }
+  /* 🔴 [07-set · Alberto: «non vedo Wilbert pur essendo attivo, con 3 tavoli
+     liberi»] LA RADICE, e il fix di stamattina l'aveva solo sfiorata: la lista
+     nasceva dal DENARO (caja), quindi mostrava solo chi aveva già numeri. Ma
+     👁 IL JL DEVE VEDERE CHI È IN SALA, non chi ha venduto: un mesero appena
+     arrivato, o con la plaza tutta libera, ESISTE — e a inizio turno è proprio
+     quello da guardare.
+     La fonte giusta ce l'abbiamo già in casa: le ASIGNACIONES del turno (le
+     stesse che disegnano il tab Turno). Si parte da CHI È IN TURNO e i numeri
+     si appendono; chi ha numeri senza essere in turno (un turno chiuso male,
+     un nome che non torna) NON si nasconde: resta in lista. */
+  const inTurno = {};
+  ((STATE.turno && STATE.turno.asignaciones) || []).forEach(a => {
+    if (!a.mesero) return;
+    const k = _slugSalaJS(a.mesero);
+    if (!inTurno[k]) inTurno[k] = { nome: a.mesero, plazas: [] };
+    if (a.plaza && inTurno[k].plazas.indexOf(a.plaza) < 0) inTurno[k].plazas.push(a.plaza);
+  });
+  const giaInLista = {};
+  out.forEach(m => { if (!m.qr) giaInLista[_slugSalaJS(m.n)] = true; });
+  Object.keys(inTurno).forEach(k => {
+    if (giaInLista[k]) return;                       // ha già numeri: c'è di suo
+    if (_slugSalaJS(STATE.user || '') === k) return; // il JL è già in cima
+    out.push({ n: inTurno[k].nome, venta: 0, ctas: 0, cobrado: 0, servido: 0,
+               abierto: 0, n_abierto: 0, qr: false, enPlaza: true,
+               plazasTurno: inTurno[k].plazas });
+  });
   /* la media si fa SOLO su chi ha denaro chiuso: chi ha solo tavoli aperti
      non è «un mesero che vende poco», è un mesero la cui serata non è finita.
      Metterlo nella media falserebbe il confronto di tutti gli altri. */
@@ -728,6 +754,7 @@ function vSala() {
          i tavoli aperti. Mai un «$0» che sembra un mesero fermo. */
       const soloAbierto = !m.venta && !m.ctas && (m.abierto || m.n_abierto);
       const que = m.qr ? (m.ctas + ' pedidos · sin mesero')
+        : m.enPlaza ? 'en plaza · sin consumo todavía'
         : soloAbierto ? (m.n_abierto + (m.n_abierto === 1 ? ' cuenta abierta' : ' cuentas abiertas'))
         : m.cobrado ? (m.ctas + ' cobros') : (m.ctas + ' cuentas · servidas');
       /* il QR non si confronta con nessuno: non è una persona che vende poco */
@@ -736,6 +763,7 @@ function vSala() {
       /* [fix 4] se ha già fatto il corte, la riga lo dichiara */
       const corteOk = !m.qr && (STATE.caja && STATE.caja.cierres || []).some(c => _slugSalaJS(c.nombre || c) === _slugSalaJS(m.n));
       const der = m.qr ? '<small class="mid">directo del cliente</small>'
+        : m.enPlaza ? '<small class="mid">en turno</small>'
         : soloAbierto ? '<small style="display:block;color:#b9b2a4">' + fmt(m.abierto) + ' en sala</small>' +
             '<small class="mid">sin cobrar todavía</small>'
         : '<small style="display:block;color:#b9b2a4">prom ' + prom + '</small>' +
@@ -750,9 +778,14 @@ function vSala() {
         '<span class="av"' + (m.qr ? ' style="background:#6b7a8f"' : '') + '>' +
         esc((m.n || '?')[0].toUpperCase()) + '</span>' +
         '<span class="nb"><b>' + esc(m.n) + '</b>' + (corteOk ? ' <span class="pill on" style="font-size:9.5px;padding:1px 7px">corte ✓</span>' : '') +
-        '<small>' + que + (mm && mm.plazas.length ? ' · ' + mm.plazas.map(pz => '<span style="white-space:nowrap">' + esc(pz) + '</span>').join(' · ') : '') + '</small></span>' +
-        '<span class="val"><b' + (soloAbierto ? ' style="color:#b9b2a4"' : '') + '>' +
-          (soloAbierto ? fmt(m.abierto) : fmt(m.venta)) + '</b>' + der + '</span></div>';
+        '<small>' + que + (() => {
+          /* le plazas: dalla vista del bordo se c'è, altrimenti da ciò che dice
+             il TURNO (per chi è in plaza e non ha ancora toccato niente) */
+          const pl = (mm && mm.plazas.length) ? mm.plazas : (m.plazasTurno || []);
+          return pl.length ? ' · ' + pl.map(pz => '<span style="white-space:nowrap">' + esc(pz) + '</span>').join(' · ') : '';
+        })() + '</small></span>' +
+        '<span class="val"><b' + (soloAbierto || m.enPlaza ? ' style="color:#b9b2a4"' : '') + '>' +
+          (m.enPlaza ? '—' : soloAbierto ? fmt(m.abierto) : fmt(m.venta)) + '</b>' + der + '</span></div>';
       if (mm) h += _mesasHtml(mm, m.n);
     });
     /* IL SUSSURRO — uno alla volta (N8): il più lontano dalla media, in giù.
