@@ -985,7 +985,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.79.0</span>
+      <span class="ver" id="ver">sala v3.80.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2874,20 +2874,32 @@ function cerrarCorreccion() {
   STATE.editando = null;
   render(STATE.sala);
 }
-async function guardarCorreccion(uuid, btn, _intento) {
+async function guardarCorreccion(uuid, btn, _intento, _payloadFijo) {
   if (btn) btn.disabled = true;
-  // v1.15 · gli id nuovi (editNuevos) viaggiano coi dati completi → il GAS li AGGIUNGE
-  const items = Object.keys(STATE.editQty).map(id => {
-    const nu = STATE.editNuevos[id];
-    return nu ? { id: id, qty: STATE.editQty[id], nombre: nu.nombre, precio: nu.precio, cat: nu.cat }
-              : { id: id, qty: STATE.editQty[id] };
-  });
+  /* v3.80.0 · [COLLAUDO 📖 MENU, AUT-0225] IL RETRY RILEGGEVA UNO
+     SCRATCHPAD GLOBALE, NON UNA FOTO DEL PRIMO GIRO — bug reale e
+     riproducibile, non teorico: `STATE.editQty`/`editNuevos` sono UNICI
+     per tutta la consola (non per-uuid). Il retry ricorsivo di sotto
+     chiamava `guardarCorreccion` da zero, che ricostruiva `items` da
+     QUALUNQUE correzione fosse aperta al momento del timer — se nei 4 s
+     di attesa il mesero apre un ALTRO pedido, il retry spedisce GLI ITEM
+     DI QUELL'ALTRO sull'uuid originale. `corregirPedido` riceve «la
+     quantità finale, mai un delta» — ma finale rispetto a cosa, se lo
+     scratchpad ha cambiato proprietario nel frattempo?
+     Cura: il payload si costruisce UNA volta (qui) e il retry lo passa
+     avanti verbatim (`_payloadFijo`) — non lo rilegge mai da `STATE`. */
+  const payload = _payloadFijo || Object.assign(
+    // v1.15 · gli id nuovi (editNuevos) viaggiano coi dati completi → il GAS li AGGIUNGE
+    { codigo: STATE.codigo, nombre: STATE.nombre, uuid: uuid, items: Object.keys(STATE.editQty).map(id => {
+        const nu = STATE.editNuevos[id];
+        return nu ? { id: id, qty: STATE.editQty[id], nombre: nu.nombre, precio: nu.precio, cat: nu.cat }
+                  : { id: id, qty: STATE.editQty[id] };
+      }) },
+    /* v1.21 · motivo e PIN viaggiano SOLO quando servono: un pedido non
+       ancora uscito resta il gesto libero di sempre, senza attrito. */
+    STATE.editVoid ? { motivo: STATE.editMotivo, pin_jl: (STATE.editPinJL || '').trim() } : {});
   try {
-    const r = await gasPost('corregirPedido', Object.assign(
-      { codigo: STATE.codigo, nombre: STATE.nombre, uuid: uuid, items: items },
-      /* v1.21 · motivo e PIN viaggiano SOLO quando servono: un pedido non
-         ancora uscito resta il gesto libero di sempre, senza attrito. */
-      STATE.editVoid ? { motivo: STATE.editMotivo, pin_jl: (STATE.editPinJL || '').trim() } : {}));
+    const r = await gasPost('corregirPedido', payload);
     if (r && r.ok) {
       /* v3.24.0 · [AUT-0058] il testimone: il GAS risponde col totale NUOVO
          (o `cancelado`) — si racconta al bordo, mai prima dell'ok.
@@ -2968,7 +2980,10 @@ async function guardarCorreccion(uuid, btn, _intento) {
       })();
       if (vivo && !_intento) {
         toast('warn', 'Este pedido es muy reciente — esperando que llegue al sistema…');
-        setTimeout(function () { guardarCorreccion(uuid, btn, 1); }, 4000);
+        /* v3.80.0 · `payload` congelato passa avanti — il retry NON deve
+           rileggere STATE.editQty: potrebbe già appartenere a un'altra
+           correzione aperta nel frattempo (vedi commento in testa). */
+        setTimeout(function () { guardarCorreccion(uuid, btn, 1, payload); }, 4000);
         return;
       }
       toast('warn', vivo
