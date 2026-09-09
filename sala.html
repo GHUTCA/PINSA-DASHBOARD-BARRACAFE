@@ -985,7 +985,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.75.0</span>
+      <span class="ver" id="ver">sala v3.77.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -8602,20 +8602,19 @@ function pagoClienteAbrir() { if (STATE.pago) { STATE.pago.cliente = true; rende
 function pagoClienteListo() { if (STATE.pago) { STATE.pago.cliente = false; STATE.pago.clienteHecho = true; _pgRelojOff(); renderPago(); } }
 function pagoSet(campo, v) { if (STATE.pago) { STATE.pago[campo] = v; renderPago(); } }
 function pagoInput(campo, v) { if (STATE.pago) STATE.pago[campo] = v; }   // niente re-render: il focus resta
-/* v3.4.3 · il tocco sul campo vuoto del mixto CONFERMA il resto: lo scrive
-   nel campo e lo seleziona (digitare = sovrascrivere, come chiesto). Niente
-   renderPago qui — il focus resta al dito; il «cuadra» si aggiorna al blur. */
-function mxToca(el, k2) {
+/* v3.77.0 · gemello di `bMxBlur` (vedi il suo commento, r.9165 ca.) — stesso
+   difetto, stessa cura: il suggerimento del resto si scrive al `blur`, mai al
+   `focus`, e mai se il mesero ci ha già scritto sopra la SUA cifra. */
+function mxBlur(el, k2) {
   const pg = STATE.pago; if (!pg || !pg.mixto) return;
-  if (String(pg.mixto[k2] || '').trim()) return;          // già scritto: mano ferma
-  const objetivo = _pagoMonto();
-  const suma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k3) {
-    return s + (Math.round(parseFloat(String(pg.mixto[k3]).replace(/[^0-9]/g, '')) || 0)); }, 0);
-  const resto = objetivo - suma;
-  if (resto <= 0) return;
-  pg.mixto[k2] = String(resto);
-  el.value = resto;
-  try { el.select(); } catch (e) {}
+  if (!String(pg.mixto[k2] || '').trim()) {
+    const objetivo = _pagoMonto();
+    const suma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k3) {
+      return s + (Math.round(parseFloat(String(pg.mixto[k3]).replace(/[^0-9]/g, '')) || 0)); }, 0);
+    const resto = objetivo - suma;
+    if (resto > 0) pg.mixto[k2] = String(resto);
+  }
+  renderPago();
 }
 function _pagoPropina() {
   const pg = STATE.pago; if (!pg) return 0;
@@ -9035,19 +9034,34 @@ function _bMonto() {
      al monto comanda la SUA porta, altrimenti la parte del flusso c4 */
   return (pg.c4 && !pg.montoOn) ? c4Parte(pg) : _pagoMonto();
 }
-/* il tocco sul campo vuoto del mixto scrive il resto — come `mxToca`, ma
-   l'obiettivo è il monto che DAVVERO si sta cobrando: `mxToca` usa
-   `_pagoMonto()`, che su un flusso a parti è il totale del TAVOLO — il resto
-   sbaglierebbe proprio dove serve di più. */
-function bMxToca(el, k2) {
+/* v3.77.0 · IL SUGGERIMENTO SI SCRIVE ALLA FINE, NON ALL'INIZIO — Alberto,
+   08-set 23:xx: «col pago mixto la cifra corretta non quadra, ma se metto uno
+   zero davanti quadra». 🔬 La cifra digitata è aritmeticamente illesa da uno
+   zero davanti (`parseFloat` dopo `replace(/[^0-9]/g,'')` lo ignora sempre) —
+   quindi NON era un bug di calcolo, ed è per questo che uno zero «a caso»
+   pareva aggiustarlo: non era lo zero, era il TOCCO che lo precedeva.
+   🌳 LA RADICE: `bMxToca`(era qui) scriveva il resto suggerito DENTRO il
+   campo GIÀ AL TOCCO (`onfocus`), prima che il mesero digitasse una sola
+   cifra, e contava su `el.select()` per farla sostituire dal primo tasto —
+   ma `.select()` su un campo popolato via JS un istante prima non è garantito
+   su ogni tastiera/telefono. Se non seleziona, il tasto successivo si
+   INSERISCE dentro la cifra suggerita invece di sostituirla, e il numero
+   finale è un impasto dei due — che a volte, per caso, un carattere in più
+   davanti rimette in fila.
+   ✅ LA CURA, DEFINITIVA: il suggerimento si scrive SOLO quando il mesero
+   LASCIA il campo (`onblur`) e SOLO se è rimasto vuoto — mai mentre sta
+   scrivendo. Chi digita la sua cifra non incontra mai un valore che non ha
+   scritto lui; chi tocca e se ne va senza scrivere si becca il resto giusto,
+   come prima. Zero dipendenza da `.select()`. */
+function bMxBlur(el, k2) {
   var pg = STATE.pago; if (!pg || !pg.mixto) return;
-  if (String(pg.mixto[k2] || '').trim()) return;          // già scritto: mano ferma
-  var suma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k3) {
-    return s + (Math.round(parseFloat(String(pg.mixto[k3]).replace(/[^0-9]/g, '')) || 0)); }, 0);
-  var resto = _bMonto() - suma;
-  if (resto <= 0) return;
-  pg.mixto[k2] = String(resto);
-  el.value = resto; try { el.select(); } catch (e) {}
+  if (!String(pg.mixto[k2] || '').trim()) {
+    var suma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k3) {
+      return s + (Math.round(parseFloat(String(pg.mixto[k3]).replace(/[^0-9]/g, '')) || 0)); }, 0);
+    var resto = _bMonto() - suma;
+    if (resto > 0) pg.mixto[k2] = String(resto);
+  }
+  renderPago();
 }
 function bMedio(w, pg) {
   c4Css();
@@ -9109,8 +9123,7 @@ function bMedio(w, pg) {
       return '<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="flex:0 0 96px;font-size:13px">' + lbl + '</span>' +
         '<input class="cs-pin" style="margin:0" inputmode="numeric" placeholder="' +
         (vacio && mxResto > 0 ? '$' + _fmtMiles(mxResto) + ' — toca y listo' : '$0') + '" value="' + esc(pg.mixto[k2]) + '"' +
-        ' onfocus="bMxToca(this,\'' + k2 + '\')"' +
-        ' oninput="STATE.pago.mixto[\'' + k2 + '\']=this.value" onchange="renderPago()"></div>';
+        ' oninput="STATE.pago.mixto[\'' + k2 + '\']=this.value" onblur="bMxBlur(this,\'' + k2 + '\')"></div>';
     };
     b += '<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.35)">' +
       /* ═══ 🔴 v3.70.0 · IL MIXTO CHIEDEVA UNA CIFRA E IL PANNELLO NE MOSTRAVA
@@ -10007,8 +10020,7 @@ function renderPago() {
         return '<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="flex:0 0 92px;font-size:12.5px">' + lbl + '</span>' +
           '<input class="cs-pin" style="margin:0" inputmode="numeric" placeholder="' +
           (vacio && resto > 0 ? '$' + _fmtMiles(resto) + ' — toca y listo' : '$0') + '" value="' + esc(mx[k2]) + '"' +
-          ' onfocus="mxToca(this,\'' + k2 + '\')"' +
-          ' oninput="STATE.pago.mixto[\'' + k2 + '\']=this.value" onchange="renderPago()"></div>';
+          ' oninput="STATE.pago.mixto[\'' + k2 + '\']=this.value" onblur="mxBlur(this,\'' + k2 + '\')"></div>';
       };
       return '<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.35)">' +
         fila('efectivo', 'Efectivo') + fila('debito', 'Débito') + fila('credito', 'Crédito') + fila('transferencia', 'Transfer') +
