@@ -985,7 +985,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.78.0</span>
+      <span class="ver" id="ver">sala v3.79.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2874,7 +2874,7 @@ function cerrarCorreccion() {
   STATE.editando = null;
   render(STATE.sala);
 }
-async function guardarCorreccion(uuid, btn) {
+async function guardarCorreccion(uuid, btn, _intento) {
   if (btn) btn.disabled = true;
   // v1.15 · gli id nuovi (editNuevos) viaggiano coi dati completi → il GAS li AGGIUNGE
   const items = Object.keys(STATE.editQty).map(id => {
@@ -2941,6 +2941,41 @@ async function guardarCorreccion(uuid, btn) {
     } else if (r && r.error === 'no_es_tuyo') {
       toast('warn', 'Es de ' + (r.mesero || 'otro') + ' — que lo corrija él');
       STATE.editando = null;
+    } else if (r && r.error === 'pedido_not_found') {
+      /* v3.79.0 · AUT-0225 · EL PEDIDO QUE EL BORDE YA MUESTRA Y GOOGLE
+         TODAVÍA NO TIENE — mecanismo de mesa 109, medido por 🚚 el 09-set:
+         el tránsito bordo→Google tiene p50 7 min, p90 61 min, máx 5 horas
+         (04-set, 651 pedidos) — no es la noche peor, es un día cualquiera.
+         El mesero VE el pedido (lo trae el bordo) y `corregirPedido` vive
+         SOLO en Google (r.1987): si la fila todavía no llegó, el GAS dice
+         que no existe — y hasta hoy el vetro lo repetía tal cual: «No se
+         pudo: pedido_not_found», sin decir qué hacer.
+         🔑 El reintento es SEGURO por construcción, no por confianza:
+         `corregirPedido` recibe la cantidad FINAL, nunca un delta
+         (MENU_GAS r.9905) — repetir el MISMO payload no puede duplicar
+         nada, a diferencia de AUT-EMERG-0110 (ahí el riesgo era un SEGUNDO
+         cálculo sobre un estado viejo). Un solo reintento corto (~4 s)
+         para el caso rápido; si sigue sin estar, mensaje honesto — el
+         tránsito típico se mide en minutos, no en segundos, y prometer
+         «unos segundos» sería otra mentira encima de la que se está
+         curando. */
+      const vivo = (function () {
+        try {
+          const t = STATE.sala ? [].concat(STATE.sala.mios || [], STATE.sala.por_limpiar || [],
+            STATE.sala.pendientes || [], STATE.sala.sin_dueno || []) : [];
+          return t.some(function (x) { return x && x.uuid === uuid; });
+        } catch (e) { return false; }
+      })();
+      if (vivo && !_intento) {
+        toast('warn', 'Este pedido es muy reciente — esperando que llegue al sistema…');
+        setTimeout(function () { guardarCorreccion(uuid, btn, 1); }, 4000);
+        return;
+      }
+      toast('warn', vivo
+        ? 'Todavía no llegó al sistema (puede tardar varios minutos) — espera y prueba de nuevo, o avisa al JL. No lo anotes en papel.'
+        : 'No se encontró — puede que ya haya cambiado. Recarga la mesa y revisa.');
+      if (btn) btn.disabled = false;
+      return;
     } else {
       toast('err', 'No se pudo: ' + (r && r.error || '?'));
       if (btn) btn.disabled = false;
