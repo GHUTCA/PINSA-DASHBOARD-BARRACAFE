@@ -985,7 +985,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.78.0</span>
+      <span class="ver" id="ver">sala v3.81.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -7479,21 +7479,27 @@ function juntaCrear() {
   STATE.selMesas = [];
   toast('ok', '👥 Junta ' + n + ' · mesas ' + j.mesas.join(' · ') + ' — los pedidos llegan a la ' + principal);
   refrescarMapa();
+  /* v3.81.0 · [PASSAGGIO CONTROLLER, 10-set] IL TESTIMONE NON ASPETTA PIÙ
+     GOOGLE. Prima viveva DENTRO il `.then` dell'ok del GAS (sotto): se
+     Google è lento o giù, gli ALTRI telefoni non vedevano MAI la junta — è
+     il «tavoli che spariscono» di Alberto. La junta è GIÀ ottimistica e
+     locale per CHI LA CREA (commento sotto, invariato: «se il server dice
+     no, la junta resta locale come ieri»); questa riga estende la stessa
+     ottimistica agli altri telefoni, nello stesso istante in cui il
+     creatore la vede sulla propria mappa. Se Google poi rifiuta, non nasce
+     un fantasma nuovo: oggi il creatore lo vedrebbe comunque (nessun
+     rollback locale) — questo allinea gli altri a lui, non introduce un
+     disaccordo che prima non c'era. */
+  const _mesasOrden = [principal].concat(j.mesas.filter(function (m) { return m !== principal; })).join(',');
+  bordeHecho('unir', { principal: principal, mesas: _mesasOrden });
   /* v3.0 · BLOCCO 3 (GAS v3.124.0): la junta della PROPRIA plaza diventa un
      GRUPO vero nel libro, col codigo del turno — niente PIN. Dietro, senza
      far aspettare il dito; se il server dice no (cross-plaza, rete), la junta
      resta locale come ieri: il servizio non dipende dall'esito. */
   (function (jj) {
     try {
-      gasPost('unirMesas', { codigo: STATE.codigo, nombre: STATE.nombre,
-        mesas: [jj.principal].concat(jj.mesas.filter(function (m) { return m !== jj.principal; })).join(',') })
+      gasPost('unirMesas', { codigo: STATE.codigo, nombre: STATE.nombre, mesas: _mesasOrden })
         .then(function (r) {
-          if (r && r.ok) {
-            // v3.24.0 · [AUT-0058] il testimone: la junta si vede anche dagli altri
-            // telefoni — STESSA lista mandata al GAS (principal inclusa)
-            bordeHecho('unir', { principal: jj.principal,
-              mesas: [jj.principal].concat(jj.mesas.filter(function (m) { return m !== jj.principal; })).join(',') });
-          }
           if (r && r.ok && r.grupo_id) {
             const l2 = _juntasLoad(); const x = l2.find(function (y) { return y.n === jj.n; });
             if (x) { x.gid = r.grupo_id; _juntasSave(l2); }
@@ -7511,14 +7517,15 @@ function juntaSeparar(nJ) {
   _juntasSave(list.filter(function (x) { return x.n !== nJ; }));
   // v3.0 · CAMBIO 7 · il messaggio del definito: nulla si perde, ogni piatto con la sua mesa
   toast('ok', '✂ Junta ' + nJ + ' separada — cada plato vuelve con su mesa. No se pierde nada.');
+  /* v3.81.0 · [PASSAGGIO CONTROLLER, 10-set] stesso principio di juntaCrear:
+     il testimone non aspetta più l'ok del GAS — parte appena la junta è
+     sciolta in locale, o gli altri telefoni restano ciechi finché Google
+     non risponde (o non risponde mai). */
+  bordeHecho('separar', { principal: j.principal, mesas: (j.mesas || []).join(',') });
   // e il grupo VERO nel libro si chiude anche lui (BLOCCO 3: codigo, no PIN)
   if (j.gid || j.principal) {
     try {
-      gasPost('separarMesas', { codigo: STATE.codigo, nombre: STATE.nombre, principal: j.principal })
-        .then(function (r) {
-          // v3.24.0 · [AUT-0058] il testimone, solo DOPO l'ok del GAS
-          if (r && r.ok) bordeHecho('separar', { principal: j.principal, mesas: (j.mesas || []).join(',') });
-        }).catch(function () {});
+      gasPost('separarMesas', { codigo: STATE.codigo, nombre: STATE.nombre, principal: j.principal }).catch(function () {});
     } catch (e) {}
   }
   cerrarMesa(); refrescarMapa();
