@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.26.0</span>
+<span class="ver" id="ver">app_jl v1.27.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -257,7 +257,24 @@ function toast(tipo, msg) {
   if (tipo !== 'err') t._h = setTimeout(() => { t.className = ''; }, 4200);
 }
 function edadS(k) { return STATE.ts[k] ? Math.round((Date.now() - STATE.ts[k]) / 1000) : null; }
-function edadTxt(k) { const s = edadS(k); if (s == null) return '—'; if (s < 90) return 'hace ' + s + ' s'; return 'hace ' + Math.round(s / 60) + ' min'; }
+function _fmtEdadS(s) { if (s == null) return '—'; if (s < 90) return 'hace ' + s + ' s'; return 'hace ' + Math.round(s / 60) + ' min'; }
+function edadTxt(k) { return _fmtEdadS(edadS(k)); }
+/* v1.27.0 · [PASSAGGIO CONTROLLER, AUT-0227-bis, 10-set] «hace 6 s» diceva
+   «ho CHIESTO 6 s fa», non «il dato ha 6 s» — e le due età si sommano: il
+   dato può avere 90 s ed essere stato chiesto 6 s fa, e la barra diceva
+   comunque «sistema ok» perché guardava solo QUANDO abbiamo ricevuto una
+   risposta, non QUANTO era vecchia. Il bordo calcola già l'età vera del
+   dato al momento di servirlo (`/estado` r.8452, `edad_ms: Date.now() -
+   crudo.ts`) — non serve un giro in più, basta leggerla invece del
+   proprio orologio. `vistaEdadBaseMs` congela quel numero al momento
+   della risposta; qui sopra ci si somma il tempo che passa DA quel
+   momento, così il semaforo continua a invecchiare fra un poll e l'altro
+   invece di restare fermo al valore ricevuto. */
+function edadVistaS() {
+  if (STATE.vistaEdadBaseMs == null || !STATE.ts.vista) return edadS('vista');   // ripiego: bordo vecchio senza edad_ms
+  return Math.round((STATE.vistaEdadBaseMs + (Date.now() - STATE.ts.vista)) / 1000);
+}
+function edadVistaTxt() { return _fmtEdadS(edadVistaS()); }
 
 /* ═════ RETE — GAS dietro, bordo davanti ═════ */
 /* i verbi che leggono fogli interi hanno il loro tetto: con 20 s getCaja
@@ -339,7 +356,13 @@ async function giroVeloce() {
   if (cod) {
     try {
       const v = await bordeGet('/estado/' + encodeURIComponent(CFG.LOCAL) + '?seccion=sala_vista&codigo=' + encodeURIComponent(cod));
-      if (v && v.ok && v.datos && v.datos.datos) { STATE.vista = v.datos.datos; STATE.ts.vista = Date.now(); }
+      if (v && v.ok && v.datos && v.datos.datos) {
+        STATE.vista = v.datos.datos;
+        // v1.27.0 · l'età VERA del dato, calcolata dal bordo al momento di
+        // servirlo — non il nostro orologio della richiesta (vedi edadVistaS).
+        STATE.vistaEdadBaseMs = (typeof v.datos.edad_ms === 'number') ? v.datos.edad_ms : null;
+        STATE.ts.vista = Date.now();
+      }
     } catch (e) {}
   }
   if (_tick % 3 === 1) {   // un tick su tre: le letture di contorno
@@ -392,7 +415,7 @@ async function giroProds() {
 /* ═════ TESTATA — allarmi SOLO di macchina, spenti quando zero ═════════════ */
 function pintaSalud() {
   const el = $('salud');
-  const vs = edadS('vista');
+  const vs = edadVistaS();   // v1.27.0 · l'età del DATO, non della domanda
   /* verde: la foto respira · ambra: invecchia · rossa: bordo muto o foto morta.
      E la barra PARLA: il JL legge lo stato, non indovina un colore. */
   if (!STATE.salud) { el.className = 'roja'; el.textContent = 'sin conexión — mostrando lo último que vi'; return; }
@@ -427,7 +450,7 @@ function _sinPapel() {
 function pintaTesta() {
   pintaSalud();
   $('hWho').textContent = STATE.user || (STATE.turno && STATE.turno.turno && STATE.turno.turno.abierto_by) || 'JL';
-  $('hEdad').textContent = STATE.ts.vista ? '📷 ' + edadTxt('vista') : '';
+  $('hEdad').textContent = STATE.ts.vista ? '📷 ' + edadVistaTxt() : '';   // v1.27.0 · idem
   /* SOLO ICONA + NUMERO (Alberto, revisione): «l'occhio poi riconoscerà
      l'icona e non ha bisogno di parole». Una riga garantita; il TAP apre
      il dettaglio, dove le parole vivono per esteso. */
@@ -449,7 +472,19 @@ function pintaTesta() {
   const c = STATE.caja;
   const vuoto = STATE.ts.caja ? '0' : '···';
   const abiertas = c && c.mesas_abiertas ? c.mesas_abiertas.length : null;
+  /* v1.27.0 · [PASSAGGIO CONTROLLER, AUT-0227-bis, 10-set] Alberto, in sala:
+     «dovrei vedere DUE numeros: quanto ho en sala ahora y quanto pagato».
+     I quattro riquadri di sempre vengono tutti dal PAGATO (`venta`) — a metà
+     servizio dicono `$0`, vero e falso insieme: c'è plata sul pavimento e
+     lo schermo non la mostra. L'ingrediente c'è già, nello stesso `getCaja`
+     che alimenta gli altri quattro: `por_mesero[n].abierto` (r.518) — la
+     stessa cifra che la riga del mesero mostra come «$X en sala». Qui si
+     somma su tutti i meseros: un quinto riquadro, zero dati nuovi. */
+  const enSala = c && c.por_mesero
+    ? Object.keys(c.por_mesero).reduce((s, n) => s + (c.por_mesero[n].abierto || 0), 0)
+    : null;
   $('hKpi').innerHTML =
+    '<span class="kpi"><b>' + (enSala == null ? vuoto : fmt(enSala)) + '</b><small>en sala</small></span>' +
     '<span class="kpi ok"><b>' + (c ? fmt(c.venta || 0) : vuoto) + '</b><small>venta hoy</small></span>' +
     '<span class="kpi"><b>' + (c ? (c.cuentas || 0) : vuoto) + '</b><small>cerradas</small></span>' +
     '<span class="kpi"><b>' + (abiertas == null ? vuoto : abiertas) + '</b><small>abiertas</small></span>' +
