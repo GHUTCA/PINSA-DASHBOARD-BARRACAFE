@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.25.0</span>
+<span class="ver" id="ver">app_jl v1.26.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -225,14 +225,15 @@ const DEMO = QS.get('demo') === '1' || location.hash === '#demo';   // #demo: re
      conferme col conto davanti — mai una strage con un dito.
    🧯 `?void=1` accende (per telefono) · default SPENTO · si accende domani a
    locale chiuso col secondo collaudatore, mai stasera a sala piena. */
-const VOID_ON = (function () {
-  const q = QS.get('void');
-  try {
-    if (q === '1') { localStorage.setItem('jl_void', '1'); return true; }
-    if (q === '0') { localStorage.setItem('jl_void', '0'); return false; }
-    return localStorage.getItem('jl_void') === '1';   // default SPENTO
-  } catch (e) { return q === '1'; }
-})();
+/* ═══ v1.26.0 · [AUT-0216c] · IL VOID NON VIVE PIÙ QUI ═════════════════════════
+   `VOID_ON`, la modal del tavolo col chip «−» e i tre passi del void (v1.22→
+   v1.25) sono stati TOLTI: erano una SECONDA copia della schermata mesa che
+   `sala.html` ha già — lo stesso errore della consola fusa nella sala il
+   16-ago. Il tap sul tavolo apre `sala.html?jl=1` (v. `mesaAbrir`): il void è
+   lì, nel pannello ELIMINAR, firmato dalla sessione del JL. `?void=1` non fa
+   più niente: l'interruttore del nuovo flusso è `?jl=1` sulla sala.
+   N9 — chi passava dalla porta vecchia: il banco `test_void_jl_06SET2026.mjs`
+   (18/18) → ritirato; le sue asserzioni vivono in `test_sala_jl_07SET2026.mjs`. */
 
 /* ═════ STATE + CACHE — la schermata non aspetta MAI la rete (N1) ═════════ */
 const CK = 'jl_cache_' + CFG.LOCAL;
@@ -550,110 +551,47 @@ function _porMesero() {
    mondo») senza riesaminarlo ora che i tavoli si vedono già qui.
    ⇒ IL TAVOLO SI APRE DENTRO L'APP. La vista porta già tutto ciò che serve
    (items_json, total, hace_s, estado): non si chiede niente a nessuno. */
+/* ═══ 🔴 v1.26.0 · 07-set · [AUT-0216c] · LA CORREZIONE DELLA CORREZIONE ════════
+   Alberto, sui tre screenshot dell'app (14:3x): *«il JL vede tutti i tavoli
+   per mesero; se passa da un tavolo di un qualsiasi garzón può aprirlo ed
+   entra DIRETTAMENTE nella schermata del tavolo — quella di Wilbert — e lì
+   può fare tutto. Perché scrivere nuove schermate? Avevamo solo detto che il
+   gesto doveva restare tracciato.»* E sul 06-set: *«avevamo commesso l'errore
+   di entrare nella sua app mesero facendogli chiedere il codice, sbagliato:
+   deve poter fare ping pong velocemente».*
+   🔑 L'obiezione del 06-set era al LOGIN, non alla pagina. Tolto il login,
+   la pagina giusta è quella che esiste già: `sala.html`, in modalità JL
+   (`?jl=1`) — vista = il mesero padrone, firma = il JL, PIN dalla sessione
+   (stesso dominio), codigo del turno da qui. La modal di v1.22-v1.25 era una
+   seconda copia della schermata mesa, e aveva già un bug suo (il chip fuso
+   «997-999»): si toglie, non si ripara.
+   ⛔ Nella sala in modalità JL compaiono SOLO PEDIDOS ed ELIMINAR: COBRAR ·
+   PEDIR · MOVER sono i #2·#3·#4 dell'ordine di Alberto, ognuno con la sua AUT. */
+function _salaJlUrl(vista, mesa) {
+  /* in DEMO la sala si apre in DEMO: la rete resta tagliata da entrambi i lati */
+  return 'sala.html?jl=1&l=' + encodeURIComponent(CFG.LOCAL) +
+    '&vista=' + encodeURIComponent(vista || '') + (mesa ? '&mesa=' + encodeURIComponent(mesa) : '') +
+    (DEMO ? '&demo=1' : '');
+}
 function mesaAbrir(nombre, mesa) {
-  const ms0 = STATE.vista && STATE.vista.meseros; const v = ms0 && (ms0[_slugSalaJS(nombre)] || ms0[Object.keys(ms0).find(x => ms0[x] && ms0[x].ok)]);
-  if (!v) { toast('warn', 'Sin foto de la sala todavía'); return; }
-  const peds = [];
-  ['pendientes', 'mios', 'por_limpiar', 'sin_dueno'].forEach(k => (v[k] || []).forEach(p => {
-    if ((p.mesa || '').toString() === mesa.toString()) peds.push(Object.assign({ _k: k }, p));
-  }));
-  if (!peds.length) { toast('warn', 'Esa mesa ya no tiene pedidos abiertos'); return; }
-  let tot = 0, lin = '';
-  peds.sort((a, b) => (b.hace_s || 0) - (a.hace_s || 0));
-  peds.forEach(p => {
-    tot += parseFloat(p.total) || 0;
-    const et = '<span class="mz ocupado" style="min-width:0;padding:1px 6px;font-size:10px">Ocupado</span>';
-    /* [AUT-0216] con l'interruttore acceso ogni item ha il suo «−»:
-       una unità per gesto, sempre attraverso motivo + conferma col denaro. */
-    let dett;
-    if (VOID_ON) {
-      let its = [];
-      try { its = JSON.parse(p.items_json || '[]'); } catch (e) {}
-      dett = its.map(i => {
-        const q = parseInt(i.qty, 10) || 1;
-        return '<div style="display:flex;align-items:center;gap:8px;margin-top:4px">' +
-          '<small style="flex:1;color:#b9b2a4">' + q + '× ' + esc(i.nombre || i.id || '?') + '</small>' +
-          (q > 0 ? '<button class="mz" style="min-width:30px;background:#8a2430;border-color:#FF6B6B;color:#FFEDEE" ' +
-            'onclick="voidPedir(\'' + esc(p.uuid) + '\',\'' + esc(mesa) + '\',\'' + esc(nombre) + '\',\'' + esc(i.id || i.nombre) + '\')">−</button>' : '') +
-          '</div>';
-      }).join('') || '<small style="color:#b9b2a4">—</small>';
-    } else {
-      dett = '<small style="display:block;color:#b9b2a4;margin-top:3px">' + _itemsTxt(p.items_json) + '</small>';
-    }
-    lin += '<div class="cob" style="align-items:flex-start"><span style="flex:1">' + et +
-      ' <b>' + fmt(parseFloat(p.total) || 0) + '</b>' + dett +
-      (p.nota ? '<small style="display:block;color:#FFB558">📝 ' + esc(p.nota) + '</small>' : '') +
-      '</span><span class="st2 mid">' + _haceTxt(p.hace_s) + '</span></div>';
-  });
-  const w = $('mesaWrap') || (function () { const d = document.createElement('div'); d.id = 'mesaWrap'; document.body.appendChild(d); return d; })();
-  w.innerHTML = '<div class="ovl" onclick="if(event.target===this)mesaCerrar()"><div class="ovl-card">' +
-    '<div class="ovl-h"><b style="font-size:17px">Mesa ' + esc(mesa) + '</b>' +
-    '<span style="margin-left:auto;font-size:17px;font-weight:800;color:#3DC97E">' + fmt(tot) + '</span>' +
-    '<button class="cx" onclick="mesaCerrar()">✕</button></div>' +
-    '<p class="mini" style="margin:0 0 8px">' + esc(nombre) + ' · ' + peds.length + ' pedido' + (peds.length === 1 ? '' : 's') + '</p>' +
-    lin + '<p class="mini">📷 sala ' + edadTxt('vista') + '</p>' +
-    '<button class="salir" onclick="mesaCerrar()" style="margin-top:12px">Cerrar</button>' +
-    '</div></div>';
-}
-function mesaCerrar() { const w = $('mesaWrap'); if (w) w.innerHTML = ''; }
-
-/* ═══ [AUT-0216] · il VOID, in tre passi: − → motivo → conferma col DENARO ══ */
-const VOID_MOTIVOS = [   // lista CHIUSA del server (MOTIVOS_CAMBIO, GAS r.9899)
-  ['cambio_producto', 'Cambió de producto'], ['no_le_gusto', 'No le gustó'],
-  ['mal_estado', 'Producto en mal estado'], ['error_mesero', 'Error del mesero']];
-let _VD = null;   // {uuid, mesa, nombreM, items[], it, motivo}
-function voidPedir(uuid, mesa, nombreM, itemId) {
-  const v = STATE.vista && STATE.vista.meseros;
-  let ped = null;
-  if (v) Object.keys(v).some(k => ['pendientes', 'mios', 'por_limpiar', 'sin_dueno'].some(kk =>
-    (v[k][kk] || []).some(p => { if (p.uuid === uuid) { ped = p; return true; } return false; })));
-  if (!ped) { toast('warn', 'Ese pedido ya no está en la foto — recarga'); return; }
-  let items = [];
-  try { items = JSON.parse(ped.items_json || '[]'); } catch (e) {}
-  const it = items.find(x => (x.id || x.nombre) === itemId);
-  if (!it) { toast('warn', 'Ese producto ya no está'); return; }
-  _VD = { uuid: uuid, mesa: mesa, items: items, it: it, motivo: '' };
-  const w = $('voidWrap') || (function () { const d = document.createElement('div'); d.id = 'voidWrap'; document.body.appendChild(d); return d; })();
-  w.innerHTML = '<div class="ovl" style="z-index:80" onclick="if(event.target===this)voidCerrar()"><div class="ovl-card">' +
-    '<div class="ovl-h"><b>¿Por qué sale?</b><button class="cx" onclick="voidCerrar()">✕</button></div>' +
-    '<p class="mini" style="margin:0 0 8px">1× ' + esc(it.nombre || it.id) + ' · mesa ' + esc(mesa) + '</p>' +
-    VOID_MOTIVOS.map(m => '<button class="btn" onclick="voidConfirmar(\'' + m[0] + '\')">' + m[1] + '</button>').join('') +
-    '</div></div>';
-}
-function voidConfirmar(motivo) {
-  if (!_VD) return;
-  _VD.motivo = motivo;
-  const it = _VD.it, precio = parseFloat(it.precio) || 0;
-  /* LA CONFERMA MOSTRA IL DENARO — l'importo in grande, prima del sì:
-     un importo diverso da quello atteso si nota sempre; un «sei sicuro?» no. */
-  $('voidWrap').innerHTML = '<div class="ovl" style="z-index:80" onclick="if(event.target===this)voidCerrar()"><div class="ovl-card" style="text-align:center">' +
-    '<div style="font-size:32px">🗑</div>' +
-    '<div style="font-size:15px;margin:6px 0 2px">Eliminas <b>1× ' + esc(it.nombre || it.id) + '</b></div>' +
-    '<div style="font-size:26px;font-weight:800;color:#FF6B6B;margin:6px 0">− ' + fmt(precio) + '</div>' +
-    '<div class="mini" style="margin-bottom:12px">de la mesa <b>' + esc(_VD.mesa) + '</b> · ' +
-    (VOID_MOTIVOS.find(m => m[0] === motivo) || ['', ''])[1] + '<br>Queda firmado a tu nombre.</div>' +
-    '<button class="btn" style="background:#8a2430;border-color:#FF6B6B;color:#FFEDEE" onclick="voidEjecutar()">Eliminar — ' + fmt(precio) + '</button>' +
-    '<button class="btn gh" onclick="voidCerrar()">No, volver</button>' +
-    '</div></div>';
-}
-async function voidEjecutar() {
-  if (!_VD) return;
-  const d = _VD; _VD = null; voidCerrar();
   const cod = STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo;
-  /* corregirPedido vuole la QUANTITÀ FINALE di ogni item (mai un delta):
-     si manda la mappa INTERA del pedido col bersaglio ridotto di 1. */
-  const finales = d.items.map(x => ({ id: (x.id || x.nombre),
-    qty: (parseInt(x.qty, 10) || 1) - ((x === d.it) ? 1 : 0) }));
+  /* senza il codigo del turno la sala chiederebbe la tastiera: si aspetta il
+     giroTurno invece di mandare il JL contro una porta che non deve vedere */
+  if (!cod) { toast('warn', 'Sin código de turno todavía — abre la pestaña Turno'); return; }
+  const vista = (nombre || '').trim() || STATE.user;
   try {
-    const r = await gasPost('corregirPedido', { codigo: cod, nombre: STATE.user,
-      uuid: d.uuid, items: finales, motivo: d.motivo, pin_jl: STATE.pin, via: 'app_jl' });
-    if (r && r.ok) {
-      toast('ok', '🗑 Eliminado · − ' + fmt(parseFloat(d.it.precio) || 0) + ' de la mesa ' + d.mesa);
-      giroVeloce(); mesaCerrar();
-    } else toast('err', '✋ ' + ((r && (r.error === 'comanda_ya_salio' ? 'La comanda ya salió entera — no se puede partir' : r.error)) || 'No se pudo'));
-  } catch (e) { toast('err', 'Sin red — no se eliminó nada'); }
+    sessionStorage.setItem('jl_codigo', String(cod));
+    /* il PIN vero non esiste in DEMO: si passa una firma finta che la sala in
+       DEMO non manda a nessuno (la rete è tagliata). Nel vivo è STATE.pin. */
+    sessionStorage.setItem('jl_pin', STATE.pin || (DEMO ? 'DEMO' : ''));
+    sessionStorage.setItem('jl_user', STATE.user || '');
+  } catch (e) {}
+  location.href = _salaJlUrl(vista, mesa);
 }
-function voidCerrar() { const w = $('voidWrap'); if (w) w.innerHTML = ''; }
+
+/* [AUT-0216c] il void di v1.22-v1.25 (VOID_MOTIVOS · voidPedir · voidConfirmar ·
+   voidEjecutar · voidCerrar) è stato tolto: vive in `sala.html?jl=1`, pannello
+   ELIMINAR → «Un producto», firmato dalla sessione del JL. Vedi `mesaAbrir`. */
 function _haceTxt(s) { s = parseInt(s, 10) || 0; return s < 90 ? s + ' s' : Math.round(s / 60) + ' min'; }
 function _itemsTxt(js) {
   try {
@@ -703,13 +641,39 @@ function _mesasSinDueno() {
    questo la plaza sembrava vuota. Qui si completa la plaza, e i liberi si
    disegnano SPENTI (mai verdi: verde = pagato, e un tavolo libero non è un
    tavolo pagato — la legenda non deve mentire). */
+/* [v1.26.0] la plaza di un mesero dal TURNO (asignaciones), quando la fetta del
+   bordo non c'è: bordo muto o DEMO. Si disegnano i suoi tavoli come «Libre»
+   invece di una riga vuota — il JL vede comunque DOVE lavora chi è in sala. */
+function _plazasTurnoDe(nombre) {
+  const k = _slugSalaJS(nombre || '');
+  const pl = [];
+  ((STATE.turno && STATE.turno.asignaciones) || []).forEach(a => {
+    if (a.mesero && a.plaza && _slugSalaJS(a.mesero) === k && pl.indexOf(a.plaza) < 0) pl.push(a.plaza);
+  });
+  return pl.length ? { plazas: pl, mesas: {}, n_pend: 0, n_mios: 0, n_limpiar: 0 } : null;
+}
 function _mesasDePlazas(plazas) {
   const pls = (STATE.turno && STATE.turno.plazas) || [];
   const out = [];
   (plazas || []).forEach(nome => {
     const p = pls.find(x => String(x.plaza).trim().toLowerCase() === String(nome).trim().toLowerCase());
     if (!p || !p.mesas) return;
-    String(p.mesas).split(/[,;·]+/).forEach(m => { const n = m.trim(); if (n) out.push(n); });
+    /* [v1.26.0 · reperto di Alberto: «997-999 è UN chip fuso, non posso aprire
+       la 998»] la lista della plaza può portare INTERVALLI («997-999»), come
+       il perimetro di sala.html: si espandono, con lo stesso tetto di 40 per
+       tratto (un «1-9999» digitato male non disegna diecimila chip). Un tratto
+       che non è né numero né intervallo si scarta: mai un chip che non è una
+       mesa. */
+    String(p.mesas).split(/[,;·]+/).forEach(m => {
+      const n = m.trim(); if (!n) return;
+      const r = n.match(/^(\d+)\s*-\s*(\d+)$/);
+      if (r) {
+        const a = parseInt(r[1], 10), b = parseInt(r[2], 10);
+        if (b >= a && b - a <= 40) for (let i = a; i <= b; i++) out.push(String(i));
+        return;
+      }
+      out.push(n);   // un nome singolo (numero o no) passa come ieri
+    });
   });
   return out;
 }
@@ -739,7 +703,7 @@ function vSala() {
        credere che l'app non le vedesse. */
     const nomi = [];
     mia.forEach(a => { if (nomi.indexOf(a.plaza) < 0) nomi.push(a.plaza); });
-    const mmio = _mesasDe(STATE.user);
+    const mmio = _mesasDe(STATE.user) || _plazasTurnoDe(STATE.user);   // [v1.26.0] senza fetta: la plaza dal turno
     /* il suo denaro non sparisce con lui dalla lista: vive qui, dov'è suo */
     const yo = _porMesero().find(m => !m.qr && _slugSalaJS(m.n) === _slugSalaJS(STATE.user));
     h += '<div class="mip"><div class="t">👑 Mis plazas <span class="pil">' + nomi.length + ' hoy</span>' +
@@ -796,7 +760,7 @@ function vSala() {
       /* [07-set] chi è in plaza e non ha ancora nulla NON è nella fetta del
          bordo (il bordo manda i vivi): la sua plaza si disegna dal turno. */
       const mm = m.qr ? _mesasSinDueno()
-        : (_mesasDe(m.n) || (m.enPlaza ? { plazas: m.plazasTurno || [], mesas: {}, n_pend: 0, n_mios: 0, n_limpiar: 0 } : null));
+        : (_mesasDe(m.n) || (m.enPlaza ? { plazas: m.plazasTurno || [], mesas: {}, n_pend: 0, n_mios: 0, n_limpiar: 0 } : _plazasTurnoDe(m.n)));
       h += '<div class="pers">' +
         '<span class="av"' + (m.qr ? ' style="background:#6b7a8f"' : '') + '>' +
         esc((m.n || '?')[0].toUpperCase()) + '</span>' +
@@ -1298,7 +1262,9 @@ function boot() {
 function bootDemo() {
   STATE.user = 'Pedro';
   STATE.turno = { ok: true, turno: { codigo: '4417', abierto_by: 'Pedro', desde_iso: '2026-09-05T11:40:00' },
-    plazas: [{ plaza: 'VIP-B', mesas: '103,105,106' }, { plaza: 'Aurora A', mesas: '' }, { plaza: 'T-Baja 1', mesas: '' }],
+    /* [v1.26.0] le plazas del demo portano INTERVALLI («20-27»): si vede il chip
+       espanso, e il tap apre la sala demo (che ha proprio le mesas 20-27/30-33) */
+    plazas: [{ plaza: 'VIP-B', mesas: '40-42' }, { plaza: 'Aurora A', mesas: '20-27' }, { plaza: 'T-Baja 1', mesas: '30-33' }],
     asignaciones: [
       { plaza: 'VIP-B', mesero: 'Pedro', hora_entrada_iso: '2026-09-05T11:41:00' },
       { plaza: 'Aurora A', mesero: 'Gabriel', hora_entrada_iso: '2026-09-05T11:45:00' },
