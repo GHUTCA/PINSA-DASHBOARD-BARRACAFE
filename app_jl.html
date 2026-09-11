@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.28.0</span>
+<span class="ver" id="ver">app_jl v1.29.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -861,6 +861,22 @@ function vSala() {
     '<button class="btn" style="' + (lv === 'estandar' ? ON + ';' : '') + (fuoriOra ? MUTO : '') + '" onclick="leva(\'estandar\')">Activar<small style="display:block;font-weight:400">' + fmt(pS) + '</small></button>' +
     '<button class="btn" style="' + (lv === 'off' ? RO : '') + '" onclick="leva(\'off\')">Desactivar</button></div>' +
     '</div>';
+  /* [11-set · passaggio 📖 MENU, r.115436 bacheca] Menú de la Noche: stessa
+     leva generalizzata (`tipo='noche'`), ma con un solo escalón — dos chips,
+     no tres (nunca 'estandar' para este tipo). Función y estado PROPIOS
+     (_levaAplicaNoche/levaRefrescaNoche/levaNoche): cero cambios al camino
+     del Día, que sigue viviendo en leva()/_levaAplica() como siempre. */
+  const lvN = STATE.levaNoche || null;
+  const pN = (STATE.levaNocheInfo && STATE.levaNocheInfo.esca) || 20990;
+  h += '<div class="card"><h4>🌙 Menú de la Noche' +
+    (lvN === 'off' ? ' <span class="pill" style="background:rgba(200,85,96,.18);color:#e78a93">DESACTIVADO</span>'
+      : lvN === 'mixto' ? ' <span class="pill" style="background:rgba(230,180,60,.18);color:#e6c05a">MIXTO ⚠️</span>'
+      : lvN ? ' <span class="pill on">ACTIVO · ' + fmt(pN) + '</span>'
+      : ' <span class="pill off">—</span>') + '</h4>' +
+    '<div class="row2">' +
+    '<button class="btn" style="' + (lvN === 'esca' ? ON + ';' : '') + '" onclick="levaNoche(\'esca\')">Activar<small style="display:block;font-weight:400">' + fmt(pN) + '</small></button>' +
+    '<button class="btn" style="' + (lvN === 'off' ? RO : '') + '" onclick="levaNoche(\'off\')">Desactivar</button></div>' +
+    '</div>';
   return h;
 }
 /* [fix 6, 2ª passata — Alberto: «non appare la plaza»] la config del turno ha
@@ -1014,6 +1030,42 @@ async function leva(escalon) {
         toast('warn', '⚠️ Menú quedó MIXTO (dos precios activos a la vez) — avísale a MENU.');
       } else {
         toast('ok', '📖 Menú ' + (real === 'off' ? 'apagado' : 'activo · ' + fmt(real === 'esca' ? (STATE.levaInfo.esca || 11990) : (STATE.levaInfo.estandar || 16990))));
+      }
+    }
+    else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
+  } catch (e) { toast('err', 'Sin conexión — no cambió nada'); }
+}
+/* ── Menú de la Noche: mismo lessico servidor↔vidrio, tipo propio, sin
+   segundo escalón (el servidor rechaza 'estandar' para tipo=noche). ── */
+function _levaAplicaNoche(r) {
+  STATE.levaNoche = _levaNorm(r.escalon);
+  STATE.levaNocheInfo = { esca: (r.esca && r.esca.precio) || 0 };
+}
+let _levaNocheLeyendo = false;
+async function levaRefrescaNoche() {
+  if (_levaNocheLeyendo) return;
+  _levaNocheLeyendo = true;
+  try { const r = await gasGet('getLevaMenu', { pin: STATE.pin, tipo: 'noche' }); if (r && r.ok) { _levaAplicaNoche(r); salva(); pintaTab(); } }
+  catch (e) { /* senza rete la card resta com'è: memoria dichiarata, non verità */ }
+  finally { _levaNocheLeyendo = false; }
+}
+async function levaNoche(escalon) {
+  const etq = escalon === 'off' ? 'DESACTIVAR' : escalon.toUpperCase();
+  if (!confirm('¿Menú Noche → ' + etq + '?')) return;
+  if (!confirm('Segunda confirmación: ' + etq + ' para TODO el local.')) return;
+  try {
+    const r = await gasPost('setLevaMenu', { pin: STATE.pin, escalon: escalon, tipo: 'noche' });
+    if (r && r.ok) {
+      _levaAplicaNoche(r);
+      salva(); pintaTab();
+      const real = STATE.levaNoche;
+      if (real !== escalon && real !== 'mixto') {
+        toast('warn', '⚠️ Pedí «' + (escalon === 'off' ? 'desactivar' : escalon) + '» pero el menú Noche quedó ' +
+          (real === 'off' ? 'apagado' : 'en ' + fmt(STATE.levaNocheInfo.esca || 20990)) + '.');
+      } else if (real === 'mixto') {
+        toast('warn', '⚠️ Menú Noche quedó MIXTO (dos precios activos a la vez) — avísale a MENU.');
+      } else {
+        toast('ok', '🌙 Menú Noche ' + (real === 'off' ? 'apagado' : 'activo · ' + fmt(STATE.levaNocheInfo.esca || 20990)));
       }
     }
     else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
@@ -1263,7 +1315,7 @@ function tab(i) {
   document.querySelectorAll('.tabs button').forEach((b, j) => b.setAttribute('aria-selected', j === i ? 'true' : 'false'));
   pintaTab();
   if (i === 2 || i === 3 || i === 0) { if (!STATE.ts.caja || edadS('caja') > 60) giroCaja(); }
-  if (i === 1 && !DEMO) levaRefresca(); /* lo stato della leva si LEGGE, non si ricorda */
+  if (i === 1 && !DEMO) { levaRefresca(); levaRefrescaNoche(); } /* lo stato della leva si LEGGE, non si ricorda */
   if (i === 1) { if (!STATE.ts.turno || edadS('turno') > 300) giroTurno(); }
 }
 /* [06-set · norma di Alberto] la via d'uscita in FONDO a ogni scheda, non solo
@@ -1337,6 +1389,7 @@ function bootDemo() {
     { id: 'coyam', nombre: 'Coyam', agotado: false },
     { id: 'rocas57', nombre: 'Emiliana 57 Rocas', agotado: false }];
   STATE.leva = 'estandar';
+  STATE.levaNoche = 'off'; STATE.levaNocheInfo = { esca: 20990 };
   /* gli allarmi in demo si mostrano ACCESI (nel vivo esistono solo quando >0) */
   STATE.rechazos = { n: 2, ultimo_hace_s: 300, mesas: { parte_mayor_que_resto: ['16', '97'] } };
   STATE.sdp = { sdplast: { cocina: Date.now() - 300000 }, colas: { cocina: { n: 3 } } };
