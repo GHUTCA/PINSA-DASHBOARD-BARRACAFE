@@ -988,7 +988,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.84.0</span>
+      <span class="ver" id="ver">sala v3.86.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1217,7 +1217,12 @@ const BACKOFF_MS = QS.get('bo') === null ? 4000
      perché cambia la strada. Visibili: PEDIDOS (sola lettura) ed ELIMINAR
      nella sola porta «Un producto» (AUT-0216: `corregirPedido`).
    · ELIMINAR firma col PIN di sessione (mai richiesto), `nombre` = il JL,
-     `via:'app_jl'` come nelle predizioni sigillate di AUT-0216. */
+     `via:'app_jl'` come nelle predizioni sigillate di AUT-0216.
+   🔓 11-set · [caso Alberto] ECCEZIONE SU «MI PLAZA» (`_jlEsMiPlaza()`,
+     r.~1235): PEDIR·COBRAR·MOVER·MÍO tornano visibili SOLO quando `vista`
+     è il JL stesso — il tavolo di un mesero resta esattamente come sopra,
+     nessun cambio. SEPARAR/JUNTAR (multi-mesa) restano spenti ovunque,
+     non richiesti in questo giro. */
 const JL = (function () {
   if (QS.get('jl') !== '1') return null;
   let pin = '', user = '', codigo = '';
@@ -1233,6 +1238,19 @@ const JL = (function () {
 /* la fetta che si legge: in modalità JL è quella del mesero PADRONE, mai la
    firma. Ovunque il poll chiedeva `STATE.nombre` per SAPERE, ora chiede qui. */
 function _vistaNombre() { return (JL && STATE.vista) ? STATE.vista : STATE.nombre; }
+/* ═══ 11-set · [caso Alberto, portato da 🛎] «MI PLAZA» NON È UN TAVOLO
+   ALTRUI ══════════════════════════════════════════════════════════════
+   I verbi nascosti in modalità JL (PEDIR·PRECUENTA·COBRAR·MOVER·SEPARAR e
+   i gesti di PEDIDOS) hanno senso SOLO quando il JL guarda il tavolo di UN
+   ALTRO mesero: lì non tocca a lui cobrar. Ma quando `vista` è LUI STESSO
+   (mesaAbrir chiamato senza nome → ricade su STATE.user, esattamente il
+   caso «Mis plazas» di app_jl.html), non c'è nessun altro che debba farlo:
+   è il suo tavolo, come su una sala normale. Qui, e SOLO qui, si distingue
+   — ogni altro tavolo resta esattamente com'era, verbi ancora spenti in
+   attesa delle loro AUT (Alberto, 07-set: «ognuno con la sua AUT»). */
+function _jlEsMiPlaza() {
+  return !!(JL && JL.vista && JL.user && JL.vista.trim().toLowerCase() === JL.user.trim().toLowerCase());
+}
 function _jlBackUrl() {
   const loc = ({ BKS: 'bks', RIESCO: 'rsc', CANDELARIA: 'cdl' })[CFG.LOCAL] || 'bks';
   return 'app_jl.html?loc=' + loc;
@@ -4705,7 +4723,7 @@ function entrarSala() {
      autorizzato) e niente foto ottimista — la foto salvata su questo telefono è
      di un'ALTRA fetta (l'ultimo mesero guardato): disegnarla sarebbe mostrare
      la sala di uno mentre si crede di guardare quella di un altro. */
-  if (JL) $('fabNuevo').classList.add('hide');
+  if (JL && !_jlEsMiPlaza()) $('fabNuevo').classList.add('hide');
   if (!STATE.sala && !JL) {
     try {
       const f = JSON.parse(localStorage.getItem('sala_foto_v1') || 'null');
@@ -4739,7 +4757,7 @@ function entrarSala() {
      il catalogo si scarica in silenzio appena entri — il primo ➕ PEDIDO
      apre all'istante invece di pagare la chiamata GAS davanti al cliente.
      Stessa cura del TTL (120s): se poi invecchia, il picker rinfresca. */
-  if (!JL && _catalogoViejo()) gasGet('getCatalogo', { codigo: STATE.codigo }).then(function (r) {
+  if ((!JL || _jlEsMiPlaza()) && _catalogoViejo()) gasGet('getCatalogo', { codigo: STATE.codigo }).then(function (r) {
     if (r && r.ok && Array.isArray(r.productos)) {
       STATE.catalogo = r.productos; STATE.catalogoTs = Date.now();
       STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server
@@ -7426,7 +7444,7 @@ function renderPanel() {
      Alberto: NON compaiono. 🔴 Il filtro è QUI, sulla lista che disegna i
      bottoni, non su un CSS: un bottone che non esiste non si preme per sbaglio
      e non si «scopre» ispezionando il DOM. */
-  const VJ = JL ? V.filter(function (b) { return b.k === 'pedidos' || b.k === 'descontar'; }) : V;
+  const VJ = (JL && !_jlEsMiPlaza()) ? V.filter(function (b) { return b.k === 'pedidos' || b.k === 'descontar'; }) : V;
   el.innerHTML =
     '<div class="vp-h">' + (j ? '<span style="color:' + _juntaCol(j.n) + '">👥</span>' : '') +
       '<span class="tt">Mesa ' + esc(mesa) + '</span>' +
@@ -8278,7 +8296,7 @@ function cerrarMesa() {
   $('mesaOvl').classList.remove('on');
   $('mesaSheet').classList.remove('on');
   // v1.3 · il FAB torna solo se la sala è davanti (mai sull'entrada/comandera)
-  if (!JL && !$('vSala').classList.contains('hide') && !STATE.nuevo) $('fabNuevo').classList.remove('hide');   // [AUT-0216c] mai per il JL
+  if ((!JL || _jlEsMiPlaza()) && !$('vSala').classList.contains('hide') && !STATE.nuevo) $('fabNuevo').classList.remove('hide');   // [AUT-0216c] mai per il JL su tavoli altrui · 11-set: sui suoi sì
 }
 function renderMesaSheet(r) {
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === STATE.mesaAbierta; });
@@ -8414,8 +8432,11 @@ function renderMesaSheet(r) {
      servizio (MÍO · digitado · entregado · limpia · agregar · cobrar · mover)
      firmerebbero il JL e — MÍO — gli passerebbero il tavolo. Si spengono TUTTI
      i controlli con un'azione tranne la ✕, invece di inseguirli uno a uno:
-     un bottone nuovo aggiunto domani nasce già spento qui. */
-  if (JL) {
+     un bottone nuovo aggiunto domani nasce già spento qui.
+     · 11-set: eccetto quando il tavolo è il SUO (`_jlEsMiPlaza`) — lì «MÍO»
+       assegna a lui, che è già la firma e già la vista: non passa niente a
+       nessuno, è esattamente il mesero di quel tavolo. */
+  if (JL && !_jlEsMiPlaza()) {
     try {
       $('mesaSheetContent').querySelectorAll('button, a[onclick]').forEach(function (b) {
         if (b.classList && b.classList.contains('msh-x')) return;
