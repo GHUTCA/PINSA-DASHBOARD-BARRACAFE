@@ -988,7 +988,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.88.0</span>
+      <span class="ver" id="ver">sala v3.89.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -4452,10 +4452,22 @@ function _cmPoner(p, op, q, bebNombre, mods, termino){
     const l = { k:++n.seq, id:p.id, nombre:(esMenu?'Menú del Día · ':'')+p.nombre, precio:p.precio + dTot, qty:q,
       cat:p.cat||'', op:op||'', termino:termino||'', es_menu:esMenu, promo:_cmEs2(p)?'2x1':'', persona:n.pAct, pri:0 };
     if(mods && mods.length){ l.mods = mods; l.precio_base = p.precio; }
+    /* [AUT-0239] col menù scaglionato acceso, il piatto nasce come PRIMA
+       tappa di una formula: porta il gruppo e l'elenco delle tappe, e il
+       prezzo pieno (le successive saranno figlie a zero). */
+    if (MENU_ESC_ON && esMenu) {
+      l.menu_grupo_id = _menuGrupoId();
+      l.menu_categoria = 'plato';
+      l.menu_formula = ['plato', 'bebida'];
+    }
     n.lineas.push(l); n.ultima=l.k;
   }
+  /* [AUT-0239] Alberto: «poi SCELGO il bebestible e LA MANDO» — scelta e
+     invio sono lo stesso gesto, dopo. Quindi col meccanismo acceso la
+     bevanda NON entra qui: resta una tappa pendente, e si sceglie quando
+     si manda, dal pannello della mesa. Spento, tutto come sempre. */
   // v2.7/v2.17 · la bebida del menú es una RIGA VERA con su id (chit a la barra)
-  if(bebNombre){
+  if(bebNombre && !(MENU_ESC_ON && esMenu)){
     const opc=(STATE.menuOpciones||[]).find(function(o){ return o.nombre===bebNombre; });
     if(opc){
       const yb = n.lineas.find(function(l){ return l.id===opc.id && l.es_menu && !l.precio && l.persona===n.pAct; });
@@ -4623,7 +4635,13 @@ async function nuevoEnviar(btn) {
       // `regalo2x1` marca l'unità regalata ($0 di base + il SUO extra).
       // Domani il timer del sussurro leggerà da qui chi è ancora pendiente.
       dupla: l.dupla || undefined, regalo2x1: l.regalo2x1 || undefined,
-      espera: l.espera || undefined };   // v3.12 · il regalo in attesa: conto sì, produzione dopo
+      espera: l.espera || undefined,   // v3.12 · il regalo in attesa: conto sì, produzione dopo
+      /* [AUT-0239] i tre tag del menù scaglionato viaggiano verbatim dentro
+         items_json: sono loro che rendono deducibile dal LIBRO «quali tappe
+         sono partite e quali restano», senza stato nuovo da nessuna parte */
+      menu_grupo_id: l.menu_grupo_id || undefined,
+      menu_categoria: l.menu_categoria || undefined,
+      menu_formula: l.menu_formula || undefined };
   });
   const total = _nuevoTotal();
   const body = { codigo: STATE.codigo, nombre: STATE.nombre, uuid: n.uuid, mesa: mesa, total: total, items_json: JSON.stringify(items) };
@@ -4734,6 +4752,62 @@ function _menuGrupoDeMesa(mesa) {
   if (!grupoId || !formula) return null;
   const pr = _menuFormulaProgreso(formula, delGrupo);
   return { grupoId: grupoId, formula: formula, enviadas: pr.enviadas, pendientes: pr.pendientes };
+}
+
+/* ── IL VETRO: cosa resta da mandare, e il tasto per mandarlo ──────────────
+   Si disegna SOLO da ciò che dice il libro (`_menuGrupoDeMesa`): se il
+   telefono si ricarica, o se apre il tavolo un altro mesero, la fila è la
+   stessa — da questa parte non c'è niente di ricordato. */
+const MENU_CAT_TXT = { plato: '🍽 plato', bebida: '🥤 bebida', entrada: '🥗 entrada',
+  bebestible: '🥤 bebestible', fondo: '🍖 fondo', postre: '🍰 postre' };
+function _menuFilaHtml(mesa) {
+  if (!MENU_ESC_ON) return '';
+  const g = _menuGrupoDeMesa(mesa);
+  if (!g) return '';
+  const hechas = g.enviadas.map(function (c) {
+    return '<span class="mz cobrado" style="min-width:0;padding:1px 7px;font-size:10.5px">' +
+      esc(MENU_CAT_TXT[c] || c) + ' ✓</span>'; }).join(' ');
+  const faltan = g.pendientes.map(function (c) {
+    return '<button class="btn" style="padding:4px 10px;font-size:12px;margin:2px" ' +
+      'onclick="_menuMandar(\'' + esc(mesa) + '\',\'' + esc(c) + '\')">enviar ' +
+      esc(MENU_CAT_TXT[c] || c) + '</button>'; }).join('');
+  return '<div class="vp-s" style="border-top:1px solid rgba(255,255,255,.10);padding-top:6px">' +
+    '<b>📖 Menú · ' + g.enviadas.length + ' de ' + g.formula.length + '</b> ' + hechas +
+    (g.pendientes.length
+      ? '<div style="margin-top:4px">' + faltan + '</div>'
+      : '<div class="mini" style="margin-top:4px">todo enviado ✓</div>') +
+    '</div>';
+}
+
+/* il tap su «enviar bebida»: si SCEGLIE adesso e si manda nello stesso gesto
+   (Alberto: «poi scelgo il bebestible e la mando»). La scelta vive il tempo
+   del tocco — non diventa mai uno stato da ricordare da qualche parte. */
+function _menuMandar(mesa, categoria) {
+  const g = _menuGrupoDeMesa(mesa);
+  if (!g) { toast('warn', 'Ese menú ya no está abierto'); return; }
+  const ops = (STATE.menuOpciones || []);
+  if (categoria === 'bebida' && ops.length) {
+    vhoja('<h3>🥤 ¿Qué bebida?</h3>' +
+      '<div class="cs-psub">Mesa ' + esc(mesa) + ' · va sola a la barra, ya pagada en el menú</div>' +
+      '<div class="cie-motivos">' + ops.map(function (o) {
+        return '<span class="cie-chip" onclick="_menuMandarBebida(\'' + esc(mesa) + '\',\'' +
+          esc(o.nombre) + '\')">' + esc(o.nombre) + '</span>'; }).join('') + '</div>');
+    return;
+  }
+  /* una tappa senza prodotti definiti NON si manda a metà: lo dice invece di
+     spedire un pedido vuoto (è la casella che 📖 MENU ha misurato sulla Noche) */
+  toast('warn', 'Esa etapa todavía no tiene productos definidos');
+}
+async function _menuMandarBebida(mesa, nombreBeb) {
+  const g = _menuGrupoDeMesa(mesa);
+  const opc = (STATE.menuOpciones || []).find(function (o) { return o.nombre === nombreBeb; });
+  if (!g || !opc) { toast('err', 'No pude leer esa bebida'); return; }
+  try { vhojaCerrar(); } catch (e) {}
+  /* esPrimera=false ⇒ precio 0 + es_menu:true: la formula è già pagata dal piatto */
+  await _menuEnviarCategoria(mesa, g.grupoId, 'bebida',
+    [{ id: opc.id, nombre: 'Menú del Día · ' + opc.nombre, precio: 0, qty: 1,
+       cat: opc.cat || 'bebidas', persona: 1 }],
+    false, 0, g.formula);
 }
 
 /* un invio scaglionato = un pedido NORMALE, per il server e per il bordo.
@@ -7589,6 +7663,10 @@ function renderPanel() {
     (its.length ? '<div class="vp-list">' + its.map(function (x) {
       return '<div class="vp-li"><span class="q">' + x.q + '×</span><span class="nm">' + esc(x.n) +
         '</span><span class="pv">$' + _fmtMiles(x.q * x.pu) + '</span></div>'; }).join('') + '</div>' : '') +
+    /* [AUT-0239] LA FILA DELLE TAPPE — si disegna solo se questa mesa ha un
+       menù scaglionato aperto, e si legge dai PEDIDOS: chi apre il tavolo la
+       vede uguale, sia dopo un reload sia se è un altro mesero. */
+    _menuFilaHtml(mesa) +
     '<div class="verbos">' + VJ.map(function (b) {
       return '<button class="vb ' + b.cl + '" data-v="' + b.k + '">' + (b.jl ? '<span class="lk">✓JL</span>' : '') +
         '<span class="vi">' + b.i + '</span><span class="vn">' + b.n + '</span></button>'; }).join('') + '</div>';
