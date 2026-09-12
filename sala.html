@@ -2698,7 +2698,18 @@ async function cierreEnviar() {
          nuovo e conia un uid nuovo, come promette la UI. */
       try { localStorage.removeItem(_cieUidKey()); } catch (e2) {}
       CIE.uid = ''; CIE.uidMonto = null;
-      CIE.res = r; _ciePaso4(r);
+      CIE.res = r;
+      /* 🔴 [11-set · caso Anthony, portato da Alberto] `r.dedup===true` tiene
+         `r.ok===true` (entra qui) ma la forma è {ok,dedup,cierre:y} — y viene
+         da _cierresDeHoy (GAS) e NON ha por_medio/boletas/efectivo_ventas/
+         propina split: sono la "cecità" voluta del secondo giro (getCierreMesero,
+         MENU_GAS.js). _ciePaso4 leggeva quei campi al livello sbagliato
+         (r.por_medio invece di r.cierre.*, che comunque non li ha) e mostrava
+         "Ningún cobro hoy" + $0 ovunque — un cierre VERO e già salvato
+         (Anthony quella notte: $164.030, 4 boletas) che sembrava sparito.
+         Cura: un secondo tap sullo stesso uid è "ya cerraste", non "cerraste
+         en cero" — vista propria, sugli unici campi che il server dà qui. */
+      if (r.dedup) _ciePaso4Dedup(r); else _ciePaso4(r);
     }
     else if (r && r.exige === 'motivo') { CIE.res = r; _ciePaso3Motivo(r); }
     else throw new Error((r && r.error) || 'no_ok');
@@ -2732,6 +2743,25 @@ function _ciePaso3Motivo(r) {
 }
 function _cieMotivo(m) { CIE.motivo = m; _ciePaso3Motivo(CIE.res); }
 
+/* segundo tap sobre el mismo uid (red lenta, doble tap): el servidor ya tenía
+   tu cierre guardado y no escribe otro — esto NO es "cerraste en cero", es
+   "ya habías cerrado". Muestra solo lo que el servidor puede dar aquí sin
+   romper la ceguera del recontado (r.cierre: id/declarado/diferencia/ts). */
+function _ciePaso4Dedup(r) {
+  CIE.paso = 4;
+  const c = r.cierre || {};
+  const d = Math.round(c.diferencia || 0);
+  let h = '<div class="cie-h">✅ Ya cerraste este turno</div>' +
+    '<div class="cie-sub">' + esc(c.mesero || STATE.nombre) + ' · ' + esc(c.id) + '</div>' +
+    '<div class="cie-nota" style="margin:8px 0">Tu declaración ya estaba guardada — este segundo intento no creó una nueva.</div>' +
+    '<div class="cie-box"><div class="cie-row"><span>Declaraste</span><b>' + fmtPrice(c.declarado) + '</b></div>' +
+    '<div class="cie-row" style="color:' + (Math.abs(d) > 2000 ? '#ff6b6b' : '#8fd694') + '">' +
+    '<span>' + (d === 0 ? 'Cuadró exacto' : (d < 0 ? 'Faltaron' : 'Sobraron')) + '</span><b>' +
+    (d === 0 ? '✓' : fmtPrice(Math.abs(d))) + '</b></div></div>';
+  h += '<button class="btn" onclick="_cieListo()">Listo — me voy</button>' +
+    '<div class="cie-nota">Si algo no cuadra, avísale al JL con el número de tu cierre.</div>';
+  _cieRender(h);
+}
 function _ciePaso4(r) {
   CIE.paso = 4;
   const d = Math.round(r.diferencia || 0);
