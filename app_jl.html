@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.29.0</span>
+<span class="ver" id="ver">app_jl v1.30.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -480,15 +480,51 @@ function pintaTesta() {
      che alimenta gli altri quattro: `por_mesero[n].abierto` (r.518) — la
      stessa cifra che la riga del mesero mostra come «$X en sala». Qui si
      somma su tutti i meseros: un quinto riquadro, zero dati nuovi. */
-  const enSala = c && c.por_mesero
-    ? Object.keys(c.por_mesero).reduce((s, n) => s + (c.por_mesero[n].abierto || 0), 0)
-    : null;
+  /* 🔴 v1.30.0 · [AUT-0244 · 12-set, Alberto IN SERVIZIO: «la vendita non si
+     vede»] Il riquadro c'era e diceva 0 mentre in sala c'erano 12 pedidos per
+     $234.110. Non era rotto il riquadro: era la FONTE. `getCaja` legge PAGOS
+     +PEDIDOS interi su Google ogni 60 s — e quando il locale non ha ancora
+     incassato, `por_mesero[n].abierto` non porta niente.
+     ⇒ Il numero viene ora dalla FETTA DEL BORDO (`STATE.vista`), che questa
+       app riceve GIÀ ogni 20 s: zero poll nuovi (N2 rispettata), tre volte
+       più fresco, e soprattutto FUORI DA GOOGLE — è un pezzo di migrazione,
+       non un ritocco. È la stessa somma che fa `sala.html` (r.7082) per la
+       «venta turno»: i totali dei pedidos ancora aperti.
+     ⚠️ La trappola evitata: `sin_dueno` (i pedidos senza mesero) vive nella
+       fetta di OGNUNO — il bordo li mostra a tutti perché non sono di
+       nessuno. Sommandoli per mesero si conterebbero N volte. Si prendono
+       una volta sola, dalla prima fetta buona. */
+  const enSala = _enSalaDaVista();
+  /* 🔴 CONDIZIONE DEL CONTROLLER, e oggi è costata minuti ad Alberto in
+     servizio: «0» e «NON LO SO» non devono avere la stessa faccia. Se la
+     fetta non è arrivata il riquadro lo DICE — non mostra uno zero che
+     significa «non ho il dato». Uno zero vero (tutto pagato) resta $0. */
   $('hKpi').innerHTML =
-    '<span class="kpi"><b>' + (enSala == null ? vuoto : fmt(enSala)) + '</b><small>en sala</small></span>' +
+    '<span class="kpi"><b>' + (enSala == null ? '···' : fmt(enSala)) + '</b><small>' +
+      (enSala == null ? 'en sala · sin dato' : 'en sala') + '</small></span>' +
     '<span class="kpi ok"><b>' + (c ? fmt(c.venta || 0) : vuoto) + '</b><small>venta hoy</small></span>' +
     '<span class="kpi"><b>' + (c ? (c.cuentas || 0) : vuoto) + '</b><small>cerradas</small></span>' +
     '<span class="kpi"><b>' + (abiertas == null ? vuoto : abiertas) + '</b><small>abiertas</small></span>' +
     '<span class="kpi"><b>' + (c && c.cuentas ? fmt((c.venta || 0) / c.cuentas) : vuoto) + '</b><small>promedio</small></span>';
+}
+
+/* [AUT-0244] la plata VIVA in sala, letta dalla fetta del bordo.
+   Torna `null` quando la fetta non c'è — e `null` NON è zero: chi disegna
+   deve dirlo, non mostrarlo come una sala vuota. */
+function _enSalaDaVista() {
+  const ms = STATE.vista && STATE.vista.meseros;
+  if (!ms) return null;
+  const buoni = Object.keys(ms).filter(k => ms[k] && ms[k].ok);
+  if (!buoni.length) return null;   // fetta arrivata ma nessuna sezione leggibile: non lo so
+  let tot = 0;
+  buoni.forEach(k => {
+    ['pendientes', 'mios', 'por_limpiar'].forEach(lista => {
+      (ms[k][lista] || []).forEach(p => { tot += parseFloat(p.total) || 0; });
+    });
+  });
+  /* i senza mesero stanno nella fetta di TUTTI: una volta sola, mai per mesero */
+  (ms[buoni[0]].sin_dueno || []).forEach(p => { tot += parseFloat(p.total) || 0; });
+  return Math.round(tot);
 }
 
 /* ═════ SCHEDA SALA ═════ */
