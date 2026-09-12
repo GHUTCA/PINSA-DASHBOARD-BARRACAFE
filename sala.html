@@ -212,6 +212,17 @@
   .toast.err{border-color:var(--bad);color:var(--bad)}
   .toast.ok{border-color:var(--ok);color:var(--ok)}
   .toast.warn{border-color:var(--warn);color:var(--warn)}
+  /* [AUT-0251] LA BANDA DEL RIFIUTO — il gemello del toast, e la differenza è
+     UNA: non ha un `setTimeout`. Il toast dice «è successo»; la banda resta
+     finché qualcuno la guarda e la chiude. *Sta SOPRA il pannello del pago
+     (z-index 101 contro 100) perché il rifiuto riguarda proprio il gesto che
+     quel pannello sta mostrando come se fosse andato a buon fine.* */
+  .rechBand{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0));
+    max-width:398px;margin:0 auto;z-index:101;background:#2A1416;border:2px solid var(--bad);
+    border-radius:14px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.55);cursor:pointer}
+  .rechBand .rechTit{font-size:16px;font-weight:800;color:var(--bad);letter-spacing:.01em}
+  .rechBand .rechMsg{font-size:14px;color:var(--t1);margin-top:6px;line-height:1.35}
+  .rechBand .rechPie{font-size:11.5px;color:var(--t3);margin-top:8px}
   @keyframes pulse{50%{opacity:.55}}
   .cargando{animation:pulse 1.2s infinite}
   /* ═ v2.0 · MIS MESAS · griglia + sheet (richiesta mesera 17-lug) ═ */
@@ -988,7 +999,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.89.0</span>
+      <span class="ver" id="ver">sala v3.90.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1023,6 +1034,9 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
 <div id="cierreWrap"></div>
 
 <div class="toast" id="toast"></div>
+<!-- [AUT-0251] la banda del rifiuto: vive FUORI dal pannello del pago, così a
+     interruttore spento il gesto del denaro non cambia di un byte. -->
+<div id="rechWrap"></div>
 
 <script>
 /* ═════ CONFIG ═════ */
@@ -1112,6 +1126,64 @@ const RESTO_PREF = (function () {
    è truthy — una lettura permissiva accenderebbe la cura a tutta la sala
    proprio mentre la property dice di tenerla spenta. Stessa coppia
    booleano/stretto concordata con ⚙️ stamattina per `enllegada_sala_on`. */
+/* ═══ 🔴 [AUT-0251] · IL RIFIUTO DEVE SOPRAVVIVERE ALLO SGUARDO ═════════════
+   🩸 IL CASO, 12-set 15:42:41, in servizio: Alberto dichiara uno sconto, tocca
+   «cobrar», **il server RIFIUTA** (`descuento_max`, 28% > 20%) — e lui **crede
+   di aver pagato**. Prima ipotesi: «il rifiuto è invisibile». **Misurata:
+   FALSA.** Il ramo c'è (r.10767) e il messaggio è ottimo: dice il tetto, la
+   percentuale chiesta e il minimo incassabile. Lo dice con `toast(...)`, e
+   `toast` vive **3.200 ms**; poi il pannello torna a un aspetto **identico a
+   quello di un pago riuscito**.
+   > **Non «l'operatore non l'ha visto»: ha guardato uno schermo che, tre
+   > secondi dopo, non portava più traccia di ciò che era successo.**
+   🔬 E NON È UN DIFETTO NUOVO: è **la stessa forma di AUT-0188** — 70
+   `pago_rechazado` in una sera su TRE tavoli, col mesero che diceva *«el
+   sistema no está cerrando algunas mesas de mi plaza»*. Lì curammo la CAUSA di
+   quel rifiuto; **il canale che lo annuncia è rimasto quello.** *Un difetto
+   curato «alla causa» tre volte senza mai toccare il canale non è tre
+   coincidenze: è un pattern — e il canale non viene mai curato perché non
+   appartiene a nessun cantiere.*
+   ⚠️ E il paradosso, dichiarato: con `AUT-0249` (tetto a 30, = quello che il
+   vetro già prometteva) `descuento_max` diventa quasi irraggiungibile ⇒ il
+   difetto **non sparisce, cambia porta** — PIN, voucher, `parte_mayor_que_resto`
+   escono dallo STESSO canale, e restano sul cammino del denaro. *Un difetto
+   raro su un cammino del denaro è quello che nessuno impara a riconoscere.*
+   🎚 `?rech=1` accende per apparecchio e si ricorda · `?rech=0` spegne.
+      **NASCE SPENTA** (spedita sabato fra due servizi, si accende domenica
+      mattina a locale chiuso, col 🎛). */
+const RECH_KEY = 'pinsita_rech';
+const RECH_ON = (function () {
+  const q = QS.get('rech');
+  try {
+    if (q === '1') { localStorage.setItem(RECH_KEY, '1'); return true; }
+    if (q === '0') { localStorage.setItem(RECH_KEY, '0'); return false; }
+    return localStorage.getItem(RECH_KEY) === '1';       // di fabbrica: SPENTA
+  } catch (e) { return q === '1'; }
+})();
+/* 🔑 A INTERRUTTORE SPENTO QUESTA FUNZIONE È `toast('err', …)` E BASTA — stessa
+   chiamata, stesso testo, stessa durata. È la garanzia che rende sicuro
+   spedirla oggi: non «non è successo nei casi provati», ma non PUÒ succedere. */
+function _rech(msg) {
+  toast('err', msg);
+  if (!RECH_ON) return;
+  const pg = STATE.pago; if (!pg) return;
+  const d = new Date();
+  pg.rech = { msg: String(msg), hora: ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) };
+  _rechPinta();
+}
+function _rechCerrar() { const pg = STATE.pago; if (pg) pg.rech = null; _rechPinta(); }
+function _rechPinta() {
+  const el = $('rechWrap'); if (!el) return;
+  const pg = STATE.pago;
+  if (!RECH_ON || !pg || !pg.rech) { el.innerHTML = ''; return; }
+  el.innerHTML =
+    '<div class="rechBand" onclick="_rechCerrar()">' +
+      '<div class="rechTit">✋ El pago NO se registró</div>' +
+      '<div class="rechMsg">' + esc(pg.rech.msg) + '</div>' +
+      '<div class="rechPie">' + esc(pg.rech.hora) + ' · la mesa sigue abierta · toca para cerrar</div>' +
+    '</div>';
+}
+
 function _restoAttivo(r) {
   if (RESTO_PREF === true) return true;
   if (RESTO_PREF === false) return false;
@@ -10488,6 +10560,9 @@ async function _pedirBoleta(pagoId, mesa) {
 }
 
 async function pagoConfirmar(btn) {
+  /* [AUT-0251] un nuovo tentativo cancella il rifiuto precedente: la banda
+     racconta L'ULTIMO esito, mai uno vecchio rimasto sullo schermo. */
+  if (STATE.pago) STATE.pago.rech = null; _rechPinta();
   const pg = STATE.pago; if (!pg || pg.enviando) return;
   // v2.0 · seconda cintura del medio: la UI lo esige già, ma una funzione
   // che scrive denaro non si fida del solo vetro
@@ -10761,11 +10836,11 @@ async function pagoConfirmar(btn) {
     /* v1.4 · gli errori del PIN parlano chiaro e riaprono la serratura */
     const errPin = { pin_jl_requerido: 'Falta el PIN del JL', pin_jl_invalido: 'PIN del JL incorrecto',
       pin_jl_bloqueado: 'PIN bloqueado 10 min (5 intentos fallidos)', pin_jl_no_configurado: 'PIN del JL no configurado — avisa a Alberto' };
-    if (r && errPin[r.error]) { pg.jl = false; pg.pinAsk = true; pg.pinJL = ''; toast('err', '🔐 ' + errPin[r.error]); }
+    if (r && errPin[r.error]) { pg.jl = false; pg.pinAsk = true; pg.pinJL = ''; _rech('🔐 ' + errPin[r.error]); }
     /* v1.8 · il tetto dello sconto (GAS v3.81.0): il server dice fin dove
        si può scendere — la toast lo ripete in parole di sala */
     else if (r && r.error === 'descuento_max') {
-      toast('err', '✋ Descuento supera el ' + r.max_pct + '% (pediste ' + r.pct + '%). ' +
+      _rech('✋ Descuento supera el ' + r.max_pct + '% (pediste ' + r.pct + '%). ' +
         'Mínimo cobrable: $' + _fmtMiles(r.monto_minimo) + '. Más abajo = cortesía.');
     }
     /* v3.7.0 · AUT-0007: il server esige il sello (cancello VOUCHER_ON). La UI
@@ -10773,12 +10848,12 @@ async function pagoConfirmar(btn) {
        lato server, o una versione UI vecchia con il cancello acceso). */
     else if (r && r.error === 'voucher_requerido') {
       pg.sinVoucher = !!String(pg.voucherPin || '').trim();
-      toast('err', '🧾 ' + (r.mensaje || 'Falta el voucher de la tarjeta — o el PIN del JL'));
+      _rech('🧾 ' + (r.mensaje || 'Falta el voucher de la tarjeta — o el PIN del JL'));
     }
     /* v3.7.1 · lo stesso codice due volte oggi = ricopiato da un'altra mesa
        (0 collisioni legittime in 48 giorni misurati): si dice QUALE */
     else if (r && r.error === 'voucher_duplicado') {
-      toast('err', '🧾 ' + (r.mensaje || ('Ese voucher ya se usó hoy' + (r.mesa_anterior ? ' en la mesa ' + r.mesa_anterior : ''))));
+      _rech('🧾 ' + (r.mensaje || ('Ese voucher ya se usó hoy' + (r.mesa_anterior ? ' en la mesa ' + r.mesa_anterior : ''))));
     }
     /* ═══ 🔴 v3.71.0 · [AUT-0188] · IL VETRO IMPARA IL RESTO DAL RIFIUTO ══════
        🔬 IL CASO, venerdì 4-set in servizio: **70 `pago_rechazado` in una sera,
@@ -10824,10 +10899,10 @@ async function pagoConfirmar(btn) {
           '. Ya lo corregí — vuelve a tocar.');
         renderPago();
       } else {
-        toast('err', '✋ ' + (r.mensaje || 'Esta parte es mayor que lo que falta.'));
+        _rech('✋ ' + (r.mensaje || 'Esta parte es mayor que lo que falta.'));
       }
     }
-    else toast('err', 'No se pudo: ' + (r && r.error || '?'));
+    else _rech('No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
     /* ⚠ niente retry cieco: registrarPago NON deduplica per uuid — un pago
        doppio è un fossile doppio. Dopo un timeout si verifica, non si insiste. */
