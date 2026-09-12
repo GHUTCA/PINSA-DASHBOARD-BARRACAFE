@@ -988,7 +988,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.87.0</span>
+      <span class="ver" id="ver">sala v3.88.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -8685,6 +8685,24 @@ function _pagoMonto() {
   return (pg.montoOn && mc) ? parseInt(mc, 10) : pg.tot;
 }
 function pagoMontoToggle() { if (STATE.pago) { STATE.pago.montoOn = !STATE.pago.montoOn; if (!STATE.pago.montoOn) STATE.pago.montoCustom = ''; renderPago(); } }
+/* ═══ [AUT-0248 ④] · C'È DAVVERO UNA DICHIARAZIONE DEL JL? ═══════════════════
+   🔬 Rilievo del 🎛 CONTROLLER: `pg.montoOn` dice che **l'interruttore è
+   acceso**, non che dentro ci sia un numero. Col campo vuoto `_pagoMonto()`
+   torna `pg.tot` — e il vetro direbbe «Cobrar $157.910 · el monto que
+   declaraste», cioè attribuirebbe al JL **una dichiarazione che non ha
+   fatto**, col numero pieno.
+   ✅ Stessa identica forma della guardia che il pago usa già per spedire
+   `monto_manual` (r.10492): `pg.montoOn && _pagoMonto() !== pg.tot`. Ora le
+   due concordano — prima il vetro poteva affermare ciò che l'invio negava.
+   🔑 Perché si fa anche se oggi non morde: sul cammino vivo (`_dtGo`)
+   `montoOn` e `montoCustom` si scrivono **nello stesso blocco, due righe
+   consecutive** ⇒ era **adiacenza, non un vincolo**. *Era sicuro per
+   coincidenza; da qui è sicuro per COSTRUZIONE.* Una sola riga spostata
+   «per uniformità» ribaltava tutto senza produrre nessun errore. */
+function _jlDeclaro() {
+  const pg = STATE.pago;
+  return !!(pg && pg.montoOn && _pagoMonto() !== pg.tot);
+}
 /* v3.31.0 · [AUT-0113] · 🔴 CONDICIÓN DE SEGURIDAD, no un detalle: mientras
    el teléfono está en manos del cliente, de esta pantalla NO se sale. Ni al
    salón, ni a otras mesas, ni al corte. El único regreso es «Listo». Sin
@@ -8842,7 +8860,27 @@ function _pagoPropina() {
      telefono, mentre sta per pagare.**
      La cura è additiva e vale SOLO col modal nuovo in gioco: senza `pg.c4` la
      riga è identica a prima, byte per byte. Il cammino vecchio non cambia. */
-  if (pg.prop === 'sug') return Math.round((pg.c4 ? c4Parte(pg) : pg.tot) * 0.10);
+  /* ═══ [AUT-0248 ④] · IL 10% È IL 10% DI CIÒ CHE SI INCASSA ════════════════
+     🔬 Trovato dal 🎛 CONTROLLER guardando oltre la porta aperta stamattina
+     (AUT-0248 ③). La base era `(pg.c4 ? c4Parte(pg) : pg.tot)` e NON passava
+     mai da `_pagoMonto()` ⇒ col monto dichiarato dal JL usciva un numero
+     falso, e ne uscivano DUE, sbagliati in versi opposti:
+       · uscita diretta al medio (`modo:''`, `sel` vuoto) → base 0 → **$0**,
+         il mesero non chiede la propina e nessuno se ne accorge;
+       · ramo 🅱 (`modo:'todo'`) → base `c4Falta` = consumo PIENO → **$15.791**
+         su un tavolo che ha appena ricevuto uno sconto: si chiede al cliente
+         più del dovuto.
+     ✅ `_bMonto()` è GIÀ l'espressione giusta — `(pg.c4 && !pg.montoOn) ?
+     c4Parte(pg) : _pagoMonto()` — e la usa `pagoConfirmar`. La propina
+     semplicemente non la chiamava.
+     🎓 Detto così sparisce la domanda «su quale base?», che è la domanda che
+        aveva prodotto tutti e due gli errori. *Una regola buona non risponde
+        meglio alla domanda ambigua: toglie la domanda.*
+     ⚠️ E si cura QUI **e** nel gemello di `bMedio` (l'etichetta del chip, che
+        ricalcola la stessa cosa a mano). Curarne uno solo mostrerebbe un
+        numero e ne incasserebbe un altro — **il difetto peggiore dei due,
+        perché sembra curato.** */
+  if (pg.prop === 'sug') return Math.round(_bMonto() * 0.10);
   if (pg.prop === 'otro') return Math.max(0, Math.round(parseFloat(String(pg.otro).replace(/[^0-9]/g, '')) || 0));
   return 0;
 }
@@ -9087,7 +9125,7 @@ function c4Go(p) {
        un bottone morto al dito non spiega niente, sposta solo il gesto su
        un'altra porta. Il bottone resta, parla, e obbedisce: se la risposta è
        no, NON tocca niente e la dichiarazione resta esattamente com'era. */
-  if (c4EsCliente(p) && pg.montoOn) {
+  if (c4EsCliente(p) && _jlDeclaro()) {   /* [AUT-0248 ④] un numero c'è davvero */
     const _m = pg.dto ? fmtPrice(pg.dto.monto) : fmtPrice(_pagoMonto());
     if (!confirm('Esto anula el monto que declaraste (' + _m + ').\n\n¿Seguir y mostrarle la cuenta completa al cliente?')) return;
   }
@@ -9312,7 +9350,13 @@ function bMedio(w, pg) {
   var mB = _bMonto(), prop = _pagoPropina(), totB = mB + prop;
   /* il 10% del chip DEVE essere il numero che `_pagoPropina` userà davvero:
      due calcoli diversi mostrerebbero una cifra e ne cobrerebbero un'altra */
-  var prop10 = Math.round((pg.c4 ? c4Parte(pg) : pg.tot) * 0.10);
+  /* [AUT-0248 ④] IL GEMELLO · stessa espressione di `_pagoPropina`, e ora
+     davvero la stessa: `_bMonto()`. Il commento qui sopra lo esigeva già
+     («due calcoli diversi mostrerebbero una cifra e ne cobrerebbero
+     un'altra») — ed erano diversi entrambi, nello stesso modo.
+     🎓 Quando si corregge una BASE DI CALCOLO si cerca l'ESPRESSIONE, non la
+        funzione: chi la copia non la rinomina. */
+  var prop10 = Math.round(_bMonto() * 0.10);
   var queda = (pg.c4 && !pg.montoOn) ? c4Resta(pg) : 0;
   if (!pg.enviando) {   // l'aviso si può solo GUADAGNARE, mai perdere (v2.0.1)
     var yaF = _pagadaAviso(pg.mesa);
@@ -9461,12 +9505,16 @@ function c4Render(w, pg) {
        decisione presa**. Il cliente sceglie quando il conto è aperto; qui è
        chiuso da una firma. Fargli scegliere di nuovo non è prudenza: è
        distruggere la firma appena messa. */
-    f = (pg.montoOn
+    /* [AUT-0248 ④] `_jlDeclaro()` invece di `pg.montoOn`: l'uscita si offre
+       solo se un numero c'è DAVVERO — un bottone che dice «el monto que
+       declaraste» col campo vuoto direbbe il consumo pieno. */
+    var _jld = _jlDeclaro();
+    f = (_jld
           ? '<button class="c4cta" onclick="c4Go(\'medio\')">💳 Cobrar ' + fmtPrice(_pagoMonto()) + ' ahora' +
               '<small>el monto que declaraste · ya está acordado y firmado</small></button>'
           : '') +
-        '<button class="c4cta' + (pg.montoOn ? ' sec' : '') + '" onclick="c4Go(\'bivio\')">📱 Mostrar la cuenta al cliente' +
-          '<small>' + (pg.montoOn ? '⚠️ anula el monto que declaraste' : 'él elige qué paga y escribe sus datos') + '</small></button>' +
+        '<button class="c4cta' + (_jld ? ' sec' : '') + '" onclick="c4Go(\'bivio\')">📱 Mostrar la cuenta al cliente' +
+          '<small>' + (_jld ? '⚠️ anula el monto que declaraste' : 'él elige qué paga y escribe sus datos') + '</small></button>' +
         '<button class="c4cta sec" onclick="c4Papel()">🖨 Imprimir la cuenta en papel</button>';
   }
 
