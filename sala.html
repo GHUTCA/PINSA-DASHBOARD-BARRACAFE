@@ -988,7 +988,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.85.0</span>
+      <span class="ver" id="ver">sala v3.88.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -4661,6 +4661,115 @@ async function nuevoEnviar(btn) {
     return;
   }
   n.enviando = false; if (btn) btn.disabled = false; renderNuevo();
+}
+
+/* ═══ AUT-0239 · IL MENÙ SCAGLIONATO — il gesto è del mesero ═══════════════
+   Alberto, 12-set: *«cliccato il Menú de la Noche o del Día, manda i prodotti
+   in cucina e in barra in modo SCAGLIONATO: prima la entrada la mando, poi
+   scelgo il bebestible e la mando, poi il fondo, poi il postre»*.
+
+   🔴 IL VINCOLO CHE VIENE PRIMA DI TUTTO (CONTROLLER): un menù è UN prezzo
+   per N portate. Quattro invii devono fare 1 × $11.990, mai 4×. È la classe
+   di mesa 49 (5 boletas per un consumo, $47.600 in più al SII).
+   ⇒ Il prezzo si fissa al PRIMO invio; ogni portata successiva è una FIGLIA
+     a `precio:0` + `es_menu:true` — che NON è un meccanismo nuovo: è lo
+     stesso della bebida del menú del día (v2.7), quello che la contabilità
+     esclude già dai totali (r.5313 e r.6255, 736/736 item in produzione).
+     Inventarne uno parallelo sarebbe un secondo posto da tenere allineato.
+
+   🔑 LO STATO NON VIVE DA NESSUNA PARTE DI NUOVO (risposta Ⓑ alla domanda
+     del CONTROLLER, bacheca 12-set 10:58): «quali portate inviate, quali
+     pendenti» si LEGGE dai pedidos che già esistono — `menu_grupo_id` e
+     `menu_categoria` viaggiano dentro `items_json`, che il GAS scrive
+     verbatim. Sopravvive al reload e al cambio di mesero per costruzione,
+     perché non è nella sessione di nessuno: è nel libro.
+     ⇒ ⚙️ ARQUITECTURA resta fuori dal cammino critico, il bordo non cambia:
+       una portata scaglionata è, per lui, un pedido normale in ritardo.
+
+   🧯 NASCE SPENTO (`?mesc=1` per accenderlo su un telefono solo). Legge del
+     10-ago: non si accende un mezzo meccanismo su un servizio — se domenica
+     non è completo e collaudato, resta spento e lunedì si va col vecchio. */
+const MENU_ESC_ON = QS.get('mesc') === '1';
+
+/* la chiave la conia il CLIENT, mai il server (dottrina ①): sopravvive al
+   retry, e lega fra loro le portate della STESSA formula sullo stesso tavolo */
+function _menuGrupoId() {
+  return 'mg-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+/* lettura PURA dal libro: stesse righe ⇒ stesso risultato, per chiunque
+   guardi e quante volte voglia. Nessuno stato di sessione entra qui. */
+function _menuFormulaProgreso(formula, pedidosDelGrupo) {
+  const enviadas = [];
+  (pedidosDelGrupo || []).forEach(function (p) {
+    try {
+      JSON.parse(p.items_json || '[]').forEach(function (it) {
+        if (it.menu_categoria && enviadas.indexOf(it.menu_categoria) < 0) enviadas.push(it.menu_categoria);
+      });
+    } catch (e) { /* una riga illeggibile non falsifica le altre */ }
+  });
+  const pendientes = (formula || []).filter(function (c) { return enviadas.indexOf(c) < 0; });
+  return { enviadas: enviadas, pendientes: pendientes };
+}
+
+/* il gruppo APERTO su una mesa, ricostruito dai pedidos vivi: la formula
+   stessa viaggia nel primo invio (`menu_formula`), così nemmeno lei dipende
+   da una configurazione locale — chi apre il tavolo la legge dal libro. */
+function _menuGrupoDeMesa(mesa) {
+  const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === (mesa || '').toString(); });
+  if (!m) return null;
+  const righe = (m.pend || []).concat(m.mios || [], m.limpiar || []);
+  let grupoId = '', formula = null;
+  const delGrupo = [];
+  righe.forEach(function (p) {
+    try {
+      JSON.parse(p.items_json || '[]').forEach(function (it) {
+        if (!it.menu_grupo_id) return;
+        if (!grupoId) { grupoId = it.menu_grupo_id; formula = it.menu_formula || null; }
+        if (it.menu_grupo_id === grupoId && delGrupo.indexOf(p) < 0) delGrupo.push(p);
+        if (!formula && it.menu_formula) formula = it.menu_formula;
+      });
+    } catch (e) {}
+  });
+  if (!grupoId || !formula) return null;
+  const pr = _menuFormulaProgreso(formula, delGrupo);
+  return { grupoId: grupoId, formula: formula, enviadas: pr.enviadas, pendientes: pr.pendientes };
+}
+
+/* un invio scaglionato = un pedido NORMALE, per il server e per il bordo.
+   Cambia solo cosa porta dentro: la prima il prezzo, le altre zero.
+   🔑 uuid DETERMINISTICO su (grupoId, categoria): un doppio tap o un retry
+   ricadono sullo stesso uuid, e il dedup del GAS — quello che già protegge
+   `crearPedidoMesero` (r.4600) — li ferma senza che serva una guardia nuova. */
+async function _menuEnviarCategoria(mesa, grupoId, categoria, lineas, esPrimera, precioFormula, formula) {
+  const items = (lineas || []).map(function (l) {
+    return { id: l.id, nombre: l.nombre, qty: l.qty || 1, llevar: l.qty || 1,
+      cat: l.cat || '', op: l.op || '', persona: l.persona || 1, pri: 0,
+      precio: esPrimera ? l.precio : 0,
+      es_menu: esPrimera ? !!l.es_menu : true,
+      menu_grupo_id: grupoId, menu_categoria: categoria,
+      menu_formula: esPrimera ? formula : undefined };
+  });
+  const body = { codigo: STATE.codigo, nombre: STATE.nombre,
+    uuid: 'mg-' + grupoId + '-' + categoria,
+    mesa: (mesa || '').toString(), total: esPrimera ? precioFormula : 0,
+    items_json: JSON.stringify(items) };
+  try {
+    const r = await staffPost('crearPedidoMesero', body);
+    if (r && r.ok) {
+      toast('ok', '🍽 ' + categoria + ' → cocina · mesa ' + mesa + (esPrimera ? ' · ' + fmtPrice(precioFormula) : ' · $0 (ya pagada en la fórmula)'));
+      refrescar(false);
+      return true;
+    }
+    toast('err', 'No se pudo: ' + ((r && r.error) || '?'));
+    return false;
+  } catch (e) {
+    /* stessa via del pedido normale: la cattura non dipende dal pollice che
+       riprova — l'uuid fisso rende il rientro sicuro per costruzione */
+    _colaPut({ action: 'crearPedidoMesero', body: body });
+    toast('ok', '📡 Sin señal — ' + categoria + ' GUARDADA · entra sola al volver');
+    return true;
+  }
 }
 
 /* ═════ v2.2 · COLA OFFLINE — MODO PUENTE (la placca mancante · 23-lug) ═════
