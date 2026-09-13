@@ -1012,7 +1012,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.93.0</span>
+      <span class="ver" id="ver">sala v3.94.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2200,18 +2200,48 @@ async function _pagoAlBorde(body, consumo) {
      sua manopola ?pago=1/0. Le cinque porte di rifiuto del Worker e il
      fallback GAS restano intatti: questa riga decide solo a chi si bussa
      per primi. */
-  if (!bordeWriteOn() || BORDE_PAGO.QS === '0') return null;
-  if (BORDE_PAGO.QS !== '1' && Date.now() < BORDE_PAGO.pausaHasta) return null;
+  /* ═══ 🔴 [AUT-0268] · LE SEI USCITE ADESSO DICONO IL PROPRIO NOME ═════════
+     🩸 Reperto di 🚚 FIGLIA: questa funzione usciva per SEI CAUSE da CINQUE
+     istruzioni — una ne portava due dietro un `||` — e nessuna diceva quale. ⇒ «il pago non è passato dal bordo» era un fatto **senza
+     causa**, e in una sera nessuno poteva dire quante volte eravamo caduti
+     sulla via lenta né per quale delle sei ragioni.
+     🔬 E la parte che fa male: lo strumento era **già finito** — `_pennaDice`,
+     costruito il 3-set per esattamente questa domanda — e `staffPost`, DIECI
+     RIGHE PIÙ SU NELLO STESSO FILE, dichiara già i suoi quattro esiti. Il
+     commento di questa funzione dice perfino «stessa sganciata di staffPost».
+     > **La via è traslocata dal gesto al pago; la capacità di DIRE quale via
+     > si è presa no. E il gemello muto è quello che porta i soldi.**
+     ⇒ è N9 nella sua forma più cara: *una cura che non trasloca quando si apre
+     una porta nuova.* Vista dall'altro capo da ⚙️ come «le nove chiavi senza
+     `muro_via`»: **lo stesso silenzio guardato dai due lati del tubo, e nessuno
+     dei due capi sapeva che era lo stesso.**
+     ✅ FORMA: additiva pura. **Nessun ramo cambia**, nessuna condizione si
+     muove: a ogni `return null` che resta identico si affianca un'etichetta.
+     🎚 Trasporto `_PENNA_N` → `muro_via`, consumatore esistente, freno `?muro=0`
+     già provato nei due sensi. */
+  if (!bordeWriteOn() || BORDE_PAGO.QS === '0') { _pennaDice('pago:leva-off'); return null; }
+  if (BORDE_PAGO.QS !== '1' && Date.now() < BORDE_PAGO.pausaHasta) { _pennaDice('pago:pausa'); return null; }
   /* la porta si guarda sul payload GIÀ COSTRUITO, non sullo stato del pannello:
      è il payload che parte, ed è di lui che stiamo dicendo «è semplice». */
   for (let i = 0; i < BORDE_PAGO.PORTAS.length; i++) {
     const v = body[BORDE_PAGO.PORTAS[i]];
-    if (v === 1 || v === '1' || v === true || (typeof v === 'string' && v.trim() !== '')) return null;
+    /* [AUT-0268] l'etichetta porta QUALE porta: «pago:porta» e basta direbbe
+       che è caduto sulle otto, non su quale — e le otto hanno cause diverse
+       (lo sconto del JL, la parte, la stampa). *Un contatore che non separa
+       le cause misura la somma di cose che si curano in modi diversi.* */
+    if (v === 1 || v === '1' || v === true || (typeof v === 'string' && v.trim() !== '')) {
+      _pennaDice('pago:porta:' + BORDE_PAGO.PORTAS[i]); return null;
+    }
   }
   /* senza la chiave del pago non si passa: è la guardia di mesa 49 in persona,
      e un ACK senza di lei non saprebbe riconoscere il ritocco. Senza consumo
      non c'è niente da confrontare, e un pago di $0 non è un pago semplice. */
-  if (!body.pago_uid || !(consumo > 0)) return null;
+  /* [AUT-0268] la riga era UNA con DUE cause (`||`). Si separa in due `if`
+     consecutivi: **stesso ordine di valutazione, stesso esito, stesso
+     cortocircuito** — cambia solo che adesso si sa quale delle due ha morso.
+     *Due cause dietro un `||` sono un contatore che non si può leggere.* */
+  if (!body.pago_uid) { _pennaDice('pago:no-uid'); return null; }
+  if (!(consumo > 0)) { _pennaDice('pago:consumo-0'); return null; }
   try {
     const u = BORDE_SALA.URL + '/pago/' + encodeURIComponent(CFG.LOCAL || 'BKS')
       + '?t=' + encodeURIComponent(BORDE_SALA.T);
@@ -2244,8 +2274,18 @@ async function _pagoAlBorde(body, consumo) {
        sul token, un 503 sin_gate: tutto quanto è la via di sempre. */
     if (j && j.ok === true && j.borde === true) return j;
     if (j && j.motivo === 'apagado') BORDE_PAGO.pausaHasta = Date.now() + BORDE_PAGO.APAGADO_MS;
+    /* [AUT-0268] il bordo ha risposto e NON ha timbrato `borde:true`: è la via
+       di sempre per decisione SUA, non nostra — e va distinta dal silenzio. */
+    _pennaDice('pago:gas:' + ((j && (j.motivo || j.need || j.error)) || 'senza-timbro'));
   } catch (e) {
     BORDE_PAGO.pausaHasta = Date.now() + BORDE_PAGO.RETE_MS;
+    /* [AUT-0268] la `e` era legata e BUTTATA: qui muore la distinzione fra
+       «il bordo ci ha messo troppo» e «la rete non c'era». Sono due guasti
+       opposti con la stessa faccia, ed è la ragione per cui l'ipotesi del
+       trasporto (abort 3,5 s → pausa 60 s) era **plausibile e non
+       falsificabile** — restava in piedi perché niente poteva contraddirla.
+       *Ora è una domanda con risposta: `pago:timeout` conta, oppure no.* */
+    _pennaDice(e && e.name === 'AbortError' ? 'pago:timeout' : 'pago:rete');
   }
   return null;
 }
