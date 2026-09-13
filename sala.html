@@ -999,7 +999,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
       <button class="fbig" onclick="cierreAbrir()">🧾 MI CORTE</button>
     </div>
     <div class="foot-chips">
-      <span class="ver" id="ver">sala v3.90.0</span>
+      <span class="ver" id="ver">sala v3.91.0</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -4678,7 +4678,22 @@ async function nuevoEnviar(btn) {
     // que la división de la cuenta se fossiliza desde hoy sin tocar el server
     return { id: l.id, nombre: l.nombre + (es2 ? ' · 2x1 (llevar ' + (l.qty*2) + ')' : ''),
       precio: l.precio, qty: l.qty, llevar: es2 ? l.qty*2 : l.qty, cat: l.cat || '', op: l.op || '',
-      es_menu: !!l.es_menu, promo: es2 ? '2x1' : '', pri: l.pri ? 1 : 0, persona: l.persona || 1,   // v2.4 · ES ENTRADA
+      /* ═══ 🔴 [AUT-0253 ①] · L'ETICHETTA CHE SI PERDEVA ALLA SPEDIZIONE ═════
+         Qui c'era `promo: es2 ? '2x1' : ''`, e `es2` è FALSO per la coppia α
+         (`!l.dupla`) — giustamente, perché governa il nome e il `llevar`
+         doppio, che sulla coppia sarebbero sbagliati. **Ma governava anche
+         l'ETICHETTA**, e così la coppia partiva verso il fossile con
+         `promo:''`: il tavolo diceva di non avere promozioni.
+         🩸 Costo misurato: `_dtPromo` legge dal fossile ⇒ trovava ZERO ⇒
+         **anche il ramo `conv`, quello scritto giusto, sottraeva zero.**
+         Mesa 64 del 12-set: tolto $7.600 invece di $6.600. E l'etichetta
+         mancante è il motivo per cui nessuna query poteva farlo vedere —
+         70 righe α senza etichetta contro 84 β con.
+         🔑 La cura separa le tre cose che viaggiavano su un flag solo: `es2`
+         resta il PADRONE DEL NOME E DEL `llevar`; l'etichetta dice ciò che la
+         riga È. *Un flag che governa tre cose non è un flag: sono tre
+         decisioni che si scoprono legate il giorno in cui una va cambiata.* */
+      es_menu: !!l.es_menu, promo: l.promo || '', pri: l.pri ? 1 : 0, persona: l.persona || 1,   // v2.4 · ES ENTRADA
       /* v3.0 · CAMBIO 2 · il término della carne (il chit lo stampa già: GAS
          riga `- termino`) e il NOME di chi l'ha chiesto (additivo, verbatim
          nel fossile → la divisione per nome vive nel conto da oggi) */
@@ -6338,12 +6353,36 @@ function _dtPromo(mesa) {
 }
 function _dtBase() {
   if (!_dt) return 0;
-  return _dt.tipo === 'conv' ? Math.max(0, _dt.tot - _dt.promo) : _dt.tot;
+  /* ═══ 🔴 [AUT-0253 ②] · L'ESCLUSIONE ERA DATA A UN CAMMINO SOLO ══════════
+     Qui c'era `_dt.tipo === 'conv' ? … : _dt.tot`. La regola della casa è
+     scritta due righe sopra, dentro `_dtPromo`, con le sue parole — *«chi ha
+     già avuto due per uno non prende anche il 20% del banco»* — **e valeva
+     solo per il convenio.** Lo sconto percentuale discrezionale (`dto`), che
+     è il bottone di tutti i giorni, scontava sul TOTALE PIENO.
+     🔬 Nasce così senza colpa: l'esclusione fu costruita per Falabella
+     (AUT-0178, 3-set) e nessuno elencò gli altri rami che dovevano ereditarla.
+     ⇒ **quando si scrive un'esclusione si elencano i rami che la ereditano,
+        nello stesso gesto** — terza volta in due giorni (la propina su una
+        base sola · il chip e la funzione · questa).
+     📌 E il perimetro è più largo del 2x1: `_dtPromo` conta `promo || es_menu`
+        ⇒ questa riga riguarda anche il **MENÚ DEL DÍA** sotto uno sconto %. */
+  return (_dt.tipo === 'conv' || _dt.tipo === 'dto')
+    ? Math.max(0, _dt.tot - _dt.promo) : _dt.tot;
 }
 function _dtQuita() {                       // quanto si toglie dal conto
   if (!_dt) return 0;
   if (_dt.tipo === 'fam' || _dt.tipo === 'coln') return _dt.tot;        // chiudono a $0
-  if (_dt.tipo === 'franq') return Math.min(_dtBase(), 100000);
+  /* [AUT-0253 ②] FRANQUICIA PINNATA AL TOTALE PIENO, esplicitamente.
+     Prima leggeva `_dtBase()` e riceveva `_dt.tot` perché non era `conv`:
+     allargando `_dtBase` alle percentuali avrebbe cambiato comportamento
+     **senza che nessuno l'avesse deciso**. L'autorità non è nostra, è il
+     commento di questo file: *«FRANQUICIA → copre tutto: non è una
+     percentuale, è un importo già pagato da un terzo»* — e la nostra regola
+     parla di percentuali della casa. *Pinnarla è visibile; lasciarla cambiare
+     sarebbe stato un effetto collaterale invisibile.*
+     ❓ Se la franquicia debba coprire anche la promo è una domanda per
+        Alberto, lun 14-set. Finché non risponde, qui non cambia niente. */
+  if (_dt.tipo === 'franq') return Math.min(_dt.tot, 100000);
   if (_dt.tipo === 'otro')  return Math.max(0, _dt.tot - (_dt.cob || 0));
   var p = _dt.tipo === 'conv' ? (_dtConv(_dt.conv) || {}).pct : (_dtMot(_dt.mot) || {}).pct;
   return p ? Math.round(_dtBase() * p / 100) : 0;
