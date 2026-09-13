@@ -1024,7 +1024,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.96.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.97.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2210,8 +2210,27 @@ function bordeHecho(gesto, datos) {
     fetch(u, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      /* ═══ 🟢 [AUT-0275] · IL CANALE CHE ARRIVA DAVVERO AL LETTORE ═════════
+         Reperto di 🚚 FIGLIA + MADRE: `bordeHecho` **non dipende da
+         `bordeWriteOn`**, spara dopo ogni ok del GAS, e va a `/pedido-staff` —
+         **cioè dove `/forense` legge.** ⇒ *è l'unico canale verso il bordo che
+         resta aperto quando la leva è spenta: esattamente lo scenario in cui i
+         dati ci mancano.* Misurato dall'altro capo: `gestoHecho` = **0 con
+         `muro_via` su 102** — non un canale scarso, un canale **vuoto**.
+         🩸 **E la mia obiezione di un'ora fa era sbagliata:** avevo detto di no
+         perché «non c'è un punto in cui si sa che è arrivato, quindi i
+         conteggi non si potrebbero mai svuotare». **Confondevo PORTARE con
+         SVUOTARE.** Qui si porta e basta: lo svuotamento resta dove la
+         consegna è confermata (il ramo timbrato di `staffPost`).
+         ⚠️ **COSTO DICHIARATO, non nascosto: gli stessi conteggi possono
+         arrivare PIÙ DI UNA VOLTA** finché `staffPost` non li svuota. ⇒ **chi
+         legge deve interpretarli come «ALMENO n», non «esattamente n».**
+         🔑 *Fra un doppione e un buco, su un contatore diagnostico, si sceglie
+         il doppione e LO SI DICHIARA* — la domanda a cui serve rispondere è
+         «`pago:timeout` succede, sì o no?», e «almeno» basta. */
       body: JSON.stringify(Object.assign({ action: 'gestoHecho', local: CFG.LOCAL,
-        codigo: STATE.codigo, nombre: STATE.nombre, gesto: gesto, uid: uid }, datos || {})),
+        codigo: STATE.codigo, nombre: STATE.nombre, gesto: gesto, uid: uid },
+        datos || {}, _muroCampi({}))),
       cache: 'no-store',
     }).catch(function () {});
   } catch (e) { /* un testimone che inciampa non ferma nessun gesto */ }
@@ -2485,7 +2504,11 @@ async function gasGet(action, params) {
 async function gasPost(action, body) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), CFG.TIMEOUT_MS);
-  const _VOLO_G = {};   // [AUT-0273 ①] la scatola di QUESTA chiamata
+  /* [AUT-0275] scatola USA E GETTA: `gasPost` PORTA i conteggi ma non li
+     RECLAMA — Google non li legge, quindi non può confermarne la consegna.
+     Passare una scatola (invece di niente) evita che `_muroCampi` ricada sullo
+     slot di modulo, che è il difetto che `AUT-0273 ①` ha appena tolto. */
+  const _VOLO_G = {};
   try {
     const r = await fetch(CFG.GAS_URL, {
       method: 'POST',
@@ -2495,10 +2518,23 @@ async function gasPost(action, body) {
     });
     clearTimeout(t);
     if (!r.ok) throw new Error('http_' + r.status);
-    /* [AUT-0273 ②] consegnato: si sottrae SOLO ciò che ha spedito questa
-       chiamata. Se il POST fallisce (`throw` sopra, o il `catch`) i conteggi
-       restano e ripartono col prossimo — stessa regola del bordo. */
-    _pennaSvuota(_VOLO_G.vie); _VOLO_G.vie = null;
+    /* ═══ 🔴 [AUT-0275] · QUI NON SI SVUOTA. La prima stesura lo faceva, ed
+       era una PERDITA che ho introdotto io con `AUT-0273 ②`. ═══════════════
+       🩸 Domanda di 🚚 MIGRACION MADRE, 09:54, venti minuti dopo il deploy:
+       *«se Google non li legge e non li scrive da nessuna parte, un POST
+       riuscito AZZERA i contatori e l'informazione muore lì».* **Verificato da
+       me, ed è vero:** `muro_g`/`muro_ms`/`muro_via` hanno **zero occorrenze**
+       in `MENU_GAS.js`, e il GAS **non conserva il payload grezzo** —
+       `_logAudit` prende campi NOMINATI, non il corpo.
+       > **Prima del mio deploy i conteggi aspettavano in RAM finché un gesto
+       > raggiungeva il bordo. Dopo, una ricaduta RIUSCITA se li portava via.**
+       🎓 *Avevo chiuso una cecità e aperto una perdita — ed è esattamente la
+       famiglia che inseguiamo da stamattina: **un gesto che riesce e non lo
+       dice a nessuno.*** La cura non è togliere il campo: è togliere lo
+       SVUOTAMENTO. ⇒ **si svuota solo dove la consegna AL LETTORE è
+       confermata**, cioè nel ramo timbrato di `staffPost`.
+       📌 Il campo resta perché non costa niente e il giorno che qualcuno di là
+          lo leggerà sarà già lì. */
     return await r.json();
   } catch (e) { clearTimeout(t); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
 }
