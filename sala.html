@@ -1024,7 +1024,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.105.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.107.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -4116,10 +4116,22 @@ function _cmBuscar(txt){
   return a.concat(b);
 }
 function _cmEs2(p){ return !!(p && p.promo && (p.promo.tipo==='2x1'||p.promo.tipo==='multiplo')); }
-function _cmEsMenuConBeb(p){ return !!(p && p.regla==='almuerzo' && (STATE.menuOpciones||[]).length); }
+/* ═══ v3.107.0 · [AUT-EMERG-0314] · IL VETRO CONOSCEVA UNA SOLA REGOLA ═══════
+   Fino a stasera «menù» voleva dire `regla === 'almuerzo'`, scritto a mano in
+   CINQUE punti. Il menú de la noche arriva dal catalogo con `regla === 'noche'`
+   (esce verbatim da `Tipo_Regla`, misurato da 📖 MENU nel suo sorgente) ⇒
+   nessuno dei cinque rami si accendeva e **il chip non compariva affatto**.
+   🔑 La cura non aggiunge un secondo `if`: mette le regole in UN posto solo,
+      così la terza (brunch, festivo, quel che sarà) è una riga di tabella e
+      non una caccia a cinque confronti sparsi.
+   🏷 E l'etichetta smette di essere fissa: la sera diceva «Menú del almuerzo». */
+const MENU_REGLAS = { almuerzo: 'Menú del almuerzo', noche: 'Menú de la noche' };
+const MENU_SIGLAS = { almuerzo: 'MA', noche: 'MN' };
+function _cmEsMenu(p){ return !!(p && p.regla && MENU_REGLAS[p.regla]); }
+function _cmEsMenuConBeb(p){ return !!(_cmEsMenu(p) && (STATE.menuOpciones||[]).length); }
 function _cmBadge(p){
   if(!p) return '';
-  if(p.regla==='almuerzo') return '<span class="cm-bdg menu">MENÚ</span>';
+  if(_cmEsMenu(p)) return '<span class="cm-bdg menu">MENÚ</span>';
   return _cmEs2(p) ? '<span class="cm-bdg promo">🎁 2x1</span>' : '';
 }
 function _cmPrecio(p){
@@ -4261,8 +4273,13 @@ function _cmPromos(){
   const out=[]; const cat=STATE.catalogo||[];
   const conP = cat.filter(function(p){ return p.promo; })[0];
   if(conP) out.push({ id:'promo', lbl:'2×1', largo:(conP.promo.nombre||'En promo'), v:'--cm-promo' });
-  if(cat.some(function(p){ return p.regla==='almuerzo'; }))
-    out.push({ id:'menu', lbl:'MA', largo:'Menú del almuerzo', v:'--cm-ok' });
+  /* [AUT-EMERG-0314] il chip prende NOME dalla regola che c'è davvero nel
+     catalogo adesso: «MA · Menú del almuerzo» a pranzo, «MN · Menú de la
+     noche» la sera. Se un giorno ne convivessero due, vince la prima trovata
+     e si vedrà allora: stasera non convivono (finestre 08-16 e 20-22). */
+  const _rMenu = (cat.find(function(p){ return _cmEsMenu(p); }) || {}).regla;
+  if(_rMenu)
+    out.push({ id:'menu', lbl:MENU_SIGLAS[_rMenu]||'M', largo:MENU_REGLAS[_rMenu], v:'--cm-ok' });
   return out;
 }
 function _cmPregHtml(){
@@ -4543,7 +4560,7 @@ function _cmCajonHtml(){
   const q = (n.qc||'').trim();
   const pasa = function(p){
     if(n.filtro==='promo') return !!p.promo;
-    if(n.filtro==='menu')  return p.regla==='almuerzo';
+    if(n.filtro==='menu')  return _cmEsMenu(p);
     if(n.filtro==='frec')  return frecP.indexOf(p)>=0;
     if(n.filtro)           return _famDe(p.cat)===n.filtro;
     return true;
@@ -4554,7 +4571,7 @@ function _cmCajonHtml(){
   const FAM = [ {id:'comida',lbl:'🍽 Comida',v:'--cm-fam1'}, {id:'cocteles',lbl:'🍸 Cócteles',v:'--cm-fam2'}, {id:'postres',lbl:'🍰 Postres',v:'--cm-fam3'} ];
   const et = q ? 'Resultados de «'+esc(q)+'»'
     : n.filtro==='promo' ? 'En promo ahora · '+esc(largoPromo)
-    : n.filtro==='menu'  ? 'Menú del almuerzo'
+    : n.filtro==='menu'  ? (MENU_REGLAS[((STATE.catalogo||[]).find(function(p){ return _cmEsMenu(p); })||{}).regla] || 'Menú')
     : n.filtro==='frec'  ? 'Lo que la sala pide ahora'
     : n.filtro ? FAM.filter(function(f){ return f.id===n.filtro; })[0].lbl.replace(/^\S+\s/,'')
     : 'Toda la carta';
@@ -4786,7 +4803,7 @@ function _cmPoner(p, op, q, bebNombre, mods, termino){
       _pend:{ op:op||'', beb:bebNombre||'', mods:mods||null } };
     _cmRedibujar(); return;
   }
-  const esMenu = p.regla==='almuerzo';
+  const esMenu = _cmEsMenu(p);
   // v3.10 · MODS2 · IL PREZZO CHE SOMMA: i delta entrano DENTRO precio, così
   // Σ precio×qty resta vero in tutti i posti che lo calcolano (libreta, server,
   // comanda, precuenta) senza toccarne nessuno. Il «+$1.500» smette di essere
@@ -4799,7 +4816,10 @@ function _cmPoner(p, op, q, bebNombre, mods, termino){
   const igual = n.lineas.find(function(l){ return l.id===p.id && l.persona===n.pAct && (l.op||'')===(op||'') && (l.termino||'')===(termino||''); });
   if(igual){ igual.qty += q; n.ultima=igual.k; }
   else {
-    const l = { k:++n.seq, id:p.id, nombre:(esMenu?'Menú del Día · ':'')+p.nombre, precio:p.precio + dTot, qty:q,
+    /* [AUT-EMERG-0314] il prefisso della riga segue la regola: di sera il chit
+       diceva «Menú del Día» alle 21. Nessuno nel GAS parsa questo prefisso
+       (verificato: 0 occorrenze in MENU_GAS.js) — è testo per gli occhi. */
+    const l = { k:++n.seq, id:p.id, nombre:(esMenu?(p.regla==='noche'?'Menú de la Noche · ':'Menú del Día · '):'')+p.nombre, precio:p.precio + dTot, qty:q,
       cat:p.cat||'', op:op||'', termino:termino||'', es_menu:esMenu, promo:_cmEs2(p)?'2x1':'', persona:n.pAct, pri:0 };
     if(mods && mods.length){ l.mods = mods; l.precio_base = p.precio; }
     /* [AUT-0239] col menù scaglionato acceso, il piatto nasce come PRIMA
