@@ -1024,7 +1024,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.108.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.109.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -4736,7 +4736,17 @@ function nuevoPick(id){
   // v3.10 · MODS2 (tappa ⑥): se il vocabolario nuovo parla per questo prodotto,
   // la stringa vecchia TACE — una sola sorgente di verità (lezione del 04-ago:
   // due sorgenti per la stessa domanda si scavalcano in silenzio).
-  const g2 = mods2GruposDe(p);
+  /* 🔴 [BUCO ②, trovato da 📖 MENU, 15-set] senza questa distinzione, un
+     contenitore scaglionato con 4 gruppi (entrada/fondo/bebida/postre)
+     chiedeva TUTTI E QUATTRO nello stesso istante — l'opposto di «manda
+     l'entrada, poi il fondo quando sei pronto». Se il prodotto ha gruppi
+     `mc` (scaglionati) SI CHIEDE SOLO IL PRIMO, per ordine; le altre tappe
+     arrivano da `_menuMandar` dopo. Un prodotto SENZA gruppi `mc` (i 46
+     esistenti) ha `_esc.length===0` ⇒ `g2=g2Full`, ZERO cambio. */
+  const g2Full = mods2GruposDe(p);
+  const _esc = MENU_ESC_ON ? g2Full.filter(function(g){ return g.mc; })
+                                    .sort(function(a,b){ return a.ord - b.ord; }) : [];
+  const g2 = _esc.length ? [_esc[0]] : g2Full;
   if(g2.length){
     n.eligiendo={ id:p.id, nombre:p.nombre, n:q, g2:g2, gi:0, sel:{}, mods:[] };
     n.q=''; _cmRedibujar(); return;
@@ -4839,21 +4849,26 @@ function _cmPoner(p, op, q, bebNombre, mods, termino){
     if(mods && mods.length){ l.mods = mods; l.precio_base = p.precio; }
     /* [AUT-0239] col menù scaglionato acceso, il piatto nasce come PRIMA
        tappa di una formula: porta il gruppo e l'elenco delle tappe, e il
-       prezzo pieno (le successive saranno figlie a zero). */
-    if (MENU_ESC_ON && esMenu) {
+       prezzo pieno (le successive saranno figlie a zero).
+       🔴 [BUCO trovato da 📖 MENU, 15-set] `esMenu` dipende da `p.regla`, che
+       il GAS scrive SOLO se esiste una riga PRECIOS_REGLA attiva per quel
+       prodotto (MENU_GAS.js r.859) — verificato in lettura. Il contenitore
+       `BKS-NOC-001` non ne ha mai avuta una: `esMenu` era sempre falso per
+       lui, e questo blocco non scattava MAI. Ora si accende anche quando
+       il prodotto ha gruppi `mc` (contenitore), indipendentemente da `esMenu`
+       — il ramo `esMenu` puro (almuerzo/noche di ieri) resta intatto. */
+    const _formulaG = MENU_ESC_ON ? mods2GruposDe(p).filter(function(g){ return g.mc; })
+                                                     .sort(function(a,b){ return a.ord - b.ord; }) : [];
+    if (MENU_ESC_ON && (esMenu || _formulaG.length)) {
       l.menu_grupo_id = _menuGrupoId();
       /* [piano 07-set §3] il prodotto viaggia col grupo: senza questo,
          `_menuMandar` non può risalire a `p` per leggere le opzioni VERE
          della tappa (mods2GruposDe(p)) e resta incollato alla sola bebida. */
       l.menu_producto_id = p.id;
-      /* [piano 07-set §2] contenitore GENERICO: la formula non è più un valore
-         fisso, si legge da MODS2_VOC via `g.mc`/`g.ord` — campi NUOVI che il
-         GAS ancora non manda (getModificadores). Finché non arrivano, `g.mc`
-         è sempre undefined, il filtro sotto torna vuoto, e si cade sul
-         fallback di oggi: SICURO, non rompe niente se questo pezzo precede
-         quello del GAS o viceversa. */
-      const _formulaG = mods2GruposDe(p).filter(function(g){ return g.mc; })
-                                         .sort(function(a,b){ return a.ord - b.ord; });
+      /* [piano 07-set §2] contenitore GENERICO: la formula si legge da
+         MODS2_VOC via `g.mc`/`g.ord`. Se il prodotto non ha gruppi `mc`
+         (i menù di ieri, o un prodotto normale con `esMenu` vero per altra
+         via) si cade sul fallback di oggi: SICURO, non rompe niente. */
       l.menu_categoria = _formulaG.length ? _formulaG[0].mc : 'plato';
       l.menu_formula = _formulaG.length ? _formulaG.map(function(g){ return g.mc; }) : ['plato', 'bebida'];
     }
