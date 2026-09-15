@@ -1024,7 +1024,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.110.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.111.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -4728,10 +4728,39 @@ function _cmCronoDump(){
   } catch (e) { alert('crono: ' + e.message); }
 }
 if (QS.get('crono') === 'dump') { window.addEventListener('load', _cmCronoDump); }
+/* [BUCO trovato da 📖 MENU, 15-set — Alberto: «non è la prima volta, ora lo
+   mostra, ma dopo 5 tentativi»] `MODS2_VOC` arriva da un fetch SEPARATO
+   (`getModificadores`), fire-and-forget dentro `entrarSala`/`nuevoAbrir`:
+   `STATE.catalogo` si popola nello stesso giro, MA `nuevoAbrir` (r.3477)
+   salta del tutto quel fetch per i successivi 120s (TTL del catalogo) se lo
+   trova già fresco — quindi per tutta quella finestra `MODS2_VOC` non viene
+   MAI ricontrollato. `mods2GruposDe` torna `[]` IN SILENZIO se `MODS2_VOC`
+   è ancora `null` (`mods2GruposDe`: `if (!MODS2_ON || !MODS2_VOC || !p) return [];`)
+   — e `[]` è indistinguibile da «questo prodotto non ha gruppi davvero».
+   🔴 NON è specifico del contenitore scaglionato: qualunque prodotto coi
+   suoi modificadores normali (i 46 già vivi) perde la domanda allo stesso
+   modo, nella stessa finestra — il sintomo di Alberto era solo il più
+   visibile perché il contenitore SENZA gruppi finisce nudo nel carrello. */
+let _mods2CargaEnVuelo = null;
+function _mods2EsperaFresca(ms) {
+  /* stesso schema di `_checkInVeloce` (v2.0.1): una CORSA contro un tempo
+     breve, mai l'attesa piena di `gasGet` (`CFG.TIMEOUT_MS`, 40s di default
+     — un `await` incondizionato trasformerebbe un raro intoppo di rete in
+     un tap che sembra congelato per 40 secondi, molto peggio del vuoto
+     silenzioso di oggi). Una sola richiesta in volo anche con più tap. */
+  if (!_mods2CargaEnVuelo) _mods2CargaEnVuelo = mods2Cargar().finally(function(){ _mods2CargaEnVuelo = null; });
+  return Promise.race([_mods2CargaEnVuelo, new Promise(function(res){ setTimeout(res, ms); })]);
+}
 /* ── elegir ≠ capturar: la pregunta forzada vive DENTRO de la elección ── */
-function nuevoPick(id){
+async function nuevoPick(id){
   const n=STATE.nuevo; if(!n) return;
   const p=(STATE.catalogo||[]).find(function(x){ return x.id===id; }); if(!p) return;
+  /* se il vocabolario non è ancora arrivato, si dà UN giro fresco fino a 4s
+     (mai la cache di localStorage, che potrebbe essere anteriore alla
+     nascita di gruppi nuovi) prima di fidarsi del vuoto — se anche dopo
+     4s non è arrivato, si procede come oggi: meglio il prodotto nudo che
+     un tap che sembra non rispondere. */
+  if (MODS2_ON && !MODS2_VOC) { try { await _mods2EsperaFresca(4000); } catch (e) {} }
   const q=_cmParseQ(n.q).n;
   // v3.10 · MODS2 (tappa ⑥): se il vocabolario nuovo parla per questo prodotto,
   // la stringa vecchia TACE — una sola sorgente di verità (lezione del 04-ago:
@@ -4871,6 +4900,30 @@ function _cmPoner(p, op, q, bebNombre, mods, termino){
          via) si cade sul fallback di oggi: SICURO, non rompe niente. */
       l.menu_categoria = _formulaG.length ? _formulaG[0].mc : 'plato';
       l.menu_formula = _formulaG.length ? _formulaG.map(function(g){ return g.mc; }) : ['plato', 'bebida'];
+      if (_formulaG.length) {
+        /* 🔴 [BUCO ARCHITETTURALE, trovato da MENU, 15-set — Alberto: «click
+           entrada e si chiude il popup, niente succede»] la PRIMA tappa di
+           un contenitore scaglionato passava da QUI (bozza `n.lineas`,
+           spedita solo dopo "Crear pedido") mentre le altre tre passano da
+           `_menuMandarOpcion` (invio REALE immediato). Due meccanismi
+           diversi per lo stesso gesto — Alberto vuole «scelgo l'entrada,
+           ENVIAR» come le altre. ⇒ NON entra in bozza (altrimenti "Crear
+           pedido" la spedirebbe una SECONDA volta): parte SUBITO con la
+           stessa meccanica di `_menuEnviarCategoria`, poi incatena alla
+           tappa successiva — stessa forma già in `_menuMandarOpcion`. */
+        _menuEnviarCategoria(n.mesa, l.menu_grupo_id, l.menu_categoria,
+          [l], true, l.precio, l.menu_formula).then(function (ok) {
+            if (!ok) return;
+            const _idx = l.menu_formula.indexOf(l.menu_categoria);
+            const _next = _idx >= 0 ? l.menu_formula[_idx + 1] : undefined;
+            /* il libro non ha ancora avuto il tempo di riflettere QUESTO
+               invio (nessuna pausa umana come nel resto della catena) —
+               si passano i dati appena costruiti, non si rilegge il libro. */
+            if (_next) _menuMandar(n.mesa, _next, { productoId: l.menu_producto_id, formula: l.menu_formula });
+          });
+        return;   // le righe GIÀ in bozza (altri piatti di questo tavolo)
+                  // restano intatte: qui si esce PRIMA di n.lineas.push(l)
+      }
     }
     n.lineas.push(l); n.ultima=l.k;
   }
@@ -5212,8 +5265,15 @@ function _menuFilaHtml(mesa) {
 /* il tap su «enviar bebida»: si SCEGLIE adesso e si manda nello stesso gesto
    (Alberto: «poi scelgo il bebestible e la mando»). La scelta vive il tempo
    del tocco — non diventa mai uno stato da ricordare da qualche parte. */
-function _menuMandar(mesa, categoria) {
-  const g = _menuGrupoDeMesa(mesa);
+function _menuMandar(mesa, categoria, gConocido) {
+  /* [15-set, secondo giro] STESSA corsa già chiusa in `_menuMandarOpcion`,
+     in un punto nuovo: quando l'entrada spedisce e incatena SUBITO il
+     fondo (`_cmPoner`), il libro non ha ancora avuto il tempo reale che
+     aveva SEMPRE avuto prima (panel-tap → pausa umana → poll aggiornato).
+     `gConocido` lascia al chiamante che ha GIÀ i dati in mano (appena
+     costruiti, non letti dal libro) di passarli — il pannello (che non ha
+     nulla in mano) continua a rileggere `_menuGrupoDeMesa` come sempre. */
+  const g = gConocido || _menuGrupoDeMesa(mesa);
   if (!g) { toast('warn', 'Ese menú ya no está abierto'); return; }
   /* [piano 07-set §3] IL PERCORSO GENERICO PRIMA: se il grupo porta un
      `productoId` (pedidos nati dopo questa cura) e quel prodotto ha un
@@ -5322,7 +5382,16 @@ async function _menuEnviarCategoria(mesa, grupoId, categoria, lineas, esPrimera,
       precio: esPrimera ? l.precio : (l.precio || 0),
       es_menu: esPrimera ? !!l.es_menu : true,
       menu_grupo_id: grupoId, menu_categoria: categoria,
-      menu_formula: esPrimera ? formula : undefined };
+      menu_formula: esPrimera ? formula : undefined,
+      /* 🔴 [15-set, trovato ricollaudando END-TO-END, non nello scenario di
+         MENU] mancava qui — `l.menu_producto_id` veniva costruito in
+         `_cmPoner` ma MAI incluso nel body spedito al server. L'invio
+         immediato entrada→fondo (in memoria, via `gConocido`) non se ne
+         accorgeva; ma riaprendo il pannello PIÙ TARDI, `_menuGrupoDeMesa`
+         legge dal LIBRO — e senza questo campo nel pedido reale, il libro
+         non avrebbe mai saputo quale prodotto cercare: l'intero meccanismo
+         generico si sarebbe spento in silenzio dopo il primo giro. */
+      menu_producto_id: esPrimera ? l.menu_producto_id : undefined };
   });
   const body = { codigo: STATE.codigo, nombre: STATE.nombre,
     uuid: 'mg-' + grupoId + '-' + categoria,
