@@ -1024,7 +1024,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.112.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.113.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -5217,24 +5217,61 @@ function _menuGrupoDeMesa(mesa) {
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === (mesa || '').toString(); });
   if (!m) return null;
   const righe = (m.pend || []).concat(m.mios || [], m.limpiar || []);
-  let grupoId = '', formula = null, productoId = '';
-  const delGrupo = [];
+  /* 🔴 [15-set, Alberto: «stesso tavolo, completo un ordine completo con
+     tutto il giro» — poi ne inizia un secondo] PRIMA questa funzione si
+     agganciava al PRIMO `menu_grupo_id` trovato scorrendo il libro e non
+     lo mollava MAI per quel tavolo — completo o no, non contava: un
+     secondo menú restava invisibile per sempre dietro il primo, anche ore
+     dopo con il primo perfettamente chiuso.
+     ORA si raggruppano TUTTE le righe per grupo (non ci si ferma al
+     primo), si calcola il progresso di OGNUNO, e si sceglie il PRIMO che
+     ha ancora qualcosa da mandare — nell'ordine in cui è comparso nel
+     libro, cioè il più VECCHIO fra gli incompleti, non il più recente:
+     se il mesero ha due menú aperti insieme, si finisce quello iniziato
+     per primo prima di aprirne uno nuovo. Se sono tutti completi, si
+     torna l'ULTIMO (il più recente): è lo stato giusto da mostrare a chi
+     guarda il pannello — «todo enviado» del menú che ha appena chiuso,
+     non di uno vecchio di ore.
+     ⚠️ LIMITE DICHIARATO, non risolto qui: due menú incompleti VERI in
+     contemporanea sullo stesso tavolo (non sequenziali) restano
+     indistinguibili l'uno dall'altro per il pannello — si vede sempre e
+     solo il primo iniziato. Non è il caso di oggi (sequenziale), ma è
+     un limite vero e va nominato, non nascosto. */
+  const gruppi = {};      // grupoId -> { formula, productoId, righe:[] }
+  const ordine = [];      // l'ordine di PRIMA COMPARSA di ogni grupoId
   righe.forEach(function (p) {
     try {
       JSON.parse(p.items_json || '[]').forEach(function (it) {
         if (!it.menu_grupo_id) return;
-        /* [piano 07-set §3] `productoId` viaggia dalla PRIMA riga della
-           formula (dove nasce, vedi §2/§3 sopra) — un pedido vecchio senza
-           questo campo torna '', e il generico si spegne da solo sul fallback. */
-        if (!grupoId) { grupoId = it.menu_grupo_id; formula = it.menu_formula || null; productoId = it.menu_producto_id || ''; }
-        if (it.menu_grupo_id === grupoId && delGrupo.indexOf(p) < 0) delGrupo.push(p);
-        if (!formula && it.menu_formula) formula = it.menu_formula;
+        const gid = it.menu_grupo_id;
+        if (!gruppi[gid]) { gruppi[gid] = { formula: null, productoId: '', righe: [] }; ordine.push(gid); }
+        const g = gruppi[gid];
+        /* [piano 07-set §3] `productoId`/`formula` viaggiano dalla PRIMA
+           riga di OGNI grupo — un pedido vecchio senza questo campo torna
+           '', e il generico si spegne da solo sul fallback per QUEL grupo. */
+        if (!g.formula && it.menu_formula) g.formula = it.menu_formula;
+        if (!g.productoId && it.menu_producto_id) g.productoId = it.menu_producto_id;
+        if (g.righe.indexOf(p) < 0) g.righe.push(p);
       });
     } catch (e) {}
   });
-  if (!grupoId || !formula) return null;
-  const pr = _menuFormulaProgreso(formula, delGrupo);
-  return { grupoId: grupoId, formula: formula, productoId: productoId, enviadas: pr.enviadas, pendientes: pr.pendientes };
+  if (!ordine.length) return null;
+  let scelto = null;
+  for (let i = 0; i < ordine.length; i++) {
+    const gid = ordine[i], g = gruppi[gid];
+    if (!g.formula) continue;
+    const pr = _menuFormulaProgreso(g.formula, g.righe);
+    if (pr.pendientes.length > 0) { scelto = { gid: gid, g: g, pr: pr }; break; }   // il PRIMO ancora incompleto
+  }
+  if (!scelto) {
+    for (let i = ordine.length - 1; i >= 0; i--) {   // nessuno incompleto: l'ULTIMO (il più recente)
+      const gid = ordine[i], g = gruppi[gid];
+      if (g.formula) { scelto = { gid: gid, g: g, pr: _menuFormulaProgreso(g.formula, g.righe) }; break; }
+    }
+  }
+  if (!scelto) return null;
+  return { grupoId: scelto.gid, formula: scelto.g.formula, productoId: scelto.g.productoId,
+           enviadas: scelto.pr.enviadas, pendientes: scelto.pr.pendientes };
 }
 
 /* ── IL VETRO: cosa resta da mandare, e il tasto per mandarlo ──────────────
