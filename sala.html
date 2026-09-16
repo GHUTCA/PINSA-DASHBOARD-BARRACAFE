@@ -5197,7 +5197,7 @@ function _menuGrupoId() {
 
 /* lettura PURA dal libro: stesse righe ⇒ stesso risultato, per chiunque
    guardi e quante volte voglia. Nessuno stato di sessione entra qui. */
-function _menuFormulaProgreso(formula, pedidosDelGrupo, grupoId) {
+function _menuFormulaProgreso(formula, pedidosDelGrupo, grupoId, mesa) {
   const enviadas = [];
   (pedidosDelGrupo || []).forEach(function (p) {
     try {
@@ -5208,22 +5208,31 @@ function _menuFormulaProgreso(formula, pedidosDelGrupo, grupoId) {
   });
   /* ═══ [16-set · AUT-0322] · IL SERVER PUÒ SAPERE PIÙ DI QUELLO CHE IL VETRO
      VEDE ══════════════════════════════════════════════════════════════════
-     Il filtro del bordo (r.1996 di pinsita-borde, «cerrado && !pagado_en_camino
-     esce dalla vista» — cura di mesa 51 del 14-ago, non si tocca) toglie una
+     Il filtro del bordo (r.2062 di pinsita-borde, «cerrado && listo esce
+     dalla vista» — cura di mesa 51 del 14-ago, non si tocca) toglie una
      riga quando cucina e barra ritirano in tempi diversi: una tappa già
      spedita SPARISCE da qui e il contatore torna indietro (4 de 4 → 2 de 4,
      grupo `mg-mu2vy7au` misurato 8 minuti così da BKP24/⚙️).
-     `sala_vista.menu_progreso[grupoId]` è calcolato dal bordo sui FATTI,
-     PRIMA di quel filtro: è monotono, non regredisce mai per costruzione.
+     `sala_vista.menu_progreso[mesa][grupoId]` è calcolato dal bordo sui
+     FATTI, su `pedidos` INTERO prima di quel filtro: è monotono, non
+     regredisce mai per costruzione.
+     🔴 LA FORMA VERA (verificata leggendo `pinsita-borde` commit `74e63fd`,
+     non solo dichiarata): DUE livelli di chiave — `[mesa][grupoId]`, non
+     `[grupoId]` da solo (il progresso è del TAVOLO, uno stesso oggetto per
+     ogni mesero) — e il valore è `{ formula, enviadas:[…] }`, non un array
+     nudo. Tollero ANCHE la forma array, per sicurezza, ma non la presumo.
      🔑 UNIONE, non sostituzione — mai azzerare ciò che il vetro ha già
      visto in locale: un grupo nato prima del deploy del bordo, o una
-     risposta senza questo campo, deve restare quello che era.
+     risposta senza questo campo (o con una forma diversa), deve restare
+     quello che era.
      🔴 L'INTERRUTTORE È LA PRESENZA DEL CAMPO: nessun flag da accendere.
-     Se il bordo non manda ancora `menu_progreso` (o non conosce questo
-     grupo), `daServer` è `[]` e il comportamento è ESATTAMENTE quello di
-     ieri — zero rischio di restare a metà se ⚙️ non fa in tempo. */
-  const daServer = (grupoId && STATE.sala && STATE.sala.menu_progreso &&
-    STATE.sala.menu_progreso[grupoId]) || [];
+     Se il bordo non manda ancora `menu_progreso`, o non conosce questa
+     mesa/grupo, o la forma non è quella attesa, `daServer` è `[]` e il
+     comportamento è ESATTAMENTE quello di ieri — zero rischio di restare
+     a metà, e zero eccezione nel cammino del vetro (v. reperto di V25). */
+  const _mp = (mesa && grupoId && STATE.sala && STATE.sala.menu_progreso &&
+    STATE.sala.menu_progreso[mesa] && STATE.sala.menu_progreso[mesa][grupoId]) || null;
+  const daServer = (Array.isArray(_mp) ? _mp : (_mp && _mp.enviadas)) || [];
   daServer.forEach(function (c) { if (enviadas.indexOf(c) < 0) enviadas.push(c); });
   const pendientes = (formula || []).filter(function (c) { return enviadas.indexOf(c) < 0; });
   return { enviadas: enviadas, pendientes: pendientes };
@@ -5291,13 +5300,13 @@ function _menuGrupoDeMesa(mesa) {
   for (let i = 0; i < ordine.length; i++) {
     const gid = ordine[i], g = gruppi[gid];
     if (!g.formula) continue;
-    const pr = _menuFormulaProgreso(g.formula, g.righe, gid);
+    const pr = _menuFormulaProgreso(g.formula, g.righe, gid, m.mesa);
     if (pr.pendientes.length > 0) { scelto = { gid: gid, g: g, pr: pr }; break; }   // il PRIMO ancora incompleto
   }
   if (!scelto) {
     for (let i = ordine.length - 1; i >= 0; i--) {   // nessuno incompleto: l'ULTIMO (il più recente)
       const gid = ordine[i], g = gruppi[gid];
-      if (g.formula) { scelto = { gid: gid, g: g, pr: _menuFormulaProgreso(g.formula, g.righe, gid) }; break; }
+      if (g.formula) { scelto = { gid: gid, g: g, pr: _menuFormulaProgreso(g.formula, g.righe, gid, m.mesa) }; break; }
     }
   }
   if (!scelto) return null;
