@@ -1024,7 +1024,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.115.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.116.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -4382,7 +4382,12 @@ function _mods2Avanza(elegidos){
     if(d === null) return;
     if(op.def && d === 0) return;
     // `add` = è un'AGGIUNTA (non una risposta obbligatoria) → conta nel tetto
-    e.mods.push({ g: gr.g, gn: gr.gn, oid: op.oid, o: op.o, d: d, cl: op.cl, add: gr.tipo !== 'unica' });
+    /* 🔴 [16-set, Alberto: «la cucina non sa che entrada fare»] `ref` viaggiava
+       già su `op` (MOD_OPCIONES.Ref_Producto) ma qui si perdeva: senza di lui
+       la PRIMA tappa di un contenitore scaglionato (r.4914 sotto) non può
+       risolvere il piatto scelto al suo prodotto vero — additivo, i 46 gruppi
+       modificatori esistenti non lo guardano e restano identici. */
+    e.mods.push({ g: gr.g, gn: gr.gn, oid: op.oid, o: op.o, d: d, cl: op.cl, ref: op.ref || '', add: gr.tipo !== 'unica' });
   });
   e.sel = {}; e.gi++;
   if(e.gi < e.g2.length){ _cmPregRedibujar(); return; }   // v3.45.0 · [AUT-0126] · resta .cm-preg, prossimo gruppo
@@ -4911,8 +4916,29 @@ function _cmPoner(p, op, q, bebNombre, mods, termino){
            pedido" la spedirebbe una SECONDA volta): parte SUBITO con la
            stessa meccanica di `_menuEnviarCategoria`, poi incatena alla
            tappa successiva — stessa forma già in `_menuMandarOpcion`. */
+        /* 🔴 [16-set, Alberto in servizio, mesa 129: «la cucina non sa che
+           entrada fare» — CONTROLLER V25, `IL CHIT DELL ENTRADA NON DICE
+           COSA CUCINARE`] `l` porta nome/id del CONTENITORE (`p.nombre`/
+           `p.id`), mai risolti al piatto scelto — `l.op` porta "Empanaditas"
+           ma nessun chit lo legge: il chit stampa `nombre`, e `nombre` è
+           quello del contenitore. Le altre tre tappe (`_menuMandarOpcion`,
+           r.5430) risolvono `op.ref` al prodotto vero e costruiscono una riga
+           propria; l'entrada non passava da lì. Qui si fa lo stesso: `l`
+           resta IDENTICO (stessa riga-prezzo del contenitore, quella che il
+           tavolo mostra già come "Nx Menú de la Noche") e si aggiunge una
+           SECONDA riga nello STESSO pedido (stesso uuid, stesso giro di
+           rete) col nome/id veri del piatto, a $0 — stessa forma di sempre
+           per una riga extra dentro un pedido. Senza `Ref_Producto`
+           sull'opzione (mods[0].ref vuoto) `_entLinea` è null e si manda
+           solo `l`: comportamento IDENTICO a oggi, nessuna rottura. */
+        const _entMod = l.mods && l.mods[0];
+        const _entRef = _entMod && _entMod.ref && (STATE.catalogo || []).find(function (x) { return x.id === _entMod.ref; });
+        const _entLinea = _entMod && _entMod.ref ? {
+          id: _entMod.ref, nombre: (MENU_CAT_TXT[l.menu_categoria] ? MENU_CAT_TXT[l.menu_categoria] + ' · ' : '') + _entMod.o,
+          precio: 0, qty: q, cat: (_entRef && _entRef.cat) || _entMod.cl || l.menu_categoria, persona: n.pAct
+        } : null;
         _menuEnviarCategoria(n.mesa, l.menu_grupo_id, l.menu_categoria,
-          [l], true, l.precio, l.menu_formula).then(function (ok) {
+          _entLinea ? [l, _entLinea] : [l], true, l.precio, l.menu_formula).then(function (ok) {
             if (!ok) return;
             const _idx = l.menu_formula.indexOf(l.menu_categoria);
             const _next = _idx >= 0 ? l.menu_formula[_idx + 1] : undefined;
@@ -5319,8 +5345,16 @@ function _menuGrupoDeMesa(mesa) {
    Si disegna SOLO da ciò che dice il libro (`_menuGrupoDeMesa`): se il
    telefono si ricarica, o se apre il tavolo un altro mesero, la fila è la
    stessa — da questa parte non c'è niente di ricordato. */
-const MENU_CAT_TXT = { plato: '🍽 plato', bebida: '🥤 bebida', entrada: '🥗 entrada',
-  bebestible: '🥤 bebestible', fondo: '🍖 fondo', postre: '🍰 postre' };
+/* 🔴 [16-set, Alberto, sul chit stampato: «invece di quel punto interrogativo
+   si può mettere un MN»] Questa stessa mappa costruisce sia il pannello (dove
+   l'emoji va bene, è uno schermo) SIA il `nombre` del pedido di ogni tappa
+   scaglionata (`_menuMandarOpcion`, `_cmPoner` sotto) — che finisce sul CHIT
+   di cucina/barra. Sulla coda di stampa passa solo ASCII (dottrina etichette,
+   21-lug): l'emoji ci arriva come `?`. `MN` non è solo leggibile: dice alla
+   cucina che quella riga appartiene a un Menú de la Noche. Un solo posto,
+   vale per entrambi — niente doppia mappa da tenere sincronizzata. */
+const MENU_CAT_TXT = { plato: 'MN plato', bebida: 'MN bebida', entrada: 'MN entrada',
+  bebestible: 'MN bebestible', fondo: 'MN fondo', postre: 'MN postre' };
 function _menuFilaHtml(mesa) {
   if (!MENU_ESC_ON) return '';
   const g = _menuGrupoDeMesa(mesa);
