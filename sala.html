@@ -1024,7 +1024,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.114.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.115.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -5197,7 +5197,7 @@ function _menuGrupoId() {
 
 /* lettura PURA dal libro: stesse righe ⇒ stesso risultato, per chiunque
    guardi e quante volte voglia. Nessuno stato di sessione entra qui. */
-function _menuFormulaProgreso(formula, pedidosDelGrupo) {
+function _menuFormulaProgreso(formula, pedidosDelGrupo, grupoId) {
   const enviadas = [];
   (pedidosDelGrupo || []).forEach(function (p) {
     try {
@@ -5206,6 +5206,25 @@ function _menuFormulaProgreso(formula, pedidosDelGrupo) {
       });
     } catch (e) { /* una riga illeggibile non falsifica le altre */ }
   });
+  /* ═══ [16-set · AUT-0322] · IL SERVER PUÒ SAPERE PIÙ DI QUELLO CHE IL VETRO
+     VEDE ══════════════════════════════════════════════════════════════════
+     Il filtro del bordo (r.1996 di pinsita-borde, «cerrado && !pagado_en_camino
+     esce dalla vista» — cura di mesa 51 del 14-ago, non si tocca) toglie una
+     riga quando cucina e barra ritirano in tempi diversi: una tappa già
+     spedita SPARISCE da qui e il contatore torna indietro (4 de 4 → 2 de 4,
+     grupo `mg-mu2vy7au` misurato 8 minuti così da BKP24/⚙️).
+     `sala_vista.menu_progreso[grupoId]` è calcolato dal bordo sui FATTI,
+     PRIMA di quel filtro: è monotono, non regredisce mai per costruzione.
+     🔑 UNIONE, non sostituzione — mai azzerare ciò che il vetro ha già
+     visto in locale: un grupo nato prima del deploy del bordo, o una
+     risposta senza questo campo, deve restare quello che era.
+     🔴 L'INTERRUTTORE È LA PRESENZA DEL CAMPO: nessun flag da accendere.
+     Se il bordo non manda ancora `menu_progreso` (o non conosce questo
+     grupo), `daServer` è `[]` e il comportamento è ESATTAMENTE quello di
+     ieri — zero rischio di restare a metà se ⚙️ non fa in tempo. */
+  const daServer = (grupoId && STATE.sala && STATE.sala.menu_progreso &&
+    STATE.sala.menu_progreso[grupoId]) || [];
+  daServer.forEach(function (c) { if (enviadas.indexOf(c) < 0) enviadas.push(c); });
   const pendientes = (formula || []).filter(function (c) { return enviadas.indexOf(c) < 0; });
   return { enviadas: enviadas, pendientes: pendientes };
 }
@@ -5272,13 +5291,13 @@ function _menuGrupoDeMesa(mesa) {
   for (let i = 0; i < ordine.length; i++) {
     const gid = ordine[i], g = gruppi[gid];
     if (!g.formula) continue;
-    const pr = _menuFormulaProgreso(g.formula, g.righe);
+    const pr = _menuFormulaProgreso(g.formula, g.righe, gid);
     if (pr.pendientes.length > 0) { scelto = { gid: gid, g: g, pr: pr }; break; }   // il PRIMO ancora incompleto
   }
   if (!scelto) {
     for (let i = ordine.length - 1; i >= 0; i--) {   // nessuno incompleto: l'ULTIMO (il più recente)
       const gid = ordine[i], g = gruppi[gid];
-      if (g.formula) { scelto = { gid: gid, g: g, pr: _menuFormulaProgreso(g.formula, g.righe) }; break; }
+      if (g.formula) { scelto = { gid: gid, g: g, pr: _menuFormulaProgreso(g.formula, g.righe, gid) }; break; }
     }
   }
   if (!scelto) return null;
