@@ -3265,15 +3265,21 @@ async function agregarAbrir(uuid) {
   if (_catalogoViejo()) {      // v2.14 · TTL: la foto di fascia caduca, il picker la rinfresca
     try {
       const r = await gasGet('getCatalogo', { codigo: STATE.codigo });
+      /* [17-set] STESSA GUARDIA di `nuevoAbrir` — vedi il commento lungo là:
+         una risposta vuota non sovrascrive mai una carta buona e non tocca
+         mai `catalogoTs`, altrimenti QUESTO cammino (l'upsell "¿otra copa?")
+         avvelena la cache esattamente come l'altro faceva. */
       if (r && r.ok && Array.isArray(r.productos)) {
-        STATE.catalogo = r.productos;
-        STATE.catalogoTs = Date.now();
-        STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server: un 86 tolto TORNA disponibile
-        STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
-        STATE.terminoOps = Array.isArray(r.termino_opciones) ? r.termino_opciones : (STATE.terminoOps || []); // v3.0 · términos carne (GAS v3.124.0)
-        mods2Cargar(r);  // v3.14.0 · col catálogo viaggia il cancello del foglio (v3.10: una lettura, mai un poll)
-        // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
-        if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
+        if (r.productos.length) {
+          STATE.catalogo = r.productos;
+          STATE.catalogoTs = Date.now();
+          STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server: un 86 tolto TORNA disponibile
+          STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
+          STATE.terminoOps = Array.isArray(r.termino_opciones) ? r.termino_opciones : (STATE.terminoOps || []); // v3.0 · términos carne (GAS v3.124.0)
+          mods2Cargar(r);  // v3.14.0 · col catálogo viaggia il cancello del foglio (v3.10: una lettura, mai un poll)
+          // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
+          try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {}
+        } else if (!STATE.catalogo || !STATE.catalogo.length) { STATE.catalogo = []; }
       } else if (!STATE.catalogo) { STATE.catalogo = []; }
     } catch (e) {
       // v2.2 · MODO PUENTE — ma la foto in RAM, se c'è, vince sul respaldo vecchio
@@ -3877,7 +3883,15 @@ function otraRondaMesa(mesa){
   renderNuevo();
   if (!catg.length) {
     gasGet('getCatalogo', { codigo: STATE.codigo }).then(function(r){
-      STATE.catalogo = (r && r.ok && Array.isArray(r.productos)) ? r.productos : [];
+      /* [17-set] stessa guardia: se nel frattempo (questa chiamata non ha
+         `await`, gira in parallelo al resto) è arrivata una carta buona da
+         un'altra strada, un vuoto qui non la deve cancellare. */
+      if (r && r.ok && Array.isArray(r.productos) && r.productos.length) {
+        STATE.catalogo = r.productos;
+        STATE.catalogoTs = Date.now();
+      } else if (!STATE.catalogo || !STATE.catalogo.length) {
+        STATE.catalogo = [];
+      }
       STATE.menuOpciones = (r && r.ok && Array.isArray(r.menu_opciones)) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
       renderNuevo();
     }).catch(function(){});
@@ -5739,14 +5753,22 @@ function entrarSala() {
      il catalogo si scarica in silenzio appena entri — il primo ➕ PEDIDO
      apre all'istante invece di pagare la chiamata GAS davanti al cliente.
      Stessa cura del TTL (120s): se poi invecchia, il picker rinfresca. */
+  /* [17-set] QUESTA È LA PIÙ IMPORTANTE DELLE QUATTRO: gira in SILENZIO al
+     boot di OGNI mesero, prima che qualcuno tocchi niente — è il candidato
+     più probabile per come si è innescata l'emergenza del 17-set (nessun
+     tap, nessun errore visto, la cache già avvelenata quando il primo PEDIR
+     arriva). Stessa guardia delle altre tre: un vuoto non scrive né su
+     `catalogo` né su `catalogoTs` se non c'è niente di buono da scrivere. */
   if (!JL && _catalogoViejo()) gasGet('getCatalogo', { codigo: STATE.codigo }).then(function (r) {
-    if (r && r.ok && Array.isArray(r.productos)) {
+    if (r && r.ok && Array.isArray(r.productos) && r.productos.length) {
       STATE.catalogo = r.productos; STATE.catalogoTs = Date.now();
       STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server
       STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);
       mods2Cargar(r);   // v3.14.0 · il cancello del foglio, dalla precarica
-      if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
+      try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {}
     }
+    // vuoto o ok:false: si tace (era già così), ma senza toccare catalogo/
+    // catalogoTs — il prossimo giro (PEDIR/AGREGAR) riprova da zero.
   }).catch(function () {});
 }
 
