@@ -1024,7 +1024,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.118.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.119.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3484,8 +3484,32 @@ async function nuevoAbrir(mesaPre) {
   STATE.nuevo = { mesa: (mesaPre || '').toString(), lineas: [], seq: 0, ultima: 0,
     personas: 1, pAct: 1, eligiendo: null, q: '', qc: '', filtro: '', cajon: false,
     uuid: '', enviando: false };
+  const _vaAPedir = _catalogoViejo();   // v2.14 · TTL: stessa cura di AGREGAR (la fascia cambia con l'ora)
+  /* [17-set] un "Reintentar"/"Volver a mirar" richiama questa stessa funzione:
+     senza azzerarlo qui (SOLO quando sta per partire un giro vero — altrimenti
+     un catalogo vuoto ma ancora fresco di TTL resterebbe bloccato per sempre
+     su "Cargando", perché nessun fetch tornerebbe mai a rimetterlo a true),
+     il render immediato qui sotto mostrerebbe ancora il vecchio esito
+     (vacío/fallo) invece di dire "sto riprovando ora". */
+  if (_vaAPedir) STATE.catalogoIntentado = false;
   renderNuevo();
-  if (_catalogoViejo()) {      // v2.14 · TTL: stessa cura di AGREGAR (la fascia cambia con l'ora)
+  if (_vaAPedir) {
+    /* ═══ [17-set · AUT-emerg cargando la carta] TRE STATI, NON UNO ═══════════
+       Reperto del 17-set (Alberto fermo su "Cargando la carta…" un minuto
+       intero): `renderNuevo` (poco sotto) mostrava lo stesso identico testo
+       per DUE cose diverse — "sto ancora aspettando" e "ho ricevuto zero
+       prodotti" — perché `!STATE.catalogo.length` è vero in tutti e due i
+       casi. Un `{ok:true, productos:[]}` (successo vero: le stazioni sono
+       chiuse, v3.33.0 del GAS) restava indistinguibile da un hang, senza
+       nessun errore visibile.
+       `STATE.catalogoIntentado` distingue "mai provato/ancora in volo" da
+       "un giro è già tornato, qualunque cosa abbia detto". `STATE.catalogoFallo`
+       distingue "è tornato con un fatto" da "è tornato con un guasto» (rete
+       o `r.ok===false`, es. codigo invalido) — un guasto vuole "reintenta",
+       un catalogo vuoto vero vuole una frase diversa, mai lo stesso "Cargando".
+       🔑 ADDITIVO PURO: se tutto va come ieri (risposta piena), questi due
+       campi non cambiano un pixel di quello che il mesero vede. */
+    STATE.catalogoFallo = false;
     try {
       const r = await gasGet('getCatalogo', { codigo: STATE.codigo });
       if (r && r.ok && Array.isArray(r.productos)) {
@@ -3494,11 +3518,24 @@ async function nuevoAbrir(mesaPre) {
         STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server: un 86 tolto TORNA disponibile
         STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
         STATE.terminoOps = Array.isArray(r.termino_opciones) ? r.termino_opciones : (STATE.terminoOps || []); // v3.0 · términos carne (GAS v3.124.0)
+        /* [17-set] `estaciones` NON esiste ancora nella risposta di `getCatalogo`
+           (verificato leggendo il GAS vivo, r.1018-1021 di MENU_GAS.js: ritorna
+           ok/count/productos/menu_opciones/termino_opciones/mods2_on, nient'altro)
+           — è un campo additivo da CHIEDERE a chi possiede quel file, non da
+           inventare qui. Se un giorno arriva, il messaggio diventa specifico da
+           solo (vedi `_catalogoVacioMsg` sotto); finché manca, resta generico. */
+        STATE.catalogoEstaciones = (r.estaciones && typeof r.estaciones === 'object') ? r.estaciones : null;
         mods2Cargar(r);  // v3.14.0 · col catálogo viaggia il cancello del foglio (v3.10: una lettura, mai un poll)
         // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
         if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
-      } else if (!STATE.catalogo) { STATE.catalogo = []; }
+      } else {
+        // r.ok===false (codigo invalido, tab mancante, ecc.): un GUASTO
+        // dichiarato dal server, non un catalogo vuoto legittimo.
+        STATE.catalogoFallo = true;
+        if (!STATE.catalogo) STATE.catalogo = [];
+      }
     } catch (e) {
+      STATE.catalogoFallo = true;
       // v2.2 · MODO PUENTE — ma la foto in RAM, se c'è, vince sul respaldo vecchio
       if (!STATE.catalogo || !STATE.catalogo.length) {
         try { STATE.catalogo = JSON.parse(localStorage.getItem('mesero_catalogo_v1') || '[]'); } catch (e2) { STATE.catalogo = []; }
@@ -3506,8 +3543,21 @@ async function nuevoAbrir(mesaPre) {
       toast(STATE.catalogo.length ? 'warn' : 'err',
         STATE.catalogo.length ? '📡 Sin señal — catálogo de respaldo' : 'No cargó el catálogo — reintenta');
     }
+    STATE.catalogoIntentado = true;   // un giro è tornato — qualunque cosa abbia detto
     renderNuevo();
   }
+}
+/* [17-set] il messaggio del catalogo vuoto VERO (successo, zero prodotti) —
+   specifico se `estaciones` arriva (oggi non arriva, vedi commento sopra),
+   generico altrimenti. Riusa le parole del menù del cliente sullo stesso
+   fatto («No hay productos disponibles en este horario», reperto di V25 sul
+   vetro di MENU) — due schermi sullo stesso fatto dicono la stessa frase. */
+function _catalogoVacioMsg() {
+  const es = STATE.catalogoEstaciones;
+  if (es && es.cocina && es.barra && !es.cocina.abierta && !es.barra.abierta) {
+    return 'La cocina y la barra están cerradas por ahora.';
+  }
+  return 'No hay productos disponibles en este horario.';
 }
 function nuevoCerrar() { STATE.nuevo = null; renderNuevo(); }
 // v2.3 · F1 · OTRA RONDA: l'ultimo pedido precompila il nuevo — modificadores
@@ -4662,10 +4712,20 @@ function renderNuevo(){
   const n = STATE.nuevo;
   if(!n){ w.innerHTML=''; return; }
   if(!STATE.catalogo || !STATE.catalogo.length){
+    /* [17-set] TRE STATI — vedi il commento lungo in `nuevoAbrir` (dove
+       nascono `catalogoIntentado`/`catalogoFallo`). Nessuno dei tre lascia
+       il mesero a fissare "Cargando…" per sempre senza un fatto o un gesto. */
+    const _cuerpo = !STATE.catalogoIntentado
+      ? '<div class="cm-vacio"><b>Cargando la carta…</b>un segundo</div>'
+      : STATE.catalogoFallo
+        ? '<div class="cm-vacio"><b>No se pudo cargar la carta.</b>' +
+          '<button class="btn" style="margin-top:10px" onclick="nuevoAbrir(\'' + esc(n.mesa) + '\')">🔄 Reintentar</button></div>'
+        : '<div class="cm-vacio"><b>' + esc(_catalogoVacioMsg()) + '</b>' +
+          '<button class="btn sec" style="margin-top:10px" onclick="nuevoAbrir(\'' + esc(n.mesa) + '\')">🔄 Volver a mirar</button></div>';
     w.innerHTML = '<div class="cm-wrap"><div class="cm-hd">'+
       '<input id="nuevoMesa" readonly inputmode="none" aria-label="número de mesa — toca para elegir" placeholder="¿mesa? ▾" value="'+esc(n.mesa)+'" onclick="nuevoMesaPick()">'+
       _cmSusHtml()+'<button class="cm-x" onclick="nuevoCerrar()">✕</button></div>'+
-      '<div class="cm-pad"><div class="cm-vacio"><b>Cargando la carta…</b>un segundo</div></div></div>';
+      '<div class="cm-pad">' + _cuerpo + '</div></div>';
     return;
   }
   w.innerHTML = '<div class="cm-wrap">'+
