@@ -3513,24 +3513,39 @@ async function nuevoAbrir(mesaPre) {
     try {
       const r = await gasGet('getCatalogo', { codigo: STATE.codigo });
       if (r && r.ok && Array.isArray(r.productos)) {
-        STATE.catalogo = r.productos;
-        STATE.catalogoTs = Date.now();
-        STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server: un 86 tolto TORNA disponibile
-        STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
-        STATE.terminoOps = Array.isArray(r.termino_opciones) ? r.termino_opciones : (STATE.terminoOps || []); // v3.0 · términos carne (GAS v3.124.0)
-        /* [17-set] `estaciones` NON esiste ancora nella risposta di `getCatalogo`
-           (verificato leggendo il GAS vivo, r.1018-1021 di MENU_GAS.js: ritorna
-           ok/count/productos/menu_opciones/termino_opciones/mods2_on, nient'altro)
-           — è un campo additivo da CHIEDERE a chi possiede quel file, non da
-           inventare qui. Se un giorno arriva, il messaggio diventa specifico da
-           solo (vedi `_catalogoVacioMsg` sotto); finché manca, resta generico. */
+        /* [17-set · reperto di V25, confermato da Alberto sul vivo] LA CACHE
+           SI AVVELENAVA: una `[]` veniva scritta qui esattamente come una
+           carta piena, `catalogoTs` si aggiornava lo stesso, e `_catalogoViejo()`
+           per tutta la sua finestra rispondeva "fresca" — bloccando OGNI
+           retry, anche dopo che le stazioni erano tornate aperte. Un mesero
+           vedeva "Cargando" per sempre finché qualcuno non ricaricava la
+           pagina a mano (`Ctrl+Shift+R`), e chi lo faceva concludeva "era
+           lento" — il difetto si nascondeva da solo.
+           🔑 LA REGOLA: una risposta VUOTA non scrive mai sopra una carta
+           BUONA già in pancia, e non aggiorna MAI `catalogoTs` — così il
+           prossimo giro la trova ancora "vecchia" e RIPROVA, invece di
+           riposare su un vuoto che potrebbe già essere superato. */
         STATE.catalogoEstaciones = (r.estaciones && typeof r.estaciones === 'object') ? r.estaciones : null;
-        mods2Cargar(r);  // v3.14.0 · col catálogo viaggia il cancello del foglio (v3.10: una lettura, mai un poll)
-        // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
-        if (STATE.catalogo.length) { try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {} }
+        if (r.productos.length) {
+          STATE.catalogo = r.productos;
+          STATE.catalogoTs = Date.now();
+          STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server: un 86 tolto TORNA disponibile
+          STATE.menuOpciones = Array.isArray(r.menu_opciones) ? r.menu_opciones : (STATE.menuOpciones || []);   // v2.7 · bebida del menu
+          STATE.terminoOps = Array.isArray(r.termino_opciones) ? r.termino_opciones : (STATE.terminoOps || []); // v3.0 · términos carne (GAS v3.124.0)
+          mods2Cargar(r);  // v3.14.0 · col catálogo viaggia il cancello del foglio (v3.10: una lettura, mai un poll)
+          // v2.2 · el catálogo bueno se guarda: componer un pedido no depende de la red
+          try { localStorage.setItem('mesero_catalogo_v1', JSON.stringify(STATE.catalogo)); } catch (e) {}
+        } else if (!STATE.catalogo || !STATE.catalogo.length) {
+          // niente in pancia da difendere: si registra il vuoto (per il
+          // messaggio), ma SENZA toccare `catalogoTs` — resta "vecchio".
+          STATE.catalogo = [];
+        }
+        // se in pancia c'era già una carta buona, non si tocca NIENTE: resta
+        // quella, e resta "vecchia" per costruzione (nessun catalogoTs qui).
       } else {
         // r.ok===false (codigo invalido, tab mancante, ecc.): un GUASTO
-        // dichiarato dal server, non un catalogo vuoto legittimo.
+        // dichiarato dal server, non un catalogo vuoto legittimo. Stessa
+        // regola: non tocca una carta buona già in pancia.
         STATE.catalogoFallo = true;
         if (!STATE.catalogo) STATE.catalogo = [];
       }
