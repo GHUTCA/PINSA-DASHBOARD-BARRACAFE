@@ -250,6 +250,189 @@ const fmt = n => '$' + (Math.round(n) || 0).toString().replace(/\B(?=(\d{3})+(?!
 /* un ERRORE non passa da solo: resta finché il JL non lo tocca (AUT-0206,
    domanda del CONTROLLER dopo la notte dei 90 gesti taciuti — il JL apre il
    turno UNA volta: se il no si perde, lo paga tutta la sala). ok/warn: 4,2 s. */
+/* ═══════════════════════════════════════════════════════════════════════════
+   🫙 IL REPARTO DELLE PROPINAS — LA PORTA CHE MANCAVA  ·  D-191
+   ───────────────────────────────────────────────────────────────────────────
+   🩸 PERCHE' ESISTE QUESTO CODICE. `REPARTO_PROPINA` ha TRE righe, tutte del
+   10-11 AGOSTO: le propinas non si distribuiscono da un mese. Il verbo
+   `cerrarReparto` non e' mai stato rotto — funziona e ricalcola dal fossile.
+   **Non si poteva arrivare al bottone.** Fino a oggi qui c'era un bottone
+   «Cerrar reparto» che rispondeva *«se cierra desde el panel de caja»*, e
+   quel pannello (`caja.html`) e' raggiungibile solo digitando l'indirizzo a
+   memoria: lo linka un file solo, che non linka nessuno.
+   🎓 **Non era una porta mancante: era un CARTELLO CHE INDICAVA UNA PORTA CHE
+      NON C'E'.** Ed e' peggio, perche' un'assenza si nota e un'indicazione
+      sbagliata no: chi la segue conclude di aver sbagliato lui. Il JL non
+      vedeva un guasto — vedeva un «próx. aquí» cortese, e ci credeva.
+      *Un rinvio senza data non scade mai.*
+
+   ⚖️ IL CONTRATTO, e non lo cambio: **il telefono PROPONE, il server CONTA.**
+   Sta scritto qui sotto nella card (*«el valor del punto lo recalcula el
+   server sobre el fósil»*) e nel GAS dentro `cerrarReparto` (*«il calcolo si
+   rifa' dal fossile qui dentro»*). Le due meta' erano gia' d'accordo: mancava
+   il filo. Quindi qui NON si calcola niente che valga: il valore del punto
+   mostrato e' una ANTEPRIMA, e il numero buono e' quello che torna.
+
+   🔴 LA TRAPPOLA DA $14.853, e si chiude nello stesso gesto. Nella riga
+   dell'11-ago i punti erano `{"Isa":1, …, "isa":1}`: la STESSA PERSONA pagata
+   due volte, e un punto in piu' nel divisore che ha diluito tutti gli altri.
+   ⇒ ① nessun campo di testo: i nomi escono SOLO da `getCaja` (una casella,
+        mai una nota)
+     ② prima di spedire si cercano le COLLISIONI (maiuscole/accenti/spazi).
+        Se ce n'e' una **NON SI SPEDISCE**: si mostrano le due voci e si
+        chiede quale sia la persona.
+   🔑 **Non si normalizza in silenzio**, e il motivo non e' tecnico: quello e'
+      il NOME DI UNA PERSONA, e deciderlo noi sarebbe attribuirle un'identita'.
+      La chiave canonica e' materia di 👥 RRHH: questa guardia serve a non
+      rifare il danno mentre quella arriva, e resta utile anche dopo. */
+var RP = { abierto: false, puntos: {}, enviando: false, choque: null };
+
+/* normalizza SOLO per CONFRONTARE. Il valore scritto resta quello originale. */
+function rpNorm(s) {
+  /* NON un normalizzatore nuovo: si usa `_slugSalaJS`, che in questo file
+     ESISTE GIA' ed e' quello con cui l'app decide da sempre se due
+     nomi sono la stessa persona (il match dei cierres: si cerca la stringa
+     `corteOk`). NESSUN numero di riga qui dentro: 🛎 SALA mi ha corretto un
+     `r.822` che era gia' `r.853` mentre lo scrivevo. Un numero di riga in un
+     commento invecchia al primo ritocco del file, e invecchia in silenzio -
+     si punta con una STRINGA, che si sposta insieme al codice che nomina.
+     La mia prima stesura ne aveva scritto uno proprio, e aveva un BUCO che
+     quello di casa non ha: comprimevo solo gli spazi, quindi `Diego V` e
+     `Diego-V` NON collidevano - ed e' uno dei casi elencati nel disegno §11,
+     accanto a `Isa`/`isa`. `_slugSalaJS` toglie tutto cio' che non e'
+     alfanumerico e li fa collassare.
+     Due normalizzatori che non concordano su chi e' la stessa persona sono
+     il difetto che questa guardia esiste per curare, scritto una seconda
+     volta. Un confronto di nomi si fa dove la casa lo fa gia'. */
+  return _slugSalaJS(s);
+}
+
+/* le coppie di nomi SCELTI che collassano sulla stessa chiave. */
+function rpChoques(nombres) {
+  var visto = {}, out = [];
+  (nombres || []).forEach(function (n) {
+    var k = rpNorm(n);
+    if (!k) return;
+    if (visto[k] && visto[k] !== n) out.push([visto[k], n]);
+    else if (!visto[k]) visto[k] = n;
+  });
+  return out;
+}
+
+/* i nomi con punti > 0. `puntos` accetta 1 · 0.5 · 0 */
+function rpElegidos(puntos) {
+  var p = puntos || RP.puntos, out = [];
+  Object.keys(p).forEach(function (n) { if ((parseFloat(p[n]) || 0) > 0) out.push(n); });
+  return out;
+}
+function rpSuma(puntos) {
+  var p = puntos || RP.puntos, s = 0;
+  Object.keys(p).forEach(function (n) { s += (parseFloat(p[n]) || 0); });
+  return s;
+}
+
+function rpAbrir() { RP.abierto = true; RP.choque = null; pintaTab(); }
+function rpCerrarPanel() { RP.abierto = false; RP.choque = null; pintaTab(); }
+function rpSet(nombre, v) {
+  RP.puntos[nombre] = parseFloat(v) || 0;
+  RP.choque = null;               /* toccare qualcosa ritira l'avviso vecchio */
+  pintaTab();
+}
+
+/* ⚠️ il pannello si disegna DENTRO la card delle propinas, al posto del
+   bottone. A pannello chiuso il vetro e' identico a prima: un bottone solo. */
+function rpPanel(c) {
+  var pr = (c && c.propinas) || {};
+  if (!RP.abierto) {
+    return '<button class="btn acc" onclick="rpAbrir()">Cerrar reparto</button>';
+  }
+  /* I DUE ELENCHI NON SONO LO STESSO ELENCO, e nessuno dei due basta:
+       `por_mesero` nasce nel ciclo dei PAGOS (chiave `Registrado_Por`)
+                    -> manca chi ha lavorato senza registrare un cobro
+       `cierres`    viene da CIERRE_MESERO
+                    -> manca chi non ha chiuso il turno
+     E divergono sul serio: nel CONTROL_PAGOS del 15-set **Jurley aveva 20
+     pagos e «sin cierre»** - c'e' nel primo, non nel secondo.
+     => si prende l'UNIONE. Con uno solo dei due, la persona che manca prende
+     ZERO e nessuno se ne accorge: un'omissione SILENZIOSA su denaro di una
+     persona e' il modo peggiore di sbagliare che ci sia qui.
+     LIMITE DICHIARATO: l'unione NON copre chi non ha ne' cobros ne' cierre
+     (barra e cocina stanno nel 30% del fondo, non in questo 70%). Se un
+     mesero manca davvero, deve dirlo una persona: non lo indovina questo
+     pannello. */
+  var visti = {}, gente = [];
+  Object.keys((c && c.por_mesero) || {}).forEach(function (n) {
+    var k = rpNorm(n); if (k && !visti[k]) { visti[k] = 1; gente.push(n); }
+  });
+  ((c && c.cierres) || []).forEach(function (x) {
+    var n = (x && x.nombre) || x; if (!n) return;
+    var k = rpNorm(n); if (k && !visti[k]) { visti[k] = 1; gente.push(String(n)); }
+  });
+  gente.sort();
+  if (!gente.length) {
+    return '<p class="mini" style="color:#E8B23A">Todavía no hay meseros con ' +
+           'movimiento hoy: sin ellos no se puede repartir.</p>' +
+           '<button class="btn" onclick="rpCerrarPanel()">Volver</button>';
+  }
+  var suma = rpSuma(), monto = pr.monto_meseros || 0;
+  var vp = suma > 0 ? Math.round(monto / suma) : 0;
+  var h = '<p class="mini">¿Cuántos puntos le toca a cada uno? <b>1</b> · <b>½</b> · <b>0</b></p>';
+  gente.forEach(function (n) {
+    var v = RP.puntos[n] || 0;
+    h += '<div class="pers" style="border:0;padding:3px 0"><span class="nb"><b>' + esc(n) + '</b></span>' +
+         '<span class="val">' +
+         [['1', 1], ['½', 0.5], ['0', 0]].map(function (o) {
+           return '<button class="btn' + (v === o[1] ? ' acc' : '') + '" style="padding:2px 9px;margin-left:4px"' +
+                  ' onclick="rpSet(\'' + esc(n).replace(/'/g, '&#39;') + '\',' + o[1] + ')">' + o[0] + '</button>';
+         }).join('') + '</span></div>';
+  });
+  h += '<div class="pers" style="border:0;padding:6px 0"><span class="nb"><b>Puntos</b>' +
+       '<small>' + (suma || 0) + ' en total</small></span>' +
+       '<span class="val"><b>' + (suma > 0 ? fmt(vp) + ' c/u por punto' : '—') + '</b></span></div>';
+  /* 🔴 l'anteprima si dichiara anteprima: il numero buono e' quello che torna */
+  h += '<p class="mini">Es una vista previa. El server lo recalcula sobre el fósil.</p>';
+  if (RP.choque) {
+    h += '<div class="card ambra" style="margin:8px 0"><h4>⚠ ¿Son la misma persona?</h4>' +
+         '<p class="mini"><b>' + esc(RP.choque[0]) + '</b> y <b>' + esc(RP.choque[1]) + '</b> ' +
+         'se escriben casi igual. Si son la misma, dale los puntos a UNA sola y deja la otra en 0.</p>' +
+         '<p class="mini">El 11 de agosto esto pagó dos veces a la misma persona.</p></div>';
+  }
+  h += '<button class="btn acc" onclick="rpEnviar()"' + (RP.enviando ? ' disabled' : '') + '>' +
+       (RP.enviando ? 'Cerrando…' : 'Confirmar y cerrar') + '</button>' +
+       '<button class="btn" onclick="rpCerrarPanel()">Volver</button>';
+  return h;
+}
+
+async function rpEnviar() {
+  if (RP.enviando) return;
+  var elegidos = rpElegidos();
+  if (!elegidos.length) { toast('warn', 'Nadie tiene puntos todavía.'); return; }
+  /* 🔴 LA GUARDIA, e FALLISCE CHIUSA: se due nomi collidono non si manda
+     niente. Non si sceglie noi quale sia il nome vero. */
+  var ch = rpChoques(elegidos);
+  if (ch.length) { RP.choque = ch[0]; pintaTab(); return; }
+  RP.enviando = true; pintaTab();
+  try {
+    var r = await gasPost('cerrarReparto', {
+      pin_jl: STATE.pin, pin: STATE.pin,
+      puntos: RP.puntos,
+      cerrado_por: STATE.nombre || 'JL'
+    });
+    if (r && r.ok) {
+      RP.abierto = false; RP.puntos = {}; RP.choque = null;
+      toast('ok', 'Reparto cerrado · ' + fmt(r.valor_punto || 0) + ' por punto');
+      /* si rilegge la caja: il «✓ ya cerrado hoy» deve venire dal SERVER,
+         non da una bandierina nostra. Uno stato inventato dal client e'
+         esattamente cio' che non vogliamo su denaro di persone. */
+      try { await giroCaja(); } catch (e) { /* il toast ha gia' detto l'esito */ }
+    } else {
+      toast('err', 'No se cerró: ' + ((r && (r.error || r.msg)) || 'sin motivo'));
+    }
+  } catch (e) {
+    toast('err', 'No se cerró: ' + (e && e.message ? e.message : 'red'));
+  } finally { RP.enviando = false; pintaTab(); }
+}
+
 function toast(tipo, msg) {
   const t = $('toast'); t.className = 'on ' + tipo; t.textContent = msg + (tipo === 'err' ? ' · toca para cerrar' : '');
   t.onclick = () => { t.className = ''; };
@@ -1175,7 +1358,7 @@ function vCaja() {
     '<div class="pers" style="border:0;padding:4px 0"><span class="nb"><b>Efectivo declarado</b></span><span class="val"><b>' + fmt(pr.efectivo || 0) + '</b></span></div>' +
     '<div class="pers" style="border:0;padding:4px 0"><span class="nb"><b>Para meseros (' + (pr.meseros_pct != null ? pr.meseros_pct : 65) + '%)</b></span><span class="val"><b>' + fmt(pr.monto_meseros || 0) + '</b></span></div>' +
     (c.reparto_hoy ? '<p class="mini" style="color:#3DC97E">✓ Reparto ya cerrado hoy' + (c.reparto_hoy.por ? ' por ' + esc(c.reparto_hoy.por) : '') + '.</p>'
-      : '<button class="btn acc" onclick="toast(\'warn\',\'El reparto se cierra desde el panel de caja — próx. aquí\')">Cerrar reparto</button>') +
+      : rpPanel(c)) +
     '<p class="mini">El valor del punto lo recalcula el server sobre el fósil, nunca el teléfono.</p></div>';
   h += '<div class="card"><h4>🧾 El cierre del mesero</h4>' +
     '<p class="mini"><b>El conteo es ciego</b>: cuenta, declara, y el server revela la diferencia después de la firma. Tolerancia $2.000. No mueve un peso.</p></div>';
