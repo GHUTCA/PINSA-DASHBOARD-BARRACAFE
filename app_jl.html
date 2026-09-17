@@ -285,7 +285,32 @@ const fmt = n => '$' + (Math.round(n) || 0).toString().replace(/\B(?=(\d{3})+(?!
       il NOME DI UNA PERSONA, e deciderlo noi sarebbe attribuirle un'identita'.
       La chiave canonica e' materia di 👥 RRHH: questa guardia serve a non
       rifare il danno mentre quella arriva, e resta utile anche dopo. */
-var RP = { abierto: false, puntos: {}, enviando: false, choque: null };
+var RP = { abierto: false, puntos: {}, enviando: false, choque: null, uid: '' };
+
+/* LA CHIAVE D'IDEMPOTENZA, e nasce QUI apposta.
+   Dottrina 1 di `_COME_SI_CODIFICA`: la chiave la conia il lato che RIPETE
+   (il client), MAI il server - se la conia il server, il retry ne genera
+   un'altra e la guardia e' teatro. Sei verbi di MENU_GAS lavorano gia' cosi'
+   (`payload.uid`; `pedirVisto` lo dice in un commento).
+   `cerrarReparto` NO: conia l'ID sul server con Math.random() e appende SENZA
+   controllare se per quel `fecha_op` un reparto esiste gia'. Due chiusure dello
+   stesso giorno scrivono DUE righe, ognuna col monto_meseros PIENO.
+   Buco trovato dal CANCELLO leggendo il GAS: non e' nel vetro, e il vetro non
+   puo' curarlo - la guardia va nel GAS. Ma il GAS non puo' scriverla finche'
+   non riceve una chiave STABILE: mandarla e' il PREREQUISITO, non un extra.
+   Oggi `cerrarReparto` la ignora, quindi e' inerte e non fa danno.
+   LA SEMANTICA, ed e' la parte che si sbaglia: la chiave identifica
+   l'INTENZIONE, non il tentativo. Nasce quando il JL apre il pannello,
+   sopravvive a ogni ritentativo, e muore SOLO quando un reparto e' andato
+   davvero. Cosi' una risposta persa e riprovata porta la STESSA chiave. */
+function rpNuovoUid() {
+  var r = '';
+  try {
+    var a = new Uint8Array(6); crypto.getRandomValues(a);
+    for (var i = 0; i < a.length; i++) r += ('0' + a[i].toString(16)).slice(-2);
+  } catch (e) { r = Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  return 'RP-' + r;
+}
 
 /* normalizza SOLO per CONFRONTARE. Il valore scritto resta quello originale. */
 function rpNorm(s) {
@@ -331,7 +356,12 @@ function rpSuma(puntos) {
   return s;
 }
 
-function rpAbrir() { RP.abierto = true; RP.choque = null; pintaTab(); }
+function rpAbrir() {
+  RP.abierto = true; RP.choque = null;
+  /* una chiave per INTENZIONE: se ce n'e' gia' una viva, si tiene */
+  if (!RP.uid) RP.uid = rpNuovoUid();
+  pintaTab();
+}
 function rpCerrarPanel() { RP.abierto = false; RP.choque = null; pintaTab(); }
 function rpSet(nombre, v) {
   RP.puntos[nombre] = parseFloat(v) || 0;
@@ -415,11 +445,15 @@ async function rpEnviar() {
   try {
     var r = await gasPost('cerrarReparto', {
       pin_jl: STATE.pin, pin: STATE.pin,
+      uid: RP.uid,                     /* la conia il client: vedi rpNuovoUid */
       puntos: RP.puntos,
       cerrado_por: STATE.nombre || 'JL'
     });
     if (r && r.ok) {
-      RP.abierto = false; RP.puntos = {}; RP.choque = null;
+      /* la chiave muore SOLO qui, dopo un si' del server. Su errore o rete
+         morta resta viva: il ritentativo porta la STESSA chiave, e la guardia
+         del GAS - quando ci sara' - potra' riconoscerlo. */
+      RP.abierto = false; RP.puntos = {}; RP.choque = null; RP.uid = '';
       toast('ok', 'Reparto cerrado · ' + fmt(r.valor_punto || 0) + ' por punto');
       /* si rilegge la caja: il «✓ ya cerrado hoy» deve venire dal SERVER,
          non da una bandierina nostra. Uno stato inventato dal client e'
