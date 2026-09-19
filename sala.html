@@ -3406,9 +3406,13 @@ async function guardarCorreccion(uuid, btn) {
          futuro «per uniformità» che l'aggiunge qui lo spegne senza errore.
          `cancelado:true` lo rende un fatto scritto, non un'inferenza dal
          vuoto. Nessun consumatore di oggi lo legge: additivo, zero rischio. */
-      if (r.cancelado) bordeHecho('corregir', { uuid: uuid, total_nuevo: 0, mesa: _mesaCorr, cancelado: true });
+      /* [reperto ⚙️ ARQUITECTURA V23, bacheca: LA DATA FALSA DI ELIMINAR §⑤]
+         `corr_uid` viaggiava al GAS ma non al bordo: lo stesso gesto aveva
+         due identità in due libri. Stessa chiave, non una nuova — è lo
+         stesso fatto raccontato due volte, non due fatti. */
+      if (r.cancelado) bordeHecho('corregir', { uuid: uuid, total_nuevo: 0, mesa: _mesaCorr, cancelado: true, corr_uid: STATE.editCorrUid });
       else if (!r.sin_cambios && r.total != null) {
-        bordeHecho('corregir', { uuid: uuid, total_nuevo: r.total, items_json_nuevo: r.items_json || '', mesa: _mesaCorr });
+        bordeHecho('corregir', { uuid: uuid, total_nuevo: r.total, items_json_nuevo: r.items_json || '', mesa: _mesaCorr, corr_uid: STATE.editCorrUid });
       }
       toast('ok', r.void_jl
         ? '✓ Cambiado — «' + (r.motivo || '') + '», autorizó ' + r.void_jl
@@ -7967,8 +7971,15 @@ function _dtGo() {
     /* [AUT-0216c] in modalità JL: `nombre` = il JL (è già STATE.nombre), il PIN
        esce dalla SESSIONE e la porta si dichiara (`via:'app_jl'`, come nelle
        predizioni sigillate di AUT-0216). Dal telefono del mesero: com'era. */
+    /* [C10 · reperto ⚙️ ARQUITECTURA V23] questa via chiama `corregirPedido`
+       DRITTA al GAS come `guardarCorreccion`, ma non conia mai `corr_uid` —
+       la guardia del GAS dorme anche qui. Stessa forma già in casa (`coln`,
+       poche righe sotto): la chiave nasce QUI perché il pannello si chiude
+       PRIMA della risposta — non c'è un «apri» separato da coniare prima. */
+    var corr_uid = 'corr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     var _bodyCorr = { codigo: STATE.codigo, nombre: STATE.nombre,
-      uuid: pr.uuid, items: finales, motivo: d.pmot, pin_jl: JL ? JL.pin : (d.pin || '').trim() };
+      uuid: pr.uuid, items: finales, motivo: d.pmot, pin_jl: JL ? JL.pin : (d.pin || '').trim(),
+      corr_uid: corr_uid };
     if (JL) _bodyCorr.via = 'app_jl';
     gasPost('corregirPedido', _bodyCorr)
       .then(function (r) {
@@ -7999,10 +8010,10 @@ function _dtGo() {
              quei campi ⇒ nel caso peggiore il comportamento è quello di ieri.
              Le condizioni sono COPIATE da r.2965-2967, non riscritte. */
           if (r.cancelado) {
-            bordeHecho('corregir', { uuid: pr.uuid, total_nuevo: 0, mesa: mesa, cancelado: true });
+            bordeHecho('corregir', { uuid: pr.uuid, total_nuevo: 0, mesa: mesa, cancelado: true, corr_uid: corr_uid });
           } else if (!r.sin_cambios && r.total != null) {
             bordeHecho('corregir', { uuid: pr.uuid, total_nuevo: r.total,
-              items_json_nuevo: r.items_json || '', mesa: mesa });
+              items_json_nuevo: r.items_json || '', mesa: mesa, corr_uid: corr_uid });
           }
           toast('ok', '🍽 ' + (pr.quita > 1 ? pr.quita + '× ' : '') + pr.n + ' fuera · mesa ' + mesa);
           refrescar();
