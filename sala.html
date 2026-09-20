@@ -9400,32 +9400,45 @@ function _tiemposScanSesion(mesa, sesiones, ahora) {
 }
 
 /* ═══ v3.12x.0 · [C11 · TIEMPOS] vTiemposSala — L'OTTAVO VERBO, IL FOGLIO ═══
-   🎨 mappatura di DESIGN V24 (bacheca, 20-set): --go->--ok · --mid/--amber->
-   --warn · --slow->--bad (danno IN CORSO, non economia) · --cy->--acc SOLO
-   per cromatura (il titolo, mai gli eventi). «Se sentaron»/«Digitado» sono
-   fatti neutri, --t2 — non chiedono niente, vestirli d'accento li fa
-   sembrare azionabili in un foglio che non ha bottoni («PEDIDOS chiedeva
-   di dichiarare. TIEMPOS mostra»).
+   🎨 mappatura DEFINITIVA di DESIGN V24 (bacheca, 20-set: TIEMPOS I SEI STATI
+   E IL RIFIUTO + IL CIANO DECISO CS CYAN) — sei stati, non cinque:
+   ① normale --ok · ② si allunga --warn · ③ lento --bad (danno IN CORSO,
+   il cliente aspetta ADESSO, non un'economia) · ④ STIMATO/candidato:
+   NESSUNA TINTA DI STATO — pallino vuoto ○, tratteggiato in --t3, prefisso
+   «≈», parola «estimado» — una stima non ha una banda di velocità, non si
+   può essere in ritardo su un numero che abbiamo inventato noi · ⑤ sequenza
+   sbagliata: --warn ma FUORI dalla linea del tempo (è un fatto sull'ORDINE,
+   non un giudizio sulla velocità — il piatto è già arrivato, non fa male
+   ADESSO) · ⑥ cromatura --acc SOLO sul titolo/kicker, mai sugli eventi
+   d'inizio («Se sentaron»/«Digitado» sono fatti neutri, --t2 — vestirli
+   d'accento li fa sembrare azionabili in un foglio che non ha bottoni).
    🔴 I campi veri (C11: ts_digitado/ts_listo/ts_retirado/estacion) non sono
-   ancora spediti da MENU — ogni riga oggi mostra il CANDIDATO tratteggiato,
-   per costruzione: non è un guasto di questo foglio, è la grammatica
-   decisa il 19-set («solo il primo fatto reale rende un timestamp vero»).
-   ⬜ Non ancora scritto, dichiarato non nascosto: la scala go/mid/slow sui
-   minuti trascorsi — la soglia si legge dalla distribuzione reale (stessa
-   regola con cui si è tarato `lista_dif`), e senza dati reali inventare un
-   numero sarebbe l'errore che quella regola esiste per evitare. Oggi si
-   distingue solo fatto/candidato, non ancora lento/normale. */
+   ancora spediti da MENU — ogni riga oggi mostra il CANDIDATO ④, per
+   costruzione: non è un guasto di questo foglio, è la grammatica decisa
+   il 19-set («solo il primo fatto reale rende un timestamp vero»).
+   ⬜ Non ancora scritto, dichiarato non nascosto: la scala ①②③ (go/mid/
+   slow) sui minuti trascorsi di un fatto VERO — la soglia si legge dalla
+   distribuzione reale (stessa regola con cui si è tarato `lista_dif`), e
+   senza dati reali un fatto vero resta colorato `--ok` di default: non è
+   ancora banda di velocità, è solo "è successo". */
 function vTiemposSala(mesa) {
   const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
   const peds = mm ? [].concat(mm.pend || [], mm.mios || [], mm.limpiar || []) : [];
   const fmt = function (ts) { return ts ? new Date(ts).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '—'; };
-  let huboCandidato = false;   // dice se il pie de página («todavía no llegan…») tiene sentido AQUÍ
+  let huboCandidato = false;   // dice se el pie de página («todavía no llegan…») tiene sentido AQUÍ
   const filaTs = function (etiqueta, ts, neutro) {
     const cand = _tiemposEsCandidato(ts);
     if (cand) huboCandidato = true;
-    const col = neutro ? 'var(--t2)' : (cand ? 'var(--t2)' : 'var(--ok)');
-    return '<div class="cs-fila"><div class="cs-body"><div class="cs-tit"><b style="color:' + col + (cand ? ';opacity:.7' : '') + '">' +
-      esc(etiqueta) + ' <span' + (cand ? ' style="border-bottom:1px dashed currentColor"' : '') + '>' + fmt(ts) + '</span></b></div></div></div>';
+    if (neutro) {   // ⑥ evento d'inizio: fatto neutro, nunca acento ni tinta de estado
+      return '<div class="cs-fila"><div class="cs-body"><div class="cs-tit"><b style="color:var(--t2)">' +
+        esc(etiqueta) + ' ' + fmt(ts) + '</b></div></div></div>';
+    }
+    if (cand) {   // ④ candidato: SIN tinta de estado — pallino vuoto, tratteggiato, --t3
+      return '<div class="cs-fila"><div class="cs-body"><div class="cs-tit"><b style="color:var(--t3)">○ ' +
+        esc(etiqueta) + ' <span style="border-bottom:1px dashed var(--t3)">—</span></b></div></div></div>';
+    }
+    return '<div class="cs-fila"><div class="cs-body"><div class="cs-tit"><b style="color:var(--ok)">' +   // ① fatto vero, default normale
+      esc(etiqueta) + ' ' + fmt(ts) + '</b></div></div></div>';
   };
   const filas = peds.length ? peds.map(function (p) {
     const items = itemsDe(p);
@@ -9433,21 +9446,28 @@ function vTiemposSala(mesa) {
     const seq = _tiemposSecuenciaOk(items.map(function (it) { return { estacion: it.estacion, ts_listo: it.ts_listo }; }));
     return '<div class="cs-psub" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">' +
       '<b style="color:var(--acc)">Pedido · ' + items.length + ' línea' + (items.length === 1 ? '' : 's') + '</b>' +
-      (seq === false ? ' <span style="color:var(--bad)">⚠ bebida después del plato</span>' : '') +
       '</div>' +
       filaTs('Se sentó / digitó', p.ts_digitado, true) +
       filaTs('Listo', p.ts_listo, false) +
       filaTs('Retirado', p.ts_retirado, false) +
-      '<div class="cs-det" style="opacity:.75">En la mesa (estimado): ' +
-        (est ? '<span style="border-bottom:1px dashed var(--t2)">' + fmt(est) + '</span>' : '<span style="opacity:.6">— sin dato de plaza aún</span>') +
-      '</div>';
+      /* ④ entregado_est: SIEMPRE candidato — una estimación no es un hecho,
+         nunca sólido, nunca sin el prefijo «≈» ni la palabra «estimado». */
+      '<div class="cs-det" style="opacity:.85">En la mesa: ' +
+        (est ? '<span style="color:var(--t3);border-bottom:1px dashed var(--t3)">○ ≈' + fmt(est) + ' estimado</span>'
+             : '<span style="color:var(--t3)">○ — sin dato de plaza aún</span>') +
+      '</div>' +
+      /* ⑤ sequencia: FUERA de la línea del tiempo, --warn (hecho sobre el
+         ORDEN, no un juicio de velocidad — el plato ya llegó, no duele AHORA). */
+      (seq === false ? '<div style="margin-top:8px;padding:8px 10px;border-left:3px solid var(--warn);' +
+        'background:rgba(255,181,88,.08);border-radius:8px">' +
+        '<b style="color:var(--warn)">⚠ Los tragos salieron después del plato</b></div>' : '');
   }).join('') : '<div class="cs-det">Sin pedidos activos en esta mesa.</div>';
   vhoja('<h3>⏱ Tiempos · Mesa ' + esc(mesa) + '</h3>' +
     '<div class="cs-psub">Muestra, no pide — sin botones que tocar.</div>' +
     filas +
     (huboCandidato ? '<div class="cs-det" style="margin-top:14px;opacity:.6;font-size:12px">' +
       'Los tiempos reales (Digitado/Listo/Retirado) todavía no llegan del servidor — ' +
-      'por eso las filas punteadas de arriba no tienen hora. Cuando lleguen, se ven solas.</div>' : ''));
+      'por eso las filas de arriba (○) no tienen hora. Cuando lleguen, se ven solas.</div>' : ''));
 }
 /* v1.5 · l'avviso Fintoc della mesa (dal poll: pagos_fintoc, GAS v3.76.0) */
 function _fintocDeMesa(mesa) {
