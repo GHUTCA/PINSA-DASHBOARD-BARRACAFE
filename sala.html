@@ -1177,20 +1177,44 @@ const RESTO_PREF = (function () {
       **NASCE SPENTA** (spedita sabato fra due servizi, si accende domenica
       mattina a locale chiuso, col 🎛). */
 const RECH_KEY = 'pinsita_rech';
-const RECH_ON = (function () {
+/* ═══ v3.12x.0 · [C10-forma] DA LEVA D'APPARECCHIO A LEVA DEL SERVER ═══════
+   🎨 reperto DESIGN V24 (bacheca: RITIRO LA FORMA DELLA LEVA RECH) — NON è lo
+   stesso oggetto di `RESTO_PREF`/`_restoAttivo` (r.1139/1212), anche se la
+   forma a tre stati è la stessa:
+     resto_on governa un COMPORTAMENTO -> un telefono spento SI VEDE (l'opzione
+       non c'è), quindi un override permanente per apparecchio è innocuo.
+     rech_on governa un AVVISO DI SICUREZZA -> un telefono spento è
+       INDISTINGUIBILE da un telefono che semplicemente non ha avuto rifiuti.
+       Un opt-out che si vede è una scelta; uno invisibile è un buco che si
+       chiama scelta — e sta sul cammino del denaro.
+   ⇒ QUI il ramo `'0'` NON scrive in localStorage: `?rech=0` vale per QUESTA
+   sessione, non per sempre. Il `'1'` sì (serve a provare la banda su un
+   telefono prima dell'accensione globale — resta uno strumento di prova).
+   ⚙️ ARQUITECTURA V27 ha spedito `rech_on` al bordo (v0.86.0, dentro la fetta
+   di ogni mesero, stessa forma di `resto_on`): STATE.sala la porta quando il
+   poll arriva. `=== true` stretto, stessa ragione di `_restoAttivo`: le leve
+   del bordo sono stringhe, e `"0"` è truthy. */
+const RECH_PREF = (function () {
   const q = QS.get('rech');
   try {
     if (q === '1') { localStorage.setItem(RECH_KEY, '1'); return true; }
-    if (q === '0') { localStorage.setItem(RECH_KEY, '0'); return false; }
-    return localStorage.getItem(RECH_KEY) === '1';       // di fabbrica: SPENTA
-  } catch (e) { return q === '1'; }
+    if (q === '0') { return false; }   // NON si ricorda: solo questa sessione
+    const m = localStorage.getItem(RECH_KEY);
+    if (m === '1') return true;
+    return null;   // "non deciso qui" -> comanda il server
+  } catch (e) { return q === '1' ? true : (q === '0' ? false : null); }
 })();
+function _rechAttivo(sala) {
+  if (RECH_PREF === true) return true;
+  if (RECH_PREF === false) return false;
+  return !!(sala && sala.rech_on === true);
+}
 /* 🔑 A INTERRUTTORE SPENTO QUESTA FUNZIONE È `toast('err', …)` E BASTA — stessa
    chiamata, stesso testo, stessa durata. È la garanzia che rende sicuro
    spedirla oggi: non «non è successo nei casi provati», ma non PUÒ succedere. */
 function _rech(msg) {
   toast('err', msg);
-  if (!RECH_ON) return;
+  if (!_rechAttivo(STATE.sala)) return;
   const pg = STATE.pago; if (!pg) return;
   const d = new Date();
   pg.rech = { msg: String(msg), hora: ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) };
@@ -1200,7 +1224,7 @@ function _rechCerrar() { const pg = STATE.pago; if (pg) pg.rech = null; _rechPin
 function _rechPinta() {
   const el = $('rechWrap'); if (!el) return;
   const pg = STATE.pago;
-  if (!RECH_ON || !pg || !pg.rech) { el.innerHTML = ''; return; }
+  if (!_rechAttivo(STATE.sala) || !pg || !pg.rech) { el.innerHTML = ''; return; }
   el.innerHTML =
     '<div class="rechBand" onclick="_rechCerrar()">' +
       '<div class="rechTit">✋ El pago NO se registró</div>' +
