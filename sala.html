@@ -1024,7 +1024,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.122.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.123.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -6314,6 +6314,28 @@ function _recibo(d) {
   vhoja('<div class="recibo"><div class="ic">' + (d.cort ? '🎁' : '✅') + '</div>' +
     '<div class="ti">' + (d.cort ? 'CORTESÍA REGISTRADA' : 'COBRADO') + '</div>' +
     '<div class="mo">' + fmtPrice(d.monto) + '</div>' +
+    /* ✏️ v3.123.0 · UN SUCCESSO CON UN VALORE DIVERSO DA QUELLO ATTESO NON È UN
+       AVVISO: È PARTE DEL FATTO. Forma decisa da 🎨 DESIGN V24 (20-set) —
+       attaccata al numero, **dentro** la ricevuta, non in un canale che passa;
+       in `--warn` e **non in rosso**, perché non è andato storto niente: il pago
+       è riuscito, solo per un importo che il mesero non aveva sullo schermo.
+       🔑 Nasce dal ritentativo automatico del resto (`pg._restoAuto`), ma il
+       campo è GENERICO di proposito: qualunque cammino che cobri meno di
+       quanto chiesto ha lo stesso dovere di dirlo, e non dovrà inventarsi un
+       posto suo. Assente `pedido` (o uguale al monto) ⇒ riga identica a ieri. */
+    /* ✏️ 🎨 DESIGN V24, seconda passata: la riga diceva «cobrado $X · pediste $Y»
+       e ripeteva $X tre centimetri sotto il numero grande che dice già $X.
+       🔑 **È LA POSIZIONE A DIRE LA RELAZIONE**: sotto un `COBRADO $37.370`,
+          una riga ambra `pediste $39.560` non ha bisogno di verbi — il mesero
+          legge due numeri e vede da sé quale gli è stato preso. *«Attaccato al
+          numero» vuol dire che il numero fa metà del lavoro.*
+       ⚖️ E scartata anche la mia alternativa («ya habían pagado $Z»), per la
+          stessa ragione per cui il campo è generico: `pedido` non è
+          `restoPedido`, quindi la riga dev'essere altrettanto generica —
+          «ya habían pagado» è vero in QUESTO cammino e falso in un altro che
+          cobri meno per un altro motivo. La cura era TOGLIERE, non riscrivere. */
+    ((d.pedido && d.pedido !== d.monto)
+      ? '<div style="color:var(--warn)">pediste ' + fmtPrice(d.pedido) + '</div>' : '') +
     '<div class="de">' + esc(MEDIO_TXT[d.medio] || d.medio) + ' · mesa ' + esc(d.mesa) +
       (d.propina ? '<br>propina ' + fmtPrice(d.propina) : '') +
       (d.folio ? '<br><b>🧾 Boleta ' + esc(d.folio) + '</b>'
@@ -11857,12 +11879,26 @@ async function pagoConfirmar(btn) {
         const _parte1 = c4Parte(pg);
         if (_parte1 > 0 && _parte1 <= _res1) {
           pg._restoAuto = 1;
+          /* ✏️ v3.123.0 · il PEDITO si conserva PRIMA di sovrascriverlo: senza,
+             la ricevuta potrebbe dire solo quanto ha cobrato e non da quanto
+             veniva — e «$2.190» da solo, su un pannello che diceva $39.560,
+             è il numero che fa ritoccare. */
+          pg._restoPedido = body.monto;
           body.monto = _parte1;
-          /* l'avviso esce PRIMA del ritentativo: il `toast` è uno solo, e
-             l'ultima parola sullo schermo dev'essere l'ESITO, non la
-             spiegazione (stessa legge di r.11829). */
-          toast('warn', '💡 Esta mesa ya pagó una parte: cobro $' + _fmtMiles(_parte1) +
-            ' de los $' + _fmtMiles(_res1) + ' que faltan…');
+          /* ═══ ✏️ v3.123.0 · QUI C'ERA UN `toast('warn', …)` PRIMA DEL RITENTATIVO,
+             E L'HO TOLTO. Revisione di 🎨 DESIGN V24 (20-set), accettata senza
+             difenderla: avevo scelto il contenitore ragionando sull'ORDINE
+             («l'ultima parola dev'essere l'esito») senza chiedermi CHI STAVA
+             GUARDANDO.
+             > 🎓 Due toast nello stesso slot sono una sequenza **solo per chi
+               guarda tutto il tempo**: chi alza gli occhi tardi vede solo il
+               secondo, chi li abbassa presto solo il primo, e **nessuno dei due
+               sa che c'era l'altro**.
+             ⇒ la spiegazione non viaggia più in un canale che passa: si attacca
+               al NUMERO, dentro `_recibo`, che è l'oggetto che RESTA dopo un
+               pago riuscito e che il mesero porta via. Il precedente è dentro
+               lo stesso oggetto (`en_vuelo`, e «sin boleta — una invitación no
+               es una venta»): non è un pattern nuovo, è quello che continua. */
           r = await gasPost('registrarPago', body);
         }
       }
@@ -11949,7 +11985,9 @@ async function pagoConfirmar(btn) {
          La cura non è più velocità — è la PROVA. Il toast passa e non si
          legge; questa resta finché non la si chiude, e porta il numero. */
       _recibo({ mesa: mesaBol, monto: (r.monto != null ? r.monto : pg.tot), medio: pg.medio,
-        propina: propina, folio: yaFolio, cort: esCort, en_vuelo: r.en_vuelo || 0 });
+        propina: propina, folio: yaFolio, cort: esCort, en_vuelo: r.en_vuelo || 0,
+        /* v3.123.0 · solo se il resto ha corretto l'importo dentro questo gesto */
+        pedido: pg._restoAuto ? (pg._restoPedido || 0) : 0 });
       STATE.pago = null; renderPago();
       cerrarMesa(); vpSoltar();
       refrescar(false);
