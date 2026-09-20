@@ -1024,7 +1024,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.125.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.126.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -10389,9 +10389,67 @@ function c4Css() {
 
 /* ── LO STATO. Vive dentro `pg` (non accanto): quando il pannello si chiude
       muore con lui, e non resta un secondo posto che ricorda cose vecchie. */
+/* ═══ 🔴 [AUT-0369 ②] · `yapag2`: IL PANNELLO PUÒ SAPERLO **PRIMA** DI SBAGLIARE ══
+   🩸 IL DIFETTO CHE CURA, misurato il 20-set: riaprendo il pannello dopo un
+      pago parziale il mesero vede **il totale pieno**, perché `pagadoAntes`
+      rinasce a 0 e `pg.tot` è il consumo intero. Dal ritentativo automatico
+      (`AUT-0361`) il tavolo viene comunque **cobrado giusto** — ma il mesero
+      **legge quel numero e lo dice al cliente** prima che il sistema si
+      corregga. ⇒ *quella cura ripara la transazione, non la frase detta ad
+      alta voce.*
+   🟢 E IL DATO NON È DA COSTRUIRE, È GIÀ QUI: `ya_pagado` esiste nel GAS da
+      v3.140.0 (e **risale la catena dei pagos** fino alla «mesa limpia» vera,
+      quindi non può mai mostrare il cliente precedente), il vetro lo riceve
+      già in `STATE.pcYaPag` e lo usa già a dodici righe da qui per la fascia
+      del doppio addebito. **Mancava di essere collegato alla seconda domanda.**
+   🔒 FALLISCE NELLA DIREZIONE SICURA, ed è la ragione per cui si può spedire:
+      `pcYaPag` è una FOTO presa all'ora della precuenta, quindi può essere
+      **stantia in difetto** (un pago successivo non c'è) ma **mai in eccesso**.
+      ⇒ `pagadoAntes` ≤ il vero ⇒ `falta` ≥ il vero ⇒ **si chiede troppo, mai
+      troppo poco** — e chiedere troppo è esattamente il caso che il server
+      rifiuta e che `AUT-0361` corregge da sola. *Non apre una strada nuova:
+      cade in quella già curata.*
+   🔴 PERIMETRO, e non è mio: è misurato e scritto nel vetro dal 18-ago — la
+      verità di sessione si sa **solo dopo una precuenta**; sul cammino
+      `directo` (**41,2% dei pagos**) non c'è. ⇒ **copre il 58,8%, non tutto.**
+   🎚 NASCE SPENTA. `?yapag2=1` accende per apparecchio · `?yapag2=0` spegne
+      (e NON scrive un «no» per sempre: correzione di 🎨 DESIGN adottata da
+      🛎 SALA lo stesso giorno). Il campo `yapag2_on` viene letto dalla fetta
+      del mesero se un giorno il bordo lo esporrà — **metà inerte spedita per
+      prima**, come ha fatto ⚙️ con `rech_on`.
+   ⚠️ E QUESTO INTERRUTTORE NON SI ACCENDE PRIMA DI LUNEDÌ: accenderlo
+      cambierebbe il numero di rifiuti `parte_mayor_que_resto` e **cancella il
+      «prima»** del metro di `AUT-0361`/`AUT-0363` (0 su 20). *Trappola ⓑ della
+      legge del rischio: «adesso» non batte «la prova».* Il ③ è del cancello. */
+const YAPAG2_PREF = (function () {
+  const q = QS.get('yapag2');
+  try {
+    if (q === '1') { localStorage.setItem('pinsita_yapag2', '1'); return true; }
+    if (q === '0') return false;                 // per questa sessione, non per sempre
+    return localStorage.getItem('pinsita_yapag2') === '1' ? true : null;
+  } catch (e) { return q === '1' ? true : null; }
+})();
+function _yapag2Attivo(r) {
+  if (YAPAG2_PREF === true) return true;
+  if (YAPAG2_PREF === false) return false;
+  return !!(r && r.yapag2_on === true);   // `=== true` stretto: le leve arrivano come STRINGHE, e "0" è truthy
+}
+/* quanto questa SESSIONE ha già incassato, secondo l'ultima precuenta. 0 = «non
+   lo so» e «so che è zero» insieme: qui le due cose portano allo stesso gesto
+   (partire da zero, come ieri), quindi non si distinguono — dove invece
+   cambiano il gesto sono distinte, ed è `_pagadaAviso`. */
+function _yapag2Monto(mesa, tot) {
+  if (!_yapag2Attivo(STATE.sala)) return 0;
+  const s = (STATE.pcYaPag || {})[mesa];
+  if (!s || !s.n || !(s.monto > 0)) return 0;
+  return Math.min(Math.round(s.monto), Math.round(tot || 0));
+}
+/* ── LO STATO. Vive dentro `pg` (non accanto): quando il pannello si chiude
+      muore con lui, e non resta un secondo posto che ricorda cose vecchie. */
 function c4Init(pg) {
   if (pg.c4) return pg.c4;
-  pg.c4 = { paso: 'inicio', modo: '', sel: {}, partes: 0, pagadoAntes: 0 };
+  pg.c4 = { paso: 'inicio', modo: '', sel: {}, partes: 0,
+    pagadoAntes: _yapag2Monto(pg.mesa, pg.tot) };
   return pg.c4;
 }
 /* 🔑 il totale NON è congelato: chi resta al tavolo continua a ordinare.
