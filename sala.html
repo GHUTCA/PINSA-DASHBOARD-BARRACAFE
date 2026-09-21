@@ -973,6 +973,12 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
   </div>
   <!-- v2.12 · LA FRANJA VENCE: aviso antes de cortar — un tap extiende 1h -->
   <div id="franjaBanner" class="camp-banner hide"></div>
+  <!-- v3.127.0 · [AUT-0372 🅒] EL VETRO STANTIO — bacheca 21-set (⚙️ ARQUITECTURA
+       su reperto di 💵 EL GIRO): una scheda abierta no sabe nunca que existe una
+       versión nueva. Este banner SOLO avisa — el refresh es SIEMPRE manual
+       (condición de 💵 EL GIRO, suscrita por el cancello): recargar el teléfono
+       de un mesero mientras cobra es peor que la enfermedad. -->
+  <div id="verBanner" class="camp-banner hide"></div>
   <div class="offline" id="offline">Sin conexión — mostrando lo último recibido. Reintento solo.</div>
 
   <!-- v2.1 · IL TICKER (idea di Alberto): gli avvisi scorrono come le
@@ -1024,7 +1030,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.126.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.127.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1872,7 +1878,7 @@ async function staffPost(action, body) {
       /* [AUT-0273 ①] `_VOLO_B` è la scatola di QUESTA chiamata: prima era una
          variabile di modulo, e col secondo chiamante si sarebbero scambiati
          lo snapshot. */
-      body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {}, _muroCampi(_VOLO_B))),
+      body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL, cli_ver: _salaVer() }, body || {}, _muroCampi(_VOLO_B))),
       signal: ctrl.signal, cache: 'no-store',
     });
     clearTimeout(to);
@@ -2272,7 +2278,7 @@ function bordeHecho(gesto, datos) {
          il doppione e LO SI DICHIARA* — la domanda a cui serve rispondere è
          «`pago:timeout` succede, sì o no?», e «almeno» basta. */
       body: JSON.stringify(Object.assign({ action: 'gestoHecho', local: CFG.LOCAL,
-        codigo: STATE.codigo, nombre: STATE.nombre, gesto: gesto, uid: uid },
+        codigo: STATE.codigo, nombre: STATE.nombre, gesto: gesto, uid: uid, cli_ver: _salaVer() },
         datos || {}, _muroCampi({}))),
       cache: 'no-store',
     }).catch(function () {});
@@ -2567,7 +2573,7 @@ async function gasPost(action, body) {
     const r = await fetch(CFG.GAS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL }, body || {}, _muroCampi(_VOLO_G))),
+      body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL, cli_ver: _salaVer() }, body || {}, _muroCampi(_VOLO_G))),
       signal: ctrl.signal, cache: 'no-store', redirect: 'follow',
     });
     clearTimeout(t);
@@ -2598,6 +2604,37 @@ const $ = id => document.getElementById(id);
 const esc = s => (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtPrice = n => '$' + (parseInt(n, 10) || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const fmtHace = s => { s = Math.max(0, s); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
+/* [AUT-0372 🅑] la versione di QUESTA scheda, letta dal marcatore già esistente
+   nell'header (`id="ver"`, testo intatto: `_LA_LEGGE_DELLE_INTERFACCE`/AUT-0274
+   vietano di rinominarlo). Una sola fonte di verità: né il payload (campo
+   `cli_ver`, contratto di ⚙️ ARQUITECTURA · MENU_GAS @307) né il check di §🅒
+   duplicano il numero, lo leggono da qui. Se manca (id="ver" non ancora nel
+   DOM) torna '' — GAS lo tratta come «versione ignota», mai un errore. */
+const _salaVer = () => { const v = $('ver'); return v ? v.textContent.trim() : ''; };
+/* [AUT-0372 🅒] EL VETRO STANTIO — SOLO avviso, MAI reload automatico (veto di
+   💵 EL GIRO, sottoscritto dal cancello: ricaricare un telefono che sta
+   incassando è peggio della malattia). Fetch della stessa sala.html servita
+   ADESSO da GitHub Pages (cache:no-store, zero costo per GAS/bordo — non passa
+   MAI dal bound), confronto testuale col marcatore già caricato in questa
+   scheda. Diverso ⇒ banner persistente con refresh manuale; il mesero decide
+   quando. Silenzioso su qualunque errore di rete: un check che fallisce non
+   deve mai sembrare un problema del turno. */
+async function _verCheck() {
+  try {
+    const mio = _salaVer();
+    if (!mio) return;
+    const r = await fetch(location.pathname + '?_v=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const html = await r.text();
+    const m = html.match(/<span class="ver" id="ver">([^<]*)<\/span>/);
+    const srv = m ? m[1].trim() : '';
+    if (srv && srv !== mio) {
+      $('verBanner').innerHTML = '🆕 Hay una versión nueva de la sala. Actualiza cuando puedas — nunca en medio de un cobro. ' +
+        '<button class="btn tg" onclick="location.reload()">Actualizar ahora</button>';
+      $('verBanner').classList.remove('hide');
+    }
+  } catch (e) { /* silencioso: ver §comentario arriba */ }
+}
 let toastT = null;
 function toast(tipo, msg) {
   const el = $('toast');
@@ -5809,6 +5846,7 @@ function entrarSala() {
   refrescar(!pintado);
   if (STATE.pollTimer) clearInterval(STATE.pollTimer);
   STATE.pollTimer = setInterval(_pollTick, CFG.POLL_MS);
+  _verCheck();   // [AUT-0372 🅒] primer check al entrar — silencioso, nunca bloquea
   _wakeLock();   // v1.12 · lo schermo non si spegne finché la sala è davanti
   pushEstado();  // v1.14 · riflette lo stato del bottone avisos
   _colaBadge(); _colaFlush();   // v2.2 · pedidos rimasti in cola da un turno interrotto → atterrano subito
@@ -13233,6 +13271,7 @@ document.addEventListener('visibilitychange', () => {
     refrescar(false);
     if (STATE.pollTimer) clearInterval(STATE.pollTimer);
     STATE.pollTimer = setInterval(_pollTick, CFG.POLL_MS);
+    _verCheck();   // [AUT-0372 🅒] el teléfono vuelve a foreground: es cuando más vale mirar
     _wakeLock();
   }
 });
