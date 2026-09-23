@@ -1048,7 +1048,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.142.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.143.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -10426,9 +10426,22 @@ async function pagoFamConfirmar() {
     else toast('err', 'No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
     bordeHecho('pago_fam_sin_respuesta', { mesa: pg.mesa, motivo: (e && e.message) || '?' });
-    toast('err', e.message === 'timeout'
-      ? 'Sin respuesta — PUEDE haber entrado igual. Verifica antes de repetir.'
-      : 'Sin conexión — reintenta');
+    /* [AUT-0406] stessa cura di AUT-0403, stesso verbo (`registrarPago`),
+       stesso principio: il messaggio diceva già "verifica antes de repetir"
+       — ora lo fa davvero, invece di fidarsi che il mesero lo faccia a mano. */
+    if (e.message === 'timeout') {
+      pg.verificando = true; renderPago();
+      const v = await _pagoVerificarTrasTimeout(pg.mesa);
+      pg.verificando = false;
+      if (v.dudoso) {
+        pg.ya = v.ya; pg.dudoso = true; pg.okDoble = false;
+        toast('warn', '⏳ Sin respuesta — puede que haya entrado igual. Revisa antes de repetir.');
+      } else {
+        toast('err', 'Sin respuesta. Verificado: la mesa aún no cerró — puedes repetir.');
+      }
+    } else {
+      toast('err', 'Sin conexión — reintenta');
+    }
   }
   pg.enviando = false; renderPago();
 }
@@ -11984,9 +11997,18 @@ function renderPago() {
   /* v1.9 · la porta FAM: codice suo, chiusura in $0, sin boleta */
   if (pg.famAsk && !pg.jl && !pg.pinAsk) {
     jlHtml += '<div class="cs-psec">Código FAM — la mesa cierra en $0</div>' +
-      '<input class="cs-pin" id="pinFamInput" type="password" inputmode="numeric" autocomplete="new-password" name="pin-no-guardar" data-1p-ignore="true" data-lpignore="true" placeholder="Código" value="' + esc(pg.pinFam) + '" oninput="pagoInput(\'pinFam\',this.value)">' +
-      '<button class="btn sec" style="margin-top:8px" ' + (pg.enviando ? 'disabled' : '') + ' onclick="pagoFamConfirmar()">' +
-      (pg.enviando ? 'Registrando…' : 'Cerrar mesa FAM — $0 ✓') + '</button>';
+      '<input class="cs-pin" id="pinFamInput" type="password" inputmode="numeric" autocomplete="new-password" name="pin-no-guardar" data-1p-ignore="true" data-lpignore="true" placeholder="Código" value="' + esc(pg.pinFam) + '" oninput="pagoInput(\'pinFam\',this.value)">';
+    /* [AUT-0406] stesso principio di AUT-0403, stesso verbo (`registrarPago`
+       medio='fam'): un esito incerto non riarma il bottone in silenzio. */
+    if (pg.verificando) {
+      jlHtml += '<button class="btn sec" style="margin-top:8px" disabled>🔍 Verificando si entró…</button>';
+    } else if (pg.dudoso && !pg.okDoble) {
+      jlHtml += '<div style="text-align:center;font-size:12px;color:#f3c96a;margin:6px 0">⚠️ No pudimos confirmar si la mesa FAM ya cerró — revisa antes de repetir.</div>' +
+        '<button class="btn sec" style="margin-top:0;background:#e24b4a;color:#fff" onclick="pagoSet(\'okDoble\',true)">Ya revisé — no cerró, repetir</button>';
+    } else {
+      jlHtml += '<button class="btn sec" style="margin-top:8px" ' + (pg.enviando ? 'disabled' : '') + ' onclick="pagoFamConfirmar()">' +
+        (pg.enviando ? 'Registrando…' : 'Cerrar mesa FAM — $0 ✓') + '</button>';
+    }
   }
   /* v1.20 · LA FASCIA ROSSA — il fatto prima della scelta. Sta in CIMA, sopra
      propina e medio: chi sta per battere la tarjeta deve saperlo prima, non
