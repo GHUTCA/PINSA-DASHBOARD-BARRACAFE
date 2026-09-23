@@ -1048,7 +1048,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.145.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.146.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -8930,10 +8930,34 @@ function _resDe(mesa) {
   for (let i = 0; i < rs.length; i++) if (String(rs[i].mesa) === String(mesa)) return rs[i];
   return null;
 }
+/* [SECONDA PORTA, 23-set sera] RESUMEN_PAGADA_ON — reperto di Alberto,
+   cronometrato: 172s in cui il pannello (E l'importo che si COBREREBBE,
+   `abrirPago`→`STATE.pago.tot`, stesso `_vpTot`) mostrano un totale vecchio
+   dopo un pago riuscito, mentre la griglia dice già LIBRE. Causa: il MAX
+   fra `res.total` (résumé del GAS, v3.4.6 sopra — lento a riflettere un
+   pago) e `visto` (locale, veloce) prende sempre il più alto — nato per
+   proteggere da una SOTTOSTIMA (pedidos di un turno passato), morde al
+   contrario quando il guasto cambia verso (una SOVRASTIMA dopo il pago).
+   LA CURA, senza toccare la protezione originale: se il server dice che
+   QUESTA mesa ha già un pago OGGI (`r.mesas_pagadas`, segnale diverso e
+   più rapido di `mesas_resumen` — lo stesso già usato da AUT-0396/0036),
+   ci si fida del locale (`visto`) invece del résumé vecchio. Sui pedidos
+   di un turno passato — MAI pagati — `mesas_pagadas` è vuoto e il MAX
+   resta quello di sempre: la protezione del 13-ago non si tocca.
+   Nasce SPENTA, stesso idioma degli altri (?resumenpag=1 accende). */
+const RESUMEN_PAGADA_ON = (function () {
+  const q = QS.get('resumenpag');
+  try {
+    if (q === '1') { localStorage.setItem('sala_resumenpag', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_resumenpag', '0'); return false; }
+    return localStorage.getItem('sala_resumenpag') === '1';   // default SPENTA
+  } catch (e) { return q === '1'; }
+})();
 function _vpTot(mesa) {
   const res = _resDe(mesa);
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
   const visto = m ? m.pend.concat(m.mios, m.limpiar).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0) : 0;
+  if (res && RESUMEN_PAGADA_ON && _pagadaDeMesa(mesa)) return visto;
   /* il MASSIMO fra i due, non il resumen secco: il resumen salta i `pendiente`
      (di nessuno, per disegno) — se un pedido è appena entrato e non è ancora
      stato preso, quel consumo esiste comunque e va cobrado. Il denaro non si
