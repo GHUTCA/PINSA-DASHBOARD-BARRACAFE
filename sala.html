@@ -1048,7 +1048,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.133.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.134.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1326,6 +1326,27 @@ const PEDIR2_ON = (function () {
     if (q === '1') { localStorage.setItem('sala_pedir2', '1'); return true; }
     if (q === '0') { localStorage.setItem('sala_pedir2', '0'); return false; }
     return localStorage.getItem('sala_pedir2') === '1';   // default SPENTA
+  } catch (e) { return q === '1'; }
+})();
+/* [AUT-0396] GUARDIA_SALA_ON — LA GUARDIA SUL CONTENUTO, dettata da Alberto il
+   23-set guardando i tavoli oscillare in tempo reale: «ordino 20 productos,
+   veo 5, despues 10, despues de nuevo 5, despues veo la mesa vacía» — e la
+   conseguenza diretta, con le sue parole: il mesero cobra lo que recuerda,
+   fuera del sistema, porque el número en pantalla no se puede confiar. Il
+   meccanismo (⚙️ ARQUITECTURA, misurato): `leerSala` a volte cade dal bordo a
+   GOOGLE (coda misurata 35-343s), e la risposta di Google torna magra con
+   `ok:true` — nessuna riga confronta il CONTENUTO col precedente. Questa
+   guardia lo fa: una mesa che aveva N items visibili non ne mostra MENO alla
+   prossima foto, a meno che la risposta non porti una ragione riconoscibile
+   (pagata, unita a un'altra mesa, liberata da questo telefono). La crescita
+   (N -> N+1, mesa nuova) non si blocca mai. Nasce SPENTA, stesso idioma degli
+   altri (?guardia=1 accende per apparecchio). */
+const GUARDIA_SALA_ON = (function () {
+  const q = QS.get('guardia');
+  try {
+    if (q === '1') { localStorage.setItem('sala_guardia', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_guardia', '0'); return false; }
+    return localStorage.getItem('sala_guardia') === '1';   // default SPENTA
   } catch (e) { return q === '1'; }
 })();
 const F57_QTY = parseInt(QS.get('f57q'), 10) || 10;   // soglia larga (fossile 3gg: max legittimo 7)
@@ -6174,6 +6195,81 @@ function _aplicarMarcados(r) {
   });
 }
 
+/* ═══ [AUT-0396] LA GUARDIA SUL CONTENUTO — mergeSalaGuardia ═════════════════
+   Vedi il flag GUARDIA_SALA_ON per il perché. Qui il COME: `_itemsPorMesa`
+   conta le righe visibili per mesa nelle quattro liste che la sala mostra
+   (stesso conteggio già usato dal toast della junta qui sotto, r.6xxx);
+   `_mesasJustificadasCalo` elenca le mese per cui un calo È legittimo, con
+   tre segnali REALI, nessuno nuovo: `r.mesas_pagadas` (pagata, dal server) ·
+   `r.grupos` (unita a un'altra mesa come non-principal, dal server) ·
+   `STATE.marcado` marca 'limpia' fresca (liberata da QUESTO telefono, lo
+   stesso segnale che già guida `liberarMesa`). Nessuna mesa nuova, nessuna
+   mesa che CRESCE è mai toccata: la guardia SOLO tiene la vista piena di una
+   mesa che calerebbe senza una di queste tre ragioni — non inventa dati, non
+   somma, sostituisce (N9: non fonde due liste diverse, sceglie quale delle
+   due mostrare, mesa per mesa). */
+const _ARRAYS_SALA_MESA = ['mios', 'pendientes', 'por_limpiar', 'sin_dueno'];
+function _itemsPorMesa(r) {
+  const out = {};
+  _ARRAYS_SALA_MESA.forEach(function (k) {
+    ((r && r[k]) || []).forEach(function (p) {
+      if (p && p.mesa != null) { const m = String(p.mesa); out[m] = (out[m] || 0) + 1; }
+    });
+  });
+  return out;
+}
+function _mesasJustificadasCalo(r) {
+  const set = {};
+  const mp = (r && r.mesas_pagadas) || {};
+  Object.keys(mp).forEach(function (m) { set[String(m)] = true; });
+  ((r && r.grupos) || []).forEach(function (g) {
+    const principal = String((g && g.principal) == null ? '' : g.principal).trim();
+    ((g && g.mesas) || []).forEach(function (m) {
+      m = String(m == null ? '' : m).trim();
+      if (m && m !== principal) set[m] = true;   // unita al principal: il calo sulla NON-principal è legittimo
+    });
+  });
+  Object.keys((STATE && STATE.marcado) || {}).forEach(function (k) {
+    const mk = STATE.marcado[k];
+    if (mk && mk.marca === 'limpia' && mk.mesa != null && Date.now() - mk.ts < MARCA_SAFETY_MS) {
+      set[String(mk.mesa)] = true;
+    }
+  });
+  return set;
+}
+function mergeSalaGuardia(prevR, respR) {
+  if (!respR || respR.ok !== true) return prevR || respR;
+  if (!prevR) return respR;                    // niente "prima" con cui confrontare: entra libera
+  const antes = _itemsPorMesa(prevR);
+  const ahora = _itemsPorMesa(respR);
+  const justificadas = _mesasJustificadasCalo(respR);
+  const aRestaurar = {};
+  Object.keys(antes).forEach(function (m) {
+    if ((ahora[m] || 0) < antes[m] && !justificadas[m]) aRestaurar[m] = true;
+  });
+  const mesas = Object.keys(aRestaurar);
+  if (!mesas.length) return respR;              // camino feliz: nada que restaurar
+  const out = Object.assign({}, respR);
+  _ARRAYS_SALA_MESA.forEach(function (k) {
+    const nuevas = ((respR && respR[k]) || []).filter(function (p) { return !(p && p.mesa != null && aRestaurar[String(p.mesa)]); });
+    const viejas = ((prevR && prevR[k]) || []).filter(function (p) { return p && p.mesa != null && aRestaurar[String(p.mesa)]; });
+    out[k] = nuevas.concat(viejas);
+  });
+  // el contador que Alberto pidió como prueba para el viernes: cuántas veces
+  // una respuesta magra habría bajado una mesa sin ninguna razón reconocible
+  try {
+    let c = 0;
+    try { c = parseInt(localStorage.getItem('sala_guardia_rechazos') || '0', 10) || 0; } catch (e2) {}
+    localStorage.setItem('sala_guardia_rechazos', String(c + mesas.length));
+    let ev = [];
+    try { ev = JSON.parse(localStorage.getItem('sala_guardia_evidencia') || '[]'); } catch (e3) {}
+    mesas.forEach(function (m) { ev.push({ mesa: m, ts: Date.now(), antes: antes[m], ahora: ahora[m] || 0 }); });
+    while (ev.length > 20) ev.shift();
+    localStorage.setItem('sala_guardia_evidencia', JSON.stringify(ev));
+  } catch (e) { /* la guardia no depende del contador */ }
+  return out;
+}
+
 async function refrescar(conSkeleton) {
   if (!STATE.codigo || !STATE.nombre) return;
   // v2.14 · P1.3 (cantiere 13): guardia in-flight, pattern del KDS — con
@@ -6211,7 +6307,7 @@ async function refrescar(conSkeleton) {
        inciampa, la lista resta vuota e il vetro è quello di ieri. */
     /* [AUT-0216c] si LEGGE la fetta di `_vistaNombre()` (il padrone del tavolo
        in modalità JL; me stesso altrimenti). La FIRMA resta `STATE.nombre`. */
-    const [r] = await Promise.all([
+    let [r] = await Promise.all([
       leerSala(STATE.codigo, _vistaNombre()),
       _enllegadaLee(STATE.codigo, _vistaNombre()),
     ]);
@@ -6222,6 +6318,12 @@ async function refrescar(conSkeleton) {
       throw new Error(r && r.error || 'error');
     }
     STATE.strikes = 0;   // v1.11 · risposta buona = si riparte da zero
+    /* [AUT-0396] LA GUARDIA SUL CONTENUTO — prima di qualsiasi altro uso di
+       `r` (toast della junta, STATE.sala, la foto salvata, render): se una
+       mesa calerebbe senza ragione, `r` diventa la versione con quella mesa
+       restaurata dalla foto precedente. Leva spenta = `r` esce identico
+       all'ingresso, bit per bit (mergeSalaGuardia lo ritorna intatto). */
+    if (GUARDIA_SALA_ON) r = mergeSalaGuardia(STATE.sala, r);
     /* ═══ v3.22.0 · [AUT-EMERG-0004] · LA JUNTA DICE DOVE È ANDATO IL CONTO ═══
        Il caso di oggi (mesa 124+125, $114.970): il pago fatto sulla principal
        chiude anche i pedidos dell'ALTRA mesa — contabilmente perfetto, ma il
