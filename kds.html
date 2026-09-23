@@ -287,7 +287,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.26</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.27</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -553,6 +553,13 @@ const BORDE = {
      (v0.33). Oltre, o col bordo rotto: GAS come sempre. ?borde=0 invariato. */
   MAX_EDAD_MS: 300000,
   fallos: 0,
+  /* v1.27 · [AUT-0399 · 23-set] L'ORA ACCANTO AL CONTATORE. `fallos` senza un
+     timestamp non può SCADERE: l'unico azzeramento (sotto, r.~653) sta dentro
+     il ramo che la guardia chiude, quindi a 3 la porta non si riapre più fino
+     al reload — e questo vetro NON ricarica quasi mai, per disegno (solo al
+     taglio delle 06:00 e solo a coda vuota). `fallosTs` non cura da solo:
+     rende curabile. Gemella di `sala.html` r.2557, viva da agosto. */
+  fallosTs: 0,
 };
 /* ═════ v1.18 · FASE 2C · IL TAP AL BORDO (31-jul) ═════
    LISTO e RETIRADO provano PRIMA il bordo (~200ms): il DO valida col digesto
@@ -593,7 +600,7 @@ function bordeWriteOn() {
    dall'assenza del marcatore (`via=?` diceva solo «vecchio», non QUANTO).
    Il GAS la scrive nella riga di audit accanto alla via (2 righe, stessa
    sanificazione). Client vecchio = campo assente = il GAS scrive `?`. */
-const KDS_VER = '1.26';
+const KDS_VER = '1.27';
 async function staffPost(action, body) {
   let via = 'gas_borde_off';
   if (BORDE.ON && bordeWriteOn()) {
@@ -628,6 +635,24 @@ async function leerKds(codigo, estacion) {
      ora è la riserva: la cucina vede la sala di qualche minuto fa (con i tap
      del bordo già dentro, via eco) invece di uno schermo cieco. */
   let fotoVieja = null;
+  /* v1.27 · [AUT-0399] IL RESPIRO. 90 s e si riprova. Tre raffiche di WiFi in
+     venti secondi non sono un bordo rotto: sono un locale pieno. Senza questa
+     riga quel tablet resta sulla via lenta fino al mattino dopo.
+     ⚖️ Il comportamento PEGGIORE possibile di questa riga è esattamente quello
+        di oggi (riprovare e fallire di nuovo): non ha un rischio proprio, può
+        solo restituire una porta.
+     📊 Misurato prima di scriverla: in 9 giorni e 5.906 tap questa porta non
+        si è MAI chiusa — i 43 ripieghi sono tutti `gas_rate_limit`, che arriva
+        da una 200 col payload negativo e NON tocca `fallos`. Quindi cura un
+        difetto LATENTE, non uno che sta costando servizi. Si spedisce lo
+        stesso perché costa una riga e il suo caso peggiore è l'oggi.
+     🔴 E NON HA UNA PROVA D'EFFETTO OSSERVABILE, per due ragioni indipendenti:
+        ① nel fossile non esiste un identificativo di APPARECCHIO (la colonna
+           `user` dice solo `cocina`/`barra`) ⇒ «stesso tablet» non è
+           verificabile · ② l'evento non accade (vedi sopra).
+     🧯 Leva: `?resp=0` nell'URL → il mondo di ieri, per apparecchio. */
+  if (BORDE.fallos >= 3 && QS.get('resp') !== '0'
+      && Date.now() - BORDE.fallosTs > 90000) BORDE.fallos = 0;
   if (BORDE.ON && BORDE.fallos < 3) {
     try {
       const u = BORDE.URL + '/estado/' + encodeURIComponent(CFG.LOCAL)
@@ -655,8 +680,10 @@ async function leerKds(codigo, estacion) {
       // Contándolo como fallo, tres polls en 20 segundos apagaban el borde
       // para todo el turno de esa tablet — justo cuando iba a servir.
       // Vacío o viejo → esta vez al GAS (aquí abajo), y se reintenta al siguiente.
-      else if (!r.ok) BORDE.fallos++;   // esto sí es un fallo de verdad: HTTP roto
-    } catch (e) { BORDE.fallos++; }
+      // v1.27 · [AUT-0399] il contatore timbra l'ora quando sale: senza questo
+      // il respiro qui sopra è inerte (confronterebbe con `fallosTs` = 0).
+      else if (!r.ok) { BORDE.fallos++; BORDE.fallosTs = Date.now(); }   // esto sí es un fallo de verdad: HTTP roto
+    } catch (e) { BORDE.fallos++; BORDE.fallosTs = Date.now(); }
   }
   // v1.21 · il gradino senza attesa (come mesero v3.9): GAS caduto da <25s
   // + foto-ombra in mano = niente fila davanti a una porta morta.
