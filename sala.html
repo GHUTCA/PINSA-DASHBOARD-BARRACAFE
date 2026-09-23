@@ -1048,7 +1048,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.134.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.135.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1347,6 +1347,25 @@ const GUARDIA_SALA_ON = (function () {
     if (q === '1') { localStorage.setItem('sala_guardia', '1'); return true; }
     if (q === '0') { localStorage.setItem('sala_guardia', '0'); return false; }
     return localStorage.getItem('sala_guardia') === '1';   // default SPENTA
+  } catch (e) { return q === '1'; }
+})();
+/* [AUT-0396 ②] BORDE_FALLBACK_ON — LA RADICE, non la cintura (AUT-0396 sopra
+   è la cintura: regge qualunque sia la causa). ⚙️ ARQUITECTURA (23-set): il
+   bordo stesso non è lento (p99 547ms, ben sotto i 6s del timeout) — quando
+   `leerSala` fallisce a livello di RETE (WiFi del locale pieno, non il
+   servizio), oggi cade dritto su GOOGLE: una fonte DIVERSA e più magra (coda
+   35-343s misurata), non solo più vecchia. Il principio (dettato in bacheca):
+   «il ripiego giusto non è una fonte diversa — è l'ULTIMA VISTA BUONA,
+   dichiarata vecchia». Con la leva ON, un fallo di rete (non l'età: quella
+   ha già `fotoVieja` sua) ripiega su STATE.sala (qualunque fosse la fonte,
+   se ha meno di MAX_EDAD_MS) invece di interrogare Google. Nasce SPENTA,
+   stesso idioma degli altri (?bfb=1 accende per apparecchio). */
+const BORDE_FALLBACK_ON = (function () {
+  const q = QS.get('bfb');
+  try {
+    if (q === '1') { localStorage.setItem('sala_bfb', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_bfb', '0'); return false; }
+    return localStorage.getItem('sala_bfb') === '1';   // default SPENTA
   } catch (e) { return q === '1'; }
 })();
 const F57_QTY = parseInt(QS.get('f57q'), 10) || 10;   // soglia larga (fossile 3gg: max legittimo 7)
@@ -2520,6 +2539,19 @@ async function _pagoAlBorde(body, consumo) {
   return null;
 }
 
+/* [AUT-0396 ②] la vista che questo telefono aveva in mano PRIMA di questo
+   giro — qualunque fosse la fonte (bordo fresco, bordo vecchio, o GAS) —
+   dichiarata come ripiego SOLO se abbastanza fresca (stesso tetto di
+   `fotoVieja`, 15 min: uno standard già scelto da Alberto, non uno nuovo). */
+function _fallbackUltimaVista() {
+  if (!BORDE_FALLBACK_ON || !BORDE_SALA.ON) return null;
+  if (!STATE.sala || !STATE.salaTs) return null;
+  const edad = Date.now() - STATE.salaTs;
+  if (edad >= BORDE_SALA.MAX_EDAD_MS) return null;
+  const vieja = Object.assign({}, STATE.sala);
+  vieja._vieja_s = Math.round(edad / 1000);
+  return vieja;
+}
 async function leerSala(codigo, nombre) {
   // v3.2 · lockout con respiro: 3 fallos = pausa di 90s, non una condanna
   if (BORDE_SALA.fallos >= 3 && Date.now() - BORDE_SALA.fallosTs > 90000) BORDE_SALA.fallos = 0;
@@ -2530,6 +2562,9 @@ async function leerSala(codigo, nombre) {
      Ora la foto vecchia si CONSERVA e, se anche il GAS non risponde, si
      usa lei con l'età dichiarata: vecchio ma vivo batte fresco ma morto. */
   let fotoVieja = null;
+  // [AUT-0396 ②] vero solo per un FALLO DI RETE (o il lockout che lo ricorda)
+  // — mai per «il mio nombre non è ancora nella foto», che non è un guasto.
+  let bordoFalloRed = (BORDE_SALA.ON && BORDE_SALA.fallos >= 3);
   if (BORDE_SALA.ON && BORDE_SALA.fallos < 3) {
     try {
       const u = BORDE_SALA.URL + '/estado/' + encodeURIComponent(CFG.LOCAL || 'BKS')
@@ -2589,8 +2624,8 @@ async function leerSala(codigo, nombre) {
         }
         // il mio nombre non c'è nella foto (appena entrato, fila non ancora
         // scritta): non è un guasto del bordo — si chiede al GAS e basta
-      } else if (!r.ok) { BORDE_SALA.fallos++; }
-    } catch (e) { BORDE_SALA.fallos++; }
+      } else if (!r.ok) { BORDE_SALA.fallos++; BORDE_SALA.fallosTs = Date.now(); bordoFalloRed = true; _pennaDice('leer:bordo-red'); }
+    } catch (e) { BORDE_SALA.fallos++; BORDE_SALA.fallosTs = Date.now(); bordoFalloRed = true; _pennaDice('leer:bordo-red'); }
   }
   /* v3.9 · IL GRADINO SENZA ATTESA: se il GAS è caduto da poco (<25s) e ho
      una foto-ombra in mano, non rifaccio la fila davanti a una porta morta —
@@ -2598,6 +2633,14 @@ async function leerSala(codigo, nombre) {
      memoria: resta lui la via del recupero. Con l'ombra del bordo (v0.11.0:
      timer che marciano + eco) la foto vecchia è una sala viva, non un fossile. */
   if (fotoVieja && Date.now() < (STATE.gasCaidoHasta || 0)) { BORDE_SALA.fallos = 0; return fotoVieja; }
+  /* [AUT-0396 ②] LA RADICE: un fallo di RETE (non l'età — quella ha già
+     `fotoVieja` sua) non deve cadere su Google, una fonte diversa e più
+     magra (coda misurata 35-343s). Il ripiego giusto è l'ULTIMA VISTA BUONA
+     di questo telefono, dichiarata vecchia — qualunque fosse la sua fonte. */
+  if (!fotoVieja && bordoFalloRed) {
+    const ultima = _fallbackUltimaVista();
+    if (ultima) { _pennaDice('leer:fallback-vieja'); return ultima; }
+  }
   try {
     const rG = await gasGet('getSalaMesero', { codigo: codigo, nombre: nombre });
     STATE.gasCaidoHasta = 0;
@@ -6358,6 +6401,7 @@ async function refrescar(conSkeleton) {
       }
     } catch (e) { /* un avviso non rompe mai un poll */ }
     STATE.sala = r;
+    STATE.salaTs = Date.now();   // [AUT-0396 ②] eta' della MIA ultima vista buona, per il ripiego di leerSala
     /* v3.5.0 · i grupos vivi del server diventano il registro locale delle
        juntas — SOLO da un poll fresco: la foto salvata può avere mezz'ora e
        resusciterebbe un tavolone già separato (stessa prudenza di _foto_local
