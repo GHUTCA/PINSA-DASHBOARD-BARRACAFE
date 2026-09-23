@@ -1048,7 +1048,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.141.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.142.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -11286,11 +11286,23 @@ function bMedio(w, pg) {
       ? 'background:rgba(61,201,126,.1);border:1px solid rgba(61,201,126,.4);color:#8ff0bd">✉️ La boleta le llega al correo'
       : 'background:rgba(233,196,106,.12);border:1px solid rgba(233,196,106,.45);color:#f3e3b5">🖶 Sin correo: la boleta sale impresa en barra') + '</div>';
   var f;
-  if (pg.ya && pg.ya.sesion && !pg.okDoble) {
+  if (pg.verificando) {
+    /* [AUT-0403] ESITO INCERTO — si sta verificando, il bottone non esiste
+       ancora: mai un secondo invio mentre non si sa cosa è successo col
+       primo. Vedi il ramo `timeout` più giù per il perché. */
+    f = '<button class="c4cta" disabled>🔍 Verificando si el pago anterior llegó…</button>';
+  } else if (pg.ya && pg.ya.sesion && !pg.okDoble) {
     /* il muro FORTE del doppio cobro — stessa soglia del pannello vecchio */
     f = '<div style="text-align:center;font-size:12.5px;color:#ff9c9c;margin-bottom:8px">✋ Esta mesa YA cobró en esta sesión: ' +
         fmtPrice(pg.ya.monto) + ' a las ' + esc(pg.ya.hora) + '</div>' +
       '<button class="c4cta" style="background:#e24b4a;color:#fff" onclick="pagoSet(\'okDoble\',true)">Lo vi — es otro cliente, cobrar igual</button>';
+  } else if (pg.dudoso && !pg.okDoble) {
+    /* [AUT-0403] la verifica no pudo CONFIRMAR que no llegó — mismo botón,
+       mismo gesto que el muro de arriba, palabras distintas: no estamos
+       diciendo "ya cobró" (podría ser un indicio viejo), estamos diciendo
+       "no lo sabemos con certeza, mira la mesa antes de tocar de nuevo". */
+    f = '<div style="text-align:center;font-size:12.5px;color:#f3c96a;margin-bottom:8px">⚠️ No pudimos confirmar si el cobro anterior llegó — revisa la mesa antes de volver a cobrar.</div>' +
+      '<button class="c4cta" style="background:#e24b4a;color:#fff" onclick="pagoSet(\'okDoble\',true)">Ya revisé — no se cobró, cobrar de nuevo</button>';
   } else {
     var mixtoMal = pg.medio === 'mixto' && !(mxResto === 0 && mxSuma > 0);
     var alPaso3 = _pagoQuiereVoucher();
@@ -12310,6 +12322,18 @@ async function _pedirBoleta(pagoId, mesa) {
   }
 }
 
+/* [AUT-0403] LA VERIFICA DOPO UN ESITO INCERTO — isolata in una funzione a
+   parte apposta: è la parte che decide se il bottone può riarmarsi, ed è
+   quella che deve avere un banco vero, non un tampone di fiducia. Forza un
+   poll fresco (mai la cadenza del backoff: un pago in dubbio non aspetta)
+   e guarda `_pagadaAviso` — qualunque segno, di sessione O di sola
+   giornata, blocca il riarmo: meglio un controllo in più che un secondo
+   cobro (stesso verso della guardia sul contenuto). */
+async function _pagoVerificarTrasTimeout(mesa) {
+  try { await refrescar(false); } catch (e) { /* la verifica non deve mai rompere il pannello */ }
+  const yaF = _pagadaAviso(mesa);
+  return { dudoso: !!yaF, ya: yaF || null };
+}
 async function pagoConfirmar(btn) {
   /* [AUT-0251] un nuovo tentativo cancella il rifiuto precedente: la banda
      racconta L'ULTIMO esito, mai uno vecchio rimasto sullo schermo. */
@@ -12738,23 +12762,34 @@ async function pagoConfirmar(btn) {
     else _rech('No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
     bordeHecho('pago_normal_sin_respuesta', { mesa: (pg && pg.mesa) || '', motivo: (e && e.message) || '?', monto: (pg && pg.tot) || 0 });
-    /* ⚠ niente retry cieco — e il PERCHÉ è cambiato, quindi la riga vecchia
-       si RISCRIVE invece di restare accanto: diceva «registrarPago NON
-       deduplica per uuid», vero PRIMA della v3.95.0 del server e falso da
-       allora. [AUT-0301, 13-set] Quel commento scaduto ci ha fatto sbagliare
-       priorità due volte in un giorno: aveva la forma di una cosa verificata.
-       🟢 OGGI la guardia ESISTE — MENU_GAS r.19230-19262: stesso `pago_uid` =
-          stesso FATTO ⇒ nessuna riga nuova, nessun secondo DTE. 34/34 in 12 gg.
-       🔴 MA copre il RITOCCO, non la RIAPERTURA: l'uid nasce col pannello
-          (r.9049), quindi chi chiude e riapre ne conia uno NUOVO e per il
-          server è un fatto nuovo — ed è la cosa che fa un umano dopo un «No
-          se pudo». Per questo la riga operativa NON cambia:
-       ⇒ dopo un timeout SI VERIFICA, non si insiste. */
-    toast('err', e.message === 'timeout'
-      /* v1.16 · il messaggio dice il VERO: dalla v3.88 del server, ritocar es
-         seguro — el mismo pago no se cobra dos veces (guardia por uid+mesa). */
-      ? 'El servidor va lento. Puedes tocar de nuevo: es seguro, no se cobra dos veces.'
-      : 'Sin conexión — reintenta');
+    /* 🚨 [AUT-0403] 23-set · IL COMMENTO QUI SOTTO DICEVA GIÀ «dopo un timeout
+       SI VERIFICA, non si insiste» — e la riga sotto non verificava affatto,
+       riarmava e basta, fidandosi del pago_uid per una RIAPERTURA che l'uid
+       non copre (vedi sotto). IL FATTO (Alberto, mesa 997, 12:47): bordo
+       rifiuta → GAS in coda 20-30s → il GAS REGISTRA → il vetro torna a
+       "PAGAR Y CERRAR" senza verificare → il mesero, senza un errore visibile
+       (il toast è già scomparso, 3,2s), tocca di nuovo → è il meccanismo dei
+       $403.760 di stamattina (mesa 20, due pagos a 7s; mesa 44, a 76s).
+       🔑 IL PRINCIPIO: quando l'esito è INCERTO (timeout: il fetch È partito,
+       l'abort arriva dopo), il vetro non torna "pronto a inviare" — verifica
+       PRIMA. Quando la richiesta non è MAI partita (rete morta, altro errore:
+       il retry di sempre resta intatto, o un mesero senza rete non potrebbe
+       più cobrare). */
+    if (e.message === 'timeout') {
+      pg.verificando = true; renderPago();
+      const v = await _pagoVerificarTrasTimeout(pg.mesa);
+      pg.verificando = false;
+      if (v.dudoso) {
+        pg.ya = v.ya; pg.dudoso = true; pg.okDoble = false;
+        toast('warn', '⏳ El servidor iba lento — puede que el pago SÍ haya llegado. Revisa antes de volver a cobrar.');
+      } else {
+        toast('err', 'El servidor va lento. Verificado: esta mesa aún no tiene pago — puedes tocar de nuevo.');
+      }
+    } else {
+      /* v1.16 · niente retry cieco: la rete non è nemmeno partita, non c'è
+         niente da verificare — il gesto di sempre resta lo stesso. */
+      toast('err', 'Sin conexión — reintenta');
+    }
   }
   pg.enviando = false; renderPago();
 }
