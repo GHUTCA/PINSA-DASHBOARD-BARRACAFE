@@ -536,6 +536,155 @@ async function bordeGet(path) {
   clearTimeout(to);
   return await r.json();
 }
+/* ═══ [AUT-0375-prep · confine spostato 23-set, `_TAVOLO_CANTIERI.md`] ═════
+   `/caja` — LO SCHERMO DEL CONTEGGIO CIECO, penna di 💵 EL GIRO.
+   Niente fallback GAS: `caja.ritiro`/`caja.sobre` esistono SOLO al bordo
+   (`_NIENTE_DI_NUOVO_SU_GOOGLE`, capacità nuova → bordo, mai Apps Script).
+   Un errore di rete qui NON deve suggerire «riprova col GAS»: non c'è. */
+async function cajaPost(verbo, payload) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const r = await fetch(CFG.BORDE + '/caja?t=' + encodeURIComponent(CFG.T),
+      { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ local: CFG.LOCAL, payload: Object.assign({ verbo: verbo, fuente: 'app_jl' }, payload || {}) }),
+        signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    if (!r.ok) throw new Error('http_' + r.status);
+    return await r.json();
+  } catch (e) { clearTimeout(to); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+/* la chiave d'idempotenza la conia il CLIENT (dottrina ① di `_COME_SI_CODIFICA`
+   — stesso motivo di `rpNuovoUid` qui sopra): se la coniasse il bordo, ogni
+   rete ballerina diventerebbe un ritiro doppio su una tabella di contante. */
+function cajaNuevoUid(pre) {
+  var r = '';
+  try {
+    var a = new Uint8Array(6); crypto.getRandomValues(a);
+    for (var i = 0; i < a.length; i++) r += ('0' + a[i].toString(16)).slice(-2);
+  } catch (e) { r = Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  return pre + '-' + r;
+}
+/* i motivi del verbo, verbatim dal server (caja.js), tradotti UNA volta sola
+   invece che in ogni punto che li mostra — e se ne arriva uno nuovo non
+   ancora tradotto, si vede il motivo grezzo: mai un «error» muto. */
+const CJ_MOTIVI = {
+  uid_gesto_mancante: 'Falta la clave del gesto (recarga la página)',
+  local_mancante: 'Falta el local',
+  mesero_mancante: 'Falta el nombre del mesero',
+  monto_non_numerico: 'El monto no es un número válido',
+  monto_non_positivo: 'El monto tiene que ser mayor que cero',
+  firma_mesero_mancante: 'Falta el PIN del mesero',
+  firma_jl_mancante: 'Falta tu PIN',
+  firme_stessa_persona: 'El PIN del mesero y el tuyo son el mismo — tienen que ser dos personas',
+  firma_mesero_tipo_invalido: 'Tipo de firma del mesero inválido',
+  firma_jl_tipo_invalido: 'Tipo de tu firma inválido',
+  dia_operativo_mancante: 'El servidor no pudo calcular el día operativo',
+  ts_mancante: 'Falta la hora del gesto',
+  fuente_invalida: 'Origen inválido',
+  sobre_nro_mancante: 'Falta el número del sobre (el que escribiste a mano)',
+  suma_ritiri_mancante: 'Falta la suma de lo que contaste',
+  suma_ritiri_negativa: 'La suma no puede ser negativa',
+};
+function cjMotivoTxt(m) { return CJ_MOTIVI[m] || ('Rechazado: ' + (m || '?')); }
+/* la respuesta {scritto:false, motivo:'gate_spento'} NO es un error: el
+   verbo existe y el payload es válido, pero el interruptor del servidor
+   todavía está apagado. Confundirlo con un rechazo haría reescribir un PIN
+   que estaba bien. */
+function cjEsGateSpento(r) { return !!(r && r.ok && r.scritto === false && r.motivo === 'gate_spento'); }
+
+/* ═══ RITIRO — el mesero le entrega la plata al JL, los dos firman ═══════
+   El conteo es CIEGO: el mesero cuenta y declara SIN ver ningún esperado en
+   pantalla (`esperado_ora` existe en el verbo pero hoy no tenemos una fuente
+   honesta para calcularlo — inventarlo sería exactamente el error de
+   `Efectivo_Esperado` del 21-ago, −7,9%. Se manda vacío: el server «se
+   arrepiente antes de mentir», es el diseño mismo del verbo. */
+let CJR = { abierto: false, mesero: '', pin: '', monto: '', uid: '', enviando: false };
+function cjRitiroAbrir() { CJR = { abierto: true, mesero: '', pin: '', monto: '', uid: cajaNuevoUid('CJ-RIT'), enviando: false }; pintaTab(); }
+function cjRitiroCerrar() { CJR.abierto = false; pintaTab(); }
+function cjRitiroSet(campo, val) { CJR[campo] = val; }
+function cjRitiroPanel() {
+  if (!CJR.abierto) return '<button class="btn acc" onclick="cjRitiroAbrir()">💸 Nuevo retiro</button>';
+  const mismoPin = CJR.pin && CJR.pin === STATE.pin;
+  return '<p class="mini"><b>Cuenta la plata que te entrega el mesero, y escribe lo que contaste — sin mirar ningún número en pantalla.</b></p>' +
+    '<input class="busca" placeholder="Nombre del mesero" value="' + esc(CJR.mesero) + '" oninput="cjRitiroSet(\'mesero\', this.value)" style="margin-bottom:6px">' +
+    '<input class="busca" type="number" inputmode="numeric" placeholder="Monto contado ($)" value="' + esc(CJR.monto) + '" oninput="cjRitiroSet(\'monto\', this.value)" style="margin-bottom:6px">' +
+    '<input class="busca" type="password" inputmode="numeric" placeholder="PIN del mesero (firma)" value="' + esc(CJR.pin) + '" oninput="cjRitiroSet(\'pin\', this.value)" style="margin-bottom:6px">' +
+    (mismoPin ? '<p class="mini" style="color:#FF6B6B">Ese es tu PIN — tiene que firmar el mesero, no tú.</p>' : '') +
+    '<button class="btn acc" onclick="cjRitiroEnviar()"' + (CJR.enviando || mismoPin ? ' disabled' : '') + '>' +
+    (CJR.enviando ? 'Enviando…' : 'Confirmar retiro') + '</button>' +
+    '<button class="btn" onclick="cjRitiroCerrar()">Volver</button>';
+}
+async function cjRitiroEnviar() {
+  if (CJR.enviando) return;
+  const mesero = (CJR.mesero || '').trim(), monto = parseInt(CJR.monto, 10), pin = (CJR.pin || '').trim();
+  if (!mesero) { toast('warn', 'Falta el nombre del mesero'); return; }
+  if (!Number.isFinite(monto) || monto <= 0) { toast('warn', 'El monto tiene que ser un número mayor que cero'); return; }
+  if (!pin) { toast('warn', 'Falta el PIN del mesero'); return; }
+  if (pin === STATE.pin) { toast('warn', 'El PIN del mesero no puede ser el tuyo'); return; }
+  CJR.enviando = true; pintaTab();
+  try {
+    const r = await cajaPost('ritiro', {
+      uid_gesto: CJR.uid, local: CFG.LOCAL, mesero: mesero, monto: monto,
+      firma_mesero: pin, firma_mesero_tipo: 'pin',
+      firma_jl: STATE.pin, firma_jl_tipo: 'pin',
+    });
+    if (cjEsGateSpento(r)) { toast('warn', 'El sistema de caja todavía no está activo — avisa antes de reintentar.'); return; }
+    if (r && r.ok && r.accodato) {
+      toast('ok', 'Retiro registrado · $' + fmt(monto) + ' · en camino al libro');
+      CJR = { abierto: false, mesero: '', pin: '', monto: '', uid: '', enviando: false };
+      pintaTab(); return;
+    }
+    if (r && r.error === 'rifiutado') { toast('err', cjMotivoTxt(r.motivo)); return; }
+    toast('err', 'No se registró: ' + ((r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) {
+    /* la clave NO muere en un error de red: el mismo uid_gesto en el
+       reintento hace que sea el MISMO gesto, nunca un segundo retiro. */
+    toast('err', 'No se registró: ' + (e && e.message === 'timeout' ? 'el servidor tardó demasiado, reintenta' : 'sin conexión'));
+  } finally { CJR.enviando = false; pintaTab(); }
+}
+
+/* ═══ SOBRE — el JL junta los retiros de la noche en UN sobre y lo cierra ═
+   Una firma sola (el dinero no pasa a nadie más). El número del sobre lo
+   escribe el JL A MANO en el papel — Alberto, 19-set: «no se estampa, más
+   simple» — así que aquí es sólo texto libre que copia lo que ya escribió. */
+let CJS = { abierto: false, nro: '', suma: '', uid: '', enviando: false };
+function cjSobreAbrir() { CJS = { abierto: true, nro: '', suma: '', uid: cajaNuevoUid('CJ-SOB'), enviando: false }; pintaTab(); }
+function cjSobreCerrar() { CJS.abierto = false; pintaTab(); }
+function cjSobreSet(campo, val) { CJS[campo] = val; }
+function cjSobrePanel() {
+  if (!CJS.abierto) return '<button class="btn" onclick="cjSobreAbrir()">📩 Cerrar sobre de la noche</button>';
+  return '<p class="mini"><b>Escribe el número que anotaste en el sobre, y cuánto metiste adentro — sin sumar los retiros en pantalla.</b></p>' +
+    '<input class="busca" placeholder="Número del sobre (el que escribiste a mano)" value="' + esc(CJS.nro) + '" oninput="cjSobreSet(\'nro\', this.value)" style="margin-bottom:6px">' +
+    '<input class="busca" type="number" inputmode="numeric" placeholder="Suma total contada ($)" value="' + esc(CJS.suma) + '" oninput="cjSobreSet(\'suma\', this.value)" style="margin-bottom:6px">' +
+    '<button class="btn acc" onclick="cjSobreEnviar()"' + (CJS.enviando ? ' disabled' : '') + '>' +
+    (CJS.enviando ? 'Enviando…' : 'Confirmar y sellar') + '</button>' +
+    '<button class="btn" onclick="cjSobreCerrar()">Volver</button>';
+}
+async function cjSobreEnviar() {
+  if (CJS.enviando) return;
+  const nro = (CJS.nro || '').trim(), suma = parseInt(CJS.suma, 10);
+  if (!nro) { toast('warn', 'Falta el número del sobre'); return; }
+  if (!Number.isFinite(suma) || suma < 0) { toast('warn', 'La suma tiene que ser un número (puede ser $0)'); return; }
+  CJS.enviando = true; pintaTab();
+  try {
+    const r = await cajaPost('sobre', {
+      uid_gesto: CJS.uid, local: CFG.LOCAL, sobre_nro: nro, suma_ritiri: suma,
+      firma_jl: STATE.pin, firma_jl_tipo: 'pin',
+    });
+    if (cjEsGateSpento(r)) { toast('warn', 'El sistema de caja todavía no está activo — avisa antes de reintentar.'); return; }
+    if (r && r.ok && r.accodato) {
+      toast('ok', 'Sobre ' + esc(nro) + ' registrado · $' + fmt(suma));
+      CJS = { abierto: false, nro: '', suma: '', uid: '', enviando: false };
+      pintaTab(); return;
+    }
+    if (r && r.error === 'rifiutado') { toast('err', cjMotivoTxt(r.motivo)); return; }
+    toast('err', 'No se registró: ' + ((r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) {
+    toast('err', 'No se registró: ' + (e && e.message === 'timeout' ? 'el servidor tardó demasiado, reintenta' : 'sin conexión'));
+  } finally { CJS.enviando = false; pintaTab(); }
+}
+
 /* le SCRITTURE di sala passano dal bordo come in sala.html; fallback GAS
    identico (qualsiasi risposta senza borde:true → via di sempre). */
 async function staffPost(action, body) {
@@ -1394,8 +1543,21 @@ function vCaja() {
     (c.reparto_hoy ? '<p class="mini" style="color:#3DC97E">✓ Reparto ya cerrado hoy' + (c.reparto_hoy.por ? ' por ' + esc(c.reparto_hoy.por) : '') + '.</p>'
       : rpPanel(c)) +
     '<p class="mini">El valor del punto lo recalcula el server sobre el fósil, nunca el teléfono.</p></div>';
-  h += '<div class="card"><h4>🧾 El cierre del mesero</h4>' +
-    '<p class="mini"><b>El conteo es ciego</b>: cuenta, declara, y el server revela la diferencia después de la firma. Tolerancia $2.000. No mueve un peso.</p></div>';
+  /* ✏️ 23-set · [confine spostato, `_TAVOLO_CANTIERI.md`] · questa carta era
+     testo statico, mai agganciato a nessun bottone — descriveva un sistema
+     che non esisteva ancora. Ora chiama i pannelli veri (`caja.ritiro` /
+     `caja.sobre`, `pinsita.caja_ritiro`/`caja_sobre`, `AUT-0375`).
+     ⚠️ DICHIARATO, non nascosto: `esperado_ora` (il confronto «cuánto
+     debería haber») esiste nel verbo ma NON si manda oggi — non c'è ancora
+     una fuente onesta per calcolarlo, e inventarla sarebbe l'errore già
+     pagato con `Efectivo_Esperado` (−7,9%, 21-ago). Il conteo resta ciego
+     per el mesero; la comparación llega en un paso futuro, no hoy. */
+  h += '<div class="card"><h4>💸 Retiro del mesero</h4>' +
+    '<p class="mini">El mesero cuenta y firma, tú firmas — <b>ninguno de los dos ve un número esperado en pantalla</b>. Queda en cola, no se confirma al toque.</p>' +
+    cjRitiroPanel() + '</div>';
+  h += '<div class="card"><h4>📩 El sobre de la noche</h4>' +
+    '<p class="mini">Juntas los retiros de la noche en un sobre, escribes el número a mano, cuentas y declaras — <b>sin sumar los retiros en pantalla</b>.</p>' +
+    cjSobrePanel() + '</div>';
   return h;
 }
 
