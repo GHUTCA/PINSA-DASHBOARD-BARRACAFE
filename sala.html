@@ -1030,7 +1030,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.128.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.129.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1282,6 +1282,19 @@ const YAPAG3_ON = (function () {
     if (q === '1') { localStorage.setItem('sala_yapag3', '1'); return true; }
     if (q === '0') return false;
     return localStorage.getItem('sala_yapag3') === '1';   // default SPENTA
+  } catch (e) { return q === '1'; }
+})();
+/* [AUT-0385] PEDIR1_ON — pezzo 1 della spec dei 4 bottoni
+   (4_CANTIERE_SALA/SPEC_RIDISEGNO_SALA_4_BOTONES_20SET2026.md §1.1/1.3/1.4):
+   tutti i chip promo attivi (non solo il primo trovato) · via il bottone
+   Cuenta · via i chip di cambio mesa nel catalogo. Nasce SPENTA, stesso
+   idioma di TIEMPOS_ON/YAPAG3_ON: ?pedir1=1 accende per apparecchio. */
+const PEDIR1_ON = (function () {
+  const q = QS.get('pedir1');
+  try {
+    if (q === '1') { localStorage.setItem('sala_pedir1', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_pedir1', '0'); return false; }
+    return localStorage.getItem('sala_pedir1') === '1';   // default SPENTA
   } catch (e) { return q === '1'; }
 })();
 const F57_QTY = parseInt(QS.get('f57q'), 10) || 10;   // soglia larga (fossile 3gg: max legittimo 7)
@@ -2644,8 +2657,8 @@ async function _verCheck() {
     const m = html.match(/<span class="ver" id="ver">([^<]*)<\/span>/);
     const srv = m ? m[1].trim() : '';
     if (srv && srv !== mio) {
-      $('verBanner').innerHTML = '🆕 Hay una versión nueva de la sala. Actualiza cuando puedas — nunca en medio de un cobro. ' +
-        '<button class="btn tg" onclick="location.reload()">Actualizar ahora</button>';
+      $('verBanner').innerHTML = '🆕 Nueva versión. Actualiza entre mesas. ' +
+        '<button class="btn tg" onclick="location.reload()">Actualizar</button>';
       $('verBanner').classList.remove('hide');
     }
   } catch (e) { /* silencioso: ver §comentario arriba */ }
@@ -4495,13 +4508,25 @@ function _cmPromos(){
   const out=[]; const cat=STATE.catalogo||[];
   const conP = cat.filter(function(p){ return p.promo; })[0];
   if(conP) out.push({ id:'promo', lbl:'2×1', largo:(conP.promo.nombre||'En promo'), v:'--cm-promo' });
-  /* [AUT-EMERG-0314] il chip prende NOME dalla regola che c'è davvero nel
-     catalogo adesso: «MA · Menú del almuerzo» a pranzo, «MN · Menú de la
-     noche» la sera. Se un giorno ne convivessero due, vince la prima trovata
-     e si vedrà allora: stasera non convivono (finestre 08-16 e 20-22). */
-  const _rMenu = (cat.find(function(p){ return _cmEsMenu(p); }) || {}).regla;
-  if(_rMenu)
-    out.push({ id:'menu', lbl:MENU_SIGLAS[_rMenu]||'M', largo:MENU_REGLAS[_rMenu], v:'--cm-ok' });
+  /* [AUT-0385 · 1.1, dietro PEDIR1_ON] PRIMA prendeva SOLO la prima
+     regola-menù trovata nel catalogo («MA · Menú del almuerzo» a pranzo,
+     «MN · Menú de la noche» la sera) — se ne conviveva più di una, le altre
+     restavano invisibili e bisognava digitarle per trovarle (reperto di
+     Alberto: MN a cena non appariva come chip). Con la leva accesa esce un
+     chip per OGNI regola-menù distinta presente: il click resta identico
+     per tutte (filtro 'menu', mostra ogni prodotto-menù) — cambiano solo le
+     etichette. Leva spenta = comportamento identico a oggi (solo la prima). */
+  if (PEDIR1_ON) {
+    const reglasViste = {};
+    cat.forEach(function(p){
+      if(!_cmEsMenu(p) || reglasViste[p.regla]) return;
+      reglasViste[p.regla] = true;
+      out.push({ id:'menu', lbl:MENU_SIGLAS[p.regla]||'M', largo:MENU_REGLAS[p.regla], v:'--cm-ok' });
+    });
+  } else {
+    const _rMenu = (cat.find(function(p){ return _cmEsMenu(p); }) || {}).regla;
+    if(_rMenu) out.push({ id:'menu', lbl:MENU_SIGLAS[_rMenu]||'M', largo:MENU_REGLAS[_rMenu], v:'--cm-ok' });
+  }
   return out;
 }
 function _cmPregHtml(){
@@ -4752,7 +4777,10 @@ function _cmBancoHtml(){
     '<div class="cm-acc">'+
       (n.personas>1 ? '<button onclick="nuevoJuntar()">↩ Juntar todo</button>'
                     : '<button onclick="nuevoMasPersona()">👥 Dividir</button>')+
-      (STATE.precuentaOn ? '<button onclick="nuevoCuenta()">🧾 Cuenta</button>' : '')+
+      /* [AUT-0385 · 1.3, dietro PEDIR1_ON] tolto il bottone Cuenta dalla
+         schermata PEDIR (spec 4 bottoni, §1.3): la precuenta si vedrà solo
+         dal nuovo COBRAR. Leva spenta = comportamento identico a oggi. */
+      (!PEDIR1_ON && STATE.precuentaOn ? '<button onclick="nuevoCuenta()">🧾 Cuenta</button>' : '')+
     '</div>'+
     '<button class="cm-cta" '+((_cmN() && !n.enviando)?'':'disabled')+' onclick="nuevoEnviar(this)">👑 Crear pedido'+
       (tot?' · '+fmtPrice(tot):'')+'</button></div>';
@@ -4814,23 +4842,25 @@ function _cmCajonHtml(){
     : n.filtro ? FAM.filter(function(f){ return f.id===n.filtro; })[0].lbl.replace(/^\S+\s/,'')
     : 'Toda la carta';
   const el = !!n.eligiendo;
-  const mesas = _cmMesasPlaza();
+  const mesas = PEDIR1_ON ? [] : _cmMesasPlaza();
   const nn = _cmN();
+  /* [AUT-0385 · 1.4, dietro PEDIR1_ON] i chip delle mesas della plaza
+     (cambio di tavolo dentro il catalogo) vanno tolti dalla spec dei 4
+     bottoni, §1.4: confondevano e potevano far sbagliare tavolo a metà
+     ordine. Il PEDIDO parte solo dal tavolo scelto all'origine, prima di
+     aprire "Nueva comanda". Leva spenta = comportamento identico a oggi. */
   return '<div class="cm-cajon">'+
     '<div class="cs-cjhd">'+
       '<div class="cs-cjrow">'+
         '<button class="cm-x" onclick="nuevoCajonCerrar()" title="ver la libreta" aria-label="ver la libreta">‹</button>'+
         '<b>Nueva comanda</b>'+_cmSusHtml()+
         '<button class="cm-x" onclick="nuevoCerrar()" title="cerrar" aria-label="cerrar">✕</button></div>'+
-      '<div class="cs-mesas">'+
+      (PEDIR1_ON ? '' : '<div class="cs-mesas">'+
         mesas.map(function(x){
           return '<button class="cs-mch" aria-pressed="'+(n.mesa===x.m)+'" onclick="csMesaChip(\''+esc(x.m)+'\')">'+
             (x.viva?'<span class="viva">●</span>':'')+esc(x.m)+'</button>'; }).join('')+
-        /* v3.3 · il campo «otra» è VIA (ordine di Alberto, 12-ago sera, dopo il
-           doppio quinteto): la mesa si sceglie SOLO dai chip della propria
-           plaza. La copertura di un collega passa dal JL, finché non c'è il
-           flusso di copertura dichiarato. */
-      '</div></div>'+
+      '</div>')+
+    '</div>'+
     '<div class="cs-cjbus"><input class="cm-cq" id="nuevoQC" '+(el?'disabled':'')+
       ' placeholder="Busca: negroni, schop, filete…" value="'+esc(n.qc||'')+'" oninput="nuevoBuscarCajon(this.value)"></div>'+
     '<div class="cm-fams">'+FAM.map(function(f){
@@ -10450,7 +10480,7 @@ function c4Css() {
       'font-size:18px;font-weight:700;line-height:1.25;min-height:58px;border:none}' +
     '.c4 .c4cta small{display:block;font-size:13px;font-weight:500;opacity:.82;margin-top:3px}' +
     '.c4 .c4cta.amber{background:#E0A94A;color:#2c1e04}' +
-    '.c4 .c4cta:disabled{background:#2a4a3c;color:#7f9a8d;border:1.5px dashed #4a6b5c}' +
+    '.c4 .c4cta:disabled{background:#2a4a3c;color:#A3BCB0;border:1.5px dashed #4a6b5c}' +
     '.c4 .c4cta.sec{background:transparent;border:1.5px solid var(--cs-line);color:var(--cs-ink);' +
       'font-size:15px;font-weight:600;margin-top:9px;min-height:48px}' +
     /* la rilettura del correo: fondo chiaro, testo grande, l'ultima cosa in mano al cliente */
