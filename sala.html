@@ -1048,7 +1048,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.138.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.139.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1345,15 +1345,18 @@ const PEDIR2_ON = (function () {
    guardia lo fa: una mesa che aveva N items visibili non ne mostra MENO alla
    prossima foto, a meno che la risposta non porti una ragione riconoscibile
    (pagata, unita a un'altra mesa, liberata da questo telefono). La crescita
-   (N -> N+1, mesa nuova) non si blocca mai. Nasce SPENTA, stesso idioma degli
-   altri (?guardia=1 accende per apparecchio). */
+   (N -> N+1, mesa nuova) non si blocca mai.
+   🟢 ACCESA DI FABBRICA dal 23-set sera — provata da Alberto in sala su
+   `v3.136.0`/`v3.138.0` con `?guardia=1&bfb=1`, banco 25/25, zero
+   regressioni. `?guardia=0` spegne per apparecchio (stesso idioma di
+   `JFIX_ON`: default ON, `=0` è l'unico modo di tornare a ieri). */
 const GUARDIA_SALA_ON = (function () {
   const q = QS.get('guardia');
   try {
     if (q === '1') { localStorage.setItem('sala_guardia', '1'); return true; }
     if (q === '0') { localStorage.setItem('sala_guardia', '0'); return false; }
-    return localStorage.getItem('sala_guardia') === '1';   // default SPENTA
-  } catch (e) { return q === '1'; }
+    return localStorage.getItem('sala_guardia') !== '0';   // default ACCESA
+  } catch (e) { return q !== '0'; }
 })();
 /* [AUT-0396 ②] BORDE_FALLBACK_ON — LA RADICE, non la cintura (AUT-0396 sopra
    è la cintura: regge qualunque sia la causa). ⚙️ ARQUITECTURA (23-set): il
@@ -1364,15 +1367,17 @@ const GUARDIA_SALA_ON = (function () {
    «il ripiego giusto non è una fonte diversa — è l'ULTIMA VISTA BUONA,
    dichiarata vecchia». Con la leva ON, un fallo di rete (non l'età: quella
    ha già `fotoVieja` sua) ripiega su STATE.sala (qualunque fosse la fonte,
-   se ha meno di MAX_EDAD_MS) invece di interrogare Google. Nasce SPENTA,
-   stesso idioma degli altri (?bfb=1 accende per apparecchio). */
+   se ha meno di MAX_EDAD_MS) invece di interrogare Google.
+   🟢 ACCESA DI FABBRICA dal 23-set sera, stessa prova di GUARDIA_SALA_ON
+   (sono legate: `fallosTs` funziona solo insieme a questa). `?bfb=0`
+   spegne per apparecchio. */
 const BORDE_FALLBACK_ON = (function () {
   const q = QS.get('bfb');
   try {
     if (q === '1') { localStorage.setItem('sala_bfb', '1'); return true; }
     if (q === '0') { localStorage.setItem('sala_bfb', '0'); return false; }
-    return localStorage.getItem('sala_bfb') === '1';   // default SPENTA
-  } catch (e) { return q === '1'; }
+    return localStorage.getItem('sala_bfb') !== '0';   // default ACCESA
+  } catch (e) { return q !== '0'; }
 })();
 /* [AUT-0396, reperto EL VIGÍA] il segno che Alberto deve vedere in due
    secondi: solo quando ENTRAMBE le leve sono accese su QUESTO telefono.
@@ -6297,6 +6302,23 @@ function _mesasJustificadasCalo(r) {
   });
   return set;
 }
+const GUARDIA_LOCAL_KEY = 'sala_guardia_local';
+/* [reperto EL VIGÍA, 23-set ②] mismo patron de PENNA_KEY/_pennaFechaOp: un
+   solo blob JSON con su jornada operativa adentro — si la jornada cambió,
+   se reinicia solo. Sin esto el contador de depuración crecía para siempre
+   y "para siempre" no dice "esta noche". */
+function _guardiaLocalRegistra(mesas, antes, ahora) {
+  try {
+    const fop = _pennaFechaOp();
+    let s = null;
+    try { s = JSON.parse(localStorage.getItem(GUARDIA_LOCAL_KEY) || 'null'); } catch (e2) {}
+    if (!s || s.fop !== fop) s = { fop: fop, c: 0, ev: [] };
+    s.c += mesas.length;
+    mesas.forEach(function (m) { s.ev.push({ mesa: m, ts: Date.now(), antes: antes[m], ahora: ahora[m] || 0 }); });
+    while (s.ev.length > 20) s.ev.shift();
+    localStorage.setItem(GUARDIA_LOCAL_KEY, JSON.stringify(s));
+  } catch (e) { /* la guardia no depende del contador */ }
+}
 function mergeSalaGuardia(prevR, respR) {
   if (!respR || respR.ok !== true) return prevR || respR;
   if (!prevR) return respR;                    // niente "prima" con cui confrontare: entra libera
@@ -6319,22 +6341,14 @@ function mergeSalaGuardia(prevR, respR) {
      SOLO en localStorage: nadie fuera de ESE telefono podía leerlo, y sin
      fecha crecía para siempre — "una cura que no se puede leer no es una
      cura, es una esperanza deployada". Sigue existiendo para depuración en
-     el aparato, pero el numero que de verdad llega a alguien es este: un
-     EVENTO por mesa rechazada (nunca un total), por el mismo canal ya vivo
-     de AUT-0396② (_pennaDice/_muroCampi, AUT-0273) — viaja con el proximo
-     gesto hacia el bordo, con fecha/reset de jornada operativa como su
-     gemelo, cero canales nuevos. */
+     el aparato (ahora con fecha/reset de jornada operativa, mismo tope
+     06:00 de `_pennaFechaOp` — segundo reperto de EL VIGÍA), pero el numero
+     que de verdad llega a alguien es este: un EVENTO por mesa rechazada
+     (nunca un total), por el mismo canal ya vivo de AUT-0396② (_pennaDice/
+     _muroCampi, AUT-0273) — viaja con el proximo gesto hacia el bordo, cero
+     canales nuevos. */
   mesas.forEach(function () { _pennaDice('guardia:rechazo'); });
-  try {
-    let c = 0;
-    try { c = parseInt(localStorage.getItem('sala_guardia_rechazos') || '0', 10) || 0; } catch (e2) {}
-    localStorage.setItem('sala_guardia_rechazos', String(c + mesas.length));
-    let ev = [];
-    try { ev = JSON.parse(localStorage.getItem('sala_guardia_evidencia') || '[]'); } catch (e3) {}
-    mesas.forEach(function (m) { ev.push({ mesa: m, ts: Date.now(), antes: antes[m], ahora: ahora[m] || 0 }); });
-    while (ev.length > 20) ev.shift();
-    localStorage.setItem('sala_guardia_evidencia', JSON.stringify(ev));
-  } catch (e) { /* la guardia no depende del contador */ }
+  _guardiaLocalRegistra(mesas, antes, ahora);
   return out;
 }
 
