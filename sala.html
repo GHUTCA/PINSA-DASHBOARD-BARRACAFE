@@ -1048,7 +1048,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.131.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.132.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -10031,7 +10031,13 @@ function _entregadosDeMesa(mesa) {
   ['mios', 'por_limpiar', 'pendientes', 'sin_dueno'].forEach(function (k) {
     (Array.isArray(r[k]) ? r[k] : []).forEach(function (p) {
       if (!p || String(p.mesa) !== String(mesa)) return;
-      if (p.estado !== 'entregado') return;
+      /* [AUT-0388 ①] `retirado` (el runner dejó el pase, tap del KDS) llega
+         ANTES que `entregado` (tap del mesero) y en MÁS líneas — mismo
+         guardián, pregunta antes y más seguido, nunca menos. `retirado` no
+         trae hora (es un booleano): no puede decir "hace cuánto", así que
+         por sí solo ya hace preguntar (ver hayRetirado abajo) en vez de
+         entrar en el cálculo de minutos, que sigue siendo cosa de `entregado`. */
+      if (p.estado !== 'entregado' && !p.retirado) return;
       if (seen[p.uuid]) return;
       seen[p.uuid] = 1; out.push(p);
     });
@@ -10041,17 +10047,20 @@ function _entregadosDeMesa(mesa) {
 function liberarMesa(uuid, mesa, tsEnt, btn) {
   var ents = _entregadosDeMesa(mesa);
   if (!ents.length && tsEnt) ents = [{ uuid: uuid, mesa: mesa, ts_entregado_iso: tsEnt, total: 0 }];
-  var ahora = Date.now(), reciente = null, lineas = [];
+  var ahora = Date.now(), reciente = null, lineas = [], hayRetirado = false;
   ents.forEach(function (p) {
     var t = p.ts_entregado_iso ? new Date(p.ts_entregado_iso).getTime() : 0;
     var m = t > 0 ? Math.round((ahora - t) / 60000) : null;
     if (m != null && (reciente === null || m < reciente)) reciente = m;
-    lineas.push('  · ' + (m == null ? 'entregado' : 'hace ' + m + ' min') +
+    // [AUT-0388 ①] sin ts_entregado_iso pero con `retirado`: ya salió del
+    // pase, no sabemos hace cuánto — se dice así, no se inventa un "entregado".
+    if (m == null && p.retirado) hayRetirado = true;
+    lineas.push('  · ' + (m != null ? 'hace ' + m + ' min' : p.retirado ? 'salió del pase' : 'entregado') +
                 (p.total ? ' — ' + fmtPrice(p.total) : ''));
   });
   var fresco = (reciente != null && reciente >= 0 && reciente < 15);
   var varios = ents.length > 1;
-  if (fresco || varios) {
+  if (fresco || varios || hayRetirado) {
     var msg = '¿Ya se fue la mesa ' + mesa + '?\n\n' +
       'Vas a CERRAR ' + ents.length + (ents.length === 1 ? ' pedido:' : ' pedidos:') + '\n' +
       lineas.join('\n') + '\n\n' +
