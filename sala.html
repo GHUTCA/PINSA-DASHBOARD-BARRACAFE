@@ -1048,7 +1048,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.143.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.144.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -8005,6 +8005,19 @@ function _dtPinIn(v) {
 function _dtPie() {
   var f = document.getElementById('dtFoot');
   if (!f || !_dt) return;
+  /* [AUT-0406, terzo sito] la Familia a dedo del JL passa dallo stesso
+     registrarPago di pagoFamConfirmar — stessa cura, senza aspettare la
+     prova del commento vecchio: se aveva ragione, questa verifica non
+     costa niente; se mentiva, chiude il terzo buco del doppio cobro. */
+  if (_dt.tipo === 'fam' && _dt.verificando) {
+    f.innerHTML = '<button class="c4cta" disabled>🔍 Verificando si entró…</button>';
+    return;
+  }
+  if (_dt.tipo === 'fam' && _dt.dudoso && !_dt.okDobleFam) {
+    f.innerHTML = '<div style="text-align:center;font-size:12px;color:#f3c96a;margin-bottom:8px">⚠️ No pudimos confirmar si la mesa FAM ya cerró — revisa antes de repetir.</div>' +
+      '<button class="c4cta" style="background:#e24b4a;color:#fff" onclick="_dt.okDobleFam=true;_dtPie()">Ya revisé — no cerró, repetir</button>';
+    return;
+  }
   var ok = _dtListo();
   /* 🍽 il bottone dice quello che SUCCEDE, e per «un producto» non è «cobras
      X»: quella porta non fissa quanto si incassa — **toglie una riga**, e il
@@ -8464,12 +8477,24 @@ function _dtGo() {
       if (r && errFam[r.error]) { d.pin = ''; toast('err', '👨‍👩‍👧 ' + errFam[r.error]); }
       else toast('err', 'No se pudo: ' + ((r && r.error) || '?'));
       _dtPinta();
-    }).catch(function (e) {
-      d.env = 0;
+    }).catch(async function (e) {
       bordeHecho('pago_fam_sin_respuesta', { mesa: mesa, motivo: (e && e.message) || '?' });
-      toast('err', (e && e.message === 'timeout')
-        ? 'Sin respuesta — PUEDE haber entrado igual. Verifica antes de repetir.'
-        : 'Sin conexión — reintenta');
+      /* [AUT-0406, terzo sito] stessa cura di pagoFamConfirmar/pagoConfirmar,
+         zero logica nuova: si riusa _pagoVerificarTrasTimeout. */
+      if (e && e.message === 'timeout') {
+        d.verificando = true; _dtPinta();
+        const v = await _pagoVerificarTrasTimeout(mesa);
+        d.verificando = false; d.env = 0;
+        if (v.dudoso) {
+          d.dudoso = true; d.okDobleFam = false;
+          toast('warn', '⏳ Sin respuesta — puede que haya entrado igual. Revisa antes de repetir.');
+        } else {
+          toast('err', 'Sin respuesta. Verificado: la mesa aún no cerró — puedes repetir.');
+        }
+      } else {
+        d.env = 0;
+        toast('err', 'Sin conexión — reintenta');
+      }
       _dtPinta();
     });
     return;
