@@ -1030,7 +1030,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.127.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.128.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1267,6 +1267,21 @@ const TIEMPOS_ON = (function () {
     if (q === '1') { localStorage.setItem('sala_tiempos', '1'); return true; }
     if (q === '0') { localStorage.setItem('sala_tiempos', '0'); return false; }
     return localStorage.getItem('sala_tiempos') === '1';   // default SPENTA
+  } catch (e) { return q === '1'; }
+})();
+/* [AUT-0376] YAPAG3_ON — chiude il buco del "cammino directo" (41,2% dei pagos,
+   AUT-0369②/18-ago): `STATE.pcYaPag` oggi si scrive SOLO dentro emitirPreCuenta,
+   quindi il muro forte del doppio cobro (pg.ya.sesion) non sa nulla di un tavolo
+   pagato se nessuno ha stampato una precuenta in questa sessione — esattamente
+   il caso del tavolo che si riapre (bacheca, MURO YA SESION CAMINO DIRECTO).
+   Nasce SPENTA, stesso idioma di TIEMPOS_ON: ?yapag3=1 accende per apparecchio,
+   =0 spegne (per questa sessione, non per sempre — correzione di 🎨 DESIGN). */
+const YAPAG3_ON = (function () {
+  const q = QS.get('yapag3');
+  try {
+    if (q === '1') { localStorage.setItem('sala_yapag3', '1'); return true; }
+    if (q === '0') return false;
+    return localStorage.getItem('sala_yapag3') === '1';   // default SPENTA
   } catch (e) { return q === '1'; }
 })();
 const F57_QTY = parseInt(QS.get('f57q'), 10) || 10;   // soglia larga (fossile 3gg: max legittimo 7)
@@ -9606,6 +9621,16 @@ function _pagadaAviso(mesa) {
   const dia = _pagadaDeMesa(mesa);                  // non so: resta l'indizio
   return dia ? Object.assign({}, dia, { sesion: false }) : null;
 }
+/* [AUT-0376] fetchYaPagado — SOLA LETTURA: espone _sesionDeMesa (GAS) senza
+   l'effetto collaterale di emitirPreCuenta, che oggi è l'unico modo in cui il
+   vetro riceve `ya_pagado`. Diretta al GAS, MAI al bordo — il bordo non ha
+   ancora la vista piena del consumo (debito dichiarato in AUT-0376, verso
+   ⚙️ ARQUITECTURA). Il chiamante (abrirPago) non aspetta questa promise: se
+   torna tardi o fallisce, il pannello resta com'è oggi — mai un muro che
+   costringe ad aspettare davanti a un incasso. */
+function fetchYaPagado(mesa) {
+  return gasPost('fetchYaPagado', { codigo: STATE.codigo, mesa: mesa });
+}
 /* v3.5.7 · la riga «ya pagado» dentro il papel della precuenta (v. il commento
    lungo nel punto d'innesto: caso mesa 120, doppio addebito sfiorato).
    Dice le tre cose che fermano la mano — QUANTO, QUANDO, CON QUALE BOLETA — e
@@ -10021,6 +10046,23 @@ function abrirPago(mesa, parte) {
     voucher: '', sinVoucher: false, voucherPin: '',
     ya: _pagadaAviso(mesa), okDoble: false };   // v3.18.0 [AUT-0036] · sessione, non giornata
   renderPago();
+  /* [AUT-0376] rinfresca `ya_pagado` all'apertura del pannello, sui DUE
+     cammini (directo e precuenta), invece di saperlo solo se qualcuno ha già
+     stampato una precuenta oggi. Guardia mesa+uid OBBLIGATORIA: una risposta
+     in ritardo non deve mai scrivere uno stato vecchio su un pannello già
+     chiuso o riaperto altrove — sarebbe lo stesso difetto che stiamo curando,
+     spostato dal server al client, e invisibile. */
+  if (YAPAG3_ON) {
+    const uidApertura = STATE.pago.uid;
+    fetchYaPagado(mesa).then(function (r) {
+      if (STATE.pago && STATE.pago.mesa === mesa && STATE.pago.uid === uidApertura) {
+        STATE.pcYaPag = STATE.pcYaPag || {};
+        STATE.pcYaPag[mesa] = (r && r.ya_pagado) || { n: 0, monto: 0, pagos: [] };
+        STATE.pago.ya = _pagadaAviso(mesa);
+        renderPago();
+      }
+    }).catch(function () {});   // silenzioso: un check che fallisce non e' un problema del turno
+  }
 }
 /* v3.7.0 · il pago in corso vuole il sello? (débito/crédito, anche dentro un mixto) */
 function _pagoQuiereVoucher() {
