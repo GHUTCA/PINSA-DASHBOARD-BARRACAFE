@@ -1048,7 +1048,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.140.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.141.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -6266,29 +6266,28 @@ function _aplicarMarcados(r) {
   });
 }
 
-/* ═══ [AUT-0396] LA GUARDIA SUL CONTENUTO — mergeSalaGuardia ═════════════════
-   Vedi il flag GUARDIA_SALA_ON per il perché. Qui il COME: `_itemsPorMesa`
-   conta le righe visibili per mesa nelle quattro liste che la sala mostra
-   (stesso conteggio già usato dal toast della junta qui sotto, r.6xxx);
-   `_mesasJustificadasCalo` elenca le mese per cui un calo È legittimo, con
-   tre segnali REALI, nessuno nuovo: `r.mesas_pagadas` (pagata, dal server) ·
-   `r.grupos` (unita a un'altra mesa come non-principal, dal server) ·
-   `STATE.marcado` marca 'limpia' fresca (liberata da QUESTO telefono, lo
-   stesso segnale che già guida `liberarMesa`). Nessuna mesa nuova, nessuna
-   mesa che CRESCE è mai toccata: la guardia SOLO tiene la vista piena di una
-   mesa che calerebbe senza una di queste tre ragioni — non inventa dati, non
-   somma, sostituisce (N9: non fonde due liste diverse, sceglie quale delle
-   due mostrare, mesa per mesa). */
+/* ═══ [AUT-0396, RISCRITTA 23-set dopo AUT-EMERG-0397] LA GUARDIA SUL
+   CONTENUTO — mergeSalaGuardia ════════════════════════════════════════════
+   🩸 IL DIFETTO TROVATO IN SERVIZIO (mesa 86, $95.920 invece di $47.960 · una
+   riga "Pollo Alfredo" mai esistita): la prima stesura contava RIGHE PER
+   MESA (un numero) e, se il numero calava senza giustificazione, sostituiva
+   TUTTO l'array di quella mesa con la foto vecchia — mesa per mesa, non
+   pedido per pedido. Un contratto che diceva solo «tieni la vista piena» e
+   MAI «tieni, non sommare»: una vista vecchia rimasta agganciata (perché il
+   suo calo non aveva un evento riconosciuto — tipico di una correzione del
+   mesero, che oggi non è fra le tre ragioni) restava a schermo insieme a
+   quella nuova finché il conteggio non tornava ad essere pari o superiore —
+   e nel frattempo si vedeva un pedido cancellato ancora in piedi.
+   🔑 LA CURA — riscritta per IDENTITÀ, non per conteggio: ogni pedido ha un
+   `uuid`. Un pedido che C'È in `respR` (qualunque mesa, qualunque array) non
+   viene MAI toccato — è la fonte di verità. Solo un pedido che C'ERA in
+   `prevR` e ORA NON C'È PIÙ DA NESSUNA PARTE, sulla mesa in cui viveva, senza
+   una delle tre ragioni, viene RIAGGIUNTO — una volta, quel pedido, mai un
+   numero. Struttura: mai due righe con lo stesso `uuid` nell'uscita ⇒ un
+   input identico due volte produce un'uscita identica, per costruzione, non
+   per fortuna (l'invariante che il primo banco non provava). */
 const _ARRAYS_SALA_MESA = ['mios', 'pendientes', 'por_limpiar', 'sin_dueno'];
-function _itemsPorMesa(r) {
-  const out = {};
-  _ARRAYS_SALA_MESA.forEach(function (k) {
-    ((r && r[k]) || []).forEach(function (p) {
-      if (p && p.mesa != null) { const m = String(p.mesa); out[m] = (out[m] || 0) + 1; }
-    });
-  });
-  return out;
-}
+function _idPedido(p) { return (p && p.uuid != null) ? String(p.uuid) : null; }
 function _mesasJustificadasCalo(r) {
   const set = {};
   const mp = (r && r.mesas_pagadas) || {};
@@ -6313,14 +6312,14 @@ const GUARDIA_LOCAL_KEY = 'sala_guardia_local';
    solo blob JSON con su jornada operativa adentro — si la jornada cambió,
    se reinicia solo. Sin esto el contador de depuración crecía para siempre
    y "para siempre" no dice "esta noche". */
-function _guardiaLocalRegistra(mesas, antes, ahora) {
+function _guardiaLocalRegistra(mancanti) {
   try {
     const fop = _pennaFechaOp();
     let s = null;
     try { s = JSON.parse(localStorage.getItem(GUARDIA_LOCAL_KEY) || 'null'); } catch (e2) {}
     if (!s || s.fop !== fop) s = { fop: fop, c: 0, ev: [] };
-    s.c += mesas.length;
-    mesas.forEach(function (m) { s.ev.push({ mesa: m, ts: Date.now(), antes: antes[m], ahora: ahora[m] || 0 }); });
+    s.c += mancanti.length;
+    mancanti.forEach(function (it) { s.ev.push({ mesa: it.mesa, uuid: it.row && it.row.uuid, ts: Date.now() }); });
     while (s.ev.length > 20) s.ev.shift();
     localStorage.setItem(GUARDIA_LOCAL_KEY, JSON.stringify(s));
   } catch (e) { /* la guardia no depende del contador */ }
@@ -6328,33 +6327,51 @@ function _guardiaLocalRegistra(mesas, antes, ahora) {
 function mergeSalaGuardia(prevR, respR) {
   if (!respR || respR.ok !== true) return prevR || respR;
   if (!prevR) return respR;                    // niente "prima" con cui confrontare: entra libera
-  const antes = _itemsPorMesa(prevR);
-  const ahora = _itemsPorMesa(respR);
-  const justificadas = _mesasJustificadasCalo(respR);
-  const aRestaurar = {};
-  Object.keys(antes).forEach(function (m) {
-    if ((ahora[m] || 0) < antes[m] && !justificadas[m]) aRestaurar[m] = true;
-  });
-  const mesas = Object.keys(aRestaurar);
-  if (!mesas.length) return respR;              // camino feliz: nada que restaurar
-  const out = Object.assign({}, respR);
+
+  // ① tutto ciò che RISPONDE ADESSO, per uuid — è la fonte di verità, non si tocca mai
+  const presentesAhora = {};
   _ARRAYS_SALA_MESA.forEach(function (k) {
-    const nuevas = ((respR && respR[k]) || []).filter(function (p) { return !(p && p.mesa != null && aRestaurar[String(p.mesa)]); });
-    const viejas = ((prevR && prevR[k]) || []).filter(function (p) { return p && p.mesa != null && aRestaurar[String(p.mesa)]; });
-    out[k] = nuevas.concat(viejas);
+    ((respR && respR[k]) || []).forEach(function (p) {
+      const id = _idPedido(p);
+      if (id != null) presentesAhora[id] = true;
+    });
   });
+
+  // ② i pedidos di PRIMA che ora non ci sono più DA NESSUNA PARTE, raggruppati
+  //    per mesa e per array (per rimetterli dove vivevano) — solo quelli senza
+  //    identità restano fuori (mai restaurati, mai usati per bloccare niente)
+  const justificadas = _mesasJustificadasCalo(respR);
+  const mancanti = [];   // [{k, row, mesa}]
+  _ARRAYS_SALA_MESA.forEach(function (k) {
+    ((prevR && prevR[k]) || []).forEach(function (p) {
+      const id = _idPedido(p);
+      if (id == null || presentesAhora[id]) return;    // senza identità, o ancora presente: niente da fare
+      const mesa = (p && p.mesa != null) ? String(p.mesa) : null;
+      if (!mesa || justificadas[mesa]) return;          // senza mesa, o il calo è legittimo: non si restaura
+      mancanti.push({ k: k, row: p, mesa: mesa });
+    });
+  });
+  if (!mancanti.length) return respR;                   // camino feliz: nada que restaurar
+
+  // ③ si riaggiunge SOLO il pedido mancante, esattamente una volta, nel SUO
+  //    array — mai un doppione: `presentesAhora` garantisce che nessun uuid
+  //    qui dentro esista già in `out`.
+  const out = Object.assign({}, respR);
+  _ARRAYS_SALA_MESA.forEach(function (k) { out[k] = ((respR && respR[k]) || []).slice(); });
+  mancanti.forEach(function (item) { out[item.k].push(item.row); });
+
   /* [reperto de EL VIGÍA, 23-set] el contador `sala_guardia_rechazos` vivía
      SOLO en localStorage: nadie fuera de ESE telefono podía leerlo, y sin
      fecha crecía para siempre — "una cura que no se puede leer no es una
      cura, es una esperanza deployada". Sigue existiendo para depuración en
      el aparato (ahora con fecha/reset de jornada operativa, mismo tope
      06:00 de `_pennaFechaOp` — segundo reperto de EL VIGÍA), pero el numero
-     que de verdad llega a alguien es este: un EVENTO por mesa rechazada
+     que de verdad llega a alguien es este: un EVENTO por PEDIDO restaurado
      (nunca un total), por el mismo canal ya vivo de AUT-0396② (_pennaDice/
      _muroCampi, AUT-0273) — viaja con el proximo gesto hacia el bordo, cero
      canales nuevos. */
-  mesas.forEach(function () { _pennaDice('guardia:rechazo'); });
-  _guardiaLocalRegistra(mesas, antes, ahora);
+  mancanti.forEach(function () { _pennaDice('guardia:rechazo'); });
+  _guardiaLocalRegistra(mancanti);
   return out;
 }
 
