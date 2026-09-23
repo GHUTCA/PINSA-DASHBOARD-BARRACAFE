@@ -1048,7 +1048,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.144.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.145.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -10050,11 +10050,28 @@ async function fintocRegistrar(mesa) {
     }
   } catch (e) {
     bordeHecho('pago_fintoc_sin_respuesta', { mesa: mesa, motivo: (e && e.message) || '?', monto: (pagFin && pagFin.monto) || 0 });
-    toast('err', e.message === 'timeout'
-      ? 'Sin respuesta — PUEDE haber entrado igual. Verifica antes de repetir.'
-      : 'Sin conexión — reintenta');
+    /* [AUT-0406, cuarto sitio] stessa cura degli altri tre, stesso riuso di
+       `_pagoVerificarTrasTimeout` — zero logica nuova, solo il cablaggio.
+       Verificato prima di curare (non per simmetria): stesso `registrarPago`,
+       stesso effetto (chiude la mesa) — stesso peso. */
+    if (e.message === 'timeout') {
+      STATE.fintocVerificando = true; STATE.fintocMesaVerif = mesa;
+      if (STATE.mesaAbierta === mesa && STATE.sala) renderMesaSheet(STATE.sala);
+      const v = await _pagoVerificarTrasTimeout(mesa);
+      STATE.fintocVerificando = false;
+      if (v.dudoso) {
+        STATE.fintocDudoso = true; STATE.fintocOkDoble = false;
+        toast('warn', '⏳ Sin respuesta — puede que haya entrado igual. Revisa antes de repetir.');
+      } else {
+        STATE.fintocDudoso = false;
+        toast('err', 'Sin respuesta. Verificado: aún no entró — puedes repetir.');
+      }
+    } else {
+      toast('err', 'Sin conexión — reintenta');
+    }
   }
   STATE.fintocEnviando = false;
+  if (STATE.mesaAbierta === mesa && STATE.sala) renderMesaSheet(STATE.sala);
 }
 
 function abrirMesa(mesa) {
@@ -10152,8 +10169,19 @@ function renderMesaSheet(r) {
     h += '<div style="margin:10px 0;padding:12px 14px;border:1px solid var(--ok,#22c55e);border-radius:12px;background:rgba(34,197,94,.08)">' +
       '<b style="color:var(--ok,#22c55e)">💚 Pagada por el teléfono</b>' +
       '<div style="font-size:13px;margin-top:2px">$' + _fmtMiles(pagFin.monto) + ' recibidos (Fintoc)' +
-      (propFin ? ' · propina $' + _fmtMiles(propFin) : '') + '</div>' +
-      '<button class="btn verde" style="margin-top:10px" onclick="fintocRegistrar(\'' + esc(m.mesa) + '\')">Registrar pago y liberar ✓</button></div>';
+      (propFin ? ' · propina $' + _fmtMiles(propFin) : '') + '</div>';
+    /* [AUT-0406, cuarto sitio] stessa cura degli altri tre, stesso riuso di
+       `_pagoVerificarTrasTimeout` — cablaggio, zero logica nuova. */
+    if (STATE.fintocVerificando && STATE.fintocMesaVerif === m.mesa) {
+      h += '<button class="btn verde" style="margin-top:10px" disabled>🔍 Verificando si entró…</button>';
+    } else if (STATE.fintocDudoso && STATE.fintocMesaVerif === m.mesa && !STATE.fintocOkDoble) {
+      h += '<div style="font-size:12px;color:#f3c96a;margin:6px 0">⚠️ No pudimos confirmar si ya se registró — revisa antes de repetir.</div>' +
+        '<button class="btn verde" style="margin-top:0" onclick="STATE.fintocOkDoble=true;renderMesaSheet(STATE.sala)">Ya revisé — no entró, repetir</button>';
+    } else {
+      h += '<button class="btn verde" style="margin-top:10px" ' + (STATE.fintocEnviando ? 'disabled' : '') + ' onclick="fintocRegistrar(\'' + esc(m.mesa) + '\')">' +
+        (STATE.fintocEnviando ? 'Registrando…' : 'Registrar pago y liberar ✓') + '</button>';
+    }
+    h += '</div>';
   }
   /* v3.7 · IL GESTO DI MESA (decisione Alberto 02-ago): alla cassa digiti
      tutto il tavolo in un colpo — qui confermi in un colpo. Il bottone nasce
