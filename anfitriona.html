@@ -156,7 +156,7 @@
   <div id="mapaPlazas"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.6 · 24set</span>
+    <span class="ver" id="ver">v1.7 · 24set</span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
@@ -189,6 +189,11 @@ const CFG = {
   TIMEOUT_MS: 25000,
   SK: { COD: 'puerta_codigo', NOM: 'puerta_nombre', LOC: 'puerta_local', TOK: 'puerta_device_token' },
 };
+/* [AUT-0424] stesso bordo di sala.html, stesso token di lettura (BORDE_SALA.T
+   lì): la rotta è la STESSA `/pedido-staff/:local` che crearPedidoMesero e
+   marcarPedido già usano — sentarMesa è solo un `action` in più su una porta
+   che esiste da mesi, non una rotta nuova da provare a freddo. */
+const BORDE_SALA = { URL: 'https://pinsita-borde.alberto-agostini.workers.dev', T: '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ' };
 const STATE = {
   codigo: localStorage.getItem(CFG.SK.COD) || (QS.get('c') || '').trim(),
   nombre: localStorage.getItem(CFG.SK.NOM) || '',
@@ -460,13 +465,52 @@ document.getElementById('paxRow').addEventListener('click', e => {
   document.querySelectorAll('#paxRow button').forEach(x => x.classList.toggle('on', x === b));
   $('bsGo').textContent = '✓ Sentados — ' + b.textContent.trim() + ' pax';
 });
+/* [AUT-0424] leva del VETRO, per apparecchio — nasce SPENTA (forma di casa,
+   F57_ON/TIEMPOS_ON/CERRAR_ASK_ON di sala.html): `?sentarborde=1` accende,
+   `?sentarborde=0` spegne. Il bordo ha la SUA leva separata
+   (`SENTAR_BORDE_ON`, Script env, nasce "0" — non è nostra da toccare). */
+const SENTARBORDE_ON = (function () {
+  const q = QS.get('sentarborde');
+  try {
+    if (q === '1') { localStorage.setItem('anfi_sentarborde', '1'); return true; }
+    if (q === '0') { localStorage.setItem('anfi_sentarborde', '0'); return false; }
+    return localStorage.getItem('anfi_sentarborde') === '1';   // default SPENTA
+  } catch (e) { return q === '1'; }
+})();
+/* Stesso stampo di `staffPost`/`_pagoAlBorde` in sala.html: qui NON c'è un
+   PIN da giudicare (sentarMesa è un append puro, zero autorità in gioco) —
+   OGNI risposta che non porta `borde:true` è un «vai di là», sala.html
+   compresa (`apagado`/`seat_uid_missing`/`mesa_missing`/`pax_invalid`
+   portano tutte `need:'gas'`, letto dal sorgente del bordo). Nessun rifiuto
+   è mai finale qui: a differenza del PIN di AUT-0412, non c'è un freno da
+   rispettare — solo un dato mancante che Google può ancora accettare. */
+async function _sentarAlBorde(body) {
+  if (!SENTARBORDE_ON) return null;
+  try {
+    const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS');
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(u, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE_SALA.T },
+      body: JSON.stringify(Object.assign({ action: 'sentarMesa', local: CFG.LOCAL }, body)),
+      signal: ctrl.signal, cache: 'no-store',
+    });
+    clearTimeout(to);
+    const j = await r.json();
+    if (j && j.borde === true) return j;   // timbrato dal DO: risposta definitiva
+    return null;   // need:'gas' o qualunque altra forma: vai di là, come sempre
+  } catch (e) { return null; }   // rete morta/timeout: vai di là, come sempre
+}
 async function confirmarSentar() {
   if (!STATE.bsMesa || STATE.enviando) return;
   STATE.enviando = true;
   const btn = $('bsGo'); btn.disabled = true; btn.classList.add('cargando');
   try {
-    const r = await gasPost('sentarMesa', { codigo: STATE.codigo, nombre: STATE.nombre, mesa: STATE.bsMesa, pax: STATE.bsPax,
-      seat_uid: STATE.bsSeatUid });   // [AUT-0424] la chiave d'idempotenza, mai dal server
+    const body = { codigo: STATE.codigo, nombre: STATE.nombre, mesa: STATE.bsMesa, pax: STATE.bsPax,
+      seat_uid: STATE.bsSeatUid };   // [AUT-0424] la chiave d'idempotenza, mai dal server
+    const rB = await _sentarAlBorde(body);
+    const r = rB || await gasPost('sentarMesa', body);
     if (r && r.ok) { toast('ok', '✓ Mesa ' + r.mesa + ' · ' + r.pax + ' pax'); cerrarSheet(); }
     else if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) { cerrarSheet(); _strikeTurno(); return; }   // v1.3 · corazza
     else toast('err', 'No se pudo: ' + (r && r.error || '?'));
