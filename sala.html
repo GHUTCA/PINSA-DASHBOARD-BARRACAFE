@@ -1086,7 +1086,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.157.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.158.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3667,7 +3667,12 @@ function _dispositivoId() {
    `cancelado`, due campi che il bordo pretende e il GAS non vuole. */
 async function _corregirAlBorde(bodyBorde) {
   if (!CORRBORDE_ON) return null;
-  if (!STATE.editVoid || !bodyBorde.pin_jl) return null;   // senza PIN in gioco, nulla da mandare qui
+  /* [24-set] il controllo era `!STATE.editVoid || !bodyBorde.pin_jl` — ma
+     questa funzione ora serve DUE chiamanti (guardarCorreccion via
+     STATE.editVoid, e il ramo «Un producto» di _dtGo via `_dt`, che non
+     tocca mai STATE.editVoid). L'unico invariante vero è «c'è un PIN in
+     gioco», non DA DOVE arriva lo stato: si controlla solo quello. */
+  if (!bodyBorde.pin_jl) return null;   // senza PIN in gioco, nulla da mandare qui
   try {
     const u = BORDE_SALA.URL + '/correccion/' + encodeURIComponent(CFG.LOCAL || 'BKS');
     const ctrl = new AbortController();
@@ -3683,6 +3688,40 @@ async function _corregirAlBorde(bodyBorde) {
     if (j && j.scritto === false && j.motivo === 'gate_spento') return null;   // leva del bordo spenta: vai di là
     return j;   // {ok:true,scritto:true,...} O un rifiuto con merito — sempre FINALE
   } catch (e) { return null; }   // rete morta/timeout: vai di là, come sempre
+}
+/* ═══ [24-set, reperto di Alberto su mesa 997] IL RIFIUTO CHE SPARIVA E IL
+   SILENZIO DOPO IL FRENO ═══════════════════════════════════════════════════
+   Due difetti nello stesso gesto (ELIMINAR/«Un producto»): ① il rifiuto era
+   un `toast` — sparisce da solo, e diceva SEMPRE il messaggio generico
+   perché il controllo cercava `pin_jl_invalid` (bug di battitura: il vero
+   codice, ovunque nel resto del file, è `pin_jl_invalido`, con la 'o'). ②
+   al freno (5 falliti) il GAS risponde `pin_jl_bloqueado` SENZA `faltan_s`
+   (letto da MENU_GAS.js r.19683: il TTL della cache è fisso a 600s, ma la
+   risposta non lo porta) — nessun ramo lo riconosceva, quindi cadeva nel
+   messaggio generico, altrettanto silenzioso perché nessuno guardava lo
+   schermo dopo che il pannello si era già chiuso.
+   LA CURA: un messaggio SPECIFICO per nome e PERSISTENTE (`alert`, non
+   `toast` — lo stesso strumento già usato in questo file per
+   `comanda_ya_salio`, per lo stesso motivo: il pannello è già chiuso, un
+   avviso che sparisce da solo non lo vede nessuno). Riconosce gli stessi
+   nomi sia dal bordo (`pin_jl_bloqueado` con `faltan_s`, quando il freno a
+   due piani di ⚙️ lo manda) sia dal GAS (`pin_jl_bloqueado` senza,
+   `pin_jl_bloqueado_apparecchio` per il futuro freno per dispositivo). */
+function _pinErrorPersistente(r) {
+  const err = r && r.error;
+  if (err === 'pin_jl_invalido') { alert('PIN del JL incorrecto — que lo escriba de nuevo.'); return true; }
+  if (err === 'pin_jl_requerido') { alert('Falta el PIN del JL.'); return true; }
+  if (err === 'pin_jl_bloqueado_apparecchio') {
+    alert('Código bloqueado en ESTE teléfono por demasiados intentos.' +
+      (r.faltan_s ? ' Reintenta en ' + Math.ceil(r.faltan_s / 60) + ' min.' : ' Reintenta más tarde.'));
+    return true;
+  }
+  if (err === 'pin_jl_bloqueado') {
+    alert('Código bloqueado por demasiados intentos.' +
+      (r.faltan_s ? ' Reintenta en ' + Math.ceil(r.faltan_s / 60) + ' min.' : ' Reintenta en 10 min.'));
+    return true;
+  }
+  return false;   // no es un rechazo de PIN reconocido: el llamador decide qué decir
 }
 async function guardarCorreccion(uuid, btn) {
   if (btn) btn.disabled = true;
@@ -8534,8 +8573,17 @@ function _dtGo() {
       uuid: pr.uuid, items: finales, motivo: d.pmot, pin_jl: JL ? JL.pin : (d.pin || '').trim(),
       corr_uid: corr_uid };
     if (JL) _bodyCorr.via = 'app_jl';
-    gasPost('corregirPedido', _bodyCorr)
-      .then(function (r) {
+    /* [24-set · estensione ordinata dal cancello] STESSO stampo di
+       guardarCorreccion: si bussa prima al bordo (clase fissa 'correccion',
+       cancelado = tutte le qty finali a zero — qui non ci sono prezzi a
+       portata di mano come nel pannello degli steppers, ma «resta qualcosa
+       da produrre?» è la stessa domanda fatta con la qty invece del monto),
+       poi il GAS come sempre se il bordo dice «vai di là». */
+    var _bodyCorrBorde = Object.assign({}, _bodyCorr, { mesa: mesa,
+      clase: 'correccion', cancelado: finales.every(function (it) { return (it.qty || 0) <= 0; }) });
+    _corregirAlBorde(_bodyCorrBorde).then(function (rB) {
+      return rB || gasPost('corregirPedido', _bodyCorr);
+    }).then(function (r) {
         if (r && r.ok) {
           /* ═══ 🔴 v3.84.0 · [AUT-EMERG-0128 · 10-set, LOCALE APERTO] ═════════
              IL TESTIMONE ERA RIMASTO APPESO ALLA PORTA VECCHIA.
@@ -8570,12 +8618,11 @@ function _dtGo() {
           }
           toast('ok', '🍽 ' + (pr.quita > 1 ? pr.quita + '× ' : '') + pr.n + ' fuera · mesa ' + mesa);
           refrescar();
-        } else {
+        } else if (!_pinErrorPersistente(r)) {
           /* 🔴 e se non si sa, si dice che NON SI SA — non che è fallito.
              Rimandare «ha fallito» quando la comanda potrebbe essere già
              cambiata è il modo di far ripetere il gesto su uno stato vecchio. */
-          toast('warn', (r && r.error === 'pin_jl_invalid') ? 'PIN del JL incorrecto'
-            : 'No se pudo confirmar — abre la mesa y mira antes de repetir');
+          toast('warn', 'No se pudo confirmar — abre la mesa y mira antes de repetir');
         }
       }).catch(function () {
         toast('warn', 'No se pudo confirmar — abre la mesa y mira antes de repetir');
