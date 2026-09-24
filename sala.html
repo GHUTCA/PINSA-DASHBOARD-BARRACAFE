@@ -1086,7 +1086,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.154.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.155.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3640,24 +3640,25 @@ const CORRBORDE_ON = (function () {
    vetro spenta, nessun PIN in gioco, gate del BORDO spento, rete morta,
    forma di risposta sconosciuta) tornano `null` — la via di sempre, GAS.
    Un rifiuto CON MERITO (`pin_jl_invalido`/`pin_jl_bloqueado`/
-   `pin_jl_requerido`, o `rifiutato`/`verbo_sconosciuto`) è invece FINALE:
-   il bordo è la guardia vera quando è accesa, e ritentare su GAS con lo
+   `pin_jl_requerido`/`rifiutato`/`verbo_sconosciuto`) è invece FINALE: il
+   bordo è la guardia vera quando è accesa, e ritentare su GAS con lo
    STESSO PIN sbagliato non lo farebbe passare — spenderebbe solo il freno
-   dell'altro lato per niente. Letto a righe dal sorgente del bordo,
-   `pinsita-borde` commit `1647ab1`, `src/index.js` (rotta `/correccion/`
-   + `_correccion` nel DO): il `pin_jl` viaggia nel CORPO, mai in query. */
-async function _corregirAlBorde(body) {
+   dell'altro lato per niente. Contratto letto dalla bacheca (⚙️ V27,
+   `CONTRATTO CORRECCION AL BORDO`, `borde v0.102.0`): il token viaggia
+   nell'header `X-Borde-Token`, il `pin_jl` nel CORPO, mai in query.
+   `bodyBorde` è un oggetto A SÉ (non il `body` del GAS): porta `clase` e
+   `cancelado`, due campi che il bordo pretende e il GAS non vuole. */
+async function _corregirAlBorde(bodyBorde) {
   if (!CORRBORDE_ON) return null;
-  if (!STATE.editVoid || !body.pin_jl) return null;   // senza PIN in gioco, nulla da mandare qui
+  if (!STATE.editVoid || !bodyBorde.pin_jl) return null;   // senza PIN in gioco, nulla da mandare qui
   try {
-    const u = BORDE_SALA.URL + '/correccion/' + encodeURIComponent(CFG.LOCAL || 'BKS')
-      + '?t=' + encodeURIComponent(BORDE_SALA.T);
+    const u = BORDE_SALA.URL + '/correccion/' + encodeURIComponent(CFG.LOCAL || 'BKS');
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 6000);
     const r = await fetch(u, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Object.assign({ verbo: 'correccion' }, body)),
+      headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE_SALA.T },
+      body: JSON.stringify(Object.assign({ verbo: 'correccion' }, bodyBorde)),
       signal: ctrl.signal, cache: 'no-store',
     });
     clearTimeout(to);
@@ -3680,21 +3681,39 @@ async function guardarCorreccion(uuid, btn) {
     /* v1.21 · motivo e PIN viaggiano SOLO quando servono: un pedido non
        ancora uscito resta il gesto libero di sempre, senza attrito. */
     STATE.editVoid ? { motivo: STATE.editMotivo, pin_jl: (STATE.editPinJL || '').trim() } : {});
-  /* [AUT-0412 ⓑ] il bordo vuole la mesa per la sua riga Postgres e per la
-     chiave d'idempotenza — lo stesso sguardo che oggi il GAS fa DOPO l'ok,
-     solo anticipato: leggerlo prima non cambia cosa vede, cambia solo quando. */
+  /* [AUT-0412 ⓑ] il bordo vuole la mesa (Postgres/idempotenza) e DUE campi
+     che il GAS non chiede: `clase` (chiuso a 'correccion' per questo pannello
+     — 'void_jl' è un'altra materia, non questo editor di quantità) e
+     `cancelado` (booleano, SEMPRE dichiarato: il bordo lo tratta come
+     default-false silenzioso se manca, ed è esattamente il rischio che il
+     contratto vieta). `totNuevo` rispecchia la STESSA somma che il pannello
+     mostra al mesero (r.13357 ca., «Total nuevo» / «= pedido CANCELADO»),
+     non una nuova invenzione. */
+  let _mesaPre = '', _totNuevo = 0;
   try {
-    const _mesaPre = [].concat((STATE.sala && STATE.sala.mios) || [], (STATE.sala && STATE.sala.por_limpiar) || [],
+    const _p = [].concat((STATE.sala && STATE.sala.mios) || [], (STATE.sala && STATE.sala.por_limpiar) || [],
       (STATE.sala && STATE.sala.pendientes) || [], (STATE.sala && STATE.sala.sin_dueno) || [])
       .find(function (x) { return x && x.uuid === uuid; });
-    if (_mesaPre && _mesaPre.mesa) body.mesa = String(_mesaPre.mesa);
+    if (_p && _p.mesa) _mesaPre = String(_p.mesa);
+    if (_p) {
+      itemsDe(_p).forEach(function (it) {
+        const q = STATE.editQty[it.id] != null ? STATE.editQty[it.id] : (parseInt(it.qty, 10) || 1);
+        _totNuevo += (parseFloat(it.precio) || 0) * q;
+      });
+    }
+    Object.keys(STATE.editNuevos).forEach(function (id) {
+      const nu = STATE.editNuevos[id], q = STATE.editQty[id] || 0;
+      _totNuevo += (parseFloat(nu.precio) || 0) * q;
+    });
   } catch (e) {}
+  if (_mesaPre) body.mesa = _mesaPre;
+  const bodyBorde = Object.assign({}, body, { clase: 'correccion', cancelado: _totNuevo === 0 });
   try {
     /* [AUT-0412 ⓐ] SI BUSSA PRIMA AL BORDO — un rifiuto con merito (PIN) cade
        negli STESSI rami più sotto che già gestiscono `pin_jl_invalido` &c.
        dalla via GAS: le etichette sono IDENTICHE (righe lette dal sorgente
        del bordo), zero rami nuovi da scrivere per quei casi. */
-    const rB = await _corregirAlBorde(body);
+    const rB = await _corregirAlBorde(bodyBorde);
     const r = rB || await gasPost('corregirPedido', body);
     if (r && r.ok) {
       /* v3.24.0 · [AUT-0058] il testimone: il GAS risponde col totale NUOVO
