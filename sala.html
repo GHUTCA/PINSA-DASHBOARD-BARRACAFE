@@ -8512,6 +8512,59 @@ function _dtPinta() {
   _dtEraHay = _dtHay();
 }
 
+/* ═══ 🍽 AUT-0432 · ELIMINAR OTTIMISTA + IL RITORNO CHE LO DICE ═══════════════
+   Reperto: AUT-EMERG-0128 (10-set) — un producto tolto RIAPPARIVA perché il
+   vetro esibiva il cambio solo al giro seguente della sombra (misurato di
+   nuovo il 24-set 16:42 sullo stesso cammino, «Un producto»: bordo accetta in
+   ms, GAS fossilizza in 7,8 s, il vetro aspetta quel giro per mostrarlo).
+   Cura in due versi (BKP V28 · PROVE 1335 ⓓ):
+   ① appena bordo/GAS dicono ok, si muta `STATE.mesasModel` IN LOCO e si
+      ridisegna lo sheet SUBITO — N1, nessuna schermata aspetta la rete.
+      `refrescar()` resta dopo: riconcilia col vivo, non sostituisce questo.
+   ② una SOLA verifica ~8s dopo (non un loop): se il prossimo poll vero non
+      ha davvero abbassato la quantità, il gesto ha fallito di merito — il
+      poll stesso l'ha già rimesso (è la sua foto), e qui SOLO SI DICE al
+      mesero, perché un item che riappare in silenzio si legge come un
+      pedido nuovo, non come un fallimento.
+   ⚖️ Scope dichiarato: solo questo cammino («Un producto» / `_dtGo`), non
+   `guardarCorreccion` (il pannello degli steppers) — è quello misurato nel
+   reperto di oggi, e la sua `items_json` porta prezzo/nombre che qui non
+   servono a ricostruire correttamente senza rischiare un vetro sbagliato. */
+function _dtEliminarOptimista(mesa, uuid, itemId, qtyEsperada, r) {
+  const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
+  if (!mm) return;
+  const arr = mm.pend.some(function (p) { return p.uuid === uuid; }) ? mm.pend
+    : mm.mios.some(function (p) { return p.uuid === uuid; }) ? mm.mios
+    : mm.limpiar.some(function (p) { return p.uuid === uuid; }) ? mm.limpiar : null;
+  if (!arr) return;
+  const idx = arr.findIndex(function (p) { return p.uuid === uuid; });
+  if (idx < 0) return;
+  if (r.cancelado) {
+    arr.splice(idx, 1);
+    mm.n = Math.max(0, (mm.n || 1) - 1);
+  } else if (!r.sin_cambios && r.total != null) {
+    arr[idx].total = r.total;
+    if (r.items_json) arr[idx].items_json = r.items_json;
+  }
+  STATE._corrOptimista = STATE._corrOptimista || {};
+  STATE._corrOptimista[uuid + ':' + itemId] = { mesa: mesa, uuid: uuid, itemId: itemId, qtyEsperada: qtyEsperada, ts: Date.now() };
+  if (STATE.mesaAbierta === mesa && STATE.sala) renderMesaSheet(STATE.sala);
+}
+function _corrOptimistaReconcilia() {
+  const reg = STATE._corrOptimista; if (!reg) return;
+  Object.keys(reg).forEach(function (k) {
+    const e = reg[k], edad = Date.now() - e.ts;
+    if (edad < 8000) return;                 // il GAS mide hasta ~7,8 s: antes es pronto
+    delete reg[k];                           // verifica una tantum, non un loop
+    const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === e.mesa; });
+    const ped = mm ? mm.pend.concat(mm.mios, mm.limpiar).filter(function (p) { return p.uuid === e.uuid; })[0] : null;
+    if (!ped) return;                        // sparita del tutto (pagata/cerrada) — no es el defecto que buscamos
+    const it = itemsDe(ped).filter(function (x) { return x.id === e.itemId; })[0];
+    const qtyOra = it ? (parseInt(it.qty, 10) || 0) : 0;
+    if (qtyOra > e.qtyEsperada) toast('warn', '⚠️ La quita no se aplicó — sigue en la mesa ' + e.mesa + ', vuelve a intentar');
+  });
+}
+
 /* ── APPLICARE ───────────────────────────────────────────────────────────────
    Il gesto finisce nel pannello del pago, che è dove il denaro si è sempre
    incassato: qui si decide QUANTO e PERCHÉ, lì si sceglie il medio.
@@ -8616,6 +8669,13 @@ function _dtGo() {
             bordeHecho('corregir', { uuid: pr.uuid, total_nuevo: r.total,
               items_json_nuevo: r.items_json || '', mesa: mesa, corr_uid: corr_uid });
           }
+          /* [24-set · AUT-EMERG-0128, il ritorno] il bordo/GAS ha detto ok:
+             non si aspetta il giro seguente della sombra per mostrarlo (N1).
+             `refrescar()` resta — riconcilia col vivo — ma lo sheet si vede
+             giusto SUBITO, e se il forward fallisce di merito il prossimo
+             poll lo rimette e `_corrOptimistaReconcilia()` lo dice. */
+          var _finItem = finales.filter(function (it) { return it.id === pr.id; })[0];
+          _dtEliminarOptimista(mesa, pr.uuid, pr.id, _finItem ? _finItem.qty : 0, r);
           toast('ok', '🍽 ' + (pr.quita > 1 ? pr.quita + '× ' : '') + pr.n + ' fuera · mesa ' + mesa);
           refrescar();
         } else if (!_pinErrorPersistente(r)) {
@@ -12929,8 +12989,23 @@ async function pagoConfirmar(btn) {
        sopra dichiara già la regola della casa — *«se il JL ha anche ritoccato
        il monto a mano, comanda la SUA porta: le due non si sommano mai in
        silenzio»* — e il mio ramo la rompeva. Ora la rispetta: se il JL ha
-       messo mano, la parte si ritira. */
-    else if (pg.c4 && !pg.montoOn) { body.parcial = 1; body.monto = c4Parte(pg); }
+       messo mano, la parte si ritira.
+       [24-set, reperto del cancello: `PARCIAL SEMPRE 1 E IL C4`] ⚠️ QUI C'ERA
+       SCRITTO «se la parte copre tutto, il server chiude da solo: non serve
+       distinguere» — ERA FALSO, misurato da ⚙️ V27 su 34 pagos VERI di
+       servizio: 34/34 uscivano con `parcial:1` (anche i pagos totali, perché
+       il COBRAR nuovo passa SEMPRE da qui) e il bordo, per una guardia VERA
+       sui parziali, non chiudeva mai il conto né i pedidos né sottraeva il
+       tavolo dall'eco — la classe di AUT-0055, $238.600. `parcial:1` si
+       dichiara SOLO quando resta davvero qualcosa dopo questo pago
+       (`!c4Cierra(pg)`, r.11300 — `c4Resta(pg) <= 0`, già in uso a r.11624
+       per «quanto manca dopo» — non un calcolo nuovo). Un pago che chiude
+       tutto esce SENZA `parcial`, e `body.es_total` (sotto) lo dice giusto
+       per la prima volta. */
+    else if (pg.c4 && !pg.montoOn) {
+      body.monto = c4Parte(pg);
+      if (!c4Cierra(pg)) body.parcial = 1;   // c4Cierra = c4Resta(pg) <= 0, già in uso (r.11300)
+    }
     if (pg.montoOn && _pagoMonto() !== pg.tot) {
       body.monto = _pagoMonto(); body.monto_manual = 1; body.pin_jl = (pg.pinJL || '').trim();
     }
@@ -13353,6 +13428,7 @@ function render(r) {
   // v2.0 · griglia MIS MESAS in testa; i pendientes su mesa GIÀ MÍA vengono
   // assorbiti dalla tessera gialla (non tornano nei pendientes di plaza)
   renderMesas(r);
+  _corrOptimistaReconcilia();   // [AUT-0432 ⓑ] il poll vero appena arrivato: si verifica, non si aspetta di più
   const absorbidos = {};
   STATE.mesasModel.forEach(function (m) { m.pend.forEach(function (p) { absorbidos[p.uuid] = true; }); });
 
