@@ -1086,7 +1086,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.156.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.157.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9170,10 +9170,53 @@ function _marcarPagoParcial(mesa, monto) {
   if (!mm) return;
   STATE.pagadoParcial[mm] = (STATE.pagadoParcial[mm] || 0) + (parseFloat(monto) || 0);
 }
+/* ═══ [AUT-0428 · 24-set] IL RESTO VIENE DAL SERVER ═══════════════════════
+   🔴 CLASSE DENARO. Caso vivo (Alberto, mesa 999): COBRAR diceva «FALTA POR
+   PAGAR $5.890» e «Tu cuenta» $5.890, mentre il GAS aveva scritto alle 06:59
+   «consumo $5.890 · pagato $4.890» — resto vero $1.000. `mesas_pagadas`
+   portava un SÌ/NO, non un importo, e la marca locale (0422ⓑ) conosce solo i
+   parziali fatti DOPO di lei su QUESTO telefono — un secondo apparecchio non
+   li vede mai. 📖 MENU ora manda `pagado_seduta` dentro `mesas_pagadas[mesa]`:
+   quanto copre la SESSIONE in corso (i pagos DOPO l'ultima chiusura TOTALE),
+   non «di oggi» — una mesa pagata da clienti precedenti non deve sottrarre a
+   quelli di adesso.
+   `calcolaResto` — stesso nome e stessa firma dell'oracolo di 💵 EL GIRO
+   (`BANCO_RESTO_SERVER_AUT0428_24SET2026.mjs`, 8/11 casi + 2 mutazioni,
+   scritto PRIMA di questo codice): il server VINCE quando arriva (anche
+   contro un locale diverso — un secondo telefono che ha registrato un
+   parziale prima che il server rispondesse); senza server si cade sul
+   locale immediato di AUT-0422ⓑ; senza nessuno dei due, il consumo intero. */
+function calcolaResto(consumo, pagadoSedutaServer, pagadoParcialLocale) {
+  if (pagadoSedutaServer != null) return Math.max(0, consumo - pagadoSedutaServer);
+  if (pagadoParcialLocale != null) return Math.max(0, consumo - pagadoParcialLocale);
+  return consumo;
+}
+function _pagadoSedutaDeMesa(mesa) {
+  const p = _pagadaDeMesa(mesa);
+  return (p && p.pagado_seduta != null) ? p.pagado_seduta : null;
+}
+const RESTO_SERVER_ON = (function () {
+  const q = QS.get('restoserver');
+  try {
+    if (q === '1') { localStorage.setItem('sala_restoserver', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_restoserver', '0'); return false; }
+    return localStorage.getItem('sala_restoserver') === '1';   // default SPENTA
+  } catch (e) { return q === '1'; }
+})();
 function _vpTot(mesa) {
   const res = _resDe(mesa);
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
   const visto = m ? m.pend.concat(m.mios, m.limpiar).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0) : 0;
+  /* [AUT-0428] il server vince SEMPRE quando `pagado_seduta` è noto — prima
+     di ogni altro segnale, anche del locale di 0422ⓑ (che resta il fallback
+     immediato quando il server non ha ancora risposto, invariato sotto). */
+  if (RESTO_SERVER_ON) {
+    const pagadoSedutaServer = _pagadoSedutaDeMesa(mesa);
+    if (pagadoSedutaServer != null) {
+      const consumoBase = res ? Math.max(res.total || 0, visto) : visto;
+      return calcolaResto(consumoBase, pagadoSedutaServer, MARCA_TS_ON ? (STATE.pagadoParcial[mesa] != null ? STATE.pagadoParcial[mesa] : null) : null);
+    }
+  }
   /* [AUT-0422 ⓑ] il resto vero: locale meno quanto incassato oggi in parti.
      Precede tutto il resto — se c'è un pago parziale noto, è la risposta
      più informata che abbiamo, più del résumé (che non sa dei parciales) e
