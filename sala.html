@@ -9065,13 +9065,8 @@ function _llamResolver(id, mesa, ic, esCuenta, btn) {
   }
   if (esCuenta) { try { vCobrarSala(mesa); } catch (e) {} }
 }
-/* v3.4.3 · il MÍO dalla fascia dei verbi: marcar mette il tomando in modo
-   sincrono, quindi il renderPanel subito dopo trova il pedido già coperto
-   e la fascia cade — stesso ottimismo delle card. */
-function _pedidoMioVp(uuid, btn) {
-  try { marcar(uuid, 'mio', btn); } catch (e) {}
-  try { renderPanel(); } catch (e) {}
-}
+/* [AUT-0425 · 24-set] _pedidoMioVp è MORTA col verbo MÍO — nessun chiamante resta:
+   `_mesero` lo popola la PLAZA all'arrivo, non più un tap del mesero. */
 
 /* ── IL PANNELLO DEI VERBI ── */
 /* ═══ v3.4.6 · IL TOTALE DELLA MESA È QUELLO DEL SERVER, NON QUELLO CHE VEDO ═══
@@ -9320,9 +9315,11 @@ function renderPanel() {
       (esCtaV ? '💳 COBRAR' : '✓ Voy') + '</button></div>'
     : '';
   /* v3.4.3 · SECONDA FAMIGLIA CHE PULSA (trovata da Alberto: «e la 27?»): la
-     tessera «pide ya» non è una llamada — è un PEDIDO NUEVO senza dueño. Anche
-     lui è una persona che aspetta, e anche il suo fatto deve stare dove cade
-     il tap, col suo gesto: ✓ MÍO. (Nello sheet la card c'era già; qui no.) */
+     tessera «pide ya» non è una llamada — è un PEDIDO NUEVO senza dueño.
+     [AUT-0425 · 24-set] Il bottone ✓ MÍO è MORTO col verbo (⚙️: «il verbo non
+     si accelera, si TOGLIE» — `_mesero` lo popola la PLAZA all'arrivo, non
+     più un tap del mesero). Resta solo l'AVVISO: un pedido senza proprietario
+     si mostra a tutti, non si inventa un proprietario toccando uno schermo. */
   const mVp = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
   let pendV = null;
   if (mVp) mVp.pend.forEach(function (p) {
@@ -9331,8 +9328,7 @@ function renderPanel() {
   });
   if (pendV) fasciaV +=
     '<div class="msh-llam" style="margin:9px 0 2px">✋ <b>Pedido nuevo — nadie lo tomó</b>' +
-    ' · ⏱ ' + fmtHace(pendV.hace_s || 0) +
-    '<button onclick="_pedidoMioVp(\'' + esc(pendV.uuid) + '\',this)">✓ MÍO</button></div>';
+    ' · ⏱ ' + fmtHace(pendV.hace_s || 0) + '</div>';
   const V = [
     { k: 'pedir', i: '🍽', n: 'PEDIR', cl: 'dest' },
     { k: 'precuenta', i: '🧾', n: 'PRECUENTA', cl: 'pcv' },
@@ -10514,7 +10510,7 @@ function renderMesaSheet(r) {
             m.limpiar.map(function (p) { return { p: p, t: 'lib' }; }))
     .sort(function (a, b) { return (a.p.hace_s || 0) - (b.p.hace_s || 0); })
     .forEach(function (c) {
-      h += c.t === 'pend' ? cardPedido(c.p, umb, '✋ Mío — lo tomo yo', 'mio')
+      h += c.t === 'pend' ? cardPedido(c.p, umb)
          : c.t === 'mio' ? cardMio(c.p, umb)
          : cardLiberar(c.p);
     });
@@ -13314,7 +13310,7 @@ function render(r) {
     // v1.5 · contatore: il più vecchio sta in cima (è il più urgente), il numero
     // ti dice quanti aspettano sotto senza dover scrollare
     h += '<div class="h">Pendientes · tu plaza — ' + (pend.length + llam.length) + '</div>';
-    pend.forEach(p => { h += cardPedido(p, umb, 'Mío — voy a la ' + esc(p.mesa), 'mio'); });
+    pend.forEach(p => { h += cardPedido(p, umb); });
     /* v3.7 · la campanella si VEDE (richiesta Alberto 02-ago): «MESA 1 llama,
        tap, vado». Grande, che pulsa, un solo bottone. Niente da leggere. */
     /* v1.6 · LA CAMPANELLA DICE COSA VUOLE (D-day 10-ago · GAS v3.77.0).
@@ -13399,7 +13395,7 @@ function render(r) {
       }).join('')
     : '';
   $('secSinDueno').innerHTML = enllHtml + (sd.length
-    ? '<div class="h bad">Sin dueño · nadie lo tomó — ' + sd.length + '</div>' + sd.map(p => cardPedido(p, umb, 'Mío — lo tomo yo', 'mio', true)).join('')
+    ? '<div class="h bad">Sin dueño · nadie lo tomó — ' + sd.length + '</div>' + sd.map(p => cardPedido(p, umb, true)).join('')
     : '');
 
   // v2.0 · i MÍOS vivono nella griglia MIS MESAS + sheet: la vecchia lista
@@ -13535,34 +13531,14 @@ function cardMio(p, umb) {
           : '<button class="btn" onclick="marcar(\'' + esc(p.uuid) + '\',\'digitado\',this)">✓ Confirmar pedido</button>' +
             // v1.10 · prima del digitado si può correggere (¿la mesa se equivocó?)
             '<button class="btn sec" style="margin-top:6px" onclick="abrirCorreccion(\'' + esc(p.uuid) + '\')">✎ Corregir pedido</button>') +
-        /* v3.13.0 · AUT-0003 §2.3 · «NO ES MÍO» — il tavolo restituibile: il
-           pedido torna al titolare vigente della plaza (GAS soltarMio scrive
-           Traspaso_A, mai Mesero). Solo sui MIOS non ereditati: un heredado
-           non è mio da restituire. */
-        (!p.heredado
-          ? '<button class="btn sec" style="margin-top:6px;opacity:.85" onclick="soltarMioUI(\'' + esc(p.uuid) + '\',this)">🫱 No es mío — pasa a la plaza' +
-            '<small style="display:block;font-size:10px;opacity:.75;font-weight:400">lo toma quien esté a cargo de la plaza</small></button>'
-          : '') +
+        /* [AUT-0425 · 24-set] «NO ES MÍO» è MORTO col verbo MÍO (⚙️: il verbo
+           non si accelera, si TOGLIE — `_mesero` lo popola la PLAZA
+           all'arrivo, non più un gesto del mesero. Restituire un tavolo che
+           nessuno ha mai "preso a mano" non ha più senso: chi lo eredita
+           (`heredado`, che RESTA) lo prende dalla plaza, non da un rifiuto). */
         '</div>';
     }
   }
-}
-
-/* v3.13.0 · AUT-0003 §2.3 · «no es mío»: il GAS lo passa al titolare vigente
-   della plaza; se non c'è nessuno, il rifiuto è parlante e il tavolo RESTA
-   tuo — mai un conto abbandonato nel vuoto. */
-async function soltarMioUI(uuid, btn) {
-  if (btn) btn.disabled = true;
-  try {
-    const r = await gasPost('soltarMio', { codigo: STATE.codigo, nombre: STATE.nombre, uuid: uuid });
-    if (r && r.ok) {
-      toast('ok', '🫱 Mesa ' + (r.mesa || '') + ' → ahora la lleva ' + (r.a || 'la plaza'));
-      try { refrescar(false); } catch (e2) {}
-    } else if (r && r.error === 'plaza_sin_titular') {
-      toast('err', '🫱 ' + (r.mensaje || 'Nadie vigente en la plaza: sigue siendo tuya. Avisa al JL.'));
-      if (btn) btn.disabled = false;
-    } else { toast('err', (r && r.error) || 'No se pudo'); if (btn) btn.disabled = false; }
-  } catch (e) { toast('err', 'Sin señal — reintenta'); if (btn) btn.disabled = false; }
 }
 
 /* v3.12 · suelta il regalo 2x1 in attesa → produzione ADESSO (GAS soltar2x1) */
@@ -13637,7 +13613,7 @@ function _mesaTag(p) {
   return '<span class="mesa">MESA ' + esc(p.mesa) + g + '</span>';
 }
 
-function cardPedido(p, umb, btnLabel, marca, urgente) {
+function cardPedido(p, umb, urgente) {
   const items = itemsDe(p);
   const n = items.reduce((s, it) => s + (parseInt(it.qty, 10) || 1), 0);
   // v1.22 · #13 · 🎁 REGALO: la card vive dal mesero del DESTINO — la mesa
@@ -13673,7 +13649,9 @@ function cardPedido(p, umb, btnLabel, marca, urgente) {
     regaloHtml + prodHtml +
     bodyItems(p) +
     '<div class="tot"><span>' + n + ' producto' + (n === 1 ? '' : 's') + ' · orden Aloha ↓</span><b>' + fmtPrice(p.total) + '</b></div>' +
-    '<button class="btn" onclick="marcar(\'' + esc(p.uuid) + '\',\'' + marca + '\',this)">' + btnLabel + '</button>' +
+    /* [AUT-0425 · 24-set] il bottone ✓ MÍO è morto col verbo: `_mesero` lo
+       popola la PLAZA all'arrivo, non più un tap del mesero. La card resta
+       — informa che il pedido esiste — ma non offre più un'azione da fare. */
     '</div>';
 }
 
@@ -13681,10 +13659,10 @@ function cardPedido(p, umb, btnLabel, marca, urgente) {
 async function marcar(uuid, marca, btn) {
   if (STATE.enVuelo[uuid]) return;
   STATE.enVuelo[uuid] = true;
-  // v1.16 · MÍO ottimistico: la card sparisce SUBITO da pendientes e resta soppressa
-  // finché il poll conferma che è nei MÍOS (o safety 12s). Basta col flicker MÍO→riappare
-  // quando la rete balla e il poll rilegge lo stato vecchio.
-  if (marca === 'mio') { STATE.tomando[uuid] = Date.now(); render(STATE.sala); }
+  /* [AUT-0425 · 24-set] il ramo `marca === 'mio'` (l'ottimismo di `_pedidoMioVp`)
+     è MORTO qui con lui: nessun chiamante manda più `'mio'` a questa funzione.
+     `STATE.tomando` resta come infrastruttura condivisa — non fa più nulla senza
+     chi lo popoli, e togliere anche quello non è nel perimetro di oggi. */
   /* v3.6 · lo stesso rispetto per gli ALTRI gesti: digitado/entregado/limpia
      si vedono SUBITO e restano finché la foto non li conferma. */
   if (MARCA_ESTADO[marca] || marca === 'limpia') {
