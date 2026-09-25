@@ -1086,7 +1086,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.171.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.172.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3954,6 +3954,16 @@ async function guardarCorreccion(uuid, btn) {
       else if (!r.sin_cambios && r.total != null) {
         bordeHecho('corregir', { uuid: uuid, total_nuevo: r.total, items_json_nuevo: r.items_json || '', mesa: _mesaCorr, corr_uid: STATE.editCorrUid });
       }
+      /* [25-set 12:2x · reperto di Alberto, mesa 997 col pannello a steppers]
+         Questo cammino (guardarCorreccion) non aveva MAI avuto l'ottimista —
+         solo `_dtGo` («Un producto») l'aveva, da ieri sera. Il toast diceva
+         il vero (il bordo/GAS avevano accettato) ma lo sheet restava com'era
+         finché non arrivava il beat: stessa classe di AUT-EMERG-0128, cammino
+         diverso. `_corrAplicaLocal` è il nucleo di `_dtEliminarOptimista`
+         senza il registro di riconciliazione (qui non c'è UN item/qty da
+         seguire: può cambiare l'intero pedido) — la verità torna comunque col
+         prossimo poll vero, come sempre. */
+      _corrAplicaLocal(_mesaCorr, uuid, r);
       toast('ok', r.void_jl
         ? '✓ Cambiado — «' + (r.motivo || '') + '», autorizó ' + r.void_jl
         : (r.cancelado ? 'Pedido cancelado — la mesa se arrepintió' : (r.sin_cambios ? 'Sin cambios' : '✓ Corregido — queda en el registro')));
@@ -8704,10 +8714,32 @@ function _dtPinta() {
       poll stesso l'ha già rimesso (è la sua foto), e qui SOLO SI DICE al
       mesero, perché un item che riappare in silenzio si legge come un
       pedido nuovo, non come un fallimento.
-   ⚖️ Scope dichiarato: solo questo cammino («Un producto» / `_dtGo`), non
-   `guardarCorreccion` (il pannello degli steppers) — è quello misurato nel
-   reperto di oggi, e la sua `items_json` porta prezzo/nombre che qui non
-   servono a ricostruire correttamente senza rischiare un vetro sbagliato. */
+   ⚖️ Scope di ieri sera: solo questo cammino («Un producto» / `_dtGo`), non
+   `guardarCorreccion`. [25-set 12:2x · esteso, reperto di Alberto sullo
+   STESSO difetto dal pannello a steppers: il totale/items non si toglie dal
+   modal aperto, si vede solo al beat] `_corrAplicaLocal`, sotto, applica lo
+   STESSO ① (muta il modello, ridisegna subito) a `guardarCorreccion` — senza
+   il ② (nessuna coda di riconciliazione: lì non c'è un item/qty solo da
+   seguire, può cambiare l'intero pedido; la verità torna col prossimo poll
+   vero, come già faceva prima di questo fix). */
+function _corrAplicaLocal(mesa, uuid, r) {
+  const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
+  if (!mm) return;
+  const arr = mm.pend.some(function (p) { return p.uuid === uuid; }) ? mm.pend
+    : mm.mios.some(function (p) { return p.uuid === uuid; }) ? mm.mios
+    : mm.limpiar.some(function (p) { return p.uuid === uuid; }) ? mm.limpiar : null;
+  if (!arr) return;
+  const idx = arr.findIndex(function (p) { return p.uuid === uuid; });
+  if (idx < 0) return;
+  if (r.cancelado) {
+    arr.splice(idx, 1);
+    mm.n = Math.max(0, (mm.n || 1) - 1);
+  } else if (!r.sin_cambios && r.total != null) {
+    arr[idx].total = r.total;
+    if (r.items_json) arr[idx].items_json = r.items_json;
+  }
+  if (STATE.mesaAbierta === mesa && STATE.sala) renderMesaSheet(STATE.sala);
+}
 function _dtEliminarOptimista(mesa, uuid, itemId, qtyEsperada, r) {
   const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
   if (!mm) return;
