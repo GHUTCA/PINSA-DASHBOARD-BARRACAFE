@@ -2686,7 +2686,20 @@ async function leerSala(codigo, nombre) {
                ⇒ l'età viaggia sempre (`_edad_s`); a decidere COSA mostrare è
                il vetro, a fasce — vedi il banner in `refrescar`. */
             mia._edad_s = mia._edad_dato_s;
-            if (_edadV > BORDE_SALA.DECLARA_MS) mia._vieja_s = mia._edad_dato_s;
+            /* [G · 25-set, ordine di Alberto `LA SALA E ISTANTANEA O NON E`]
+               QUI C'ERA `if (_edadV > DECLARA_MS) mia._vieja_s = ...` — il
+               banner misurava l'età della FOTO DI GOOGLE (_edadV/ts_datos),
+               non quella della sala che il mesero vede. Con la sala nata al
+               bordo i gesti sono freschi in ms: dire «vedi una cosa vecchia»
+               quando è istantaneo è rumore, non prudenza. `_edad_s` sopra
+               resta (viaggia SEMPRE, N4, e serve alla diagnostica/`/sombra`)
+               — solo NON accende più il banner. `_vieja_s` ora nasce SOLO
+               da `edad_borde_s` (ultimo beat dei hechos applicato dal
+               bordo), pubblicato da ⚙️ V27/V28: finché non lo pubblica,
+               questo resta `undefined` e il banner tace — mai un falso
+               allarme nel frattempo. */
+            const _edadBordeS = Number(j.datos.datos.edad_borde_s);
+            if (_edadBordeS > 60) mia._vieja_s = Math.round(_edadBordeS);
             return mia;
           }
           fotoVieja = mia; fotoVieja._vieja_s = Math.round(_edadV / 1000);
@@ -3272,10 +3285,22 @@ async function cierreEnviar() {
        si vede più inghiottire il secondo corte come duplicato. Il valore nasce
        al primo passo e resta stabile per i retry della stessa dichiarazione. */
     if (!CIE.franja) CIE.franja = (new Date().getHours() < 17 ? 'dia' : 'noche');
-    const r = await gasPost('cerrarMesero', { codigo: STATE.codigo, nombre: STATE.nombre,
+    const _cierreBody = { codigo: STATE.codigo, nombre: STATE.nombre,
       franja: CIE.franja,
       uid: _cieUid(monto), efectivo_declarado: monto, motivo: CIE.motivo || '',
-      pasar_mesas: !!CIE.pasarMesas });
+      pasar_mesas: !!CIE.pasarMesas };
+    /* [E · 25-set] cerrarMesero al bordo — accept-e-inoltra, NON come gli
+       altri verbi del bordo: qui non si sostituisce a gasPost, lo affianca.
+       `recibido:true` del bordo non porta esperado/dif/cierre (R5, l'anti-
+       frode non li rivela prima della firma — dichiarato dal bordo stesso):
+       il verdetto vero, coi numeri che questa schermata deve mostrare, resta
+       SEMPRE quello di GAS. Fire-and-forget, mai atteso: serve solo come
+       scrittura durevole se Google è giù in quel momento — lo stesso `uid`
+       fa dedup lato GAS, quindi non duplica nulla. Inerte oggi
+       (`CERRARMESERO_BORDE_ON`="0"): la leva la gira ⚙️ V28 dopo il suo
+       banco denaro, non questa riga. */
+    _cerrarMeseroAlBorde(_cierreBody).catch(function () {});
+    const r = await gasPost('cerrarMesero', _cierreBody);
     if (r && r.ok) {
       /* v2.0.1 · REPERTO ROSSO del collaudo a teste diverse: l'uid persistito
          NON moriva mai — il secondo cierre del giorno con lo STESSO monto
@@ -3642,8 +3667,13 @@ const CORRBORDE_ON = (function () {
   try {
     if (q === '1') { localStorage.setItem('sala_corrborde', '1'); return true; }
     if (q === '0') { localStorage.setItem('sala_corrborde', '0'); return false; }
-    return localStorage.getItem('sala_corrborde') === '1';   // default SPENTA
-  } catch (e) { return q === '1'; }
+    /* [H · 25-set, `VAI VENERDI 0741`] DI FLOTTA: AUT-0412 è verificata sul
+       vivo (`0412 PRIMA CORREZIONE NEL LIBRO NUOVO`) e il `local` che la
+       bloccava è vivo da ieri sera. Stesso idioma di GUARDIA_SALA_ON/
+       CERRAR_ASK_ON: `?corrborde=0` spegne per apparecchio, chi non tocca
+       niente eredita ACCESA. */
+    return localStorage.getItem('sala_corrborde') !== '0';   // default ACCESA di flotta [H]
+  } catch (e) { return q !== '0'; }
 })();
 /* ═══ [24-set 22:2x · voce C, priorità cambiata dal cancello a servizio in
    corso] LA CARTA DAL BORDO — Google non arriva più (30s+ di «Cargando la
@@ -3689,6 +3719,34 @@ async function _catalogoAlBorde() {
    ritorno — i quattro chiamanti sotto non cambiano nessun'altra riga. */
 function _catalogoConBorde(params) {
   return _catalogoAlBorde().then(function (rb) { return rb || gasGet('getCatalogo', params); });
+}
+/* ═══ [E · 25-set] cerrarMesero al bordo — accept-e-inoltra, letto dal
+   sorgente del bordo prima di scrivere (`pinsita-borde/src/index.js`, azione
+   `cerrarMesero`): valida nombre/uid/efectivo come GAS, fossilizza, inoltra
+   VERBATIM nell'alarm, e risponde SOLO `{ok, uid, recibido:true}` — MAI
+   esperado/dif/cierre (R5 dell'anti-frode: quei numeri non si rivelano
+   prima della firma, dichiarato nel commento del bordo stesso). Per questo
+   la leva NON sostituisce gasPost in `cierreEnviar()` come fanno gli altri
+   verbi: lo affianca, fire-and-forget — i numeri della schermata restano
+   sempre quelli di GAS. Leva propria del bordo (`CERRARMESERO_BORDE_ON`),
+   nasce "0": qui non c'è niente da accendere dal lato vetro, solo la
+   chiamata pronta e inerte finché ⚙️ V28 non gira la sua, dopo il banco
+   denaro che ha chiesto lei stessa prima. */
+async function _cerrarMeseroAlBorde(body) {
+  try {
+    const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS');
+    const ctrl = new AbortController();
+    const to = setTimeout(function () { ctrl.abort(); }, 6000);
+    const r = await fetch(u, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE_SALA.T },
+      body: JSON.stringify(Object.assign({ action: 'cerrarMesero', local: CFG.LOCAL }, body)),
+      signal: ctrl.signal, cache: 'no-store',
+    });
+    clearTimeout(to);
+    const j = await r.json();
+    return (j && j.borde === true) ? j : null;
+  } catch (e) { return null; }
 }
 /* [reperto 🎛 BKP V28, 24-set] il freno PIN del bordo è per LOCALE, non per
    apparecchio: cinque errori di CHIUNQUE bloccano il PIN per TUTTI per 10
@@ -6825,16 +6883,21 @@ async function refrescar(conSkeleton) {
           (reperto di ⚙️). *Un messaggio che dichiara una CAUSA invece di un
           FATTO fabbrica una diagnosi, e quella diagnosi viaggia più lontano
           del fatto perché è più utile.* ⇒ la causa si nomina SOLO dove è
-          vista: `BORDE_SALA.fallos > 0`, che esiste già. */
-    const _edadS = r._vieja_s || r._edad_s || 0;
+          vista: `BORDE_SALA.fallos > 0`, che esiste già.
+       ③ [G · 25-set] E LA CAUSA ERA COMUNQUE SBAGLIATA: `BORDE_SALA.fallos`
+          conta i fallos VERSO IL BORDO (r.2696-2697), non verso Google — il
+          testo diceva «Google no contesta» su un contatore che parla
+          d'altro. `_edad_s` (Google) è sceso dalla riga sopra: NON accende
+          più questo banner (va a `/sombra`, non al mesero — ordine di
+          Alberto `LA SALA E ISTANTANEA O NON E`). Resta solo `_vieja_s`
+          (età del bordo) e, quando è la causa vista, si nomina lui. */
+    const _edadS = r._vieja_s || 0;
     if (_edadS >= 60) {
       const _of = $('offline');
       const _min = Math.max(1, Math.round(_edadS / 60));
-      _of.textContent = r._vieja_s
-        ? ('📷 Sala de hace ' + _min + ' min' +
-           (BORDE_SALA.fallos > 0 ? ' — Google no contesta' : '') +
-           ' · tus gestos igual quedan guardados.')
-        : ('📷 hace ' + _min + ' min');
+      _of.textContent = '📷 Sala de hace ' + _min + ' min' +
+           (BORDE_SALA.fallos > 0 ? ' — no llego al borde' : '') +
+           ' · tus gestos igual quedan guardados.';
       _of.classList.add('show', 'vieja');
     } else {
       const _of = $('offline');
@@ -13361,6 +13424,21 @@ async function pagoConfirmar(btn) {
          entra qui: una invitación non è una vendita e non ha mai portato
          boleta:1 — chiederle un DTE sarebbe inventare una vendita. */
       if (!esCort && !yaFolio) _pedirBoleta(pagoIdBol, mesaBol);
+      return;
+    }
+    /* [24-set 23:4x · reperto `MESA 36 DUE PAGOS FANTASMA`, ⓑ] il GAS blocca
+       un `uid` ripetuto (`pago_duplicado_bloqueado` — mesa 36, due tentativi
+       sullo STESSO uid) ma il vetro non lo riconosceva: restava aperto e il
+       mesero, non vedendo un «ya pagada», ha riprovato con un uid NUOVO e un
+       medio diverso — e QUELLO il bordo l'ha accettato ottimisticamente
+       (scritto in Postgres) prima che Google lo rifiutasse (`sin_cuenta`,
+       il conto era già chiuso dal primo pago vero): due righe fantasma da
+       $214.580. Cura decisa dal cancello: come `ya_registrado` (r.13373,
+       stessa chiusura) — la mesa ERA già pagata, si chiude qui, non si
+       apre la porta a un uid nuovo sulla stessa seduta. */
+    if (r && !r.ok && r.error === 'pago_duplicado_bloqueado') {
+      toast('ok', '✓ Mesa ' + pg.mesa + ' ya estaba pagada — no se cobró de nuevo');
+      STATE.pago = null; renderPago(); cerrarMesa(); refrescar(false);
       return;
     }
     /* v1.4 · gli errori del PIN parlano chiaro e riaprono la serratura */
