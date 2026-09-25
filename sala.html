@@ -3569,7 +3569,7 @@ async function agregarAbrir(uuid) {
   STATE.agregarQ = '';
   if (_catalogoViejo()) {      // v2.14 · TTL: la foto di fascia caduca, il picker la rinfresca
     try {
-      const r = await gasGet('getCatalogo', { codigo: STATE.codigo });
+      const r = await _catalogoConBorde({ codigo: STATE.codigo });
       /* [17-set] STESSA GUARDIA di `nuevoAbrir` — vedi il commento lungo là:
          una risposta vuota non sovrascrive mai una carta buona e non tocca
          mai `catalogoTs`, altrimenti QUESTO cammino (l'upsell "¿otra copa?")
@@ -3645,6 +3645,51 @@ const CORRBORDE_ON = (function () {
     return localStorage.getItem('sala_corrborde') === '1';   // default SPENTA
   } catch (e) { return q === '1'; }
 })();
+/* ═══ [24-set 22:2x · voce C, priorità cambiata dal cancello a servizio in
+   corso] LA CARTA DAL BORDO — Google non arriva più (30s+ di «Cargando la
+   carta…», il muro suo oltre 120s a cena). Contratto di ⚙️ V28 (bacheca
+   `CATALOGOMESERO VIVO ROTTA OK SEZIONE VUOTA`): `GET /catalogoMesero/:local`
+   risponde nella STESSA forma di `getCatalogo` (GAS), byte per byte —
+   `productos`/`menu_opciones`/`termino_opciones`/`mods2_on` — quindi tutta
+   la logica già indurita di sotto (le 22 prove di `_catalogoViejo` e della
+   cache avvelenata) non cambia di una riga: cambia solo DA DOVE arriva.
+   Leva di DEVICE, come `corrborde`/`restoserver`: nasce SPENTA (`?carta=gas`
+   la tiene giù), `?carta=borde` la accende su QUESTO telefono — è la stringa
+   che il cancello ha dettato, non `1`/`0` come le altre, per restare fedele
+   all'ordine. Su QUALSIASI `ok:false` (leva del BORDO spenta — oggi lo è,
+   `CATALOGO_MESERO_BORDE_ON` — sezione assente/più vecchia di 10 min, token,
+   local) si torna `null`: il chiamante fa esattamente come ieri, `gasGet`
+   diretto. Il bordo non deve mai essere PEGGIO di Google, solo più veloce
+   quando risponde — e a leva-bordo spenta questo cammino si esercita lo
+   stesso (la rotta risponde sempre `apagado`), collaudabile PRIMA che
+   qualcuno lo accenda dall'altro lato. */
+const CARTA_BORDE_ON = (function () {
+  const q = QS.get('carta');
+  try {
+    if (q === 'borde') { localStorage.setItem('sala_carta_borde', '1'); return true; }
+    if (q === 'gas') { localStorage.setItem('sala_carta_borde', '0'); return false; }
+    return localStorage.getItem('sala_carta_borde') === '1';   // default SPENTA
+  } catch (e) { return q === 'borde'; }
+})();
+async function _catalogoAlBorde() {
+  if (!CARTA_BORDE_ON) return null;
+  try {
+    const u = BORDE_SALA.URL + '/catalogoMesero/' + encodeURIComponent(CFG.LOCAL || 'BKS')
+      + '?t=' + encodeURIComponent(BORDE_SALA.T);
+    const ctrl = new AbortController();
+    const to = setTimeout(function () { ctrl.abort(); }, 6000);
+    const r = await fetch(u, { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    const j = await r.json();
+    if (!j || !j.ok || !Array.isArray(j.productos)) return null;   // apagado · sin_catalogo · token/local — «vai di là»
+    return j;
+  } catch (e) { return null; }   // rete morta, timeout: stesso «vai di là»
+}
+/* drop-in di `gasGet('getCatalogo', params)`: stessa firma, stessa forma di
+   ritorno — i quattro chiamanti sotto non cambiano nessun'altra riga. */
+function _catalogoConBorde(params) {
+  return _catalogoAlBorde().then(function (rb) { return rb || gasGet('getCatalogo', params); });
+}
 /* [reperto 🎛 BKP V28, 24-set] il freno PIN del bordo è per LOCALE, non per
    apparecchio: cinque errori di CHIUNQUE bloccano il PIN per TUTTI per 10
    min. ⚙️ prepara un freno a due piani (per apparecchio sopra per locale) —
@@ -3961,7 +4006,7 @@ async function nuevoAbrir(mesaPre) {
        campi non cambiano un pixel di quello che il mesero vede. */
     STATE.catalogoFallo = false;
     try {
-      const r = await gasGet('getCatalogo', { codigo: STATE.codigo });
+      const r = await _catalogoConBorde({ codigo: STATE.codigo });
       if (r && r.ok && Array.isArray(r.productos)) {
         /* [17-set · reperto di V25, confermato da Alberto sul vivo] LA CACHE
            SI AVVELENAVA: una `[]` veniva scritta qui esattamente come una
@@ -4335,7 +4380,7 @@ function otraRondaMesa(mesa){
   });
   renderNuevo();
   if (!catg.length) {
-    gasGet('getCatalogo', { codigo: STATE.codigo }).then(function(r){
+    _catalogoConBorde({ codigo: STATE.codigo }).then(function(r){
       /* [17-set] stessa guardia: se nel frattempo (questa chiamata non ha
          `await`, gira in parallelo al resto) è arrivata una carta buona da
          un'altra strada, un vuoto qui non la deve cancellare. */
@@ -6272,7 +6317,7 @@ function entrarSala() {
      tap, nessun errore visto, la cache già avvelenata quando il primo PEDIR
      arriva). Stessa guardia delle altre tre: un vuoto non scrive né su
      `catalogo` né su `catalogoTs` se non c'è niente di buono da scrivere. */
-  if (!JL && _catalogoViejo()) gasGet('getCatalogo', { codigo: STATE.codigo }).then(function (r) {
+  if (!JL && _catalogoViejo()) _catalogoConBorde({ codigo: STATE.codigo }).then(function (r) {
     if (r && r.ok && Array.isArray(r.productos) && r.productos.length) {
       STATE.catalogo = r.productos; STATE.catalogoTs = Date.now();
       STATE._ago86 = {};   // v3.26.0 · catalogo fresco = verità del server
