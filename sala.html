@@ -1086,7 +1086,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.177.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.178.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -8762,6 +8762,60 @@ function _corrAplicaLocal(mesa, uuid, r) {
      sé) ed esce da sola se il pannello non esiste o mostra un'altra mesa —
      chiamarla sempre è innocua (stesso pattern di `vpSoltar()`, r.9657). */
   renderPanel();
+  /* [25-set 15:0x · PASSAGGIO CONTROLLER V28: Alberto ha usato SEMPRE questo
+     pannello (steppers), mai «Un producto»] `_dtEliminarOptimista` aveva
+     una coda di riconciliazione (`_corrOptimistaReconcilia`, sotto) per
+     esattamente questo motivo: un poll che arriva PRIMA della
+     fossilizzazione al bordo/GAS rimette la riga com'era, e senza qualcuno
+     che la ritolga resta così finché non arriva il poll vero — lo stesso
+     identico sintomo di partenza, mai chiuso su QUESTO pannello perché
+     v3.172.0 (r.3957 ca., commento RITIRO) aveva scelto di non seguirlo
+     ("può cambiare l'intero pedido, non un item solo"). Qui si registra
+     l'aspettativa — cancelado, o il total/items_json nuovo — e la si segue
+     con lo stesso ritmo (`_corrPedidoReconcilia`, poco sotto): il nucleo
+     è lo stesso di `_dtEliminarOptimista`, non una terza invenzione. */
+  STATE._corrPedidoOptimista = STATE._corrPedidoOptimista || {};
+  STATE._corrPedidoOptimista[uuid] = {
+    mesa: mesa, uuid: uuid,
+    cancelado: !!r.cancelado,
+    total: (!r.sin_cambios && r.total != null) ? r.total : null,
+    items_json: r.items_json || null,
+    ts: Date.now()
+  };
+}
+function _corrPedidoReconcilia() {
+  /* [25-set 15:0x] stesso ritmo di `_corrOptimistaReconcilia` (5 min di
+     grazia, verifica finale una tantum) ma sul PEDIDO intero, non su un
+     item/qty solo — è quello che `_corrAplicaLocal` sa scrivere. */
+  const reg = STATE._corrPedidoOptimista; if (!reg) return;
+  let riapplicato = false;
+  Object.keys(reg).forEach(function (k) {
+    const e = reg[k], edad = Date.now() - e.ts;
+    const mm = (STATE.mesasModel || []).find(function (x) { return String(x.mesa) === String(e.mesa); });
+    const arr = mm && mm.pend.some(function (p) { return p.uuid === e.uuid; }) ? mm.pend
+      : mm && mm.mios.some(function (p) { return p.uuid === e.uuid; }) ? mm.mios
+      : mm && mm.limpiar.some(function (p) { return p.uuid === e.uuid; }) ? mm.limpiar : null;
+    const idx = arr ? arr.findIndex(function (p) { return p.uuid === e.uuid; }) : -1;
+    if (edad < 300000) {
+      if (e.cancelado && idx >= 0) {
+        arr.splice(idx, 1);
+        mm.n = Math.max(0, (mm.n || 1) - 1);
+        riapplicato = true;
+      } else if (!e.cancelado && e.total != null && idx >= 0 &&
+                 (arr[idx].total !== e.total || (e.items_json && arr[idx].items_json !== e.items_json))) {
+        arr[idx].total = e.total;
+        if (e.items_json) arr[idx].items_json = e.items_json;
+        riapplicato = true;
+      }
+      return;   // non ancora definitivo: si ricontrolla al prossimo giro
+    }
+    delete reg[k];                    // verifica finale, una tantum
+    if (e.cancelado && idx >= 0) toast('warn', '⚠️ El cambio no se aplicó — sigue en la mesa ' + e.mesa + ', vuelve a intentar', 4500);
+  });
+  if (riapplicato) {
+    renderPanel();
+    if (STATE.mesaAbierta && STATE.sala) renderMesaSheet(STATE.sala);
+  }
 }
 function _dtEliminarOptimista(mesa, uuid, itemId, qtyEsperada, r) {
   // [25-set 13:4x · stesso passaggio] stesso confronto tollerante al tipo —
@@ -13806,6 +13860,7 @@ function render(r) {
   // assorbiti dalla tessera gialla (non tornano nei pendientes di plaza)
   renderMesas(r);
   _corrOptimistaReconcilia();   // [AUT-0432 ⓑ] il poll vero appena arrivato: si verifica, non si aspetta di più
+  _corrPedidoReconcilia();      // [25-set 15:0x] stesso ritmo, per il pannello a steppers (`guardarCorreccion`)
   const absorbidos = {};
   STATE.mesasModel.forEach(function (m) { m.pend.forEach(function (p) { absorbidos[p.uuid] = true; }); });
 
