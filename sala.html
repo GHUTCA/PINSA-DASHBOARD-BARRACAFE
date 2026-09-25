@@ -1086,7 +1086,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.169.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.170.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2863,12 +2863,15 @@ async function _verCheck() {
   } catch (e) { /* silencioso: ver §comentario arriba */ }
 }
 let toastT = null;
-function toast(tipo, msg) {
+/* [25-set · reperto di Alberto su mesa 997] `ms` opzionale — di default resta
+   3200 come sempre. L'esito di un gesto che il mesero deve LEGGERE prima di
+   lasciare il tavolo (ELIMINAR: fuera/rifiutato) passa un `ms` più lungo. */
+function toast(tipo, msg, ms) {
   const el = $('toast');
   el.className = 'toast show ' + tipo;
   el.textContent = msg;
   clearTimeout(toastT);
-  toastT = setTimeout(() => el.classList.remove('show'), 3200);
+  toastT = setTimeout(() => el.classList.remove('show'), ms || 3200);
 }
 function esperaClass(s, umb) {
   if (s < (umb ? umb.RING_REPEAT_S : 90)) return 'ok';
@@ -8726,18 +8729,52 @@ function _dtEliminarOptimista(mesa, uuid, itemId, qtyEsperada, r) {
   if (STATE.mesaAbierta === mesa && STATE.sala) renderMesaSheet(STATE.sala);
 }
 function _corrOptimistaReconcilia() {
+  /* [25-set 11:3x · reperto di Alberto su mesa 997, bacheca `PAGO PERFETTO
+     1131`] `renderMesas(r)` (appena prima di questa chiamata) RICOSTRUISCE
+     `STATE.mesasModel` DA ZERO dal poll appena arrivato — e se quel poll è
+     più veloce del GAS a fossilizzare (misurato fino a ~7,8s), la foto
+     fresca mostra ANCORA il prodotto: la rimozione ottimista di
+     `_dtEliminarOptimista` veniva cancellata dal poll SEGUENTE, un attimo
+     dopo essere apparsa — il mesero vedeva il prodotto tornare prima
+     ancora di essersi accorto che era sparito. Qui non si aspettava più:
+     si ricontrollava alla fine (8s) e basta, lasciando il poll di mezzo
+     libero di disfare il gesto. Ora, FINCHÉ siamo nella finestra di grazia,
+     si RI-APPLICA la rimozione sul modello appena ricostruito — il client
+     si fida della propria azione recente più di un poll che non ha ancora
+     visto la scrittura, esattamente come dichiara il commento di
+     `_dtEliminarOptimista` sopra. */
   const reg = STATE._corrOptimista; if (!reg) return;
+  let riapplicato = false;
   Object.keys(reg).forEach(function (k) {
     const e = reg[k], edad = Date.now() - e.ts;
-    if (edad < 8000) return;                 // il GAS mide hasta ~7,8 s: antes es pronto
-    delete reg[k];                           // verifica una tantum, non un loop
     const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === e.mesa; });
-    const ped = mm ? mm.pend.concat(mm.mios, mm.limpiar).filter(function (p) { return p.uuid === e.uuid; })[0] : null;
+    const arr = mm && mm.pend.some(function (p) { return p.uuid === e.uuid; }) ? mm.pend
+      : mm && mm.mios.some(function (p) { return p.uuid === e.uuid; }) ? mm.mios
+      : mm && mm.limpiar.some(function (p) { return p.uuid === e.uuid; }) ? mm.limpiar : null;
+    const ped = arr ? arr.filter(function (p) { return p.uuid === e.uuid; })[0] : null;
+    if (edad < 8000) {
+      // finestra di grazia: il poll può non aver ancora visto la scrittura
+      // del server — se il prodotto è ricomparso, lo si toglie di nuovo
+      // (solo per una rimozione INTERA, qtyEsperada 0: è il caso dominante,
+      // AUT-EMERG-0128; una riduzione parziale resta come oggi, dichiarato).
+      if (ped && e.qtyEsperada <= 0) {
+        const it = itemsDe(ped).filter(function (x) { return x.id === e.itemId; })[0];
+        const qtyOra = it ? (parseInt(it.qty, 10) || 0) : 0;
+        if (qtyOra > 0) {
+          arr.splice(arr.indexOf(ped), 1);
+          mm.n = Math.max(0, (mm.n || 1) - 1);
+          riapplicato = true;
+        }
+      }
+      return;   // non ancora definitivo: si ricontrolla al prossimo giro
+    }
+    delete reg[k];                           // verifica finale, una tantum
     if (!ped) return;                        // sparita del tutto (pagata/cerrada) — no es el defecto que buscamos
     const it = itemsDe(ped).filter(function (x) { return x.id === e.itemId; })[0];
     const qtyOra = it ? (parseInt(it.qty, 10) || 0) : 0;
-    if (qtyOra > e.qtyEsperada) toast('warn', '⚠️ La quita no se aplicó — sigue en la mesa ' + e.mesa + ', vuelve a intentar');
+    if (qtyOra > e.qtyEsperada) toast('warn', '⚠️ La quita no se aplicó — sigue en la mesa ' + e.mesa + ', vuelve a intentar', 4500);
   });
+  if (riapplicato && STATE.mesaAbierta && STATE.sala) renderMesaSheet(STATE.sala);
 }
 
 /* ── APPLICARE ───────────────────────────────────────────────────────────────
@@ -8851,16 +8888,20 @@ function _dtGo() {
              poll lo rimette e `_corrOptimistaReconcilia()` lo dice. */
           var _finItem = finales.filter(function (it) { return it.id === pr.id; })[0];
           _dtEliminarOptimista(mesa, pr.uuid, pr.id, _finItem ? _finItem.qty : 0, r);
-          toast('ok', '🍽 ' + (pr.quita > 1 ? pr.quita + '× ' : '') + pr.n + ' fuera · mesa ' + mesa);
+          /* [25-set · reperto di Alberto, mesa 997] 3200ms bastavano sulla
+             carta e non sul tavolo: «niente, e un messaggio impossibile da
+             leggere, meno di un secondo». L'esito di ELIMINAR è un gesto che
+             il mesero deve LEGGERE prima di lasciare il tavolo — ≥4s. */
+          toast('ok', '🍽 ' + (pr.quita > 1 ? pr.quita + '× ' : '') + pr.n + ' fuera · mesa ' + mesa, 4500);
           refrescar();
         } else if (!_pinErrorPersistente(r)) {
           /* 🔴 e se non si sa, si dice che NON SI SA — non che è fallito.
              Rimandare «ha fallito» quando la comanda potrebbe essere già
              cambiata è il modo di far ripetere il gesto su uno stato vecchio. */
-          toast('warn', 'No se pudo confirmar — abre la mesa y mira antes de repetir');
+          toast('warn', 'No se pudo confirmar — abre la mesa y mira antes de repetir', 4500);
         }
       }).catch(function () {
-        toast('warn', 'No se pudo confirmar — abre la mesa y mira antes de repetir');
+        toast('warn', 'No se pudo confirmar — abre la mesa y mira antes de repetir', 4500);
       });
     return;
   }
