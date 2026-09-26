@@ -1091,7 +1091,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.186.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.187.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -11283,8 +11283,16 @@ function abrirPago(mesa, parte) {
      Il monto che mostriamo e il consumo che il server chiude devono essere
      LO STESSO numero — se divergono, la cintura v3.128 ferma tutto. */
   const jPago = _juntaDe(mesa);
-  const mesasPago = (jPago && jPago.gid && (jPago.principal || jPago.mesas[0]).toString() === mesa.toString())
-    ? jPago.mesas.slice() : [mesa];
+  const _esJuntaPago = !!(jPago && jPago.gid && (jPago.principal || jPago.mesas[0]).toString() === mesa.toString());
+  const mesasPago = _esJuntaPago ? jPago.mesas.slice() : [mesa];
+  /* [26-set · AUT-0450, bacheca `BANCO PAGO MESAS PAYLOAD ROSSO`] il GAS
+     accetta `payload.mesas` SOLO se ogni mesa appartiene al grupo
+     `payload.gid` letto dal foglio GRUPOS — senza `gid` nel payload, ripiega
+     sulla regola di sempre (`_sesionDeMesa`). Si manda solo quando è
+     DAVVERO un pago di junta (stessa condizione di `mesasPago` sopra): un
+     `gid` mandato a caso su una mesa singola non aiuta nessuno e complica
+     la lettura dell'audit (`mesas_payload_rechazado`). */
+  const gidPago = _esJuntaPago ? jPago.gid : '';
   /* ═══ v3.7.0 · LA JUNTA NON DIMEZZA (AUT-0003 · caso $135.730 → $14.278) ═══
      Qui si sommavano SOLO i pedidos in mano mia (mesasModel): in una junta
      dove metà carte le tiene un collega, il pannello mostrava metà conto —
@@ -11310,7 +11318,7 @@ function abrirPago(mesa, parte) {
      VETRO aveva davanti nell'istante in cui il mesero ha premuto pagar».
      Si salva su `STATE.pago` per arrivare fino al payload del submit,
      qualunque via prenda (bordo/GAS, cintura/parte/chiusura). */
-  STATE.pago = { mesa: mesa, mesas: mesasPago.slice(), tot: tot, parte: _pt ? { titulo: (parte.titulo || 'parte'), monto: _pt } : null,
+  STATE.pago = { mesa: mesa, mesas: mesasPago.slice(), gid: gidPago, tot: tot, parte: _pt ? { titulo: (parte.titulo || 'parte'), monto: _pt } : null,
     prop: 'sug', medio: '',
     otro: '', correo: '', celular: '', nombre: '', enviando: false,
     /* v3.31.0 · [AUT-0113] · `cliente:true` = el teléfono está en manos del
@@ -13490,6 +13498,13 @@ async function pagoConfirmar(btn) {
        GAS di oggi ignora il campo finché non lo legge — nessun rischio a
        mandarlo sempre, come già fa `muro_ms`/`muro_via`. */
     mesas: (pg.mesas && pg.mesas.length) ? pg.mesas : [pg.mesa] };
+  /* [26-set · AUT-0450, bacheca `BANCO PAGO MESAS PAYLOAD ROSSO`] il GAS
+     accetta `mesas` SOLO se ogni mesa appartiene al grupo `gid` — senza
+     `gid` nel payload ripiega sulla regola di sempre. Si manda SOLO quando
+     `abrirPago` l'ha popolato (pago di junta vero): un `gid` a caso su una
+     mesa singola non aiuterebbe e sporcherebbe l'audit
+     (`mesas_payload_rechazado`) senza motivo. */
+  if (pg.gid) body.gid = pg.gid;
   /* v1.4 · le mosse del JL viaggiano DICHIARATE + col PIN (GAS v3.75.0):
      cortesía → cortesia:1 (il server forza $0 e non emette) · otro monto →
      monto_manual:1 + monto (la boleta esce dal cobrado, riga unica). */
