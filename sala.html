@@ -1092,7 +1092,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.189.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.190.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -6572,7 +6572,14 @@ function _limpiarMesaLocal(mesa) {
    nuova regola, la stessa. */
 function _limpiarJuntaLocal(mesa) {
   const j = _juntaDe(mesa);
-  const mesas = (j && j.gid && (j.principal || j.mesas[0]).toString() === (mesa == null ? '' : mesa).toString())
+  /* [26-set 12:0x · AUT-EMERG] `gidSrv`, non `gid`: se il libro non ha mai
+     confermato il grupo, il pago sulla principal ha chiuso — con ogni
+     probabilità — SOLO quella mesa (la guardia del libro ripiega sulla
+     regola di sempre senza un gid vero). Pulire ANCHE la secondaria qui
+     la marcherebbe «a posto» sullo schermo mentre nel libro resta aperta
+     e non pagata — lo stesso difetto della 80 di ieri, dalla parte
+     opposta. */
+  const mesas = (j && j.gidSrv && (j.principal || j.mesas[0]).toString() === (mesa == null ? '' : mesa).toString())
     ? j.mesas : [mesa];
   mesas.forEach(function (m) { _limpiarMesaLocal(m); });
 }
@@ -7626,12 +7633,20 @@ function vCobrarSala(mesa) {
        casino» — e la norma del subito è sua). Il GAS era GIÀ pronto dal
        v3.124.0 (sesión grupo-aware dietro SESION_GRUPO_ON, ora accesa): col
        flag ON il pago copre e chiude TUTTE le mesas della sessione (r.15987).
-       Si accende SOLO se il grupo è confermato dal server (j.gid): una junta
+       Si accende SOLO se il grupo è confermato dal server (j.gidSrv): una junta
        solo-locale non ha sessione di là, e cobrarla «tutta» lascerebbe fuori
        le mesas che il server non conosce. E se il flag tornasse a 0 col
        bottone vivo, la cintura v3.128 rifiuta il monto che non quadra
        (cuenta_desactualizada): fail-closed sui soldi, mai in silenzio. */
-    (j.gid
+    /* [26-set 12:0x · AUT-EMERG, reperto di CONTROLLER] QUI C'ERA `j.gid` —
+       dal 26-set mattina quel campo lo conia il VETRO SUBITO (AUT-0212,
+       `juntaCrear`), non più solo il server: un unir mai arrivato al
+       libro accendeva ugualmente questo bottone, il pago partiva con un
+       gid che il libro non riconosce, la sua guardia ripiegava sulla
+       regola di sempre e chiudeva UNA mesa sola — mentre il mesero, col
+       bottone acceso, aveva incassato per TUTTA la junta. `gidSrv` resta
+       vero SOLO quando il libro ha davvero risposto. */
+    (j.gidSrv
       ? '<button class="opt2" onclick="vhojaCerrar();abrirPago(\'' + esc(j.principal) + '\')"><b>💳 Todo lo que queda · $' + _fmtMiles(tot) + '</b>' +
           '<small>Una boleta, un pago — cierra las ' + j.mesas.length + ' mesas juntas</small></button>'
       : '<button class="opt2" disabled style="opacity:.45"><b>💳 Todo lo que queda · $' + _fmtMiles(tot) + '</b>' +
@@ -10053,7 +10068,7 @@ function _juntasSync(r) {
     let n = (viejo && !usati[viejo.n]) ? viejo.n : 0;
     if (!n) { n = 1; while (usati[n]) n++; }
     usati[n] = true;
-    out.push({ n: n, principal: principal, mesas: mesas, gid: g.gid || '', srv: true });
+    out.push({ n: n, principal: principal, mesas: mesas, gid: g.gid || '', gidSrv: g.gid || '', srv: true });
   });
   /* ═══ [AUT-0212] · 06-set · LA FOTO VECCHIA NON SCIOGLIE LA JUNTA NUOVA ════
      IL FATTO, riprodotto in diretta con Alberto alle 08:5x: junta fatta e
@@ -10202,7 +10217,12 @@ function juntaCrear() {
              junta nell'intervallo, non a vincere sul server. */
           if (r && r.ok && r.grupo_id) {
             const l2 = _juntasLoad(); const x = l2.find(function (y) { return y.n === jj.n; });
-            if (x) { x.gid = r.grupo_id; _juntasSave(l2); }
+            /* [26-set 12:0x · AUT-EMERG] `gidSrv` — SOLO qui, o dal poll
+               (`gs.forEach` sopra), SIGNIFICA «il libro conosce questo
+               grupo». `gid` da solo (r.10159 ca.) è coniato dal vetro e
+               vive anche se il libro non ha mai risposto — vedi la riga
+               sotto per il perché questa distinzione esiste. */
+            if (x) { x.gid = r.grupo_id; x.gidSrv = r.grupo_id; _juntasSave(l2); }
           }
         }).catch(function () {});
     } catch (e) {}
@@ -11364,7 +11384,14 @@ function abrirPago(mesa, parte) {
      Il monto che mostriamo e il consumo che il server chiude devono essere
      LO STESSO numero — se divergono, la cintura v3.128 ferma tutto. */
   const jPago = _juntaDe(mesa);
-  const _esJuntaPago = !!(jPago && jPago.gid && (jPago.principal || jPago.mesas[0]).toString() === mesa.toString());
+  /* [26-set 12:0x · AUT-EMERG, reperto di CONTROLLER prima del pranzo]
+     `gidSrv`, non `gid`: `gid` lo conia il vetro subito (AUT-0212) e resta
+     vero anche se l'unir non è mai arrivato al libro. Sommare il totale
+     E mandare quel gid al pago in quel caso lascerebbe il mesero convinto
+     di cobrar tutta la junta mentre la guardia del libro, non trovando il
+     grupo, ripiega su una mesa sola — soldi incassati e non registrati.
+     `gidSrv` resta vero SOLO quando il libro ha davvero risposto. */
+  const _esJuntaPago = !!(jPago && jPago.gidSrv && (jPago.principal || jPago.mesas[0]).toString() === mesa.toString());
   const mesasPago = _esJuntaPago ? jPago.mesas.slice() : [mesa];
   /* [26-set · AUT-0450, bacheca `BANCO PAGO MESAS PAYLOAD ROSSO`] il GAS
      accetta `payload.mesas` SOLO se ogni mesa appartiene al grupo
@@ -11373,7 +11400,7 @@ function abrirPago(mesa, parte) {
      DAVVERO un pago di junta (stessa condizione di `mesasPago` sopra): un
      `gid` mandato a caso su una mesa singola non aiuta nessuno e complica
      la lettura dell'audit (`mesas_payload_rechazado`). */
-  const gidPago = _esJuntaPago ? jPago.gid : '';
+  const gidPago = _esJuntaPago ? jPago.gidSrv : '';
   /* ═══ v3.7.0 · LA JUNTA NON DIMEZZA (AUT-0003 · caso $135.730 → $14.278) ═══
      Qui si sommavano SOLO i pedidos in mano mia (mesasModel): in una junta
      dove metà carte le tiene un collega, il pannello mostrava metà conto —
