@@ -871,6 +871,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
 .vp-li .q{font-weight:900;min-width:26px;color:#b8b0a0}
 .vp-li .nm{flex:1;line-height:1.25}
 .vp-li .pv{font-weight:800;color:#b8b0a0;font-size:13px}
+.vp-li-mesa{font-size:11.5px;opacity:.75;padding:8px 0 2px;text-transform:uppercase;letter-spacing:.02em}
 .verbos{display:grid;gap:7px;grid-template-columns:repeat(3,1fr)}
 .vb{background:#222230;border:1px solid rgba(255,255,255,.09);border-radius:13px;padding:11px 2px 9px;
   display:flex;flex-direction:column;align-items:center;gap:5px;color:#f2ead8;position:relative}
@@ -1091,7 +1092,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.187.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.188.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9834,10 +9835,21 @@ function renderPanel() {
       '<b>Mantén presionada</b> y arrastra por varias para juntarlas.</div>';
     return;
   }
-  const j = _juntaDe(mesa), tot = _vpTot(mesa), its = _vpItems(mesa);
+  const j = _juntaDe(mesa);
   const viva = (STATE.mesasModel || []).some(function (x) { return x.mesa === mesa; });
   const ya = _pagadaDeMesa(mesa);
   let totJ = 0; if (j) j.mesas.forEach(function (mm) { totJ += _vpTot(mm); });
+  /* [26-set · reperto di Alberto, collaudo junta 998+999 dal vivo] IL
+     PANNELLO MOSTRAVA SOLO LE RIGHE DELLA MESA TOCCATA: `its = _vpItems(mesa)`
+     guardava una mesa sola, mentre `totJ` (già sopra) sommava tutta la
+     junta — il totale diceva $7.890 (998+999), la lista sotto ne mostrava
+     solo una parte (la 998), l'Agua della 999 spariva. Ora, se `j` esiste,
+     le righe arrivano da OGNI mesa della junta, raggruppate per mesa. */
+  const gruposItems = (j ? j.mesas : [mesa]).map(function (mm) {
+    return { mesa: mm, items: _vpItems(mm) };
+  }).filter(function (g) { return g.items.length; });
+  const nLineas = gruposItems.reduce(function (s, g) { return s + g.items.length; }, 0);
+  const tot = j ? totJ : _vpTot(mesa);
   /* v3.4.3 · LA FASCIA STA DOVE CADE IL TAP (secondo giro di Alberto: «clicco
      la tessera che pulsa e cado nei VERBI, non nel messaggio»). L'avevo messa
      nello sheet — la stanza giusta era QUESTA: il tap sulla tessera apre il
@@ -9915,8 +9927,10 @@ function renderPanel() {
     '<div class="vp-s">' +
       (j ? '<b style="color:' + _juntaCol(j.n) + '">Junta ' + j.n + '</b> · mesas ' + j.mesas.join(' · ') +
            ' · total $' + _fmtMiles(totJ) + '<br><span style="opacity:.8">los pedidos llegan a la <b>' + esc(j.principal) +
-           '</b> · se cobra <b>por mesa</b></span><br>' : '') +
-      (viva ? its.length + ' línea' + (its.length === 1 ? '' : 's') : 'sin consumo — <b>toca PEDIR</b>') +
+           /* [26-set · AUT-0450 ya vivo] "por mesa" era la vieja verdad —
+              hoy el pago cubre la junta entera (mesas+gid al servidor). */
+           '</b> · se cobra <b>toda la junta</b></span><br>' : '') +
+      (viva ? nLineas + ' línea' + (nLineas === 1 ? '' : 's') : 'sin consumo — <b>toca PEDIR</b>') +
       /* [AUT-0208 · 06-set] la riga rossa «ya se cobró hoy» è stata TOLTA per
          ordine di Alberto: il totale è GIÀ netto (misurato su mesa 34 al peso,
          308 pagos verificati dal CONTROLLER: zero importi liberi orfani) e
@@ -9926,9 +9940,12 @@ function renderPanel() {
          cobró` nel flusso del pago): quello interrompe un GESTO e resta.
          «Il pagato non è un messaggio: è aritmetica.» */
     '</div>' +
-    (its.length ? '<div class="vp-list">' + its.map(function (x) {
-      return '<div class="vp-li"><span class="q">' + x.q + '×</span><span class="nm">' + esc(x.n) +
-        '</span><span class="pv">$' + _fmtMiles(x.q * x.pu) + '</span></div>'; }).join('') + '</div>' : '') +
+    (nLineas ? '<div class="vp-list">' + gruposItems.map(function (g) {
+      return (j ? '<div class="vp-li-mesa">Mesa ' + esc(g.mesa) + '</div>' : '') +
+        g.items.map(function (x) {
+          return '<div class="vp-li"><span class="q">' + x.q + '×</span><span class="nm">' + esc(x.n) +
+            '</span><span class="pv">$' + _fmtMiles(x.q * x.pu) + '</span></div>'; }).join('');
+    }).join('') + '</div>' : '') +
     /* [AUT-0239] LA FILA DELLE TAPPE — si disegna solo se questa mesa ha un
        menù scaglionato aperto, e si legge dai PEDIDOS: chi apre il tavolo la
        vede uguale, sia dopo un reload sia se è un altro mesero. */
