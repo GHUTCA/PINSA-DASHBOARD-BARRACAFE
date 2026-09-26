@@ -1092,7 +1092,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.188.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.189.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -10004,10 +10004,37 @@ function _juntasSave(list) { try { localStorage.setItem(JUNTAS_KEY, JSON.stringi
    🧯 Freno: se il GAS non manda `grupos` (riga `sala_grupos_off` in PARAMETROS,
    o versione vecchia), il campo è null e qui non si tocca niente — si torna a
    ieri, con la memoria locale sovrana. */
+/* [26-set · gemella di AUT-0212] due juntas sono la STESSA se hanno lo
+   stesso principal O gli stessi membri — non solo se combacia il gid. Il
+   libro conia il proprio gid (`G-2026-09-26-N`) indipendente da quello che
+   il vetro manda: finché il libro non lo adotta (② non ancora fatta),
+   confrontare SOLO per gid rischia la junta immortale che AUT-0212 dice
+   di evitare. */
+function _mesasIguales(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  const sa = a.slice().sort(), sb = b.slice().sort();
+  return sa.every(function (m, i) { return m === sb[i]; });
+}
 function _juntasSync(r) {
   const gs = r && r.grupos;
   if (!Array.isArray(gs)) return;
   const prev = _juntasLoad(), usati = {}, out = [];
+  const ahora = Date.now();
+  const fotoTs = ahora - ((r && r._edad_dato_s) ? r._edad_dato_s * 1000 : 0);
+  /* [26-set · reperto di Alberto, collaudo junta 998+999: «si separa e dopo
+     10s si riunisce da sola»] Il libro scrive `grupo_cerrar` SUBITO, ma la
+     foto del bordo nasce ogni 5-8 minuti: una foto nata PRIMA del separar
+     porta ancora il vecchio grupo, e `_juntasSync` lo adottava senza
+     guardia — è la gemella di AUT-0212 (che protegge solo l'UNIR contro
+     una foto vecchia; qui è il SEPARAR contro una foto vecchia, verso
+     opposto). Si ricorda il gesto in `STATE._juntasDisueltas` finché una
+     foto NATA DOPO non lo conferma (il grupo resta assente → risolto) o lo
+     smentisce (il grupo c'è ancora anche in una foto nuova → il separar
+     non è mai attecchito, si rispetta il server). */
+  if (JFIX_ON) {
+    STATE._juntasDisueltas = (STATE._juntasDisueltas || []).filter(function (d) { return ahora - d.ts < 1800000; });
+  }
+  const disueltas = (JFIX_ON && STATE._juntasDisueltas) ? STATE._juntasDisueltas : [];
   gs.forEach(function (g) {
     const principal = (g.principal == null ? '' : g.principal).toString().trim();
     if (!principal || principal.indexOf('.') >= 0) return;
@@ -10017,13 +10044,17 @@ function _juntasSync(r) {
       if (m && m.indexOf('.') < 0 && mesas.indexOf(m) < 0) mesas.push(m);
     });
     if (mesas.length < 2) return;   // un grupo di una mesa sola non è un grupo
+    const dis = disueltas.find(function (d) { return d.principal === principal || _mesasIguales(d.mesas, mesas); });
+    if (dis) {
+      if (fotoTs < dis.ts) return;   // foto più vecchia del separar: non prova niente, si ignora il grupo
+      const i = disueltas.indexOf(dis); if (i >= 0) disueltas.splice(i, 1);   // foto più nuova: risolto, si toglie dal registro
+    }
     const viejo = prev.find(function (x) { return x.principal === principal; });
     let n = (viejo && !usati[viejo.n]) ? viejo.n : 0;
     if (!n) { n = 1; while (usati[n]) n++; }
     usati[n] = true;
     out.push({ n: n, principal: principal, mesas: mesas, gid: g.gid || '', srv: true });
   });
-  const ahora = Date.now();
   /* ═══ [AUT-0212] · 06-set · LA FOTO VECCHIA NON SCIOGLIE LA JUNTA NUOVA ════
      IL FATTO, riprodotto in diretta con Alberto alle 08:5x: junta fatta e
      CONFERMATA dal server (gid) alle 08:51 → la foto del poll nasce 1-2 min
@@ -10037,11 +10068,17 @@ function _juntasSync(r) {
      difetto gemello). L'età della foto è `_edad_dato_s` (bordo); sul cammino
      GAS la foto è appena costruita (età 0) e giudica subito, com'è giusto:
      l'unir scrive nel libro in modo sincrono. Senza gid: 20 s, come ieri.
+     [26-set · collaudo junta 998+999] `j.gid` oggi lo conia il VETRO
+     (`juntaCrear`, `_gid('un')`), subito — non solo il libro dopo il
+     round-trip: chiude il buco misurato stamattina (libro a 5-30s di
+     risposta, la finestra di 20s non bastava). E la supersessione qui sotto
+     ora guarda anche i MEMBRI, non solo il principal (`_mesasIguales`):
+     finché il libro non adotta il gid del client (② non ancora fatta), due
+     gid diversi per la stessa junta non devono farla sembrare sciolta.
      🧯 Freno: `?jfx=0` (o `sala_jfx=0`) = riga di ieri, zero deploy. */
-  const fotoTs = ahora - ((r && r._edad_dato_s) ? r._edad_dato_s * 1000 : 0);
   prev.forEach(function (j) {
     if (j.srv || usati[j.n]) return;
-    if (out.some(function (x) { return x.principal === j.principal; })) return;
+    if (out.some(function (x) { return x.principal === j.principal || _mesasIguales(x.mesas, j.mesas); })) return;
     if (JFIX_ON && j.gid && j.ts) {
       if (fotoTs >= j.ts) return;             // foto nata DOPO e senza il grupo → sciolto davvero
       usati[j.n] = true; out.push(j); return; // foto più VECCHIA del gesto → non è una prova
@@ -10119,7 +10156,18 @@ function juntaCrear() {
   if (rotte) toast('warn', '✂ ' + rotte + ' junta' + (rotte === 1 ? '' : 's') + ' anterior' + (rotte === 1 ? '' : 'es') + ' se deshizo — estas mesas cambian de grupo');
   const n = list.reduce(function (mx, j) { return Math.max(mx, j.n); }, 0) + 1;
   const principal = (_mapStart && sel.indexOf(_mapStart) >= 0) ? _mapStart : sel[0];
-  const j = { n: n, principal: principal, ts: Date.now(),   // v3.5.0 · la finestra di 20s di _juntasSync
+  /* [26-set · collaudo junta 998+999, decisione `LA JUNTA NASCE AL BORDO
+     OGGI`] IL GID LO CONIA IL VETRO, SUBITO — non più il libro dopo il
+     round-trip. Misurato stamattina: il libro risponde in 5-30s (a locale
+     vuoto); il terzo unir del collaudo non è mai arrivato entro la
+     finestra di 20s di `_juntasSync`, e la junta è morta sullo schermo
+     prima che il libro rispondesse. Con un gid proprio, `j.gid` è vero fin
+     dal primo poll — la protezione di AUT-0212 (gid+ts) parte SUBITO,
+     qualunque sia la lentezza del libro. `_gid('un')` è la stessa fabbrica
+     già usata da mover/separar (r.4306) — chiave coniata dal lato che
+     ripete, non dal libro (①_COME_SI_CODIFICA). */
+  const gid = _gid('un');
+  const j = { n: n, principal: principal, ts: Date.now(), gid: gid,   // v3.5.0 · la finestra di 20s di _juntasSync
     mesas: sel.sort(function (a, b) { return (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0); }) };
   list.push(j); _juntasSave(list);
   STATE.selMesas = [];
@@ -10144,8 +10192,14 @@ function juntaCrear() {
      resta locale come ieri: il servizio non dipende dall'esito. */
   (function (jj) {
     try {
-      gasPost('unirMesas', { codigo: STATE.codigo, nombre: STATE.nombre, mesas: _mesasOrden })
+      gasPost('unirMesas', { codigo: STATE.codigo, nombre: STATE.nombre, mesas: _mesasOrden, gid: gid })
         .then(function (r) {
+          /* [26-set] se il libro adotta `payload.gid` (② del piano, non
+             ancora fatta), `r.grupo_id` sarà il NOSTRO gid — riscriverlo è
+             un no-op. Finché non lo adotta, il libro risponde con un gid
+             suo: si adegua comunque, perché `_juntasSync` confronta `out`
+             (dal server) col SUO gid — il nostro serve a tenere viva la
+             junta nell'intervallo, non a vincere sul server. */
           if (r && r.ok && r.grupo_id) {
             const l2 = _juntasLoad(); const x = l2.find(function (y) { return y.n === jj.n; });
             if (x) { x.gid = r.grupo_id; _juntasSave(l2); }
@@ -10161,6 +10215,16 @@ function juntaCrear() {
 function juntaSeparar(nJ) {
   const list = _juntasLoad(); const j = list.find(function (x) { return x.n === nJ; }); if (!j) return;
   _juntasSave(list.filter(function (x) { return x.n !== nJ; }));
+  /* [26-set · gemella di AUT-0212, collaudo junta 998+999: «si separa e
+     dopo 10s si riunisce da sola»] il libro scrive `grupo_cerrar` SUBITO,
+     ma la foto del bordo nasce ogni 5-8 min: una foto nata PRIMA di questo
+     separar porta ancora il vecchio grupo, e `_juntasSync` lo resuscitava
+     senza guardia. Si ricorda il gesto finché una foto NATA DOPO non lo
+     conferma o lo smentisce — consumato dentro `_juntasSync`. */
+  if (JFIX_ON) {
+    STATE._juntasDisueltas = (STATE._juntasDisueltas || []);
+    STATE._juntasDisueltas.push({ principal: j.principal, mesas: (j.mesas || []).slice(), gid: j.gid || '', ts: Date.now() });
+  }
   // v3.0 · CAMBIO 7 · il messaggio del definito: nulla si perde, ogni piatto con la sua mesa
   toast('ok', '✂ Junta ' + nJ + ' separada — cada plato vuelve con su mesa. No se pierde nada.');
   /* v3.81.0 · [PASSAGGIO CONTROLLER, 10-set] stesso principio di juntaCrear:
