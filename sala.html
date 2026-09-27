@@ -1092,7 +1092,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.192.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.193.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -11449,7 +11449,27 @@ function abrirPago(mesa, parte) {
      VETRO aveva davanti nell'istante in cui il mesero ha premuto pagar».
      Si salva su `STATE.pago` per arrivare fino al payload del submit,
      qualunque via prenda (bordo/GAS, cintura/parte/chiusura). */
-  STATE.pago = { mesa: mesa, mesas: mesasPago.slice(), gid: gidPago, tot: tot, parte: _pt ? { titulo: (parte.titulo || 'parte'), monto: _pt } : null,
+  /* [AUT-0462 · 27-set] L'ELENCO È CIÒ CHE IL PANNELLO MOSTRA, CONGELATO ADESSO.
+     Collaudo 998 (10:39): un caffè ordinato dal QR col pannello aperto è finito
+     nel pago dell'acqua, perché l'elenco lo prendeva il bordo all'arrivo del
+     pago. Qui si fotografa all'APERTURA del cobro, e si manda SOLO se la somma
+     delle righe è esattamente il totale mostrato (niente carte di colleghi che
+     questo telefono non vede, niente parziali): altrimenti nessun elenco e il
+     pago va come ieri. Il libro (v3.225) rifiuta se la somma non è il cobrado. */
+  let uuidsPago = null;
+  if (PAGO_UUIDS_VETRO_ON && !_pt) {
+    let vistoU = 0, parcU = 0; const lU = [];
+    mesasPago.forEach(function (mm) {
+      const mU = (STATE.mesasModel || []).find(function (x) { return x.mesa === mm; });
+      if (MARCA_TS_ON && STATE.pagadoParcial[mm]) parcU += STATE.pagadoParcial[mm];
+      if (!mU) return;
+      mU.pend.concat(mU.mios, mU.limpiar).forEach(function (p) {
+        if (p && p.uuid) { lU.push(String(p.uuid)); vistoU += parseFloat(p.total) || 0; }
+      });
+    });
+    if (lU.length && !parcU && Math.abs(Math.round(vistoU) - Math.round(tot)) <= 1) uuidsPago = lU;
+  }
+  STATE.pago = { mesa: mesa, mesas: mesasPago.slice(), gid: gidPago, uuids: uuidsPago, tot: tot, parte: _pt ? { titulo: (parte.titulo || 'parte'), monto: _pt } : null,
     prop: 'sug', medio: '',
     otro: '', correo: '', celular: '', nombre: '', enviando: false,
     /* v3.31.0 · [AUT-0113] · `cliente:true` = el teléfono está en manos del
@@ -13636,6 +13656,7 @@ async function pagoConfirmar(btn) {
      mesa singola non aiuterebbe e sporcherebbe l'audit
      (`mesas_payload_rechazado`) senza motivo. */
   if (pg.gid) body.gid = pg.gid;
+  if (pg.uuids && pg.uuids.length) body.uuids = pg.uuids;   // [AUT-0462] le righe del pannello, congelate all apertura
   /* v1.4 · le mosse del JL viaggiano DICHIARATE + col PIN (GAS v3.75.0):
      cortesía → cortesia:1 (il server forza $0 e non emette) · otro monto →
      monto_manual:1 + monto (la boleta esce dal cobrado, riga unica). */
