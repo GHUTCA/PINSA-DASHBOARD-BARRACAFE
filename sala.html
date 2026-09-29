@@ -1092,7 +1092,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.200.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.201.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2532,7 +2532,30 @@ const BORDE_PAGO = {
 };
 /* Ritorna la risposta del bordo se il pago è ACCETTATO, `null` in ogni altro
    caso — e `null` significa una cosa sola: fai quello che facevi ieri. */
-async function _pagoAlBorde(body, consumo) {
+/* ═══ [SCONTI AL BORDO · 29-set · 🎛 BKP V29] ════════════════════════════════
+   Alberto: «tutto va veloce ma gli sconti sono di una lentezza incredibile».
+   Col flag (`?dtoborde=1`, si ricorda nell'apparecchio; `?dtoborde=0` lo
+   toglie) sconto, FAM, cortesía e colación passano PRIMA dal bordo, che li
+   giudica da sé (bordo v0.155.0, leve SCONTO_*_BORDE_ON / COLACION_BORDE_ON).
+   Se il bordo non li prende (leva spenta, non sa giudicare) si va al libro
+   ESATTAMENTE come oggi. Un NO del bordo (`definitivo:true`) ha la stessa
+   forma di quello del libro: il telefono lo mostra con gli stessi messaggi. */
+const DTO_BORDE_ON = (function () {
+  try {
+    const q = new URLSearchParams(location.search).get('dtoborde');
+    if (q === '1' || q === '0') localStorage.setItem('pinsita_dtoborde', q);
+    return localStorage.getItem('pinsita_dtoborde') === '1';
+  } catch (e) { return false; }
+})();
+const DTO_PORTAS_BORDE = ['pin_jl', 'monto_manual', 'cortesia', 'imprimir', 'fam', 'pin_fam'];
+async function _scontoVia(action, body, consumo) {
+  if (DTO_BORDE_ON) {
+    const rB = await _pagoAlBorde(body, consumo, action);
+    if (rB) return rB;
+  }
+  return gasPost(action, body);
+}
+async function _pagoAlBorde(body, consumo, action) {
   /* v3.19.0 · [AUT-EMERG 22-ago] · stessa sganciata di staffPost: il pago al
      bordo era incatenato a BORDE_SALA.ON (la foto) e quindi spento per tutti
      dal 15-ago — 125 pagos a 9,4s con l'ACK da 200ms già costruito e
@@ -2564,6 +2587,7 @@ async function _pagoAlBorde(body, consumo) {
   /* la porta si guarda sul payload GIÀ COSTRUITO, non sullo stato del pannello:
      è il payload che parte, ed è di lui che stiamo dicendo «è semplice». */
   for (let i = 0; i < BORDE_PAGO.PORTAS.length; i++) {
+    if (DTO_BORDE_ON && DTO_PORTAS_BORDE.indexOf(BORDE_PAGO.PORTAS[i]) >= 0) continue;   // [SCONTI AL BORDO]
     const v = body[BORDE_PAGO.PORTAS[i]];
     /* [AUT-0268] l'etichetta porta QUALE porta: «pago:porta» e basta direbbe
        che è caduto sulle otto, non su quale — e le otto hanno cause diverse
@@ -2600,7 +2624,7 @@ async function _pagoAlBorde(body, consumo) {
          perso in silenzio. Qui la cintura è il `consumo` del Worker; il folio
          vive sulla via del GAS, dove un no è sincrono e prima della penna. */
       body: JSON.stringify((function () {
-        const bB = Object.assign({ action: 'registrarPago', local: CFG.LOCAL },
+        const bB = Object.assign({ action: action || 'registrarPago', local: CFG.LOCAL },
           body, { consumo: Math.round(consumo) });
         delete bB.folio_pc;
         return bB;
@@ -2613,6 +2637,7 @@ async function _pagoAlBorde(body, consumo) {
        (stessa regola di staffPost). `need:'gas'`, un errore senza need, un 403
        sul token, un 503 sin_gate: tutto quanto è la via di sempre. */
     if (j && j.ok === true && j.borde === true) return j;
+    if (j && j.ok === false && j.borde === true && j.definitivo === true) return j;   // [SCONTI AL BORDO] il bordo ha giudicato: NO
     if (j && j.motivo === 'apagado') BORDE_PAGO.pausaHasta = Date.now() + BORDE_PAGO.APAGADO_MS;
     /* [AUT-0268] il bordo ha risposto e NON ha timbrato `borde:true`: è la via
        di sempre per decisione SUA, non nostra — e va distinta dal silenzio. */
@@ -9164,8 +9189,8 @@ function _dtGo() {
     _dt = null; _dtPinta();
     /* la chiave la conia il CLIENT, una per gesto: il retry non duplica */
     var uid = 'col-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
-    gasPost('registrarColacion', { codigo: STATE.codigo, nombre: STATE.nombre,
-      mesa: mesa, para: d.col, pin_jl: d.pin, uid: uid }).then(function (r) {
+    _scontoVia('registrarColacion', { codigo: STATE.codigo, nombre: STATE.nombre,
+      mesa: mesa, para: d.col, pin_jl: d.pin, uid: uid, pago_uid: uid }, d.tot || _vpTot(mesa) || 0).then(function (r) {
       if (r && r.ok) {
         _limpiarMesaLocal(mesa);
         _marcarCierreInstante(mesa);   // [AUT-0422 ⓐ]
@@ -9202,14 +9227,14 @@ function _dtGo() {
        torna a 0 nel catch/rechazo, ma `d.uid` non si rigenera) — come
        `pago_uid` per pagoFamConfirmar/pagoConfirmar. */
     d.uid = d.uid || ('PU-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7));
-    gasPost('registrarPago', { codigo: STATE.codigo, nombre: STATE.nombre,
+    _scontoVia('registrarPago', { codigo: STATE.codigo, nombre: STATE.nombre,
       registrado_por: STATE.nombre, mesa: mesa, medio: 'fam', fam: 1,
-      pin_fam: (d.pin || '').trim(), pago_uid: d.uid }).then(function (r) {
+      pin_fam: (d.pin || '').trim(), pago_uid: d.uid }, d.tot || _vpTot(mesa) || 0).then(function (r) {
       if (r && r.ok) {
         _dt = null; _dtPinta();
         _limpiarMesaLocal(mesa);
         _marcarCierreInstante(mesa);   // [AUT-0422 ⓐ]
-        bordeHecho('pago_gas', { mesa: mesa, monto: 0 });
+        if (!r.borde) bordeHecho('pago_gas', { mesa: mesa, monto: 0 });   // via bordo il bordo lo sa gia'
         toast('ok', '👨‍👩‍👧 Mesa FAM ✓ mesa ' + mesa + ' · $0' +
           (r.en_vuelo ? ' · ' + r.en_vuelo + ' cerrados sin marcar entrega' : ''));
         refrescar(false); return;
@@ -9345,8 +9370,8 @@ async function colnConfirmar(btn) {
   if (!c.uid) c.uid = 'col-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
   btn.disabled = true; btn.classList.add('cargando');
   try {
-    const r = await gasPost('registrarColacion', { codigo: STATE.codigo, nombre: STATE.nombre,
-      mesa: c.mesa, para: c.para, pin_jl: c.pin, uid: c.uid });
+    const r = await _scontoVia('registrarColacion', { codigo: STATE.codigo, nombre: STATE.nombre,
+      mesa: c.mesa, para: c.para, pin_jl: c.pin, uid: c.uid, pago_uid: c.uid }, _vpTot(c.mesa) || 0);
     if (r && r.ok) {
       // stesso ottimismo della FAM: la mesa si pulisce subito, il poll conferma
       _limpiarMesaLocal(c.mesa);   // v3.5.9 · la marca nasce SEMPRE, anche senza modello
@@ -11584,16 +11609,16 @@ async function pagoFamConfirmar() {
   if (!String(pg.pinFam || '').trim()) { toast('err', 'Escribe el código FAM'); return; }
   pg.enviando = true; renderPago();
   try {
-    const r = await gasPost('registrarPago', {
+    const r = await _scontoVia('registrarPago', {
       codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: STATE.nombre,
       mesa: pg.mesa, medio: 'fam', fam: 1, pin_fam: (pg.pinFam || '').trim(),
-      pago_uid: pg.uid });   // [AUT-0417] il fam nasce con lo STESSO uid del pannello, come tutti gli altri
+      pago_uid: pg.uid }, pg.tot || 0);   // [AUT-0417] il fam nasce con lo STESSO uid del pannello, come tutti gli altri
     if (r && r.ok) {
       if (pg.uuids && pg.uuids.length) _limpiarUuidsLocal(pg.uuids, pg.mesa);   // [AUT-0463] solo i pedidos pagati: il cliente nuovo resta
       else { _limpiarJuntaLocal(pg.mesa);   // v3.5.9 · la marca nasce SEMPRE, anche senza modello · [26-set] tutta la junta, non solo la principal
       _marcarCierreInstante(pg.mesa); }   // [AUT-0422 ⓐ]
-      bordeHecho('pago_gas', { mesa: pg.mesa, monto: 0,
-        uuids: pg.uuids || [], mesas: pg.mesas || [] });   // v3.24.0 · [AUT-0058] il testimone · [29-set] uuids+mesas: il bordo chiude il conto
+      if (!r.borde) bordeHecho('pago_gas', { mesa: pg.mesa, monto: 0,
+        uuids: pg.uuids || [], mesas: pg.mesas || [] });   // v3.24.0 · [AUT-0058] il testimone · [29-set] uuids+mesas: il bordo chiude il conto · via bordo il bordo lo sa gia'
       toast('ok', '👨‍👩‍👧 Mesa FAM ✓ mesa ' + pg.mesa + ' · $0' +
         (r.en_vuelo ? ' · ' + r.en_vuelo + ' cerrados sin marcar entrega' : ''));
       STATE.pago = null; renderPago(); cerrarMesa(); refrescar(false); return;
@@ -13832,7 +13857,7 @@ async function pagoConfirmar(btn) {
        d'uscita, ed è quella che la sala conosce da ieri.
        ⚠️ Sotto, dalla riga del gasPost in giù, NON è cambiato niente. */
     const rB = await _pagoAlBorde(body, pg.tot);
-    if (rB) {
+    if (rB && rB.ok !== false) {
       /* la mesa si chiude ottimisticamente come sempre (v1.13): il GAS chiude
          TUTTA la mesa al pago, e lo farà anche stavolta — solo, lo fa dietro,
          chiamato dal bordo. La mano che fa sparire i pedidos è la stessa. */
@@ -13861,7 +13886,7 @@ async function pagoConfirmar(btn) {
       refrescar(false);
       return;
     }
-    let r = await gasPost('registrarPago', body);
+    let r = (rB && rB.ok === false) ? rB : await gasPost('registrarPago', body);   // [SCONTI AL BORDO] un NO del bordo e' la risposta
     /* v3.6.0 · LA CADUTA MORBIDA: se il GAS non trova il folio (la precuenta
        del bordo non è ancora nel foglio — succede quando Apps Script affoga),
        si riprova UNA volta senza folio, cioè il comportamento di ieri.
