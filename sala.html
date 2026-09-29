@@ -1092,7 +1092,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.201.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.202.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2548,6 +2548,30 @@ const DTO_BORDE_ON = (function () {
   } catch (e) { return false; }
 })();
 const DTO_PORTAS_BORDE = ['pin_jl', 'monto_manual', 'cortesia', 'imprimir', 'fam', 'pin_fam'];
+/* il bordo dice solo «giusto, firma X» o «no»: nessun pago scritto, stesso freno */
+async function _pinJlAlBorde(pin) {
+  try {
+    if (!BORDE_SALA || !BORDE_SALA.URL) return null;
+    const u = BORDE_SALA.URL + '/pago/' + encodeURIComponent(CFG.LOCAL || 'BKS')
+      + '?t=' + encodeURIComponent(BORDE_SALA.T);
+    const ctrl = new AbortController();
+    const to = setTimeout(function () { ctrl.abort(); }, BORDE_PAGO.MS);
+    const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'verificarPinJL', local: CFG.LOCAL, codigo: STATE.codigo,
+        nombre: STATE.nombre, pin_jl: String(pin || '').trim(),
+        dispositivo_id: (typeof _dispositivoId === 'function' ? _dispositivoId() : '') }),
+      signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    const j = await r.json();
+    return (j && j.borde === true) ? j : null;
+  } catch (e) { return null; }
+}
+function _pinErrTxt(j) {
+  const e = (j && j.error) || '';
+  if (/bloqueado/.test(e)) return 'PIN bloqueado' + (j.faltan_s ? ' — espera ' + Math.ceil(j.faltan_s / 60) + ' min' : '') + '. Demasiados intentos.';
+  if (e === 'pin_jl_requerido') return 'Falta el PIN del JL.';
+  return 'PIN del JL incorrecto. Vuelve a escribirlo.';
+}
 async function _scontoVia(action, body, consumo) {
   if (DTO_BORDE_ON) {
     const rB = await _pagoAlBorde(body, consumo, action);
@@ -8535,6 +8559,10 @@ function _dtPie() {
   /* [29-set · Alberto: «il bottone APLICAR dovrebbe rimanere cliccato: siccome
      ritarda, non si capisce se ho cliccato e mi viene da cliccare due volte»]
      mentre il FAM aspetta il libro il bottone RESTA PREMUTO e lo dice. */
+  if (_dt.verPin) {
+    f.innerHTML = '<button class="c4cta cargando" disabled>⏳ Verificando el PIN…</button>';
+    return;
+  }
   if (_dt.tipo === 'fam' && _dt.env && !_dt.verificando) {
     f.innerHTML = '<button class="c4cta cargando" disabled>⏳ Aplicando… espera la respuesta</button>';
     return;
@@ -8823,6 +8851,7 @@ function _dtPinta() {
           'name="dt' + Math.random().toString(36).slice(2) + '" ' +
           'data-1p-ignore data-lpignore="true" data-form-type="other" ' +
           'oninput="_dtPinIn(this.value)">' +
+        (_dt.pinErr ? '<div style="color:#e24b4a;font-weight:800;font-size:14px;margin-top:6px">⛔ ' + esc(_dt.pinErr) + '</div>' : '') +
         '<div class="c4expl" style="font-size:12.5px">no se guarda en el teléfono</div>';
     }
   }
@@ -9265,6 +9294,28 @@ function _dtGo() {
         toast('err', 'Sin conexión — reintenta');
       }
       _dtPinta();
+    });
+    return;
+  }
+  /* [SCONTI AL BORDO · 29-set · Alberto: «l'ideale sarebbe rimanere bloccato
+     subito nella finestra dove facciamo inserire il PIN»] col flag, il PIN si
+     controlla QUI, al bordo, prima di aprire il cobro: se è sbagliato si resta
+     nel pannello col messaggio fisso. Se il bordo non risponde si va avanti
+     come oggi (il PIN lo giudica il cobro). */
+  if (DTO_BORDE_ON && d.pin && !d.pinOk) {
+    if (d.verPin) return;
+    d.verPin = true; d.pinErr = ''; _dtPie();
+    _pinJlAlBorde(d.pin).then(function (j) {
+      if (_dt !== d) return;                       // il pannello è stato chiuso nel frattempo
+      d.verPin = false;
+      if (j && j.ok === false && j.definitivo) {
+        d.pin = '';
+        d.pinErr = _pinErrTxt(j);
+        _dtPinta();
+        return;
+      }
+      if (j && j.ok) d.pinOk = true;
+      _dtGo();
     });
     return;
   }
@@ -13050,7 +13101,8 @@ function renderPago() {
       && !pg.jl && !pg.pinAsk && !pg.famAsk && !pg.montoOn) {
     w.innerHTML = '<div class="cs-pago" onclick="if(event.target===this)pagoCerrar()"><div class="cs-pcard">' +
       '<div class="cs-asa"></div>' +
-      '<h3>Mesa ' + esc(pg.mesa) + (pg.parte ? ' — parte de ' + esc(pg.parte.titulo) : ' — cobrar') + '</h3>' +
+      '<h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span>Mesa ' + esc(pg.mesa) + (pg.parte ? ' — parte de ' + esc(pg.parte.titulo) : ' — cobrar') + '</span>' +
+      (pg.enviando ? '' : '<button onclick="pagoCerrar()" style="flex:none;background:var(--cs-card);border:1px solid var(--cs-line);color:var(--cs-ink);font-weight:700;font-size:13px;padding:7px 12px;border-radius:10px">✕ Salir</button>') + '</h3>' +   // [29-set · Alberto: «da quella finestra non ho via d'uscita»]
       (pg.parte ? '<div style="margin:2px 0 10px;padding:9px 12px;border-radius:12px;' +
         'background:rgba(61,184,118,.13);border:1px solid #3db876;font-size:12.5px;line-height:1.5">' +
         '<b>Cobras solo esta parte.</b> La mesa <b>queda abierta</b> con el resto.</div>' : '') +
@@ -13303,7 +13355,8 @@ function renderPago() {
        il pannello è identico a quello del pago intero, e un mesero convinto
        di star chiudendo il tavolo è il modo più veloce per lasciare il resto
        fuori. Il titolo lo dice, e la fascia sotto dice che la mesa resta. */
-    '<h3>Mesa ' + esc(pg.mesa) + (pg.parte ? ' — parte de ' + esc(pg.parte.titulo) : ' — cobrar') + '</h3>' +
+    '<h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span>Mesa ' + esc(pg.mesa) + (pg.parte ? ' — parte de ' + esc(pg.parte.titulo) : ' — cobrar') + '</span>' +
+      (pg.enviando ? '' : '<button onclick="pagoCerrar()" style="flex:none;background:var(--cs-card);border:1px solid var(--cs-line);color:var(--cs-ink);font-weight:700;font-size:13px;padding:7px 12px;border-radius:10px">✕ Salir</button>') + '</h3>' +   // [29-set · Alberto: «da quella finestra non ho via d'uscita»]
     (pg.parte ? '<div style="margin:2px 0 10px;padding:9px 12px;border-radius:12px;' +
       'background:rgba(61,184,118,.13);border:1px solid #3db876;font-size:12.5px;line-height:1.5">' +
       '<b>Cobras solo esta parte.</b> La mesa <b>queda abierta</b> con el resto — se cierra sola cuando esté todo pagado.</div>' : '') +
