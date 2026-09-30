@@ -551,7 +551,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v83 · el oro es el del logo · 06set</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v84 · inventario al borde (palanca en el borde) · 28set</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -3315,7 +3315,140 @@ async function _bordeLee(payload){
   } catch(e) { BORDE_REG.fallos++; return null; }
 }
 
+/* ═════ v84 · EL INVENTARIO ÚNICO · binario B (28-set) — 🚚 MIGRACION V27 ═════
+   Il libro dell'inventario passa da Google a Postgres, UNA tabella per tutti i
+   locali e BC. Questo gradino sta DAVANTI a callGAS, che e' l'unico punto da
+   cui passano le scritture dirette, la coda offline (flushCola) e il 🧾 oggi.
+   🔑 LA LEVA NON VIVE QUI: vive nel bordo (`INVENTARIO_PG_ON`). Il telefono
+      CHIEDE sempre al bordo; se il bordo dice «leva_spenta» si va al GAS come
+      prima, e la risposta si ricorda 5 minuti IN MEMORIA (mai localStorage:
+      una leva copiata nel telefono e' una seconda leva che nessuno gira).
+   🔴 UNA SCRITTURA NON RIPIEGA MAI SUL GAS SE IL BORDO NON RISPONDE: resta in
+      coda e si ritenta. Se il bordo avesse scritto e la risposta si fosse
+      persa, il GAS scriverebbe lo stesso gesto nell'ALTRO libro — due verità.
+      Si ripiega solo quando il bordo DICE che la leva e' spenta.
+   ⚠️ ?borde=0 NON spegne questo gradino: quello e' un interruttore di debug
+      delle letture; con la leva accesa, mandare le scritture al GAS spezzerebbe
+      il libro. L'unico interruttore dell'inventario e' la leva del bordo. */
+var INV_PG = {
+  ACT: { registrarMovimientoBatch:1, registrarInventarioSeccion:1, registrarAjustesCandelaria:1, anularLote:1,
+         getMisMovimientosHoy:1, getSugerenciaReposicion:1 },
+  LETTURE: { getMisMovimientosHoy:'hoy', getSugerenciaReposicion:'sugerencia' },
+  leva: 'ignota',          // 'ignota' | 'spenta' | 'accesa' — l'ultima cosa che il BORDO ha detto
+  spentaHasta: 0,
+};
+/* ✏️ C1 della seconda testa (29-set), il verso GAS->libro nuovo: un lote che ha
+   GIA' provato il GAS (risposta persa, lento) e poi trova la leva ACCESA
+   finirebbe anche su Postgres — due libri. ⇒ un lote che e' andato al GAS
+   RESTA sul GAS: la destinazione si attacca al LOTE, non al momento.
+   (L'altro verso — lote scritto su Postgres, leva poi spenta — lo chiude il
+   bordo: a leva spenta guarda nel libro nuovo prima di dire «vai al GAS».)
+   Non e' una copia della leva: e' la memoria di DOVE un lote e' gia' andato. */
+var INV_LIBRO_KEY = 'pinsita_inv_libro_lote';
+function _invLibroDi(lote){ try{ return (JSON.parse(localStorage.getItem(INV_LIBRO_KEY)||'{}'))[lote] || null; }catch(e){ return null; } }
+function _invLibroSegna(lote, libro){
+  try{
+    var m = JSON.parse(localStorage.getItem(INV_LIBRO_KEY)||'{}'); m[lote] = libro;
+    var k = Object.keys(m); if (k.length > 300) { k.slice(0, k.length - 300).forEach(function(x){ delete m[x]; }); }
+    localStorage.setItem(INV_LIBRO_KEY, JSON.stringify(m));
+  }catch(e){}
+}
+function _invCodigoDe(url){
+  if (!url) return CTX_CODE;
+  for (var k in CONTEXTOS) { if (CONTEXTOS.hasOwnProperty(k) && CONTEXTOS[k].gas === url) return k; }
+  return null;   // un endpoint che non e' di un locale: non e' inventario, va al GAS
+}
+async function _invBordo(payload, timeoutMs, urlOverride){
+  var lettura = INV_PG.LETTURE[payload.action] || '';
+  /* 🔴 la memoria «spenta» vale SOLO per le LETTURE. Una SCRITTURA chiede
+     sempre al bordo (~100 ms, e non blocca nessuno: passa dalla coda). Se la
+     memoria valesse anche per le scritture, nei 5 minuti dopo l'ACCENSIONE un
+     telefono scriverebbe ancora su Google — fatti che il libro nuovo non
+     vedrebbe mai, cioe' persi. Cosi' la leva morde le scritture all'istante,
+     nei due versi (accensione e ritorno). */
+  if (lettura && Date.now() < INV_PG.spentaHasta) return null;
+  var code = _invCodigoDe(urlOverride); if (!code) return null;
+  var loteChiave = lettura ? null : (payload.action === 'anularLote' ? 'ANU-' : '') + String(payload.loteId || '');
+  if (loteChiave && _invLibroDi(loteChiave) === 'gas') return null;   // questo lote e' gia' passato dal GAS: resta li'
+  var ctl = (typeof AbortController!=='undefined') ? new AbortController() : null;
+  var tid = ctl ? setTimeout(function(){ try{ctl.abort();}catch(e){} }, timeoutMs || 12000) : null;
+  try {
+    var url = BORDE_REG.URL + '/inventario/' + encodeURIComponent(code)
+      + (lettura === 'hoy' ? '/hoy?responsable=' + encodeURIComponent(String(payload.responsable||'').trim())
+         : lettura ? '/' + lettura : '');
+    var r = await fetch(url, lettura
+      ? { headers: { 'X-Borde-Token': BORDE_REG.T }, cache: 'no-store', signal: ctl ? ctl.signal : undefined }
+      : { method: 'POST', headers: { 'X-Borde-Token': BORDE_REG.T, 'Content-Type': 'text/plain' },
+          body: JSON.stringify(payload), signal: ctl ? ctl.signal : undefined });
+    var j = null; try { j = await r.json(); } catch(e) {}
+    /* 404 = la rotta /inventario NON ESISTE su questo bordo (vetro partito prima
+       del bordo, o bordo tornato indietro): il libro nuovo non c'e', quindi e'
+       una leva spenta. Senza questa riga il 404 si leggeva come «leva accesa» e
+       ogni scrittura restava in coda per sempre — l'ordine dei deploy non conta piu'. */
+    /* ✏️ B1: il 404 «libro nuovo assente» e' SOLO quello del bordo senza la rotta
+       (index.js 13507, `ruta_desconocida`); la rotta nuova non risponde mai 404. */
+    if ((r.status === 404 && (!j || j.error === 'ruta_desconocida')) || (j && j.error === 'leva_spenta')) {
+      INV_PG.leva = 'spenta'; INV_PG.spentaHasta = Date.now() + 5*60*1000;
+      if (loteChiave) _invLibroSegna(loteChiave, 'gas');   // da qui in poi QUESTO lote e' del GAS
+      return null;
+    }
+    if (!j) {
+      if (lettura && INV_PG.leva !== 'accesa') return null;          // una lettura senza leva nota: il GAS come prima
+      return { ok: false, error: 'inventario al borde: respuesta ilegible (' + r.status + ')' };
+    }
+    /* ✏️ A2: «accesa» si impara SOLO da una risposta del libro nuovo (ok, un
+       rifiuto definitivo, o un 502 del libro) — mai da un 401: un token ruotato
+       non dice niente sulla leva. */
+    if (j.ok === true || j.definitivo || r.status === 502) INV_PG.leva = 'accesa';
+    if (loteChiave && (j.ok === true || r.status === 502)) _invLibroSegna(loteChiave, 'pg');
+    /* 🔴 le righe che il libro ha RIFIUTATO (sku o sección desconocidos…): il lote
+       e' scritto e lascia la coda, quindi QUESTO e' l'unico momento in cui chi
+       registra puo' saperlo. Un rifiuto che non si dice si paga due volte (v82). */
+    if (j.ok && j.rechazados && j.rechazados.length) {
+      var txt = j.rechazados.map(function(x){ return '· ' + (x.sku||'?') + ': ' + (x.motivo||'rechazado'); }).join('\n');
+      setTimeout(function(){ alert('⚠️ ' + j.rechazados.length + ' línea(s) NO quedaron registradas:\n\n' + txt + '\n\nEl resto sí quedó. Avisa al encargado.'); }, 50);
+    }
+    return j;
+  } catch(e) {
+    if (lettura && INV_PG.leva !== 'accesa') return null;
+    /* il compromesso, dichiarato: con la leva SPENTA (sara' cosi' per giorni dopo
+       il deploy) un bordo caduto non deve fermare l'inventario di oggi. Se il
+       bordo ha detto «spenta» da meno di 5 minuti, la scrittura va al GAS come
+       oggi e il lote RESTA del GAS. ⚠️ Rischio residuo: la leva accesa proprio
+       in quei 5 minuti E la richiesta arrivata al bordo E la risposta persa —
+       contromisura nel giorno della leva (§⑦bis). */
+    if (!lettura && INV_PG.leva === 'spenta' && Date.now() < INV_PG.spentaHasta) {
+      if (loteChiave) _invLibroSegna(loteChiave, 'gas');
+      return null;
+    }
+    return { ok: false, error: 'inventario al borde: sin respuesta (' + (e && e.name || e) + ')' };   // leva accesa o ignota: resta in coda, MAI al GAS
+  } finally { if (tid) clearTimeout(tid); }
+}
+/* 📦 lo stock della schermata Inventario: stesso CSV, stesse intestazioni; se il
+   bordo dice leva spenta (o non risponde e la leva non e' nota) → il CSV del
+   foglio come prima. */
+async function _invStockTesto(){
+  if (Date.now() >= INV_PG.spentaHasta) {
+    try {
+      var r = await fetch(BORDE_REG.URL + '/inventario/' + encodeURIComponent(CTX_CODE) + '/stock.csv',
+                          { headers: { 'X-Borde-Token': BORDE_REG.T }, cache: 'no-store' });
+      var t = await r.text();
+      if (r.ok && /^Local,SKU,Seccion,/.test(t)) { INV_PG.leva = 'accesa'; return t; }
+      if (r.status === 404 || /leva_spenta/.test(t)) { INV_PG.leva = 'spenta'; INV_PG.spentaHasta = Date.now() + 5*60*1000; }
+      else if (INV_PG.leva === 'accesa') throw new Error('inventario al borde: ' + r.status);
+    } catch(e) { if (INV_PG.leva === 'accesa') throw e; }
+  }
+  var g = await fetch(_csvMaestro(GID_STOCK), { cache: 'no-store' });
+  if (!g.ok) throw new Error('stock ' + g.status);
+  return g.text();
+}
+
 async function callGAS(payload, timeoutMs, urlOverride){
+  // v84 · l'inventario prova PRIMA il libro nuovo; null = leva spenta → il GAS di sempre
+  if (payload && INV_PG.ACT[payload.action]) {
+    var inv = await _invBordo(payload, timeoutMs, urlOverride);
+    if (inv) return inv;
+  }
   // v66 · le tre letture dell'apertura provano prima il bordo; null → GAS di sempre
   // v76 · e la foto vecchia del bordo è la riserva se il GAS muore (ultimo gradino)
   var _vieja = null;
@@ -4211,7 +4344,7 @@ async function flushCola(){
   try{
     var c=colaLeer();
     for(var i=0;i<c.length;i++){
-      if(c[i].estado==='ok') continue;
+      if(c[i].estado==='ok' || c[i].estado==='rechazado') continue;   // v84: un rifiuto DEFINITIVO non si ritenta
       // 7-jul: 15s de cortesía a los lotes recién encolados — el envío DIRECTO
       // del confirmar está en vuelo; si la cola gana la carrera, el directo
       // recibe dedup:true SIN detalle y el recibo no aparece. La cola los toma
@@ -4223,6 +4356,11 @@ async function flushCola(){
       // Un captive portal può rispondere 200 con HTML, ma non può conoscere il
       // loteId — mai più lotes marcati inviati senza essere scritti.
       if(r && r.ok===true && (r.loteId===c[i].loteId || r.dedup===true)){ c[i].estado='ok'; c[i].okTs=new Date().toISOString(); }
+      /* v84 · A3 della seconda testa: il libro nuovo dice «definitivo» quando lo
+         stesso lote verra' rifiutato SEMPRE (payload malformato, inventario
+         general non ancora al bordo…). Si ferma e RESTA VISIBILE nel badge col
+         suo motivo, invece di essere ritentato all'infinito in silenzio. */
+      else if(r && r.definitivo){ c[i].estado='rechazado'; c[i].error='RECHAZADO: '+(r.error||'sin motivo'); }
       else { c[i].estado='fail'; c[i].error=(r&&r.error)||'sin red'; }
       colaGuardar(c); pintarBadge();
     }
@@ -4232,7 +4370,7 @@ async function flushCola(){
   } finally { flushing=false; }
 }
 function colaPend(){ return colaLeer().filter(function(x){return x.estado==='pending';}).length; }
-function colaFail(){ return colaLeer().filter(function(x){return x.estado==='fail';}).length; }
+function colaFail(){ return colaLeer().filter(function(x){return x.estado==='fail' || x.estado==='rechazado';}).length; }   // v84: i rechazados si CONTANO (restano visibili)
 // ── v82 (09-ago) · EL ERROR VERDADERO LLEGA A QUIEN REGISTRA ─────────────
 // La mañana del 09-ago: Alberto registra en el -6, sube con señal, y el badge
 // dice «SIN ENVIAR» durante media hora. La causa real estaba a un clic de
@@ -4244,7 +4382,7 @@ function colaFail(){ return colaLeer().filter(function(x){return x.estado==='fai
 // El badge ahora se toca y cuenta lo que sabe, sin traducirlo a nada bonito.
 function _colaMotivos(){
   var m={}, c=colaLeer();
-  for(var i=0;i<c.length;i++){ if(c[i].estado==='fail'){ var e=String(c[i].error||'sin detalle'); m[e]=(m[e]||0)+1; } }
+  for(var i=0;i<c.length;i++){ if(c[i].estado==='fail' || c[i].estado==='rechazado'){ var e=String(c[i].error||'sin detalle'); m[e]=(m[e]||0)+1; } }
   return m;
 }
 function _colaContar(){
@@ -4260,6 +4398,15 @@ function _colaContar(){
         '\nSi dice algo de «sheet» o «dimensions», avisa a Alberto:\n'+
         'no es tu teléfono ni tu señal, es el libro.\n\n'+
         'Con señal reintenta solo cada 20 segundos.');
+  /* v84 · un lote RECHAZADO (el libro dijo «nunca») no se reintenta y no se va
+     solo: si no, el badge queda rojo para siempre. Se ofrece quitarlo DESPUÉS
+     de haber leído el motivo arriba — nada desaparece sin que alguien lo vea. */
+  var rech = colaLeer().filter(function(x){ return x.estado==='rechazado'; });
+  if (rech.length && confirm(rech.length+' registro(s) RECHAZADO(S) por el sistema (motivo arriba).\n\n'+
+        'No se van a subir nunca así. Si ya lo registraste bien de nuevo, puedes quitarlos.\n\n¿Quitarlos de la lista?')) {
+    colaGuardar(colaLeer().filter(function(x){ return x.estado!=='rechazado'; }));
+    pintarBadge();
+  }
 }
 function pintarBadge(){
   var el=document.getElementById('syncBadge'); if(!el) return;
@@ -4736,9 +4883,7 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
     if(cargado||cargando) return;
     cargando=true;
     try{
-      var r=await fetch(_csvMaestro(GID_STOCK),{cache:'no-store'});
-      if(!r.ok) throw new Error('stock '+r.status);
-      var rows=_parseCSV(await r.text());
+      var rows=_parseCSV(await _invStockTesto());   // v84 · dal libro nuovo se la leva e' accesa
       var idx={}, secsSet={};
       rows.forEach(function(o){
         if(String(o.Local||'').trim()!==LOCAL_ACTUAL) return;   // solo local del operador
