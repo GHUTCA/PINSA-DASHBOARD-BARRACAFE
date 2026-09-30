@@ -1092,7 +1092,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.211.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.212.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2722,6 +2722,7 @@ async function leerSala(codigo, nombre) {
       if (j && j.error === 'codigo_invalid') return { ok: false, error: 'codigo_invalid' };
       if (r.ok && j && j.ok && j.datos && j.datos.datos && j.datos.datos.ok) {
         const mia = (j.datos.datos.meseros || {})[_slugSalaJS(nombre)];
+        try { STATE.salaTodos = j.datos.datos.meseros || null; } catch (e) {}   // [30-set] il corte al bordo: chi tiene le altre plazas
         if (mia && mia.ok) {
           /* ═══ v3.12.0 · 16-ago · L'ETÀ SI CHIEDE AL DATO, NON ALLA COPIA ═══
              `edad_ms` è l'età del record NEL WORKER, non del dato. Misurato
@@ -3386,13 +3387,44 @@ var _CIE_FIRMADO = false;   // [30-set · FINE TURNO] il corte è stato firmato 
 /* [30-set · FINE TURNO] i MIEI tavoli aperti, dalla stessa vista che il mesero
    ha sullo schermo (quella nata al bordo, che sa le chiusure del libro): le
    mesas delle mie plazas, e quelle dove ho consumo io. */
+function _mesaResta(m, mp) {
+  const pag = parseFloat(((mp || {})[m.mesa] || {}).pagado_seduta) || 0;
+  return Math.max(0, Math.round((parseFloat(m.total) || 0) - pag));
+}
+/* [30-set] i dati del primo schermo del corte, dalla sala del telefono: stessi
+   campi di `getCierreMesero` per le mesas (mesa · consumo · pasa_a). `pasa_a` è
+   un altro mesero vigente che tiene la plaza di quella mesa (la sala di tutti,
+   `STATE.salaTodos`). null se il telefono non ha ancora la sala: allora si
+   aspetta il libro come ieri. */
+function _cieDatosLocali() {
+  try {
+    const r = STATE.sala, tutti = STATE.salaTodos;
+    if (!r || !tutti) return null;
+    const yo = _slugSalaJS(STATE.nombre);
+    const lista = _misMesasAbiertas().map(function (m) {
+      let pasa = '';
+      if (m.plaza) for (const sl in tutti) {
+        const v = tutti[sl];
+        if (sl === yo || !v || !v.ok) continue;
+        if ((v.plazas || []).indexOf(m.plaza) >= 0) { pasa = v.nombre || sl; break; }
+      }
+      return { mesa: m.mesa, consumo: m.total, pasa_a: pasa };
+    });
+    let monto = 0; lista.forEach(function (m) { monto += m.consumo; });
+    return { ok: true, _local: true, mesero: r.nombre || STATE.nombre, mesas_abiertas: lista,
+      n_abiertas: lista.length, monto_abierto: monto, hay_heredero: lista.some(function (m) { return !!m.pasa_a; }) };
+  } catch (e) { return null; }
+}
 function _misMesasAbiertas() {
   try {
     const r = STATE.sala || {};
     const pl = {}; (r.plazas || []).forEach(function (p) { pl[p] = true; });
+    const mp = r.mesas_pagadas || {};
     return (r.mesas || []).filter(function (m) {
-      return m && (parseFloat(m.total) || 0) > 0 && (pl[m.plaza] || (parseFloat(m.mio) || 0) > 0);
-    });
+      /* [30-set] la regola del libro (`_mesasAbiertasDe`): è mia la mesa dove ho
+         servito io. Una plaza mia con i pedidos di un altro è sua, non mia. */
+      return m && (parseFloat(m.mio) || 0) > 0 && _mesaResta(m, mp) > 0;
+    }).map(function (m) { return Object.assign({}, m, { total: _mesaResta(m, mp) }); });
   } catch (e) { return []; }
 }
 async function cierreAbrir() {
@@ -3408,6 +3440,23 @@ async function cierreAbrir() {
      dopo il turno día, stesso monto) riparte da zero e ne conia un altro. */
   CIE.uid = ''; CIE.uidMonto = null; CIE.pasarMesas = false;
   _cieRender('<div class="cie-msg">Mirando tus mesas…</div>');
+  const loc = CORTE_LOCAL_ON ? _cieDatosLocali() : null;
+  if (loc) {
+    CIE.data = loc; CIE.tol = 2000;
+    _ciePaso1();
+    bordeHecho('corte_local', { n_abiertas: loc.n_abiertas });
+    /* il libro completa dietro (turno, régimen, cierre previo, tolerancia):
+       se arriva mentre il mesero è ancora qui, il primo schermo si ridisegna.
+       Se non arriva, non si mostra nessun errore: il corte va avanti. */
+    const _uidFlusso = _CIE_INTENTO;
+    gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre }).then(function (r) {
+      if (!r || !r.ok || _uidFlusso !== _CIE_INTENTO || !CIE.data || !CIE.data._local) return;
+      CIE.data.turno = r.turno; CIE.data.regimen = r.regimen; CIE.data.ya_cerrado = r.ya_cerrado;
+      CIE.tol = r.tolerancia || 2000;
+      if (CIE.paso === 1) _ciePaso1();
+    }).catch(function () {});
+    return;
+  }
   try {
     const r = await gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre });
     if (!r || !r.ok) throw new Error((r && r.error) || 'no_ok');
@@ -3426,9 +3475,9 @@ async function cierreAbrir() {
 function _ciePaso1() {
   const d = CIE.data;
   const n = d.n_abiertas || 0;
-  let h = '<div class="cie-h">🧾 Cerrar mi turno</div><div class="cie-sub">' + esc(d.mesero) + ' · ' +
-    (d.turno === 'noche' ? 'noche' : 'día') + ' · propina ' +
-    (d.regimen === 'individual' ? 'individual' : 'al pozo') + '</div>';
+  let h = '<div class="cie-h">🧾 Cerrar mi turno</div><div class="cie-sub">' + esc(d.mesero) +
+    (d.turno ? ' · ' + (d.turno === 'noche' ? 'noche' : 'día') : '') +
+    (d.regimen ? ' · propina ' + (d.regimen === 'individual' ? 'individual' : 'al pozo') : '') + '</div>';   // [30-set] senza il libro non si indovina
   if (d.ya_cerrado) {
     h += '<div class="cie-warn">Ya cerraste hoy (entregaste ' + fmtPrice(d.ya_cerrado.declarado) +
       '). Si vuelves a cerrar se guarda una declaración NUEVA — la anterior no se borra.</div>';
@@ -8383,6 +8432,11 @@ var DTO_MAX_PCT = 30;
    tavolo aperto»] leva del bordo (/salud → finturno_bloqueo_on). Nasce spenta;
    finché il bordo non risponde resta spenta: il vetro di ieri, esatto. */
 var FINTURNO_BLOQUEO_ON = false;
+/* [30-set · Alberto: «non perdiamo tempo, andiamo al bordo anche con questo:
+   se al mesero di sera lo facciamo aspettare non chiuderà nulla»] il primo
+   schermo del corte si disegna dalla sala che il telefono HA GIÀ (nata al
+   bordo), senza aspettare il libro; il libro completa dietro. Nasce spenta. */
+var CORTE_LOCAL_ON = false;
 /* [29-set · Alberto: «il tetto del 30% fallo subito»] il tetto NON e' piu' una
    copia del vetro: si legge dal bordo (/salud → desc_max_pct), che e' la fonte
    unica e lo applica. 30 resta solo finche' il bordo non ha risposto. */
@@ -8405,6 +8459,7 @@ var FINTURNO_BLOQUEO_ON = false;
         return null;
       };
       FINTURNO_BLOQUEO_ON = String(cercaK(j, 'finturno_bloqueo_on')) === '1';   // [30-set]
+      CORTE_LOCAL_ON = String(cercaK(j, 'corte_local_on')) === '1';             // [30-set]
     }).catch(function () {});
   } catch (e) { /* senza il bordo resta 30 */ }
 })();
