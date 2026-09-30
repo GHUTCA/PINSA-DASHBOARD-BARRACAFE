@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.30.0</span>
+<span class="ver" id="ver">app_jl v1.31.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1232,6 +1232,17 @@ function vSala() {
     '<div class="row2"><button class="btn" onclick="moverJL()">Mover</button>' +
     '<button class="btn gh" onclick="mvLimpiar()">Cancelar</button></div>' +
     '</div>';
+  /* [30-set · FINE TURNO punto 4 · Alberto 29-set: «solo il JL dalla sua app»]
+     una mesa che non si pagherà: il consumo resta visibile nel libro (pago $0
+     col motivo), e «error del sistema» si conta. Il PIN è quello della sessione. */
+  h += '<div class="card"><h4>🚫 Cerrar una mesa sin pago</h4>' +
+    '<p class="mini">Solo cuando la mesa no se va a pagar. Queda firmado a tu nombre con el motivo.</p>' +
+    '<input class="busca" id="spMesa" inputmode="numeric" placeholder="mesa" oninput="spVer()">' +
+    '<small id="spInfo" class="mini" style="display:block;min-height:14px"></small>' +
+    '<div class="row2"><button class="btn gh" id="spM1" onclick="spMot(\'se_fue_sin_pagar\')">Se fue sin pagar</button>' +
+    '<button class="btn gh" id="spM2" onclick="spMot(\'error_sistema\')">Error del sistema</button></div>' +
+    '<div class="row2"><button class="btn" id="spBtn" onclick="sinPagoJL()">Cerrar sin pago</button></div>' +
+    '</div>';
   /* [06-set · Alberto: «switch El Menú e Colación»] EL MENÚ vive QUI, in
      Sala: la leva del menù è un gesto DI SERVIZIO (un 86 di tutto il locale),
      non di gestione del turno. La cobertura è andata in Turno, al suo posto. */
@@ -1311,6 +1322,72 @@ function mvPlaza(inp, dst) {
   const m = (inp.value || '').replace(/[^0-9]/g, '');
   const pz = m ? _plazaDeMesa(m) : '';
   $(dst).textContent = pz ? '↳ ' + pz : (m ? '↳ ¿plaza?' : '');
+}
+/* ═══ [30-set · FINE TURNO punto 4] CERRAR SIN PAGO ═══════════════════════
+   Il consumo della mesa si legge dalla vista del bordo (la stessa delle
+   pastiglie): il bordo esige un numero, e il JL deve vedere COSA sta chiudendo
+   prima di confermare. Via: /pago del bordo, che giudica PIN, app e motivo
+   (SIN_PAGO_BORDE_ON). Nessuna via di riserva al libro: il libro rifiuta un
+   sin pago senza il marchio del bordo. */
+var _SP = { motivo: '', enviando: false };
+function _spConsumo(mesa) {
+  const ms = STATE.vista && STATE.vista.meseros;
+  if (!ms) return null;
+  let mejor = null;
+  Object.keys(ms).forEach(k => {
+    const v = ms[k]; if (!v || !v.ok) return;
+    const pag = (v.mesas_pagadas && v.mesas_pagadas[mesa] && parseFloat(v.mesas_pagadas[mesa].pagado_seduta)) || 0;
+    (v.mesas || []).forEach(m => {
+      if (String(m.mesa) !== String(mesa)) return;
+      const r = Math.max(0, Math.round((parseFloat(m.total) || 0) - pag));
+      if (mejor === null || r > mejor) mejor = r;
+    });
+  });
+  return mejor;
+}
+function spVer() {
+  const m = ($('spMesa').value || '').replace(/[^0-9]/g, '');
+  const c = m ? _spConsumo(m) : null;
+  $('spInfo').textContent = !m ? '' : c ? ('Mesa ' + m + ' · ' + fmt(c) + ' sin cobrar') : 'No veo esa mesa abierta';
+}
+function spMot(k) {
+  _SP.motivo = k;
+  $('spM1').className = 'btn ' + (k === 'se_fue_sin_pagar' ? '' : 'gh');
+  $('spM2').className = 'btn ' + (k === 'error_sistema' ? '' : 'gh');
+}
+async function sinPagoJL() {
+  if (_SP.enviando) return;
+  const mesa = ($('spMesa').value || '').replace(/[^0-9]/g, '');
+  if (!mesa) { toast('warn', '¿Qué mesa?'); return; }
+  if (!_SP.motivo) { toast('warn', 'Elige el motivo'); return; }
+  const consumo = _spConsumo(mesa);
+  if (!consumo) { toast('warn', 'No veo la mesa ' + mesa + ' abierta'); return; }
+  const cod = STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo;
+  if (!cod) { toast('warn', 'Sin código de turno todavía — abre la pestaña Turno'); return; }
+  const txt = _SP.motivo === 'error_sistema' ? 'Error del sistema' : 'Se fue sin pagar';
+  if (!confirm('¿Cerrar la mesa ' + mesa + ' SIN PAGO?\n\n' + fmt(consumo) + ' · ' + txt + '\nQueda firmado a tu nombre.')) return;
+  _SP.enviando = true;
+  const b = $('spBtn'); if (b) { b.disabled = true; b.textContent = 'Cerrando…'; }
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 8000);
+    const r = await fetch(CFG.BORDE + '/pago/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T), {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctrl.signal, cache: 'no-store',
+      body: JSON.stringify({ action: 'registrarPago', local: CFG.LOCAL, app: 'jl', codigo: cod, nombre: STATE.user,
+        registrado_por: STATE.user, mesa: mesa, medio: 'sin_pago', sin_pago: 1, motivo_sin_pago: _SP.motivo,
+        pin_jl: STATE.pin, consumo: consumo, pago_uid: 'SP-' + mesa + '-' + Date.now().toString(36) })
+    });
+    clearTimeout(to);
+    const j = await r.json();
+    if (j && j.ok) {
+      toast('ok', '✓ Mesa ' + mesa + ' cerrada sin pago · ' + txt);
+      $('spMesa').value = ''; $('spInfo').textContent = ''; _SP.motivo = ''; spMot('');
+      giroVeloce();
+    } else {
+      toast('err', '✋ ' + ((j && (j.mensaje || j.error)) || 'No se pudo') + (j && j.need === 'gas' ? ' (el bordo no lo aceptó)' : ''));
+    }
+  } catch (e) { toast('err', 'Sin conexión — no se cerró nada'); }
+  finally { _SP.enviando = false; if (b) { b.disabled = false; b.textContent = 'Cerrar sin pago'; } }
 }
 async function moverJL() {
   const de = ($('mvDe').value || '').replace(/[^0-9]/g, ''), a = ($('mvA').value || '').replace(/[^0-9]/g, '');
