@@ -1278,6 +1278,41 @@ function spinner(on){    // 🆕 12-jun · clessidra durante la scrittura
     document.body.appendChild(sp);}
   sp.style.display=on?'flex':'none';
 }
+/* ═══ C2a · 30-set-2026 · 🚚 MIGRACION V28 — il Diccionario scrive in POSTGRES (dal bordo) ═══
+   Il bordo conia lo SKU e fa le stesse guardie del GAS; il foglio lo riceve DIETRO (inoltro).
+   · leva spenta («leva_spenta») o bordo senza la rotta (404) → il GAS come oggi, stessa risposta.
+   · bordo che NON risponde → errore e si ritenta: MAI ripiegare sul GAS alla cieca (a leva accesa
+     sarebbe un secondo conio dello SKU). Il ritentativo porta lo STESSO uid ⇒ non crea due volte.
+   Il token e' lo stesso (pubblico) del Registro: debito M4 dichiarato, non nuovo. */
+const DICC_BORDE = { URL:'https://pinsita-borde.alberto-agostini.workers.dev', T:'7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ' };
+const _uidInCorso = {};   // un uid per GESTO, finche' non va a buon fine (idempotenza dal lato che ripete)
+function _uidPer(payload){
+  // ✏️ banco C2a D5: la chiave e' TUTTO il gesto (row, extras, guard…) tranne l'ora — se l'operatore cambia
+  //    anche solo le empresas dopo una risposta persa, e' un gesto NUOVO e deve avere un uid nuovo
+  const senzaOra = Object.assign({}, payload); delete senzaOra.ts;
+  const k = JSON.stringify(senzaOra);
+  if (!_uidInCorso[k]) _uidInCorso[k] = 'dicc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  return { k, uid: _uidInCorso[k] };
+}
+async function scriviCatalogo(payload){
+  const { k, uid } = _uidPer(payload);
+  let r = null, j = null;
+  try {
+    r = await fetch(DICC_BORDE.URL + '/catalogo/scrivi', { method:'POST',
+      headers:{ 'X-Borde-Token':DICC_BORDE.T, 'Content-Type':'text/plain' }, body: JSON.stringify(Object.assign({}, payload, { uid })) });
+    try { j = await r.json(); } catch(e) { j = null; }
+  } catch(e) {
+    throw new Error('sin conexión con el sistema (' + (e && e.name || e) + '). Reintenta: no se crea dos veces');
+  }
+  const levaSpenta = (j && j.error === 'leva_spenta') || (r.status === 404 && (!j || j.error === 'ruta_desconocida'));
+  if (levaSpenta) {                         // il GAS come oggi, invariato
+    const g = await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
+    return await g.json();
+  }
+  if (!j) throw new Error('respuesta ilegible del sistema (' + r.status + '). Reintenta: no se crea dos veces');
+  if (j.ok === true) delete _uidInCorso[k];
+  return j;
+}
 async function guardar(){
   const payload=buildPayload();
   if(!CFG.GAS_URL){          // FAIL LOUD: nada de escrituras a ciegas
@@ -1288,8 +1323,7 @@ async function guardar(){
   }
   $('savebtn').disabled=true;$('savebtn').textContent='Guardando…';spinner(true);
   try{
-    const r=await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
-    const j=await r.json();
+    const j=await scriviCatalogo(payload);   // C2a · 30-set: prima il bordo (Postgres), il GAS solo a leva spenta
     if(j&&j.ok){
       // 🆕 12-jun · el CSV publicado tarda minutos en propagarse: empujamos la fila nueva
       // al catálogo EN MEMORIA. NO se llama boot(): pisaría S.catalog con el CSV viejo
@@ -1464,8 +1498,7 @@ async function guardarEdit(){
   }
   const b=$('ev-savebtn');b.disabled=true;b.textContent='Guardando…';spinner(true);
   try{
-    const r=await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
-    const j=await r.json();
+    const j=await scriviCatalogo(payload);   // C2a · 30-set: prima il bordo (Postgres), il GAS solo a leva spenta
     if(j&&j.ok){
       // espejamos los cambios al catálogo EN MEMORIA (el CSV tarda minutos · lección crear)
       const p=E.row,col=CFG.COL;
