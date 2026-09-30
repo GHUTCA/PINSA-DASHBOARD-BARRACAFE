@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.30.0</span>
+<span class="ver" id="ver">app_jl v1.30.1</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -715,6 +715,25 @@ async function staffPost(action, body) {
    = ~0,10 richieste/s al bordo per telefono JL (1-2 apparecchi). N2 rispettata:
    ogni poll ha nome, ritmo e questo commento come data di morte. */
 let _tick = 0;
+/* [30-set] la lista del bordo si fonde con ciò che il JL ha appena scritto e il
+   bordo non ha ancora visto (`_pendiente`): un'assegnazione non sparisce dallo
+   schermo nei 1-2 minuti del battito. */
+async function giroAsigBorde(cod) {
+  const v = await bordeGet('/estado/' + encodeURIComponent(CFG.LOCAL) + '?seccion=asignaciones&codigo=' + encodeURIComponent(cod));
+  const d = v && v.ok && v.datos && v.datos.datos;
+  if (!d || !Array.isArray(d.list)) return false;
+  if (STATE.turno.fecha_op && d.fecha_op && d.fecha_op !== STATE.turno.fecha_op) return false;
+  const nuove = d.list.filter(a => a && a.estado !== 'fusionada').map(a => ({
+    plaza: a.plaza || '', franja: a.franja || '', mesero: a.mesero || '',
+    campanilla: !!a.chat, hora_entrada_iso: a.hora_entrada_ms ? new Date(a.hora_entrada_ms).toISOString() : '',
+  }));
+  const pend = (STATE.turno.asignaciones || []).filter(a => a._pendiente &&
+    !nuove.some(n => n.plaza === a.plaza && _slugSalaJS(n.mesero) === _slugSalaJS(a.mesero)) &&
+    (Date.now() - (a._ts || 0)) < 5 * 60 * 1000);
+  STATE.turno.asignaciones = nuove.concat(pend);
+  STATE.ts.asig = Date.now();
+  return true;
+}
 async function giroVeloce() {
   if (DEMO) return;
   _tick++;
@@ -730,6 +749,15 @@ async function giroVeloce() {
         STATE.ts.vista = Date.now();
       }
     } catch (e) {}
+  }
+  /* [30-set · Alberto: «non arriva la lista dei meseros… è un lavoro urgente»]
+     le ASSEGNAZIONI dal bordo (sezione `asignaciones`, pubblicata dal libro a
+     ogni battito da AUT-0514), invece di aspettare `getTurnoAdmin` ogni 5 min —
+     che legge per intero TURNOS_ASIGNACIONES, una tab che cresce. Stesso codice
+     del turno della vista. Con la scheda Turno davanti a ogni giro (20 s),
+     altrimenti uno su tre. Il turno (codice, plazas, grupos) resta del libro. */
+  if (cod && STATE.turno && (TAB === 1 || _tick % 3 === 1)) {
+    try { await giroAsigBorde(cod); } catch (e) { /* resta la foto del libro */ }
   }
   if (_tick % 3 === 1) {   // un tick su tre: le letture di contorno
     try { const s = await bordeGet('/salud'); STATE.salud = s; STATE.ts.salud = Date.now(); } catch (e) { STATE.salud = null; }
@@ -1498,18 +1526,24 @@ function tabAsig() {
   (t && t.plazas || []).forEach(p => {
     const a = (t.asignaciones || []).find(x => x.plaza === p.plaza && x.mesero);
     h += '<div class="cob">' + esc(p.plaza) + ' <small style="color:#b9b2a4">' + esc(p.mesas) + '</small>' +
-      '<span class="st2 ' + (a ? 'up' : 'mid') + '">' + (a ? esc(a.mesero) : 'sin dueño') + '</span></div>';
+      '<span class="st2 ' + (a ? 'up' : 'mid') + '">' + (a ? esc(a.mesero) + (a._pendiente ? ' · guardando…' : '') : 'sin dueño') + '</span></div>';
   });
   $('body').innerHTML = h + _salidaHtml(); $('body').scrollTop = 0;   // via d'uscita anche qui
 }
 async function asignar() {
   const m = ($('asMesero').value || '').trim(), p = ($('asPlaza').value || '').trim();
   if (!m || !p) { toast('warn', 'Mesero y plaza'); return; }
+  /* [30-set] N1: la schermata non aspetta la rete — l'assegnazione compare
+     SUBITO («guardando…») e il libro la scrive dietro. Se il libro dice di no,
+     si toglie e si dice perché. */
+  const ott = { plaza: p, franja: '', mesero: m, campanilla: false, hora_entrada_iso: '', _pendiente: true, _ts: Date.now() };
+  if (STATE.turno) { STATE.turno.asignaciones = (STATE.turno.asignaciones || []).concat([ott]); pintaTab(); }
+  const togli = () => { if (STATE.turno) STATE.turno.asignaciones = (STATE.turno.asignaciones || []).filter(a => a !== ott); pintaTab(); };
   try {
     const r = await gasPost('asignarPlaza', { pin: STATE.pin, mesero: m, plaza: p });
     if (r && r.ok) { toast('ok', '✓ ' + m + ' → ' + p); giroTurno(); tab(1); }
-    else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
-  } catch (e) { toast('err', 'Sin conexión'); }
+    else { togli(); toast('err', '✋ ' + ((r && r.error) || 'No se pudo')); }
+  } catch (e) { togli(); toast('err', 'Sin conexión'); }
 }
 
 /* ═════ SCHEDA CAJA — materia di 💰 DINERO, letta dal ferro (getCaja) ═════ */
