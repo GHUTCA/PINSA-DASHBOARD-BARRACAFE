@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.31.1</span>
+<span class="ver" id="ver">app_jl v1.31.2</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1265,10 +1265,10 @@ function vSala() {
      col motivo), e «error del sistema» si conta. Il PIN è quello della sessione. */
   h += '<div class="card"><h4>🚫 Cerrar una mesa sin pago</h4>' +
     '<p class="mini">Solo cuando la mesa no se va a pagar. Queda firmado a tu nombre con el motivo.</p>' +
-    '<input class="busca" id="spMesa" inputmode="numeric" placeholder="mesa" oninput="spVer()">' +
-    '<small id="spInfo" class="mini" style="display:block;min-height:14px"></small>' +
-    '<div class="row2"><button class="btn gh" id="spM1" onclick="spMot(\'se_fue_sin_pagar\')">Se fue sin pagar</button>' +
-    '<button class="btn gh" id="spM2" onclick="spMot(\'error_sistema\')">Error del sistema</button></div>' +
+    '<input class="busca" id="spMesa" inputmode="numeric" placeholder="mesa" value="' + esc(_SP.mesa || '') + '" oninput="spVer()">' +
+    '<small id="spInfo" class="mini" style="display:block;min-height:14px">' + esc(_spInfoTxt(_SP.mesa)) + '</small>' +
+    '<div class="row2"><button class="btn ' + (_SP.motivo === 'se_fue_sin_pagar' ? '' : 'gh') + '" id="spM1" onclick="spMot(\'se_fue_sin_pagar\')">Se fue sin pagar</button>' +
+    '<button class="btn ' + (_SP.motivo === 'error_sistema' ? '' : 'gh') + '" id="spM2" onclick="spMot(\'error_sistema\')">Error del sistema</button></div>' +
     '<div class="row2"><button class="btn" id="spBtn" onclick="sinPagoJL()">Cerrar sin pago</button></div>' +
     '</div>';
   /* [06-set · Alberto: «switch El Menú e Colación»] EL MENÚ vive QUI, in
@@ -1357,7 +1357,7 @@ function mvPlaza(inp, dst) {
    prima di confermare. Via: /pago del bordo, che giudica PIN, app e motivo
    (SIN_PAGO_BORDE_ON). Nessuna via di riserva al libro: il libro rifiuta un
    sin pago senza il marchio del bordo. */
-var _SP = { motivo: '', enviando: false };
+var _SP = { motivo: '', mesa: '', enviando: false };
 function _spConsumo(mesa) {
   const ms = STATE.vista && STATE.vista.meseros;
   if (!ms) return null;
@@ -1373,10 +1373,15 @@ function _spConsumo(mesa) {
   });
   return mejor;
 }
+function _spInfoTxt(m) {
+  if (!m) return '';
+  const c = _spConsumo(m);
+  return c ? ('Mesa ' + m + ' · ' + fmt(c) + ' sin cobrar') : 'No veo esa mesa abierta';
+}
 function spVer() {
   const m = ($('spMesa').value || '').replace(/[^0-9]/g, '');
-  const c = m ? _spConsumo(m) : null;
-  $('spInfo').textContent = !m ? '' : c ? ('Mesa ' + m + ' · ' + fmt(c) + ' sin cobrar') : 'No veo esa mesa abierta';
+  _SP.mesa = m;   // [01-ott] sopravvive al ridisegno della scheda
+  $('spInfo').textContent = _spInfoTxt(m);
 }
 function spMot(k) {
   _SP.motivo = k;
@@ -1409,7 +1414,7 @@ async function sinPagoJL() {
     const j = await r.json();
     if (j && j.ok) {
       toast('ok', '✓ Mesa ' + mesa + ' cerrada sin pago · ' + txt);
-      $('spMesa').value = ''; $('spInfo').textContent = ''; _SP.motivo = ''; spMot('');
+      _SP.mesa = ''; _SP.motivo = ''; pintaTab();
       giroVeloce();
     } else {
       toast('err', '✋ ' + ((j && (j.mensaje || j.error)) || 'No se pudo') + (j && j.need === 'gas' ? ' (el bordo no lo aceptó)' : ''));
@@ -1856,7 +1861,20 @@ function salirJL() {
   try { sessionStorage.removeItem('jl_pin'); sessionStorage.removeItem('jl_user'); } catch (e) {}
   location.reload();
 }
-function pintaTab() { if (TAB >= 0) { $('body').innerHTML = VIS[TAB]() + _salidaHtml(); } }
+/* [01-ott · collaudo di Alberto: «inserisco 998, dopo un paio di secondi sparisce»]
+   la scheda si ridisegna intera a ogni giro di dati: mentre il JL scrive in una
+   casella non si tocca — si ridisegna quando la lascia. */
+let _repintaPend = false;
+function pintaTab() {
+  if (TAB < 0) return;
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && $('body').contains(ae)) {
+    if (!_repintaPend) { _repintaPend = true; ae.addEventListener('blur', function () { if (_repintaPend) { _repintaPend = false; setTimeout(pintaTab, 0); } }, { once: true }); }
+    return;
+  }
+  _repintaPend = false;
+  $('body').innerHTML = VIS[TAB]() + _salidaHtml();
+}
 
 async function entrar() {
   const pin = ($('gPin').value || '').trim();
