@@ -1291,8 +1291,8 @@ function _uidPer(payload){
   //    anche solo le empresas dopo una risposta persa, e' un gesto NUOVO e deve avere un uid nuovo
   const senzaOra = Object.assign({}, payload); delete senzaOra.ts;
   const k = JSON.stringify(senzaOra);
-  if (!_uidInCorso[k]) _uidInCorso[k] = 'dicc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
-  return { k, uid: _uidInCorso[k] };
+  if (!_uidInCorso[k]) _uidInCorso[k] = { uid: 'dicc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8), sku: payload.sku || null };
+  return { k, uid: _uidInCorso[k].uid };
 }
 async function scriviCatalogo(payload){
   const { k, uid } = _uidPer(payload);
@@ -1310,7 +1310,13 @@ async function scriviCatalogo(payload){
     return await g.json();
   }
   if (!j) throw new Error('respuesta ilegible del sistema (' + r.status + '). Reintenta: no se crea dos veces');
-  if (j.ok === true) delete _uidInCorso[k];
+  if (j.ok === true) {
+    delete _uidInCorso[k];
+    // banco C2b E06 (stessa classe nel Diccionario): un gesto piu' NUOVO sullo stesso SKU e' andato a buon fine ⇒ i
+    // gesti rimasti aperti su quello SKU (risposta persa) sono superati: ripeterli uguali e' un gesto NUOVO
+    const skuOk = payload.sku || j.sku;
+    if (skuOk) for (const kk of Object.keys(_uidInCorso)) if (String(_uidInCorso[kk].sku) === String(skuOk)) delete _uidInCorso[kk];
+  }
   return j;
 }
 async function guardar(){
