@@ -558,7 +558,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v91 · cada lugar su casilla · 01oct</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v92 · buscar sin espacios · 01oct</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -996,24 +996,39 @@ function searchProductos(q, limit){
   var nq = norm(q);
   if(!nq) return [];
   var byPrefix=[], byContains=[], byFuzzy=[], seen={};
+  // v92 · 01-oct: también SIN ESPACIOS — «cocacola» mostraba sólo «Coca Cola 350cc» y la «Coca Cola Zero Lata» parecía
+  // no existir (inventario general de Riesco). Un nivel PROPIO, después de los «contiene» de verdad; sólo si el match
+  // empieza al INICIO de una palabra; y NO marca el producto como visto (una entrada mejor suya, p.ej. un alias, gana).
+  var nqNS = nq.split(' ').join(''), byNS=[], nsSeen={};
+  function _empiezaPalabraNS(key){
+    var ws = key.split(' ');
+    for (var w = 0; w < ws.length; w++) if (ws.slice(w).join('').indexOf(nqNS) === 0) return true;
+    return false;
+  }
   NAME_IDX.forEach(function(ni){
     var sku = ni.v.sku;
     if(seen[sku]) return;            // un producto una vez (su mejor entrada gana)
     var key = ni.key;
     if(key.indexOf(nq)===0){ seen[sku]=1; byPrefix.push(ni.v); }       // empieza por: cima
     else if(key.indexOf(nq)>=0){ seen[sku]=1; byContains.push(ni.v); } // contiene: medio
+    else if(nqNS.length>=3 && _empiezaPalabraNS(key)){ if(!nsSeen[sku]){ nsSeen[sku]=1; byNS.push(ni.v); } }   // v92 · sin espacios
     else {
       var sc = diceScore(nq, key);
       if(sc>=58){ seen[sku]=1; byFuzzy.push({v:ni.v, sc:sc}); }        // parecido fonético: abajo
     }
   });
   byFuzzy.sort(function(a,b){return b.sc-a.sc;});
-  // orden de relevancia: prefijo (alfabético por nombre), contiene, fuzzy
+  // orden de relevancia: prefijo (alfabético por nombre), contiene, sin espacios (v92), fuzzy
   byPrefix.sort(function(a,b){return cleanName(a.nombre).localeCompare(cleanName(b.nombre));});
   byContains.sort(function(a,b){return cleanName(a.nombre).localeCompare(cleanName(b.nombre));});
+  var enPC = {}; byPrefix.concat(byContains).forEach(function(v){ enPC[v.sku]=1; });
+  byNS = byNS.filter(function(v){ return !enPC[v.sku]; });                    // ya está arriba: no se repite
+  byNS.sort(function(a,b){return cleanName(a.nombre).localeCompare(cleanName(b.nombre));});
+  var fz = byFuzzy.map(function(x){return x.v;}).filter(function(v){ return !nsSeen[v.sku] || enPC[v.sku]; });   // sin espacios gana a parecido
   return byPrefix
     .concat(byContains)
-    .concat(byFuzzy.map(function(x){return x.v;}))
+    .concat(byNS)
+    .concat(fz.filter(function(v){ return !enPC[v.sku]; }))
     .slice(0, limit);
 }
 
