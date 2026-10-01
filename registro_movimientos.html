@@ -558,7 +558,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v90 · la merma en su sección · 30set</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v91 · cada lugar su casilla · 01oct</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -3597,6 +3597,98 @@ GIRO_RIESCO = GIROS_POR_LOCAL[CTX_CODE] || [];   // sin giro → Inventario va d
 
 // estado de conteo en curso: { 'sku': qContadaUO }  (UO, no UTM; se convierte al cerrar)
 var MAPA_CONTEO = {};
+// ══ v91 · LA CASILLA ES DEL LUGAR, EL TOTAL ES DEL SKU (01-oct · Alberto: «se suman, obvio») ══════════════
+// Antes UNA casilla por SKU: el mismo producto en dos lugares (46 de 115 en el giro de Riesco) compartía la
+// casilla, y lo escrito en el segundo lugar REEMPLAZABA lo del primero (4 en el Refr B + 2 en Mini Bod = 2).
+// Ahora cada casilla guarda SU valor (MAPA_POSTO, clave «estación|contenedor») y MAPA_CONTEO[sku] es SIEMPRE
+// la SUMA de los lugares: todo lo de abajo (mapaValor, total, progreso global, registro) lee la suma.
+var MAPA_POSTO = {};   // { 'estCode|cont': { sku: valor (número escrito, o {paq,gr} si factor>1) } }
+function mapaPostoKey(estCode, cont){ return String(estCode)+'|'+String(cont||''); }
+// banco v91 D1: lo stesso SKU DUE volte nello stesso contenitore (Candelaria «Cong Past»: 1283 «Cesta manzana» e
+// «Cesta frutilla») sono DUE caselle ⇒ la chiave porta «#n» = quante volte lo SKU e' gia' comparso prima in quel
+// contenitore (n=0 resta la chiave semplice: compatibile con quanto gia' salvato). UNA funzione sola, usata da
+// mapaItemsDe e dal disegno: le due strade non possono piu' divergere.
+function mapaPkDe(estCode, cont, arr, i){
+  var sku = arr[i] && arr[i].sku, n = 0;
+  for (var j=0; j<i; j++) if (arr[j] && sku && String(arr[j].sku)===String(sku)) n++;
+  return mapaPostoKey(estCode, cont) + (n>0 ? ('#'+n) : '');
+}
+// somma due valori di casella (per ricollocare un posto orfano dentro uno visibile)
+function _mapaSommaVal(a, b){
+  if (_mapaPostoVacio(a)) return b; if (_mapaPostoVacio(b)) return a;
+  if (typeof a==='object' || typeof b==='object'){
+    var oa=(typeof a==='object')?a:{paq:'',gr:a}, ob=(typeof b==='object')?b:{paq:'',gr:b};
+    var p1=_mapaNum(oa.paq), p2=_mapaNum(ob.paq), g1=_mapaNum(oa.gr), g2=_mapaNum(ob.gr);
+    return { paq:(p1===null&&p2===null)?'':_mapaSumaTxt((p1||0)+(p2||0)), gr:(g1===null&&g2===null)?'':_mapaSumaTxt((g1||0)+(g2||0)) };
+  }
+  return _mapaSumaTxt((_mapaNum(a)||0)+(_mapaNum(b)||0));
+}
+// banco v91 D2: un posto salvato che NON corrisponde a nessuna casella del giro di adesso (conteo v90 su un
+// «añadido» arrivato dopo dal GAS, añadido tolto da un altro telefono, giro cambiato da un deploy) entrerebbe
+// nella somma SENZA vedersi. Si ricolloca nella prima casella visibile dello SKU (sommandolo a cio' che c'e':
+// il numero si VEDE). Gira a ogni disegno, dopo l'iniezione degli añadidos (che arrivano anche in ritardo).
+// Uno SKU che non sta piu' nel giro resta dov'e' (nella somma, come lo mandava il v90).
+function mapaRicolloca(){
+  var visibili={}, primo={};
+  GIRO_RIESCO.forEach(function(est){ mapaItemsDe(est).forEach(function(o){
+    var s=String(o.it.sku||''); if(!s) return; visibili[o.pk+'§'+s]=1; if(!primo[s]) primo[s]=o.pk; }); });   // la casilla = lugar + SKU
+  var mosso=false;
+  Object.keys(MAPA_POSTO).forEach(function(pk){
+    Object.keys(MAPA_POSTO[pk]||{}).forEach(function(sku){
+      if (visibili[pk+'§'+sku]) return;           // tiene la sua casilla: resta
+      var dest=primo[sku]; if(!dest) return;
+      var v=MAPA_POSTO[pk][sku];
+      (MAPA_POSTO[dest]=MAPA_POSTO[dest]||{})[sku]=_mapaSommaVal(MAPA_POSTO[dest][sku], v);
+      delete MAPA_POSTO[pk][sku]; mosso=true;
+    });
+    if (MAPA_POSTO[pk] && !Object.keys(MAPA_POSTO[pk]).length) delete MAPA_POSTO[pk];
+  });
+  if (mosso){ Object.keys(primo).forEach(function(s){ mapaRicalcola(s); }); mapaConteoGuardar(); }
+}
+function mapaPostoVal(pk, sku){ var p=MAPA_POSTO[pk]; return (p && p[sku]!=null) ? p[sku] : null; }
+function _mapaPostoVacio(v){
+  if (v===undefined || v===null) return true;
+  if (typeof v==='object') return (_mapaNum(v.paq)===null && _mapaNum(v.gr)===null);
+  return _mapaNum(v)===null;
+}
+function _mapaSumaTxt(n){ return String(Math.round(n*1e6)/1e6); }
+// recalcula la SUMA de un SKU desde sus lugares (vacío ≠ cero: un lugar no escrito no suma, un 0 sí cuenta)
+function mapaRicalcola(sku){
+  var f = (typeof skuFactor==='function') ? skuFactor(sku) : 1;
+  var sp=null, sg=null, sq=null;
+  Object.keys(MAPA_POSTO).forEach(function(pk){
+    var v = MAPA_POSTO[pk] ? MAPA_POSTO[pk][sku] : null;
+    if (v===undefined || v===null) return;
+    if (typeof v==='object'){
+      var a=_mapaNum(v.paq), b=_mapaNum(v.gr);
+      if (a!==null) sp=(sp||0)+a;
+      if (b!==null) sg=(sg||0)+b;
+    } else {
+      var n=_mapaNum(v); if (n!==null) sq=(sq||0)+n;
+    }
+  });
+  if (f>1){
+    if (sq!==null) sg=(sg||0)+sq;   // un valor suelto (heredado) en un SKU de doble entrada: va a los sueltos
+    if (sp===null && sg===null){ delete MAPA_CONTEO[sku]; return; }
+    MAPA_CONTEO[sku] = { paq:(sp===null?'':_mapaSumaTxt(sp)), gr:(sg===null?'':_mapaSumaTxt(sg)) };
+  } else {
+    if (sp!==null || sg!==null) sq=(sq||0)+(sp||0)+(sg||0);
+    if (sq===null){ delete MAPA_CONTEO[sku]; return; }
+    MAPA_CONTEO[sku] = _mapaSumaTxt(sq);
+  }
+}
+function mapaPostoSet(pk, sku, v){
+  sku=String(sku);
+  if (_mapaPostoVacio(v)){ if (MAPA_POSTO[pk]) { delete MAPA_POSTO[pk][sku]; if (!Object.keys(MAPA_POSTO[pk]).length) delete MAPA_POSTO[pk]; } }
+  else { (MAPA_POSTO[pk]=MAPA_POSTO[pk]||{})[sku]=v; }
+  mapaRicalcola(sku);
+}
+// en cuántos lugares del giro aparece un SKU (para decir «se suman» donde se repite)
+function mapaLugaresDe(sku){
+  var n=0;
+  GIRO_RIESCO.forEach(function(est){ mapaItemsDe(est).forEach(function(o){ if(String(o.it.sku)===String(sku)) n++; }); });
+  return n;
+}
 var MAPA_ESTACION_ABIERTA = null;   // índice de estación abierta en el acordeón
 var MAPA_EDIT = false;              // candado abierto = modo reordenar (▲▼)
 var MAPA_ORDEN_KEY = 'pinsita_mapa_orden_'+CTX_CODE;   // cache local del orden compartido (per local)
@@ -3666,11 +3758,11 @@ function mapaNombre(it){
 function mapaItemsDe(est){
   var out = [];
   if (est.items) {
-    est.items.forEach(function(it){ if(it && (it.sku||it.label)) out.push({it:it, casilla:null}); });
+    est.items.forEach(function(it,i){ if(it && (it.sku||it.label)) out.push({it:it, casilla:null, cont:'', pk:mapaPkDe(est.code,'',est.items,i)}); });
   }
   if (est.sub) {
-    est.sub.forEach(function(c){
-      (c.items||[]).forEach(function(it){ if(it && (it.sku||it.label)) out.push({it:it, casilla:c.casilla}); });
+    est.sub.forEach(function(c,k){
+      (c.items||[]).forEach(function(it,i){ if(it && (it.sku||it.label)) out.push({it:it, casilla:c.casilla, cont:'s'+k, pk:mapaPkDe(est.code,'s'+k,c.items,i)}); });
     });
   }
   return out;
@@ -3683,7 +3775,7 @@ function mapaProgresoEst(est){
     var sku = o.it.sku;
     if (!sku) return;                        // 'sin SKU' no cuenta ni bloquea el verde
     total++;
-    if (!mapaValor(sku).vacio) hechos++;
+    if (!_mapaPostoVacio(mapaPostoVal(o.pk, sku))) hechos++;   // v91 · la casilla de ESTE lugar
   });
   return { hechos: hechos, total: total };
 }
@@ -3776,7 +3868,7 @@ function mapaExtraQuitar(estCode, cont, sku){
         if (arr[i].extra && String(arr[i].sku) === String(sku)) arr.splice(i, 1);
     }
   }
-  try { delete MAPA_CONTEO[String(sku)]; mapaConteoGuardar(); } catch(e){}
+  try { mapaPostoSet(mapaPostoKey(estCode, cont), sku, null); mapaConteoGuardar(); } catch(e){}   // v91 · solo su lugar
   mapaGuardarOrden();
   pintarMapa();
 }
@@ -4046,8 +4138,8 @@ function abrirMapa(){
   ov.style.display='flex';
   MAPA_ESTACION_ABIERTA = null;
   MAPA_EDIT = false;
-  mapaConteoCargar();  // recupera el conteo en curso (si cerró la app a mitad de giro)
   mapaCargarOrden();   // cache local al vuelo + orden compartido del GAS (repinta al volver)
+  mapaConteoCargar();  // recupera el conteo en curso · v91 (banco D2): DESPUÉS del orden, que trae los añadidos
   pintarMapa();
   try{ pintarBadge(); }catch(e){}   // v82 · lo que quedó sin subir se ve TAMBIÉN aquí dentro
 }
@@ -4058,6 +4150,7 @@ function cerrarMapa(){
 function pintarMapa(){
   var body=document.getElementById('mapaBody'); if(!body) return;
   mapaInyectarExtras();   // v75 · idempotente: lo añadido entra antes de dibujar
+  mapaRicolloca();        // v91 (banco D2): un lugar guardado sin casilla visible pasa a la primera del SKU
   var html='';
   // v67 · CODICE VISIVO (PATTERN_CODICE_VISIVO_CONTEO_29JUL2026): la lezione dei
   // due colori vive UNA volta, in testa al giro — non si ripete per fila.
@@ -4114,53 +4207,59 @@ function pintarMapa(){
     };
   });
   // inputs de conteo · refresca el total legible de esa fila (sin repintar)
-  function _mapaRefTot(sku){
-    var totEl=document.getElementById('mtot-'+sku);
-    if(totEl){ var t=mapaTotUTM(sku); totEl.textContent = t ? ('= '+t) : ''; }
+  // v91 · cada casilla escribe SU lugar (pk); el total de abajo es la SUMA de todos los lugares del SKU
+  function _mapaRefTot(sku, pk){
+    var t=mapaTotUTM(sku);
+    body.querySelectorAll('.mtot[data-sku="'+sku+'"]').forEach(function(el){
+      el.innerHTML = _mapaTotTxt(sku, parseInt(el.dataset.lug,10)||0);
+    });
     // v67 · il sussurro del conteo (PATTERN 29-jul §4): 60+ envases CERRADOS tutti
     // insieme non esistono in barra — se son sueltos, van en la ámbar. Avvisa, non blocca.
-    var v=MAPA_CONTEO[sku], paq=(v&&typeof v==='object')?(parseFloat(v.paq)||0):0;
+    // v91 · lo dice la casilla de ESTE lugar (60 cerrados en un refrigerador), no la suma
+    var v=mapaPostoVal(pk, sku), paq=(v&&typeof v==='object')?(parseFloat(v.paq)||0):0;
     var loco = paq>=60;
-    var sus=document.getElementById('msus-'+sku);
-    var inp=document.querySelector('.mapa-paq[data-sku="'+sku+'"]');
+    var sus=body.querySelector('.msus[data-sku="'+sku+'"][data-pk="'+pk+'"]');
+    var inp=body.querySelector('.mapa-paq[data-sku="'+sku+'"][data-pk="'+pk+'"]');
     if(sus){
       sus.textContent = loco ? ('¿'+paq+' envases sin abrir? Lo suelto va en la ámbar →') : '';
       sus.style.display = loco ? 'block' : 'none';
     }
     if(inp){ inp.style.borderColor = loco?'#d43f3f':'#2f6fed'; inp.style.background = loco?'#fdf0f0':'#eef4ff'; }
+    var totEl=body.querySelector('.mtot[data-sku="'+sku+'"][data-pk="'+pk+'"]');   // banco v91 D3: come nel v90
     if(totEl){ totEl.style.color = loco?'#d43f3f':'var(--ink)'; totEl.style.fontWeight = loco?'700':''; }
   }
   // casilla simple (factor<=1): el número es UO=UTM
-  function _mapaTrasContar(sku){ _mapaRefTot(sku); mapaConteoGuardar(); _mapaRefProgreso(); }
+  function _mapaTrasContar(sku, pk){ _mapaRefTot(sku, pk); mapaConteoGuardar(); _mapaRefProgreso(); }
   body.querySelectorAll('.mapa-q').forEach(function(inp){
     inp.oninput=function(){
-      var sku=inp.dataset.sku, raw=inp.value.trim();
-      if(raw===''){ delete MAPA_CONTEO[sku]; } else { MAPA_CONTEO[sku]=raw; }
-      _mapaTrasContar(sku);
+      var sku=inp.dataset.sku, pk=inp.dataset.pk, raw=inp.value.trim();
+      mapaPostoSet(pk, sku, raw===''?null:raw);
+      _mapaTrasContar(sku, pk);
     };
   });
   // doble entrada (factor>1): estado {paq, gr} → utmReal = paq×factor + gr
-  function _mapaDobleSet(sku,campo,valor){
-    var o = (MAPA_CONTEO[sku] && typeof MAPA_CONTEO[sku]==='object') ? MAPA_CONTEO[sku] : {paq:'',gr:''};
+  function _mapaDobleSet(sku,pk,campo,valor){
+    var prev = mapaPostoVal(pk, sku);
+    var o = (prev && typeof prev==='object') ? {paq:prev.paq, gr:prev.gr} : {paq:'',gr:''};
     o[campo]=valor;
-    if((!o.paq) && (!o.gr)) delete MAPA_CONTEO[sku]; else MAPA_CONTEO[sku]=o;
-    _mapaTrasContar(sku);
+    mapaPostoSet(pk, sku, ((!o.paq) && (!o.gr)) ? null : o);
+    _mapaTrasContar(sku, pk);
   }
   body.querySelectorAll('.mapa-paq').forEach(function(inp){
-    inp.oninput=function(){ _mapaDobleSet(inp.dataset.sku,'paq',inp.value.trim()); };
+    inp.oninput=function(){ _mapaDobleSet(inp.dataset.sku,inp.dataset.pk,'paq',inp.value.trim()); };
   });
   body.querySelectorAll('.mapa-gr').forEach(function(inp){
-    inp.oninput=function(){ _mapaDobleSet(inp.dataset.sku,'gr',inp.value.trim()); };
+    inp.oninput=function(){ _mapaDobleSet(inp.dataset.sku,inp.dataset.pk,'gr',inp.value.trim()); };
   });
   // PESO MEDIO: unidades → riempie i gr della stessa fila (in place, cursor a salvo)
   body.querySelectorAll('.mapa-un').forEach(function(inp){
     inp.oninput=function(){
-      var sku=inp.dataset.sku, un=_mapaNum(inp.value), pm=parseFloat(inp.dataset.pm)||0;
+      var sku=inp.dataset.sku, pk=inp.dataset.pk, un=_mapaNum(inp.value), pm=parseFloat(inp.dataset.pm)||0;
       // v86 · R4: 0 unidades es «no hay» (se manda 0 g); casilla vacía = no contado
       var gr=(un!==null&&pm>0)?String(Math.round(un*pm)):'';
-      var q=body.querySelector('.mapa-q[data-sku="'+sku+'"]'); if(q) q.value=gr;
-      if(gr===''){ delete MAPA_CONTEO[sku]; } else { MAPA_CONTEO[sku]=gr; }
-      _mapaTrasContar(sku);
+      var q=body.querySelector('.mapa-q[data-sku="'+sku+'"][data-pk="'+pk+'"]'); if(q) q.value=gr;   // v91 · la de ESTE lugar
+      mapaPostoSet(pk, sku, gr===''?null:gr);
+      _mapaTrasContar(sku, pk);
     };
   });
   // "Listo" = colapsar la estación (NO registra; el registro es la confirmación final)
@@ -4184,6 +4283,12 @@ function pintarMapa(){
   _mapaRefProgreso();   // cabecera + botón de confirmación con el estado del giro
 }
 
+// v91 · el total bajo la casilla: si el producto está en VARIOS lugares, se dice que se suman y cuánto da
+function _mapaTotTxt(sku, nLug){
+  var t = mapaTotUTM(sku);
+  if (nLug>1) return 'está en '+nLug+' lugares · se suman'+(t?(' · total = '+esc(t)):'');
+  return t ? ('= '+esc(t)) : '';
+}
 // pinta los productos de una estación, agrupados por casilla si es 'mueble'
 function pintarItemsEstacion(est, estIdx){
   var html='';
@@ -4196,7 +4301,10 @@ function pintarItemsEstacion(est, estIdx){
     // idéntica a Ingreso BLoc. factor<=1 → una sola casilla (UO=UTM).
     var f = sku ? ((typeof skuFactor==='function')?skuFactor(sku):1) : 1;
     var esDoble = (f>1);
-    var cur = (sku && MAPA_CONTEO[sku]!=null) ? MAPA_CONTEO[sku] : null;
+    var arrF = contKey ? ((est.sub && est.sub[parseInt(String(contKey).slice(1),10)]) || {}).items || [] : (est.items || []);
+    var pk = mapaPkDe(est.code, contKey, arrF, i);                  // v91 · la casilla es de ESTE lugar (banco D1: con #n)
+    var cur = sku ? mapaPostoVal(pk, sku) : null;
+    var nLug = sku ? mapaLugaresDe(sku) : 0;
     var val = sku ? mapaValor(sku) : {vacio:true};
     var uoCorto  = (uo||'ud').trim().split(/\s+/)[0];
     var utmCorto = (sku && typeof skuUTM==='function' && skuUTM(sku)) || 'sueltos';
@@ -4218,7 +4326,7 @@ function pintarItemsEstacion(est, estIdx){
     function boxD(cls,v,w,lbl,fam){
       var st=(fam==='u')?stU:stS, ink=(fam==='u')?'#2456c9':'#9a5b00';
       return '<div style="display:flex;flex-direction:column;align-items:center;gap:2px">'+
-        '<input class="'+cls+'" data-sku="'+esc(sku)+'" type="number" inputmode="'+(cls==='mapa-paq'?'numeric':'decimal')+'" value="'+esc(v)+'" placeholder="0" style="width:'+w+'px;'+st+inpSt+'">'+
+        '<input class="'+cls+'" data-sku="'+esc(sku)+'" data-pk="'+esc(pk)+'" type="number" inputmode="'+(cls==='mapa-paq'?'numeric':'decimal')+'" value="'+esc(v)+'" placeholder="0" style="width:'+w+'px;'+st+inpSt+'">'+
         '<div style="font-size:9px;font-weight:700;color:'+ink+';white-space:nowrap;max-width:'+(w+8)+'px;overflow:hidden;text-overflow:ellipsis">'+esc(lbl)+'</div>'+
       '</div>';
     }
@@ -4232,11 +4340,11 @@ function pintarItemsEstacion(est, estIdx){
       : pmM
       ? '<div style="display:flex;gap:6px;align-items:flex-start">'+
           '<div style="display:flex;flex-direction:column;align-items:center;gap:2px">'+
-            '<input class="mapa-un" data-sku="'+esc(sku)+'" data-pm="'+pmM.peso+'" type="number" inputmode="numeric" placeholder="un" style="width:48px;'+stS+inpSt+'">'+
+            '<input class="mapa-un" data-sku="'+esc(sku)+'" data-pk="'+esc(pk)+'" data-pm="'+pmM.peso+'" type="number" inputmode="numeric" placeholder="un" style="width:48px;'+stS+inpSt+'">'+
             '<div style="font-size:9px;font-weight:700;color:#9a5b00;white-space:nowrap">un ≈'+pmM.peso+'g</div></div>'+
-          '<input class="mapa-q" data-sku="'+esc(sku)+'" type="number" inputmode="decimal" step="any" value="'+esc(cur!=null?String(cur):'')+'" style="width:76px;'+stS+inpSt+'" placeholder="gr">'+
+          '<input class="mapa-q" data-sku="'+esc(sku)+'" data-pk="'+esc(pk)+'" type="number" inputmode="decimal" step="any" value="'+esc(cur!=null?String(cur):'')+'" style="width:76px;'+stS+inpSt+'" placeholder="gr">'+
         '</div>'
-      : '<input class="mapa-q" data-sku="'+esc(sku)+'" type="number" inputmode="decimal" step="'+step+'" value="'+esc(cur!=null?String(cur):'')+'" style="width:76px;'+stS+inpSt+'" placeholder="0">';
+      : '<input class="mapa-q" data-sku="'+esc(sku)+'" data-pk="'+esc(pk)+'" type="number" inputmode="decimal" step="'+step+'" value="'+esc(cur!=null?String(cur):'')+'" style="width:76px;'+stS+inpSt+'" placeholder="0">';
     html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line-soft,rgba(0,0,0,.05));'+(i%2?'background:rgba(26,29,35,.035);':'')+'">'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:14px;color:var(--ink);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nombre)+
@@ -4255,8 +4363,8 @@ function pintarItemsEstacion(est, estIdx){
           ? '<div style="font-size:11px;color:var(--accent);white-space:nowrap">sin SKU</div>'
           : '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">'+
               inputHtml+
-              '<div id="mtot-'+esc(sku)+'" style="font-size:11px;color:var(--ink)">'+(tot?('= '+esc(tot)):'')+'</div>'+
-              '<div id="msus-'+esc(sku)+'" style="display:none;font-size:10.5px;color:#d43f3f;text-align:right;max-width:170px"></div>'+
+              '<div class="mtot" data-sku="'+esc(sku)+'" data-pk="'+esc(pk)+'" data-lug="'+nLug+'" style="font-size:11px;color:var(--ink);text-align:right">'+_mapaTotTxt(sku, nLug)+'</div>'+
+              '<div class="msus" data-sku="'+esc(sku)+'" data-pk="'+esc(pk)+'" style="display:none;font-size:10.5px;color:#d43f3f;text-align:right;max-width:170px"></div>'+
             '</div>'))+
     '</div>';
   }
@@ -4293,9 +4401,29 @@ function estacionLista(idx){ MAPA_ESTACION_ABIERTA = null; pintarMapa(); }
 
 // ── persistencia del conteo en curso (sobrevive recarga/cierre a mitad de giro) ──
 var MAPA_CONTEO_KEY = 'pinsita_mapa_conteo_'+CTX_CODE;
-function mapaConteoGuardar(){ try{ localStorage.setItem(MAPA_CONTEO_KEY, JSON.stringify(MAPA_CONTEO)); }catch(e){} }
-function mapaConteoCargar(){ try{ var c=JSON.parse(localStorage.getItem(MAPA_CONTEO_KEY)||'null'); if(c&&typeof c==='object') MAPA_CONTEO=c; }catch(e){} }
-function mapaConteoLimpiar(){ MAPA_CONTEO={}; try{ localStorage.removeItem(MAPA_CONTEO_KEY); }catch(e){} }
+var MAPA_POSTO_KEY = 'pinsita_mapa_posto_'+CTX_CODE;   // v91 · el valor de cada lugar
+function mapaConteoGuardar(){ try{ localStorage.setItem(MAPA_CONTEO_KEY, JSON.stringify(MAPA_CONTEO)); localStorage.setItem(MAPA_POSTO_KEY, JSON.stringify(MAPA_POSTO)); }catch(e){} }
+function mapaConteoCargar(){
+  var c=null, p=null;
+  try{ c=JSON.parse(localStorage.getItem(MAPA_CONTEO_KEY)||'null'); }catch(e){}
+  try{ p=JSON.parse(localStorage.getItem(MAPA_POSTO_KEY)||'null'); }catch(e){}
+  MAPA_POSTO = (p && typeof p==='object') ? p : {};
+  MAPA_CONTEO = {};
+  // v91 · un conteo a medias guardado por el v90 (solo por SKU, sin lugar): entra en el PRIMER lugar del SKU
+  // en el giro (es donde el v90 lo mostraba primero); si el SKU ya no está en el giro, en un lugar «heredado».
+  if (c && typeof c==='object' && !(p && typeof p==='object')){
+    Object.keys(c).forEach(function(sku){
+      var pk=null;
+      GIRO_RIESCO.some(function(est){ return mapaItemsDe(est).some(function(o){
+        if(String(o.it.sku)===String(sku)){ pk=o.pk; return true; } return false; }); });
+      (MAPA_POSTO[pk||'heredado|']=MAPA_POSTO[pk||'heredado|']||{})[sku]=c[sku];
+    });
+  }
+  var skus={};
+  Object.keys(MAPA_POSTO).forEach(function(pk){ Object.keys(MAPA_POSTO[pk]||{}).forEach(function(s){ skus[s]=1; }); });
+  Object.keys(skus).forEach(mapaRicalcola);
+}
+function mapaConteoLimpiar(){ MAPA_CONTEO={}; MAPA_POSTO={}; try{ localStorage.removeItem(MAPA_CONTEO_KEY); localStorage.removeItem(MAPA_POSTO_KEY); }catch(e){} }
 
 // borra TODO el conteo en curso (los de prueba que quedaron). NO toca lo ya
 // registrado en el sistema. Con aviso para no borrar por error.
@@ -4332,7 +4460,7 @@ function _mapaRefProgreso(){
 function mapaGaps(){
   var g=[];
   GIRO_RIESCO.forEach(function(est){
-    var f=[]; mapaItemsDe(est).forEach(function(o){ var s=o.it.sku; if(!s)return; if(mapaValor(s).vacio) f.push(mapaNombre(o.it)); });
+    var f=[]; mapaItemsDe(est).forEach(function(o){ var s=o.it.sku; if(!s)return; if(_mapaPostoVacio(mapaPostoVal(o.pk, s))) f.push(mapaNombre(o.it)); });   // v91
     if(f.length) g.push({ nom:est.nom, faltan:f });
   });
   return g;
