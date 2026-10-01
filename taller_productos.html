@@ -184,7 +184,7 @@
     <button id="nav-precios" onclick="vista('precios')" style="display:none">Precios</button>
   </nav>
   <span class="userchip" id="userchip">—</span>
-  <span class="ver" id="ver">v2.5 · 21-set</span>
+  <span class="ver" id="ver">v2.6 · 30-set</span>
 </header>
 
 <main>
@@ -3239,6 +3239,41 @@ async function llamarGAS(payload){
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return await r.json();
 }
+/* ═══ v2.6 · C2b · 30-set-2026 · 🚚 MIGRACION V28 — le ricette si scrivono in POSTGRES (dal bordo) ═══
+   Postgres conia l'ID (REC-nnnn) e lo SKU 5xxx; il foglio lo riceve DIETRO (inoltro del bordo, in ordine per ricetta).
+   · leva spenta («leva_spenta») o bordo senza la rotta (404) → il GAS come oggi (llamarGAS), stessa risposta.
+   · bordo che NON risponde → errore e si ritenta: MAI ripiegare sul GAS alla cieca (a leva accesa sarebbe
+     un secondo conio). Il ritentativo dello STESSO gesto porta lo STESSO uid ⇒ non crea due volte.
+   Il token e' lo stesso (pubblico) del Registro e del Diccionario: debito M4 dichiarato, non nuovo. */
+const TALLER_BORDE = { URL:'https://pinsita-borde.alberto-agostini.workers.dev', T:'7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ' };
+const _uidReceta = {};   // un uid per GESTO (tutto il payload), finche' non va a buon fine: { k: {uid, id} }
+async function scriviReceta(payload){
+  const k = JSON.stringify(payload);
+  if (!_uidReceta[k]) _uidReceta[k] = { uid: 'taller-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8), id: payload.id || null };
+  const uid = _uidReceta[k].uid;
+  const body = { action: 'receta_' + payload.action, uid, data: payload.data };
+  if (payload.id) body.id = payload.id;
+  let r = null, j = null;
+  try {
+    r = await fetch(TALLER_BORDE.URL + '/catalogo/scrivi', { method:'POST',
+      headers:{ 'X-Borde-Token':TALLER_BORDE.T, 'Content-Type':'text/plain' }, body: JSON.stringify(body) });
+    try { j = await r.json(); } catch(e) { j = null; }
+  } catch(e) {
+    throw new Error('sin conexión con el sistema (' + (e && e.name || e) + '). Reintenta: no se crea dos veces');
+  }
+  const levaSpenta = (j && j.error === 'leva_spenta') || (r.status === 404 && (!j || j.error === 'ruta_desconocida'));
+  if (levaSpenta) return await llamarGAS(payload);   // il GAS come oggi, invariato
+  if (!j) throw new Error('respuesta ilegible del sistema (' + r.status + '). Reintenta: no se crea dos veces');
+  if (j.ok === true) {
+    delete _uidReceta[k];
+    // banco C2b E06: un gesto piu' NUOVO sulla stessa ricetta e' andato a buon fine ⇒ i gesti rimasti aperti su
+    // quella ricetta (risposta persa) sono superati: ripeterli uguali e' un gesto NUOVO, con un uid nuovo
+    // (se no «5000 → perso · 6000 ok · 5000» tornava dedup e il prezzo restava 6000 con scritto «actualizado»)
+    const idOk = payload.id || j.id;
+    if (idOk) for (const kk of Object.keys(_uidReceta)) if (_uidReceta[kk].id === idOk) delete _uidReceta[kk];
+  }
+  return j;
+}
 async function guardar(){
   // v1.7: assorbe il paso scritto ma non ancora aggiunto (niente perdite mute)
   if (val('f-paso').trim()) addPaso();
@@ -3249,8 +3284,8 @@ async function guardar(){
   btn.disabled = true; btn.textContent = 'Guardando…';
   try {
     const res = S.id
-      ? await llamarGAS({ action:'editar', id:S.id, data:p })
-      : await llamarGAS({ action:'guardar', data:p });
+      ? await scriviReceta({ action:'editar', id:S.id, data:p })     // v2.6 · C2b
+      : await scriviReceta({ action:'guardar', data:p });
     if (res && res.ok) {
       const esCC = p.tipo_receta === 'PREPARACION' || p.tipo_receta === 'SUBRECETA';
       toast('✔ <b>' + (res.id || S.id) + '</b> guardada' +
@@ -3508,7 +3543,7 @@ async function activar(id){
   const r = RECETAS.find(x => x.id === id);
   if (!r) return;
   try {
-    const res = await llamarGAS({ action:'editar', id, data:{ estado:'ACTIVA' } });
+    const res = await scriviReceta({ action:'editar', id, data:{ estado:'ACTIVA' } });   // v2.6 · C2b
     if (res && res.ok) { toast('✔ <b>' + id + '</b> ACTIVA — visible y vendible.', 'ok'); r.estado = 'ACTIVA'; verReceta(id); }
     else toast('✘ ' + esc((res&&res.error)||'error'), 'err');
   } catch(e) { toast('✘ Sin respuesta del servidor.', 'err'); }
@@ -3532,7 +3567,7 @@ function renderPrecios(){
 async function setPV(id, v){
   const pv = parseFloat(v) || null;
   try {
-    const res = await llamarGAS({ action:'editar', id, data:{ precio_venta: pv } });
+    const res = await scriviReceta({ action:'editar', id, data:{ precio_venta: pv } });   // v2.6 · C2b
     if (res && res.ok) {
       const r = RECETAS.find(x => x.id === id);
       if (r) r.pv = pv;
