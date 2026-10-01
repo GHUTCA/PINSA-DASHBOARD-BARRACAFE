@@ -3279,9 +3279,22 @@ function salir() {
      fermato Ray su una plaza che il JL gli aveva già tolto. Se la rilettura non
      riesce si decide sulla memoria come prima — e l'uscita resta «MI CORTE»,
      che senza sala fresca chiede al libro e, firmato, apre il «Salgo». */
+  /* [seconda testa, 01-ott] e senza sala fresca si chiede al LIBRO prima della
+     memoria: è il caso esatto di Ray dopo le 19:46 (nessuna plaza ⇒ nessuna sua
+     vista al bordo), dove la memoria lo avrebbe fermato ancora sulla 89. Solo se
+     anche il libro non risponde si decide sulla memoria, come prima. */
   if (finTurno && FINTURNO_BLOQUEO_ON && !_CIE_FIRMADO) {
-    _cieLeerFresco().then(function (f) {
-      const ab = _misMesasAbiertas(f ? f.sala : null);
+    _cieLeerFresco().then(async function (f) {
+      let ab = f ? _misMesasAbiertas(f.sala) : null;
+      if (!ab) {
+        try {
+          const rl = await gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre });
+          if (rl && rl.ok && Array.isArray(rl.mesas_abiertas)) {
+            ab = rl.mesas_abiertas.map(function (m) { return { mesa: m.mesa, total: parseFloat(m.consumo) || 0 }; });
+          }
+        } catch (e) {}
+      }
+      if (!ab) ab = _misMesasAbiertas();
       if (ab.length) {
         alert('Tienes ' + ab.length + ' mesa' + (ab.length > 1 ? 's' : '') + ' abierta' + (ab.length > 1 ? 's' : '') + ': ' +
           ab.map(function (m) { return m.mesa + ' (' + fmtPrice(m.total) + ')'; }).join(' · ') +
@@ -3457,6 +3470,9 @@ async function _cieLeerFresco() {
     if (!r.ok || !j || !j.ok || !d || !d.ok || !d.meseros) return null;
     const tsD = Number(d.ts_datos || 0);
     if (!(tsD > 0) || Date.now() - tsD > CIE_FRESCO_MAX_MS) return null;   // senza età, o vecchia: non decide
+    /* [seconda testa, 01-ott] un dato «dal futuro» è un orologio del telefono
+       indietro: con lui un dato vecchio sembrerebbe fresco. Oltre 2 min non decide. */
+    if (tsD - Date.now() > 120000) return null;
     const mia = d.meseros[_slugSalaJS(STATE.nombre)];
     if (!mia || !mia.ok) return null;                                       // nome assente: decide il libro
     return { sala: mia, todos: d.meseros };
