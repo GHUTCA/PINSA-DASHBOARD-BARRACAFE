@@ -1092,7 +1092,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.216.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.217.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3274,16 +3274,28 @@ function salir() {
      tavoli aperti — salvo che tu abbia appena firmato il corte, che li ha già
      guardati uno per uno col libro (li hai cobrati o passati). «Solo cerrar
      sesión» (Cancelar) resta libero: le mesas restano tue. */
+  /* [01-ott · AUT-EMERG-0537] il blocco guarda una sala riletta ADESSO (vedi
+     `_cieLeerFresco`): la memoria del telefono può avere quaranta minuti, e ha
+     fermato Ray su una plaza che il JL gli aveva già tolto. Se la rilettura non
+     riesce si decide sulla memoria come prima — e l'uscita resta «MI CORTE»,
+     che senza sala fresca chiede al libro e, firmato, apre il «Salgo». */
   if (finTurno && FINTURNO_BLOQUEO_ON && !_CIE_FIRMADO) {
-    const ab = _misMesasAbiertas();
-    if (ab.length) {
-      alert('Tienes ' + ab.length + ' mesa' + (ab.length > 1 ? 's' : '') + ' abierta' + (ab.length > 1 ? 's' : '') + ': ' +
-        ab.map(function (m) { return m.mesa + ' (' + fmtPrice(m.total) + ')'; }).join(' · ') +
-        '\n\nNo puedes terminar tu turno así. Cóbralas, o pásalas en 🧾 MI CORTE, o pide al JL que las cierre.');
-      bordeHecho('salida_con_mesas', { n: ab.length });
-      return;
-    }
+    _cieLeerFresco().then(function (f) {
+      const ab = _misMesasAbiertas(f ? f.sala : null);
+      if (ab.length) {
+        alert('Tienes ' + ab.length + ' mesa' + (ab.length > 1 ? 's' : '') + ' abierta' + (ab.length > 1 ? 's' : '') + ': ' +
+          ab.map(function (m) { return m.mesa + ' (' + fmtPrice(m.total) + ')'; }).join(' · ') +
+          '\n\nNo puedes terminar tu turno así. Cóbralas, o pásalas en 🧾 MI CORTE, o pide al JL que las cierre.');
+        bordeHecho('salida_con_mesas', { n: ab.length, fresca: !!f });
+        return;
+      }
+      _salirProsegui(finTurno);
+    });
+    return;
   }
+  _salirProsegui(finTurno);
+}
+function _salirProsegui(finTurno) {
   if (finTurno && STATE.codigo && STATE.nombre) gasPost('salidaMesero', { codigo: STATE.codigo, nombre: STATE.nombre })
     .then(function (r) {
       const filas = r && (r.filas != null ? r.filas : (r.ok ? null : 0));
@@ -3409,12 +3421,53 @@ function _mesaResta(m, mp) {
    un altro mesero vigente che tiene la plaza di quella mesa (la sala di tutti,
    `STATE.salaTodos`). null se il telefono non ha ancora la sala: allora si
    aspetta il libro come ieri. */
-function _cieDatosLocali() {
+/* ═══ [01-ott · AUT-EMERG-0537] IL CORTE DECIDE SU UNA SALA LETTA ADESSO ═══
+   🩸 Ray, 01-ott 19:50 UTC: «Mesa 89 · sin nadie en esa plaza $82.960», corte
+      e «Salgo» bloccati. Il JL aveva passato AURORA B ad Arianna alle 19:04:59
+      (libro: Traspaso_A = Arianna sui 5 pedidos) e il bordo lo sapeva — i suoi
+      dati del libro avevano 2-4 minuti per tutta l'ora, e il suo calcolo, rifatto
+      coi dati veri, dà la 89 ad Arianna e a Ray solo VIP A.
+   🔑 LA RADICE: il corte locale leggeva `STATE.sala`/`STATE.salaTodos` IN
+      MEMORIA, senza chiederne l'età. Lo schermo di Ray è identico alla sala di
+      PRIMA delle 19:04 (AURORA B ancora sua ⇒ nessun altro sulla plaza): un
+      telefono che ha dormito in tasca, o che non riesce a rileggere, porta la
+      sala di quaranta minuti fa — e dalle 19:46, tolta a Ray l'ultima plaza, il
+      bordo non pubblicava più nessuna vista sua, quindi il suo telefono non
+      poteva più rinfrescarla da lì.
+   ⇒ La decisione del corte (e del blocco del «Salgo») si prende SOLO su una sala
+     letta ADESSO dal bordo, coi dati del libro dentro la sua età. Se la lettura
+     non riesce, o il mio nome non c'è, NON si ripiega sulla memoria: si va al
+     cammino del libro (`getCierreMesero`), quello che ha fatto chiudere Ray.
+   ⚖️ Il nome assente NON vale «zero mesas»: se il JL scrive il nome con una
+      grafia diversa, «assente» sarebbe un falso via libera con tavoli aperti. */
+const CIE_FRESCO_TIMEOUT_MS = 4000;
+const CIE_FRESCO_MAX_MS = 10 * 60000;   // età dei dati del libro dentro la sala (di norma 2-4 min)
+async function _cieLeerFresco() {
+  if (!BORDE_SALA.ON || !STATE.codigo || !STATE.nombre) return null;
   try {
-    const r = STATE.sala, tutti = STATE.salaTodos;
+    const u = BORDE_SALA.URL + '/estado/' + encodeURIComponent(CFG.LOCAL || 'BKS')
+      + '?t=' + encodeURIComponent(BORDE_SALA.T)
+      + '&seccion=sala_vista&codigo=' + encodeURIComponent(STATE.codigo);
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), CIE_FRESCO_TIMEOUT_MS);
+    const r = await fetch(u, { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    const j = await r.json();
+    const d = j && j.datos && j.datos.datos;
+    if (!r.ok || !j || !j.ok || !d || !d.ok || !d.meseros) return null;
+    const tsD = Number(d.ts_datos || 0);
+    if (!(tsD > 0) || Date.now() - tsD > CIE_FRESCO_MAX_MS) return null;   // senza età, o vecchia: non decide
+    const mia = d.meseros[_slugSalaJS(STATE.nombre)];
+    if (!mia || !mia.ok) return null;                                       // nome assente: decide il libro
+    return { sala: mia, todos: d.meseros };
+  } catch (e) { return null; }
+}
+function _cieDatosLocali(f) {
+  try {
+    const r = f && f.sala, tutti = f && f.todos;
     if (!r || !tutti) return null;
     const yo = _slugSalaJS(STATE.nombre);
-    const lista = _misMesasAbiertas().map(function (m) {
+    const lista = _misMesasAbiertas(r).map(function (m) {
       let pasa = '';
       if (m.plaza) for (const sl in tutti) {
         const v = tutti[sl];
@@ -3428,9 +3481,9 @@ function _cieDatosLocali() {
       n_abiertas: lista.length, monto_abierto: monto, hay_heredero: lista.some(function (m) { return !!m.pasa_a; }) };
   } catch (e) { return null; }
 }
-function _misMesasAbiertas() {
+function _misMesasAbiertas(sala) {
   try {
-    const r = STATE.sala || {};
+    const r = sala || STATE.sala || {};
     const pl = {}; (r.plazas || []).forEach(function (p) { pl[p] = true; });
     const mp = r.mesas_pagadas || {};
     return (r.mesas || []).filter(function (m) {
@@ -3453,7 +3506,8 @@ async function cierreAbrir() {
      dopo il turno día, stesso monto) riparte da zero e ne conia un altro. */
   CIE.uid = ''; CIE.uidMonto = null; CIE.pasarMesas = false;
   _cieRender('<div class="cie-msg">Mirando tus mesas…</div>');
-  const loc = CORTE_LOCAL_ON ? _cieDatosLocali() : null;
+  // [01-ott · AUT-EMERG-0537] la sala si rilegge ADESSO; senza, decide il libro
+  const loc = CORTE_LOCAL_ON ? _cieDatosLocali(await _cieLeerFresco()) : null;
   if (loc) {
     CIE.data = loc; CIE.tol = 2000;
     _ciePaso1();
