@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.32.3</span>
+<span class="ver" id="ver">app_jl v1.32.4</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1670,17 +1670,27 @@ function tabAsig(ridisegno) {
     '<p class="mini">Queda firmado a tu nombre en el fósil.</p></div>';
   pls.forEach(p => {
     // la assegnazione IN CORSO vince sulla vecchia: è quella che il JL ha appena fatto
-    const pend = (t.asignaciones || []).filter(x => x.plaza === p.plaza && x._pendiente).slice(-1)[0];
-    const a = pend || (t.asignaciones || []).find(x => x.plaza === p.plaza && x.mesero);
+    /* [v1.32.4 · collaudo: «non vedo il cambio»] una plaza ha UNA riga per franja (PRUEBA:
+       10:00-18:30 e 19:00-03:00): si mostrava la PRIMA trovata, cioè la sera, ancora di
+       Wilbert, mentre quella in corso era già di Eduardo. Ora: chi la tiene ADESSO, e
+       sotto le altre franjas. La riga in attesa vince sulla sua franja. */
+    const rig = (t.asignaciones || []).filter(x => x.plaza === p.plaza && (x.mesero || x._pendiente));
+    const perF = {};
+    rig.forEach(x => { const f = x.franja || ''; if (!perF[f] || x._pendiente) perF[f] = x; });
+    const fr = Object.keys(perF), ora = _franjaAdesso(fr.filter(Boolean));
+    const a = perF[ora] || (fr.length === 1 ? perF[fr[0]] : null);
+    const lbl = x => esc(x.mesero) + (x._pendiente ? (x._verificando ? ' · ⏳ verificando…' : ' · ⏳ guardando…') : '');
+    const altre = fr.filter(f => perF[f] !== a).map(f => esc(f || 'sin franja') + ': ' + lbl(perF[f]));
     h += '<div class="cob">' + esc(p.plaza) + ' <small style="color:#b9b2a4">' + esc(p.mesas) + '</small>' +
-      '<span class="st2 ' + (a ? (a._pendiente ? 'mid' : 'up') : 'mid') + '">' + (a ? esc(a.mesero) + (a._pendiente ? (a._verificando ? ' · ⏳ verificando…' : ' · ⏳ guardando…') : '') : 'sin dueño') + '</span></div>';
+      '<span class="st2 ' + (a ? (a._pendiente ? 'mid' : 'up') : 'mid') + '">' + (a ? lbl(a) + (ora && a === perF[ora] ? ' · ahora' : '') : 'sin dueño ahora') + '</span>' +
+      (altre.length ? '<small class="mini" style="display:block;color:#8a93a3">' + altre.join(' · ') + '</small>' : '') + '</div>';
   });
   $('body').innerHTML = h + _salidaHtml(); if (!ridisegno) $('body').scrollTop = 0;   // via d'uscita anche qui · il battito non riporta in cima
 }
 async function asignar() {
   const m = ($('asMesero').value || '').trim(), p = ($('asPlaza').value || '').trim(), f = (($('asFranja') || {}).value || '').trim();
   if (!m || !p || !f) { toast('warn', 'Elige el mesero, la plaza y la franja'); return; }
-  const _prima = (((STATE.turno && STATE.turno.asignaciones) || []).find(x => x.plaza === p && x.mesero && !x._pendiente) || {}).mesero || '';
+  const _prima = (((STATE.turno && STATE.turno.asignaciones) || []).find(x => x.plaza === p && (x.franja || '') === f && x.mesero && !x._pendiente) || {}).mesero || '';
   /* [30-set] N1: la schermata non aspetta la rete — l'assegnazione compare
      SUBITO («guardando…») e il libro la scrive dietro. Se il libro dice di no,
      si toglie e si dice perché. */
