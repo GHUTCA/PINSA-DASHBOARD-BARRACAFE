@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.31.5</span>
+<span class="ver" id="ver">app_jl v1.32.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1604,22 +1604,61 @@ async function cerrarT() {
     else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
   } catch (e) { toast('err', 'Sin conexión'); }
 }
-function tabAsig() {
+/* ═══ [02-ott · v1.32.0 · Alberto: «le plazas e i meseros non dovrebbero essere
+   digitabili ma selezionabili»] ════════════════════════════════════════════
+   🩸 Prima: due caselle di testo. Un nome scritto male creava un'assegnazione a
+      una persona che non esiste, e la plaza restava senza nessuno, in silenzio.
+      E la lista mostrava la PRIMA assegnazione trovata, non quella appena
+      scritta: «guardando…» non compariva mai ⇒ «ho fatto Guardar e non vedo
+      cosa sia successo».
+   ⇒ Si SCEGLIE: le plazas sono quelle del turno (`STATE.turno.plazas`), i
+     meseros il personale attivo (`getStaffSala`, col PIN del JL) più chi è già
+     nelle assegnazioni di oggi — così il menu non è mai vuoto mentre la lista
+     arriva (N1: la schermata non aspetta la rete). La riga della plaza mostra
+     l'assegnazione IN CORSO al posto della vecchia, e l'esito si dice in chiaro. */
+let _STAFF_JL = null, _STAFF_JL_TS = 0;
+function _staffJLCarga() {
+  if (!STATE.pin || (_STAFF_JL && Date.now() - _STAFF_JL_TS < 10 * 60000)) return;
+  _STAFF_JL_TS = Date.now();
+  gasPost('getStaffSala', { pin: STATE.pin }).then(function (r) {
+    if (r && r.ok && Array.isArray(r.staff)) { _STAFF_JL = r.staff; if (TAB === 1) pintaTab(); }
+  }).catch(function () { _STAFF_JL_TS = 0; });
+}
+function _meserosJL() {
+  const vist = {}, out = [];
+  const add = function (n) { n = (n || '').toString().trim(); const k = n.toLowerCase(); if (n && !vist[k]) { vist[k] = 1; out.push(n); } };
+  (_STAFF_JL || []).forEach(function (s) { if (s && s.activo !== false) add(s.nombre); });
+  ((STATE.turno && STATE.turno.asignaciones) || []).forEach(function (a) { if (a && !a._pendiente) add(a.mesero); });
+  return out.sort(function (a, b) { return a.localeCompare(b); });
+}
+function tabAsig(ridisegno) {
   const t = STATE.turno;
+  _ASIG_ON = true;
+  _staffJLCarga();
+  const pls = (t && t.plazas) || [];
+  const mes = _meserosJL();
+  const opt = function (v, txt) { return '<option value="' + esc(v) + '">' + esc(txt) + '</option>'; };
   let h = '<div class="card"><h4>＋ Asignar / cambiar</h4>' +
-    '<input class="busca" id="asMesero" placeholder="mesero"><input class="busca" id="asPlaza" placeholder="plaza (ej: VIP-B)">' +
+    '<select class="busca" id="asMesero"><option value="">— mesero —</option>' +
+      mes.map(function (n) { return opt(n, n); }).join('') + '</select>' +
+    (_STAFF_JL ? '' : '<p class="mini">Cargando el personal… (ya están los del turno de hoy)</p>') +
+    '<select class="busca" id="asPlaza"><option value="">— plaza —</option>' +
+      pls.map(function (p) { return opt(p.plaza, p.plaza + (p.mesas ? ' · ' + p.mesas : '')); }).join('') + '</select>' +
     '<button class="btn acc" onclick="asignar()">Guardar</button>' +
     '<p class="mini">Queda firmado a tu nombre en el fósil.</p></div>';
-  (t && t.plazas || []).forEach(p => {
-    const a = (t.asignaciones || []).find(x => x.plaza === p.plaza && x.mesero);
+  pls.forEach(p => {
+    // la assegnazione IN CORSO vince sulla vecchia: è quella che il JL ha appena fatto
+    const pend = (t.asignaciones || []).filter(x => x.plaza === p.plaza && x._pendiente).slice(-1)[0];
+    const a = pend || (t.asignaciones || []).find(x => x.plaza === p.plaza && x.mesero);
     h += '<div class="cob">' + esc(p.plaza) + ' <small style="color:#b9b2a4">' + esc(p.mesas) + '</small>' +
-      '<span class="st2 ' + (a ? 'up' : 'mid') + '">' + (a ? esc(a.mesero) + (a._pendiente ? ' · guardando…' : '') : 'sin dueño') + '</span></div>';
+      '<span class="st2 ' + (a ? (a._pendiente ? 'mid' : 'up') : 'mid') + '">' + (a ? esc(a.mesero) + (a._pendiente ? ' · ⏳ guardando…' : '') : 'sin dueño') + '</span></div>';
   });
-  $('body').innerHTML = h + _salidaHtml(); $('body').scrollTop = 0;   // via d'uscita anche qui
+  $('body').innerHTML = h + _salidaHtml(); if (!ridisegno) $('body').scrollTop = 0;   // via d'uscita anche qui · il battito non riporta in cima
 }
 async function asignar() {
   const m = ($('asMesero').value || '').trim(), p = ($('asPlaza').value || '').trim();
-  if (!m || !p) { toast('warn', 'Mesero y plaza'); return; }
+  if (!m || !p) { toast('warn', 'Elige el mesero y la plaza'); return; }
+  const _prima = (((STATE.turno && STATE.turno.asignaciones) || []).find(x => x.plaza === p && x.mesero && !x._pendiente) || {}).mesero || '';
   /* [30-set] N1: la schermata non aspetta la rete — l'assegnazione compare
      SUBITO («guardando…») e il libro la scrive dietro. Se il libro dice di no,
      si toglie e si dice perché. */
@@ -1628,9 +1667,14 @@ async function asignar() {
   const togli = () => { if (STATE.turno) STATE.turno.asignaciones = (STATE.turno.asignaciones || []).filter(a => a !== ott); pintaTab(); };
   try {
     const r = await gasPost('asignarPlaza', { pin: STATE.pin, mesero: m, plaza: p });
-    if (r && r.ok) { toast('ok', '✓ ' + m + ' → ' + p); giroTurno(); tab(1); }
-    else { togli(); toast('err', '✋ ' + ((r && r.error) || 'No se pudo')); }
-  } catch (e) { togli(); toast('err', 'Sin conexión'); }
+    if (r && r.ok) { ['asMesero', 'asPlaza'].forEach(function (id) { const e = $(id); if (e) e.value = ''; }); toast('ok', '✓ ' + p + ' ahora es de ' + m); giroTurno(); tab(1); }
+    else { togli(); toast('err', '✋ No se guardó: ' + ((r && (r.mensaje || r.error)) || 'el sistema dijo que no') + (_prima ? ' · ' + p + ' sigue con ' + _prima : '')); }
+  } catch (e) {
+    togli();
+    toast('err', (e && e.message === 'timeout')
+      ? '⏳ El sistema está lento: NO se guardó. ' + (_prima ? p + ' sigue con ' + _prima + '. ' : '') + 'Reintenta en un minuto.'
+      : 'Sin conexión: NO se guardó.' + (_prima ? ' ' + p + ' sigue con ' + _prima + '.' : ''));
+  }
 }
 
 /* ═════ SCHEDA CAJA — materia di 💰 DINERO, letta dal ferro (getCaja) ═════ */
@@ -1847,7 +1891,7 @@ async function toggle86(id, value) {
 /* ═════ TAB + BOOT ═════ */
 const VIS = [vSala, vTurno, vCaja, vVentas];
 function tab(i) {
-  TAB = i;
+  TAB = i; _ASIG_ON = false;   // [v1.32.0] cambiare linguetta chiude la scheda delle assegnazioni
   document.querySelectorAll('.tabs button').forEach((b, j) => b.setAttribute('aria-selected', j === i ? 'true' : 'false'));
   pintaTab();
   if (i === 2 || i === 3 || i === 0) { if (!STATE.ts.caja || edadS('caja') > 60) giroCaja(); }
@@ -1888,18 +1932,19 @@ function _repintaDopo() {
 /* e i due campi del «Mover» sopravvivono a un ridisegno periodico (il battito
    ogni 20 s): si ricopiano se il nuovo campo nasce vuoto. Dopo uno spostamento
    riuscito li svuota `mvLimpiar`, e il ridisegno non li rimette. */
-const _CAMPI_TENUTI = ['mvDe', 'mvA'];
+const _CAMPI_TENUTI = ['mvDe', 'mvA', 'asMesero', 'asPlaza'];
+let _ASIG_ON = false;   // [v1.32.0] la scheda «Asignar / cambiar» è aperta: il battito la ridisegna, non la chiude
 function pintaTab() {
   if (TAB < 0) return;
   const ae = document.activeElement;
-  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && $('body').contains(ae)) {
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT') && $('body').contains(ae)) {
     if (!_repintaPend) { _repintaPend = true; ae.addEventListener('blur', function () { if (_repintaPend) { _repintaPend = false; setTimeout(_repintaDopo, 150); } }, { once: true }); }
     return;
   }
   _repintaPend = false;
   const _tenuti = {};
   _CAMPI_TENUTI.forEach(function (id) { const e = $(id); if (e && e.value) _tenuti[id] = e.value; });
-  $('body').innerHTML = VIS[TAB]() + _salidaHtml();
+  if (TAB === 1 && _ASIG_ON) tabAsig(true); else $('body').innerHTML = VIS[TAB]() + _salidaHtml();
   Object.keys(_tenuti).forEach(function (id) { const e = $(id); if (e && !e.value) e.value = _tenuti[id]; });
 }
 
