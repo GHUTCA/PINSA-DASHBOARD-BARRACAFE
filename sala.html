@@ -1095,7 +1095,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.217.2 · vetro</span>
+      <span class="ver" id="ver">sala v3.218.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3642,6 +3642,10 @@ function _ciePaso1() {
 function _ciePasar() { CIE.pasarMesas = true; _ciePaso2(); }
 
 function _ciePaso2() {
+  if (CAJA_ATTO1_ON) { _ciePaso2Atto1(); return; }   // [02-ott · ATTO I] senza conteggio, a tasca zero
+  _ciePaso2Viejo();
+}
+function _ciePaso2Viejo() {
   CIE.paso = 2;
   // chi torna a contare riparte pulito: un motivo scelto per il conteggio di
   // prima non deve appiccicarsi a una dichiarazione nuova
@@ -3658,6 +3662,97 @@ function _ciePaso2() {
     '<div class="cie-out" onclick="_ciePaso1()">← Volver</div>');
   setTimeout(() => { const i = $('cieMonto'); if (i) i.focus(); }, 120);
 }
+
+/* ═══ [02-ott · v3.218.0 · 🎛 BKP V29] CAJA · ATTO I nella sala del mesero ═══
+   ③ la conferma del ritiro («Coincide / No coincide») e ⑥ «Mi corte» SENZA
+   conteggio: il contante del mesero è la somma dei ritiri firmati dal JL
+   (Alberto: «il mesero non conta più, anche perché non lo ricorderà»), e il
+   corte si chiude solo a tasca zero. Dal bordo, leva CAJA_ATTO1_ON.
+   🔴 FALLISCE APERTO SUL CORTE, CHIUSO SUI NUMERI: se il bordo non sa dire quanto
+   ha in tasca, NON si inventa uno zero — si torna a contare come prima, e si dice. */
+async function _cajaMesero(extra) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const r = await fetch(BORDE_SALA.URL + '/caja/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?t=' + encodeURIComponent(BORDE_SALA.T),
+      { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctrl.signal, cache: 'no-store',
+        body: JSON.stringify(Object.assign({ codigo: STATE.codigo, nombre: STATE.nombre }, extra || {})) });
+    clearTimeout(to);
+    return await r.json();
+  } catch (e) { clearTimeout(to); return null; }
+}
+async function _ciePaso2Atto1() {
+  CIE.paso = 21;   // non 2: `cierreEnviar` prende la cifra da CIE.uidMonto (la somma dei ritiri), non da una casella
+  CIE.motivo = ''; CIE.res = null;
+  _cieRender('<div class="cie-msg">Mirando lo que entregaste…</div>');
+  const r = await _cajaMesero({ verbo: 'estado_mesero' });
+  if (!r || !r.ok) {
+    toast('warn', 'No pude leer tus retiros: cuenta como siempre, y avísale al JL.');
+    _ciePaso2Viejo(); return;
+  }
+  if ((r.por_confirmar || []).length) {
+    const p = r.por_confirmar[0]; _cajaPendCorte = p;
+    _cieRender('<div class="cie-h">💵 Primero confirma el retiro</div>' +
+      '<div class="cie-box"><b>El JL te retiró ' + fmtPrice(p.monto) + '</b><div class="cie-nota">Confírmalo antes de cerrar tu turno.</div></div>' +
+      '<button class="btn" onclick="_cajaConfMostrar(_cajaPendCorte)">Confirmar ahora</button>' +
+      '<div class="cie-out" onclick="_ciePaso1()">← Volver</div>');
+    return;
+  }
+  if (r.en_mano > 0) {
+    _cieRender('<div class="cie-h">💵 Te queda plata en el bolsillo</div>' +
+      '<div class="cie-box"><div class="cie-tot">' + fmtPrice(r.en_mano) + '</div>' +
+      '<div class="cie-nota">Entrégaselo al JL: él hace el último retiro, y tú lo confirmas aquí. Tu turno se cierra con el bolsillo en cero.</div></div>' +
+      '<button class="btn" onclick="_ciePaso2Atto1()">Ya se lo entregué · revisar</button>' +
+      '<div class="cie-out" onclick="_ciePaso1()">← Volver</div>');
+    return;
+  }
+  CIE.uidMonto = r.entregado || 0;
+  _cieRender('<div class="cie-h">🧾 Mi corte</div>' +
+    '<div class="cie-box">' +
+      '<div class="cie-row"><span>Ventas en efectivo</span><b>' + fmtPrice(r.ventas_efectivo || 0) + '</b></div>' +
+      '<div class="cie-row"><span>Propinas en efectivo</span><b>' + fmtPrice(r.propina_efectivo || 0) + '</b></div>' +
+      '<div class="cie-row"><span>Entregaste en ' + (r.n_ritiri || 0) + ' retiro' + ((r.n_ritiri || 0) === 1 ? '' : 's') + '</span><b>' + fmtPrice(r.entregado || 0) + '</b></div>' +
+      '<div class="cie-row"><span><b>Te queda en el bolsillo</b></span><b style="color:#3DC97E">' + fmtPrice(0) + ' ✓</b></div>' +
+    '</div>' +
+    '<button class="btn" id="cieBtn" onclick="cierreEnviar()">Cerrar mi turno</button>' +
+    '<div class="cie-out" onclick="_ciePaso1()">← Volver</div>');
+}
+/* ③ la conferma del ritiro: arriva da sola (giro ogni 30 s) o dal corte */
+let _cajaConfAperta = '', _cajaPendCorte = null;
+function _cajaConfMostrar(p) {
+  if (!p || !p.uid_gesto) return;
+  _cajaConfAperta = p.uid_gesto;
+  let w = $('cajaConfWrap');
+  if (!w) { w = document.createElement('div'); w.id = 'cajaConfWrap'; document.body.appendChild(w); }
+  const hh = p.ts ? new Date(p.ts).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '';
+  w.innerHTML = '<div class="cs-pago"><div class="cs-pcard cie-card"><div class="cs-asa"></div>' +
+    '<div class="cie-h">💵 ' + esc(p.quien_jl || 'El JL') + ' te retiró plata</div>' +
+    '<div class="cie-sub">Confirma tú también.</div>' +
+    '<div class="cie-box"><div class="cie-tot">' + fmtPrice(p.monto) + '</div>' +
+      '<div class="cie-nota">contados' + (hh ? ' a las ' + hh : '') + '</div></div>' +
+    '<button class="btn" onclick="_cajaConfResponder(\'coincide\')">Sí, es correcto</button>' +
+    '<button class="btn sec" onclick="_cajaConfResponder(\'no_coincide\')">No coincide</button>' +
+    '</div></div>';
+}
+function _cajaConfCerrar() { const w = $('cajaConfWrap'); if (w) w.innerHTML = ''; _cajaConfAperta = ''; }
+async function _cajaConfResponder(esito) {
+  const uid = _cajaConfAperta; if (!uid) return;
+  if (esito === 'no_coincide' && !confirm('¿No coincide lo que contaron?\n\nQueda registrado con tu nombre y el del JL. Hablen ahora para aclararlo.')) return;
+  const r = await _cajaMesero({ verbo: 'firma', rol: 'mesero', contenedor: 'ritiro', contenedor_uid: uid, esito: esito });
+  if (r && r.ok) {
+    toast('ok', esito === 'coincide' ? '✓ Confirmado' : '⚠️ Registrado: no coincide');
+    _cajaConfCerrar();
+    if (CIE.paso === 21) _ciePaso2Atto1();
+  } else if (r && (r.error === 'ritiro_no_pendiente')) { _cajaConfCerrar(); }
+  else toast('err', 'No se registró tu respuesta — reintenta');
+}
+async function _cajaGiroMesero() {
+  if (!CAJA_ATTO1_ON || JL || !STATE.codigo || !STATE.nombre || _cajaConfAperta) return;
+  if (document.visibilityState && document.visibilityState !== 'visible') return;
+  const r = await _cajaMesero({ verbo: 'estado_mesero' });
+  if (r && r.ok && (r.por_confirmar || []).length) _cajaConfMostrar(r.por_confirmar[0]);
+}
+setInterval(_cajaGiroMesero, 30000);
 
 /* «vacío» y «cero» no son lo mismo: el botón se habilita cuando hay ALGO
    escrito, aunque sea 0 — un turno sin un solo pago en efectivo es una
@@ -8607,6 +8702,8 @@ var FINTURNO_BLOQUEO_ON = false;
    schermo del corte si disegna dalla sala che il telefono HA GIÀ (nata al
    bordo), senza aspettare il libro; il libro completa dietro. Nasce spenta. */
 var CORTE_LOCAL_ON = false;
+/* [02-ott · ATTO I] la caja della notte al bordo: conferma dei ritiri e «Mi corte» senza conteggio. Nasce spenta. */
+var CAJA_ATTO1_ON = false;
 /* [29-set · Alberto: «il tetto del 30% fallo subito»] il tetto NON e' piu' una
    copia del vetro: si legge dal bordo (/salud → desc_max_pct), che e' la fonte
    unica e lo applica. 30 resta solo finche' il bordo non ha risposto. */
@@ -8630,6 +8727,7 @@ var CORTE_LOCAL_ON = false;
       };
       FINTURNO_BLOQUEO_ON = String(cercaK(j, 'finturno_bloqueo_on')) === '1';   // [30-set]
       CORTE_LOCAL_ON = String(cercaK(j, 'corte_local_on')) === '1';             // [30-set]
+      CAJA_ATTO1_ON = String(cercaK(j, 'caja_atto1_on')) === '1';           // [02-ott · ATTO I]
     }).catch(function () {});
   } catch (e) { /* senza il bordo resta 30 */ }
 })();
