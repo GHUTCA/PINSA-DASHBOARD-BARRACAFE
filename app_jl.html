@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.32.1</span>
+<span class="ver" id="ver">app_jl v1.32.2</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1631,6 +1631,25 @@ function _meserosJL() {
   ((STATE.turno && STATE.turno.asignaciones) || []).forEach(function (a) { if (a && !a._pendiente) add(a.mesero); });
   return out.sort(function (a, b) { return a.localeCompare(b); });
 }
+/* [v1.32.2 · reperto del collaudo: «No se guardó: franja_missing»] il libro vuole
+   la FRANJA (asignarPlaza fa l'upsert per fecha+plaza+franja) e l'app non l'ha
+   MAI mandata, nemmeno con le caselle: ogni «Guardar» del JL falliva così. Le
+   franjas si leggono dalle assegnazioni di oggi; si propone quella in corso. */
+function _franjasJL() {
+  const vist = {}, out = [];
+  ((STATE.turno && STATE.turno.asignaciones) || []).forEach(function (a) { const f = (a && a.franja || '').toString().trim(); if (f && !vist[f]) { vist[f] = 1; out.push(f); } });
+  return out.sort();
+}
+function _franjaAdesso(lista) {
+  const d = new Date(), m = d.getHours() * 60 + d.getMinutes();
+  const mm = function (s) { const p = (s || '').split(':'); return (+p[0]) * 60 + (+p[1] || 0); };
+  for (const f of lista) {
+    const x = f.split('-'); if (x.length !== 2) continue;
+    const a = mm(x[0]), b = mm(x[1]);
+    if (a <= b ? (m >= a && m < b) : (m >= a || m < b)) return f;   // anche quella che passa la mezzanotte
+  }
+  return lista[0] || '';
+}
 function tabAsig(ridisegno) {
   const t = STATE.turno;
   _ASIG_ON = true;
@@ -1644,6 +1663,9 @@ function tabAsig(ridisegno) {
     (_STAFF_JL ? '' : '<p class="mini">Cargando el personal… (ya están los del turno de hoy)</p>') +
     '<select class="busca" id="asPlaza"><option value="">— plaza —</option>' +
       pls.map(function (p) { return opt(p.plaza, p.plaza + (p.mesas ? ' · ' + p.mesas : '')); }).join('') + '</select>' +
+    '<select class="busca" id="asFranja">' + (function () { const fs = _franjasJL(), ora = _franjaAdesso(fs);
+      return fs.length ? fs.map(function (f) { return '<option value="' + esc(f) + '"' + (f === ora ? ' selected' : '') + '>' + esc(f) + (f === ora ? ' · ahora' : '') + '</option>'; }).join('')
+        : '<option value="">— sin franjas hoy —</option>'; })() + '</select>' +
     '<button class="btn acc" onclick="asignar()">Guardar</button>' +
     '<p class="mini">Queda firmado a tu nombre en el fósil.</p></div>';
   pls.forEach(p => {
@@ -1656,17 +1678,17 @@ function tabAsig(ridisegno) {
   $('body').innerHTML = h + _salidaHtml(); if (!ridisegno) $('body').scrollTop = 0;   // via d'uscita anche qui · il battito non riporta in cima
 }
 async function asignar() {
-  const m = ($('asMesero').value || '').trim(), p = ($('asPlaza').value || '').trim();
-  if (!m || !p) { toast('warn', 'Elige el mesero y la plaza'); return; }
+  const m = ($('asMesero').value || '').trim(), p = ($('asPlaza').value || '').trim(), f = (($('asFranja') || {}).value || '').trim();
+  if (!m || !p || !f) { toast('warn', 'Elige el mesero, la plaza y la franja'); return; }
   const _prima = (((STATE.turno && STATE.turno.asignaciones) || []).find(x => x.plaza === p && x.mesero && !x._pendiente) || {}).mesero || '';
   /* [30-set] N1: la schermata non aspetta la rete — l'assegnazione compare
      SUBITO («guardando…») e il libro la scrive dietro. Se il libro dice di no,
      si toglie e si dice perché. */
-  const ott = { plaza: p, franja: '', mesero: m, campanilla: false, hora_entrada_iso: '', _pendiente: true, _ts: Date.now() };
+  const ott = { plaza: p, franja: f, mesero: m, campanilla: false, hora_entrada_iso: '', _pendiente: true, _ts: Date.now() };
   if (STATE.turno) { STATE.turno.asignaciones = (STATE.turno.asignaciones || []).concat([ott]); pintaTab(); }
   const togli = () => { if (STATE.turno) STATE.turno.asignaciones = (STATE.turno.asignaciones || []).filter(a => a !== ott); pintaTab(); };
   try {
-    const r = await gasPost('asignarPlaza', { pin: STATE.pin, mesero: m, plaza: p });
+    const r = await gasPost('asignarPlaza', { pin: STATE.pin, mesero: m, plaza: p, franja: f });
     if (r && r.ok) { ['asMesero', 'asPlaza'].forEach(function (id) { const e = $(id); if (e) e.value = ''; }); toast('ok', '✓ ' + p + ' ahora es de ' + m); giroTurno(); tab(1); }
     else { togli(); toast('err', '✋ No se guardó: ' + ((r && (r.mensaje || r.error)) || 'el sistema dijo que no') + (_prima ? ' · ' + p + ' sigue con ' + _prima : '')); }
   } catch (e) {
@@ -1932,7 +1954,7 @@ function _repintaDopo() {
 /* e i due campi del «Mover» sopravvivono a un ridisegno periodico (il battito
    ogni 20 s): si ricopiano se il nuovo campo nasce vuoto. Dopo uno spostamento
    riuscito li svuota `mvLimpiar`, e il ridisegno non li rimette. */
-const _CAMPI_TENUTI = ['mvDe', 'mvA', 'asMesero', 'asPlaza'];
+const _CAMPI_TENUTI = ['mvDe', 'mvA', 'asMesero', 'asPlaza', 'asFranja'];
 let _ASIG_ON = false;   // [v1.32.0] la scheda «Asignar / cambiar» è aperta: il battito la ridisegna, non la chiude
 function pintaTab() {
   if (TAB < 0) return;
