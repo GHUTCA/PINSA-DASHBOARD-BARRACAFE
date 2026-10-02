@@ -752,7 +752,11 @@ function _cjMesasAbiertas() {
 function cjRetAbrir(nombre) {
   const m = ((CJ1.st && CJ1.st.meseros) || []).find(function (x) { return x.mesero === nombre; });
   if (!m) return;
-  CJ1.ret = { mesero: m.mesero, att: m, uid: cajaNuevoUid('CJ-RIT') };
+  /* [02-ott · reperto della QUARTA PENNA, `QUARTA UN TOCCO E UID AL TOCCO`] dopo un esito INCERTO
+     (timeout, rete) l'uid di quel mesero sopravvive anche se il pannello si chiude e si riapre:
+     il reintento è lo STESSO ritiro, mai un secondo. Muore solo su un esito certo. */
+  CJ1.retDubbio = CJ1.retDubbio || {};
+  CJ1.ret = { mesero: m.mesero, att: m, uid: CJ1.retDubbio[m.mesero] || cajaNuevoUid('CJ-RIT') };
   pintaTab();
 }
 function cjRetCerrar() { CJ1.ret = null; const e = $('cj1Monto'); if (e) e.value = ''; pintaTab(); }
@@ -774,13 +778,16 @@ async function cjRetEnviar() {
     const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, monto: monto,
       esperado_ora: ret.att.en_mano, uid_gesto: ret.uid });
     if (r && r.ok && r.accodato) {
-      toast('ok', '✓ Retiro de ' + fmt(monto) + ' a ' + ret.mesero + ' · ahora confirma él en su teléfono');
+      if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero];
+      if (r.ya) toast('ok', '✓ Este retiro ya estaba registrado — no se cuenta dos veces. Revisa la lista.');
+      else toast('ok', '✓ Retiro de ' + fmt(monto) + ' a ' + ret.mesero + ' · ahora confirma él en su teléfono');
       const e = $('cj1Monto'); if (e) e.value = '';
       CJ1.ret = null; cjAtto1Giro();
-    } else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
+    } else if (r && r.error === 'rifiutato') { if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero]; toast('err', cjMotivoTxt(r.motivo)); }
     else toast('err', '✋ No se registró: ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
   } catch (e) {
     /* la clave NO muere: el reintento con el MISMO uid_gesto es el MISMO retiro */
+    CJ1.retDubbio = CJ1.retDubbio || {}; CJ1.retDubbio[ret.mesero] = ret.uid;
     toast('err', '⏳ ' + (e && e.message === 'timeout' ? 'El sistema tardó: puede que SÍ se haya registrado. Reintenta: no se duplica.' : 'Sin conexión: reintenta, no se duplica.'));
   } finally { CJ1.enviando = false; pintaTab(); }
 }
