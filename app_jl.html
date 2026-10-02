@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.31.3</span>
+<span class="ver" id="ver">app_jl v1.31.4</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1431,7 +1431,7 @@ async function moverJL() {
   const cod = STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo;
   try {
     const r = await staffPost('moverMesa', { codigo: cod, nombre: STATE.user, de: de, a: a });
-    if (r && r.ok) { toast('ok', '✓ Mesa ' + de + ' → ' + a); giroVeloce(); }
+    if (r && r.ok) { mvLimpiar(); toast('ok', '✓ Mesa ' + de + ' → ' + a); giroVeloce(); }   // [v1.31.4] svuota PRIMA del ridisegno: il campo tenuto non si rimette
     else toast('err', '✋ ' + ((r && (r.mensaje || r.error)) || 'No se pudo'));
   } catch (e) { toast('err', 'Sin conexión — no se movió nada'); }
 }
@@ -1865,15 +1865,37 @@ function salirJL() {
    la scheda si ridisegna intera a ogni giro di dati: mentre il JL scrive in una
    casella non si tocca — si ridisegna quando la lascia. */
 let _repintaPend = false;
+/* [02-ott · v1.31.4 · Alberto: «clicco Mover e non fa nulla»] il rimedio del
+   v1.31.2 ridisegnava al `blur` del campo — e toccare un BOTTONE toglie il
+   fuoco al campo PRIMA che il tocco arrivi al bottone: la scheda si ridisegnava
+   in quell'istante, i campi si svuotavano e il click cadeva su un bottone che
+   non esisteva più (nessuna conferma, nessun messaggio). Ora il ridisegno
+   rimandato aspetta che il dito si sia alzato e che il click sia passato. */
+let _ditoGiu = 0;
+document.addEventListener('pointerdown', function () { _ditoGiu++; }, true);
+['pointerup', 'pointercancel'].forEach(function (ev) {
+  document.addEventListener(ev, function () { setTimeout(function () { _ditoGiu = Math.max(0, _ditoGiu - 1); }, 0); }, true);
+});
+function _repintaDopo() {
+  if (_ditoGiu > 0) { setTimeout(_repintaDopo, 120); return; }
+  pintaTab();
+}
+/* e i due campi del «Mover» sopravvivono a un ridisegno periodico (il battito
+   ogni 20 s): si ricopiano se il nuovo campo nasce vuoto. Dopo uno spostamento
+   riuscito li svuota `mvLimpiar`, e il ridisegno non li rimette. */
+const _CAMPI_TENUTI = ['mvDe', 'mvA'];
 function pintaTab() {
   if (TAB < 0) return;
   const ae = document.activeElement;
   if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && $('body').contains(ae)) {
-    if (!_repintaPend) { _repintaPend = true; ae.addEventListener('blur', function () { if (_repintaPend) { _repintaPend = false; setTimeout(pintaTab, 0); } }, { once: true }); }
+    if (!_repintaPend) { _repintaPend = true; ae.addEventListener('blur', function () { if (_repintaPend) { _repintaPend = false; setTimeout(_repintaDopo, 150); } }, { once: true }); }
     return;
   }
   _repintaPend = false;
+  const _tenuti = {};
+  _CAMPI_TENUTI.forEach(function (id) { const e = $(id); if (e && e.value) _tenuti[id] = e.value; });
   $('body').innerHTML = VIS[TAB]() + _salidaHtml();
+  Object.keys(_tenuti).forEach(function (id) { const e = $(id); if (e && !e.value) e.value = _tenuti[id]; });
 }
 
 async function entrar() {
