@@ -28,11 +28,16 @@
                    detalle:{...}|null, falta:{alias:[]|cobraron_y_no_estan:[]|
                    dos_grupos_mismo_turno:[]|modo:string}|null,
                    personas:[{persona_id,nombre,grupo,puntos,alias_app_caja:bool}],
-                   pagados:[{persona_id,concepto,monto,ts,firmado}] }
+                   pagados:[{persona_id,voce,monto,ts,firmado}] }
           POST /caja/:local  { verbo:'reparto_cerrar', uid_gesto, dia_operativo, turno,
                                partes:[{persona_id,grupo,puntos}] }
           POST /caja/:local  { verbo:'propina_pago', uid_gesto, reparto_uid, persona_id,
-                               grupo, concepto, monto, tranche, quien }
+                               grupo, voce, monto, tranche, quien }
+        Nomi di colonna: schema di 🚚 `64ad57c0b1` — `grupo` ammette `mesero` ·
+        `barra_cocina` · `gasto_fijo`, e la `voce` (`anfitriona`/`limpieza_banos`/
+        `fabian`) è obbligatoria solo lì. L'indice unico è
+        `(reparto_uid, persona_id, coalesce(voce,''))`: la stessa persona può avere la
+        sua quota E una spesa fissa, quindi la porta del pago guarda tutti e tre.
         A leva spenta i POST tornano { ok:true, scritto:false, motivo:'gate_spento' },
         la stessa forma dell'ATTO I che i vetri già leggono.
         Finché la cucitura non è incollata, l'app chiama, vede fallire e lo DICE sullo
@@ -127,7 +132,7 @@ h1{font-size:19px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em}
 <div class="wrap" id="app"><p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando…</p></div>
 <div class="sheet" id="sheet"><div class="card" id="sheetCard"></div></div>
 <div class="toast" id="toast"></div>
-<span id="ver" hidden>v1.0.0 · atto3 propinas · 02oct</span>
+<span id="ver" hidden>v1.0.1 · atto3 propinas · sin frases · 02oct</span>
 
 <script src="shared/pinsita_auth.js"></script>
 <script>
@@ -248,15 +253,13 @@ function pantallaFalta(f) {
     h += '<h1>No sé quién es</h1><p class="sd">Alguien cobró propina anoche con un nombre que no está en la lista de personas.</p>'
       + '<div class="rows"><div class="r hd">nombres sin ficha</div>'
       + f.alias.map(function(n){ return '<div class="r"><div class="n">' + esc(n) + '</div><div class="v bad">sin ficha</div></div>'; }).join('')
-      + '</div><div class="note bad">Si reparto sin ellos, su dinero se suma al de los demás y ningún total se ve mal. '
-      + 'Avisa a administración para que quede en la lista.</div>';
+      + '</div><div class="note bad">Avisa a administración.</div>';
   } else if (f.cobraron_y_no_estan && f.cobraron_y_no_estan.length) {
     h += '<h1>Falta marcar a alguien</h1><p class="sd">Cobraron propina anoche y no están entre los que trabajaron.</p>'
       + '<div class="rows"><div class="r hd">cobraron y no están marcados</div>'
       + f.cobraron_y_no_estan.map(function(x){
           return '<div class="r"><div class="n">' + esc((x.grafias||[]).join(' · ')) + '</div><div class="v">' + fmt(x.propina) + '</div></div>'; }).join('')
-      + '</div><div class="note bad">Márcalos como que trabajaron, o déjalos fuera a propósito. '
-      + 'Lo que no se puede es cerrar sin decidirlo.</div>';
+      + '</div><div class="note bad">Márcalos, o déjalos fuera a propósito.</div>';
   } else if (f.dos_grupos_mismo_turno && f.dos_grupos_mismo_turno.length) {
     h += '<h1>Alguien está en dos grupos</h1><p class="sd">En un turno cada persona recibe de un solo grupo.</p>'
       + '<div class="rows">'
@@ -265,7 +268,7 @@ function pantallaFalta(f) {
       + '</div>';
   } else if (f.modo) {
     h += '<h1>No sé cómo se reparte hoy</h1><p class="sd">' + esc(f.modo) + '</p>'
-      + '<div class="note bad">La regla del día y del turno no está escrita. No reparto adivinando.</div>';
+      + '<div class="note bad">La regla del día y del turno no está escrita.</div>';
   } else {
     h += '<h1>Falta algo</h1><p class="sd">' + esc(JSON.stringify(f)) + '</p>';
   }
@@ -332,13 +335,16 @@ function pantallaReparto() {
   h += '</div>';
 
   if (d.residuo > 0) {
-    h += '<p class="blab">Quedan ' + fmt(d.residuo) + ' del redondeo. Van al pozo de mañana.</p>';
+    /* ✏️ era una frase («Quedan $X del redondeo. Van al pozo de mañana»). Alberto,
+       02-ott: niente frasi esplicative sul vetro. ⇒ diventa una RIGA: l'etichetta dice
+       dove va e il numero resta visibile, perché è dinero di qualcuno. */
+    h += '<div class="rows"><div class="r"><div class="n">Redondeo<small>va al pozo de mañana</small></div>'
+      + '<div class="v">' + fmt(d.residuo) + '</div></div></div>';
   }
   if (D.cerrado) {
     h += '<button class="btn ok" id="ir">Ir a la entrega</button>';
   } else {
-    h += '<button class="btn acc" id="cerrar">Cerrar y avisar</button>'
-      + '<p class="blab" style="text-align:center;margin-top:8px">Cada uno ve su número antes de recibir el dinero.</p>';
+    h += '<button class="btn acc" id="cerrar">Cerrar y avisar</button>';
   }
   app.innerHTML = h;
   if (D.cerrado) document.getElementById('ir').onclick = function(){ PASO = 2; pintar(); };
@@ -350,7 +356,7 @@ function pantallaPago() {
   var d = D.detalle;
   var pagados = {};
   (D.pagados || []).forEach(function(p){
-    var k = String(p.persona_id) + '|' + String(p.concepto == null ? '' : p.concepto);
+    var k = String(p.persona_id) + '|' + String(p.voce == null ? '' : p.voce);
     if (!pagados[k] || String(p.ts||'') > String(pagados[k].ts||'')) pagados[k] = p;
   });
   var grupo = (PASO === 3) ? 'barra_cocina' : 'mesero';
@@ -393,11 +399,14 @@ function pantallaPago() {
         + '</div>';
     }
     if (falta.some(function(x){ return alias[String(x.p.persona_id)] === false; })) {
-      h += '<div class="note bad"><b>Sin ficha no se puede firmar.</b> No le entregues el dinero todavía: '
-        + 'quedaría sin firma y, para el sistema, sin pagar. Avisa a administración.</div>';
+      /* questa RESTA, ridotta all'osso: non spiega una regola, dice cosa fare adesso
+         con il dinero in mano. Toglierla sposterebbe un rischio sulla memoria. */
+      h += '<div class="note bad"><b>Sin ficha no se puede firmar.</b> No le entregues todavía.</div>';
     }
-    h += '<div class="note">Nadie queda pagado sin su firma. Quien no viene hoy no pierde nada: '
-      + 'su dinero queda en el fondo y aparece mañana en esta misma lista.</div>';
+    /* ✏️ via la frase «Nadie queda pagado sin su firma…»: la regola 14 è già nella
+       FORMA (senza PIN il pago non parte) e il «no pierde nada» è già nella forma
+       (chi non viene resta in cima alla lista domani). Una riga che ripete quello che
+       lo schermo fa da sé è esattamente ciò che Alberto ha chiesto di togliere. */
   }
   h += '<div class="two"><button class="btn gh" id="atras">‹ El reparto</button>'
     + '<button class="btn ok" id="guardar">Guardar</button></div>';
@@ -441,7 +450,7 @@ async function confirmarPago(p, grupo) {
     reparto_uid: D.reparto_uid || (D.reparto && D.reparto.uid_gesto) || null,
     persona_id: p.persona_id,
     grupo: grupo,
-    concepto: p.concepto || null,
+    voce: p.voce || null,
     monto: p.monto,
     tranche: TURNO === 'AM' ? 'AM_cierre' : 'PM_apertura',
     quien: (per && per.alias_app_caja_nombre) || p.persona_id,   // l'ALIAS registrato, mai testo libero
@@ -467,7 +476,7 @@ async function confirmarPago(p, grupo) {
 async function cerrarReparto() {
   var btn = document.getElementById('cerrar'); btn.disabled = true; btn.textContent = 'Cerrando…';
   var partes = ((D.detalle && D.detalle.partes) || []).map(function(p){
-    return { persona_id: p.persona_id, grupo: p.grupo, puntos: p.puntos, concepto: p.concepto || null };
+    return { persona_id: p.persona_id, grupo: p.grupo, puntos: p.puntos, voce: p.voce || null };
   });
   var r = await postCaja({ verbo:'reparto_cerrar', uid_gesto: uidGesto('rp'),
     dia_operativo: DIA, turno: TURNO, partes: partes });
