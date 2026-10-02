@@ -143,6 +143,30 @@ function toast(msg, clase) {
   clearTimeout(toast._h); toast._h = setTimeout(function(){ t.classList.remove('show'); }, 3200);
 }
 
+/* ✏️ 02-ott sera · Alberto («DOPPIO TOCCO DISEGNO E SISTEMA»): «se clicco due
+   volte, sono dos fatti» — un sistema a 450ms premia el doble toque que el
+   sistema lento (Google) castigaba sin querer. UN TOQUE = UN HECHO: en cada
+   botón que escribe un fatto (confirmar conteo · guardar corte · salir al
+   banco · guardar depósito), el segundo toque se ignora hasta que el primero
+   termina (éxito o error) — nunca "mientras dure la red", siempre hasta que
+   el gesto esté confirmado. La etiqueta cambia al tocar: prueba visible de
+   que SÍ tomó el gesto, no solo un botón apagado. */
+function unTocoUnHecho(btn, fn) {
+  btn.addEventListener('click', async function(ev){
+    if (btn.dataset.tocado === '1') return;   // el segundo toque, ignorado
+    btn.dataset.tocado = '1';
+    var texto = btn.textContent;
+    btn.textContent = '… ' + texto;
+    btn.disabled = true;
+    try { await fn(ev); }
+    finally {
+      btn.dataset.tocado = '';
+      btn.disabled = false;
+      btn.textContent = texto;
+    }
+  });
+}
+
 /* ═══ 1 · RED — llamadas al bordo, con cola si falla ════════════════════ */
 var COLA_KEY = 'caja_atto2_cola';
 function leerCola() { try { return JSON.parse(localStorage.getItem(COLA_KEY) || '[]'); } catch(e){ return []; } }
@@ -272,7 +296,7 @@ function pantalla7() {
         '<p class="lb">Qué viste al abrirlo</p><input class="inp" id="nota" placeholder="En tus palabras">' +
         '<button class="btn acc" id="confirmar">Dejar anotado y seguir</button>';
     }
-    document.getElementById('confirmar').onclick = confirmar;
+    unTocoUnHecho(document.getElementById('confirmar'), confirmar);
   }
   document.getElementById('contado').addEventListener('input', pintarExtra);
   document.getElementById('selloSi').onclick = function(){ selloIntacto = true; pintarExtra(); };
@@ -312,7 +336,7 @@ async function pantalla8() {
     '<div class="note ok">El corte de la máquina es <b>el único testigo que no somos nosotros.</b></div>' +
     '<button class="btn acc" id="guardar">Guardar</button>' +
     '<button class="btn gh" id="siguiente">Ir al depósito</button>';
-  document.getElementById('guardar').onclick = async function(){
+  unTocoUnHecho(document.getElementById('guardar'), async function(){
     var inputsEl = app.querySelectorAll('input[data-maq]');
     for (var i=0;i<inputsEl.length;i++) {
       var v = Number(inputsEl[i].value || '');
@@ -322,7 +346,7 @@ async function pantalla8() {
       if (!r.ok) { toast('No se guardó ' + inputsEl[i].dataset.maq + ': ' + r.motivo, 'bad'); return; }
     }
     toast('Cortes guardados', 'ok');
-  };
+  });
   document.getElementById('siguiente').onclick = function(){ PASO = 4; pantalla9(); };
 }
 
@@ -337,7 +361,7 @@ async function pantalla9() {
       '<div class="rows"><div class="r tot"><span class="n">Depositaste</span><span class="v">' + fmt(DEPOSITO_PENDIENTE.a_depositar) + '</span></div></div>' +
       '<p class="lb">N° de depósito</p><input class="inp" id="nro" placeholder="Lo escribes cuando vuelves">' +
       '<button class="btn acc" id="cerrar">Guardar número de depósito</button>';
-    document.getElementById('cerrar').onclick = async function(){
+    unTocoUnHecho(document.getElementById('cerrar'), async function(){
       var nro = document.getElementById('nro').value.trim();
       if (!nro) { toast('Escribe el número de depósito', 'bad'); return; }
       var r = await postCaja({ verbo:'deposito', uid_gesto: uidGesto('dep'), evento:'vuelta',
@@ -346,7 +370,7 @@ async function pantalla9() {
       if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
       toast('Depósito cerrado', 'ok');
       PASO = 1; pantalla6();
-    };
+    });
     return;
   }
 
@@ -374,14 +398,14 @@ async function pantalla9() {
   }
   var ultimo = recalc();
   document.getElementById('contado').addEventListener('input', function(){ ultimo = recalc(); });
-  document.getElementById('salir').onclick = async function(){
+  unTocoUnHecho(document.getElementById('salir'), async function(){
     var r = await postCaja({ verbo:'deposito', uid_gesto: uidGesto('dep'), evento:'salida',
       contado: ultimo.c, reserva: ultimo.reserva, a_depositar: ultimo.aDep,
       firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
     if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
     toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok');
     pantalla9();
-  };
+  });
 }
 
 function renderError(titulo, error) {
