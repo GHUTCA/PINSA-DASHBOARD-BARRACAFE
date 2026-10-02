@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.32.5</span>
+<span class="ver" id="ver">app_jl v1.33.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -683,6 +683,219 @@ async function cjSobreEnviar() {
   } catch (e) {
     toast('err', 'No se registró: ' + (e && e.message === 'timeout' ? 'el servidor tardó demasiado, reintenta' : 'sin conexión'));
   } finally { CJS.enviando = false; pintaTab(); }
+}
+
+/* ═══ [02-ott · v1.33.0 · 🎛 BKP V29] CAJA · ATTO I «LA NOTTE» ════════════════
+   Ordine di Alberto: da lunedì 5 la cassiera non c'è più. Schermate del mockup
+   14-set con le correzioni del 01-ott:
+     ① el aviso   — c'è plata da ritirare: QUANTA e CHI, mai la cifra del limite
+     ② el retiro  — «Debería tener» e la cifra la SCRIVE il JL (casella vuota)
+     ④ el sobre   — la somma la DICHIARA il JL (mai quella calcolata)
+     ⑤ el cierre  — sobres, chi ha ancora plata, mesas abiertas, e si chiude
+   Tutto dal bordo (`POST /caja/<local>`, leva `CAJA_ATTO1_ON`), MAI da Google.
+   ⚠️ Il pannello vecchio (`cajaPost`) chiamava `/caja?t=` SENZA il local nella
+   rotta: il bordo rispondeva `local_desconocido` — non ha mai funzionato. Qui
+   si chiama la rotta vera, col verbo in cima al corpo. */
+function cjAtto1On() { try { return /"caja_atto1_on"\s*:\s*"1"/.test(JSON.stringify(STATE.salud || {})); } catch (e) { return false; } }
+async function cajaPost1(payload) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const r = await fetch(CFG.BORDE + '/caja/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T),
+      { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload), signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    let j = null; try { j = await r.json(); } catch (e) { j = null; }
+    if (!j) throw new Error('http_' + r.status);
+    return j;   // anche un 401/429/400 ha un corpo che dice perché
+  } catch (e) { clearTimeout(to); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+const CJ1_ERR = {
+  pg_no_responde: 'No puedo leer la caja ahora (la base de datos no responde). No retires a ojo: espera un minuto.',
+  pg_no_configurado: 'La caja no está configurada en el sistema — avisa a Alberto.',
+  pin_jl_invalido: 'Tu PIN no es válido para la caja.',
+  pin_jl_requerido: 'Falta tu PIN — vuelve a entrar.',
+  pin_jl_bloqueado: 'PIN bloqueado 10 minutos por intentos fallidos.',
+  pin_jl_bloqueado_apparecchio: 'Este teléfono está bloqueado 10 minutos por intentos fallidos.',
+  pin_jl_no_configurado: 'Los PIN de JL no están configurados en el sistema — avisa a Alberto.',
+  verbo_sconosciuto: 'La caja nueva todavía está apagada.',
+  timeout: 'El sistema tardó demasiado — reintento solo.',
+  sin_conexion: 'Sin conexión — reintento solo.',
+};
+let CJ1 = { st: null, ts: 0, err: '', ret: null, enviando: false };
+async function cjAtto1Giro() {
+  if (!cjAtto1On() || !STATE.pin) return;
+  if (CJ1.inVolo) return;
+  CJ1.inVolo = true; CJ1.tryTs = Date.now();   // l'ultimo TENTATIVO: un errore non deve far ripartire subito un'altra lettura
+  try {
+    const r = await cajaPost1({ verbo: 'estado', pin_jl: STATE.pin });
+    if (r && r.ok) { CJ1.st = r; CJ1.ts = Date.now(); CJ1.err = ''; }
+    else CJ1.err = (r && r.error) || 'sin_respuesta';
+  } catch (e) { CJ1.err = e && e.message === 'timeout' ? 'timeout' : 'sin_conexion'; }
+  CJ1.inVolo = false;
+  if (TAB === 2) pintaTab();
+}
+function _cjHace(ts) {
+  if (!ts) return '';
+  const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  return m < 60 ? 'hace ' + m + ' min' : 'hace ' + Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
+}
+function _cjMesasAbiertas() {
+  const out = {};
+  try {
+    const ms = (STATE.vista && STATE.vista.meseros) || {};
+    Object.keys(ms).forEach(function (k) { ((ms[k] && ms[k].mesas) || []).forEach(function (m) { if (m && (+m.total || 0) > 0) out[String(m.mesa)] = 1; }); });
+  } catch (e) {}
+  return Object.keys(out).sort(function (a, b) { return (+a) - (+b); });
+}
+function cjRetAbrir(nombre) {
+  const m = ((CJ1.st && CJ1.st.meseros) || []).find(function (x) { return x.mesero === nombre; });
+  if (!m) return;
+  CJ1.ret = { mesero: m.mesero, att: m, uid: cajaNuevoUid('CJ-RIT') };
+  pintaTab();
+}
+function cjRetCerrar() { CJ1.ret = null; const e = $('cj1Monto'); if (e) e.value = ''; pintaTab(); }
+function cjRetDif(inp) {
+  const d = $('cj1Dif'); if (!d || !CJ1.ret) return;
+  const v = parseInt((inp.value || '').replace(/[^0-9]/g, ''), 10);
+  if (!Number.isFinite(v)) { d.textContent = ''; return; }
+  const dif = v - CJ1.ret.att.en_mano;
+  d.textContent = dif === 0 ? '✓ Cuadra exacto' : ('Diferencia ' + (dif > 0 ? '+' : '−') + fmt(Math.abs(dif)));
+  d.style.color = dif === 0 ? '#3DC97E' : '#FFB547';
+}
+async function cjRetEnviar() {
+  if (CJ1.enviando || !CJ1.ret) return;
+  const monto = parseInt((($('cj1Monto') || {}).value || '').replace(/[^0-9]/g, ''), 10);
+  if (!Number.isFinite(monto) || monto <= 0) { toast('warn', 'Escribe cuánto te entregó (contado delante de él)'); return; }
+  CJ1.enviando = true;
+  const ret = CJ1.ret;
+  try {
+    const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, monto: monto,
+      esperado_ora: ret.att.en_mano, uid_gesto: ret.uid });
+    if (r && r.ok && r.accodato) {
+      toast('ok', '✓ Retiro de ' + fmt(monto) + ' a ' + ret.mesero + ' · ahora confirma él en su teléfono');
+      const e = $('cj1Monto'); if (e) e.value = '';
+      CJ1.ret = null; cjAtto1Giro();
+    } else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
+    else toast('err', '✋ No se registró: ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) {
+    /* la clave NO muere: el reintento con el MISMO uid_gesto es el MISMO retiro */
+    toast('err', '⏳ ' + (e && e.message === 'timeout' ? 'El sistema tardó: puede que SÍ se haya registrado. Reintenta: no se duplica.' : 'Sin conexión: reintenta, no se duplica.'));
+  } finally { CJ1.enviando = false; pintaTab(); }
+}
+async function cjSobEnviar() {
+  if (CJ1.enviando) return;
+  const nro = ((($('cj1SobNro') || {}).value) || '').trim();
+  const suma = parseInt((($('cj1SobSuma') || {}).value || '').replace(/[^0-9]/g, ''), 10);
+  if (!nro) { toast('warn', 'Escribe el número del sobre (el que anotaste en el papel)'); return; }
+  if (!Number.isFinite(suma) || suma < 0) { toast('warn', 'Escribe cuánto metiste en el sobre'); return; }
+  if (!CJ1.sobUid) CJ1.sobUid = cajaNuevoUid('CJ-SOB');
+  CJ1.enviando = true;
+  try {
+    const r = await cajaPost1({ verbo: 'sobre', pin_jl: STATE.pin, sobre_nro: nro, suma_ritiri: suma, uid_gesto: CJ1.sobUid });
+    if (r && r.ok && r.accodato) {
+      toast('ok', '✓ Sobre ' + nro + ' · ' + fmt(suma) + ' · a la caja fuerte');
+      ['cj1SobNro', 'cj1SobSuma'].forEach(function (id) { const e = $(id); if (e) e.value = ''; });
+      CJ1.sobUid = null; cjAtto1Giro();
+    } else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
+    else toast('err', '✋ No se registró: ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) { toast('err', '⏳ No sé si se registró: reintenta, no se duplica.'); }
+  finally { CJ1.enviando = false; pintaTab(); }
+}
+async function cjCieEnviar() {
+  if (CJ1.enviando) return;
+  const st = CJ1.st || {};
+  const monto = parseInt((($('cj1CieMonto') || {}).value || '').replace(/[^0-9]/g, ''), 10);
+  if (!Number.isFinite(monto) || monto < 0) { toast('warn', 'Escribe el total que dejas en la caja fuerte esta noche'); return; }
+  const turno = (($('cj1CieTurno') || {}).value) || 'PM';
+  const mesas = _cjMesasAbiertas();
+  const conPlata = (st.meseros || []).filter(function (m) { return m.en_mano > 0; });
+  if ((mesas.length || conPlata.length) && !confirm('Cerrar el turno con aviso:\n\n' +
+    (mesas.length ? '· ' + mesas.length + ' mesa(s) abierta(s): ' + mesas.join(', ') + '\n' : '') +
+    (conPlata.length ? '· ' + conPlata.length + ' garzón(es) con plata en el bolsillo\n' : '') + '\nQueda registrado. ¿Cerrar igual?')) return;
+  if (!CJ1.cieUid) CJ1.cieUid = cajaNuevoUid('CJ-CIE');
+  const warnings = (!(st.sobres || []).length && !((st.da_imbustare || {}).n)) ? ['sin_ritiros'] : [];
+  CJ1.enviando = true;
+  try {
+    const r = await cajaPost1({ verbo: 'cierre_turno', pin_jl: STATE.pin, turno: turno, monto_declarado: monto,
+      mesas_abiertas: mesas, warnings: warnings, uid_gesto: CJ1.cieUid });
+    if (r && r.ok && r.accodato) { toast('ok', '✓ Turno cerrado · ' + fmt(monto) + ' en la caja fuerte'); const e = $('cj1CieMonto'); if (e) e.value = ''; CJ1.cieUid = null; cjAtto1Giro(); }
+    else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
+    else toast('err', '✋ No se registró: ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) { toast('err', '⏳ No sé si se registró: reintenta, no se duplica.'); }
+  finally { CJ1.enviando = false; pintaTab(); }
+}
+function cjAtto1Html() {
+  const st = CJ1.st;
+  let h = '';
+  if (CJ1.err) h += '<div class="card ' + (st ? 'ambra' : 'rossa') + '"><p>⚠️ ' + esc(CJ1_ERR[CJ1.err] || CJ1.err) + '</p>' +
+    (st ? '<p class="mini">Lo de abajo es de ' + _cjHace(CJ1.ts) + '.</p>' : '') + '</div>';
+  if (!st) return h + (CJ1.err ? '' : '<div class="card"><p>Cargando la caja…</p></div>');
+  /* ① EL AVISO — cuánto y quién, NUNCA la cifra del límite */
+  if (st.aviso && st.aviso.abierto) {
+    const resta = Math.round(((st.aviso.scade_ts || 0) - Date.now()) / 60000);
+    const conPlata = (st.meseros || []).filter(function (m) { return m.en_mano > 0; });
+    h += '<div class="card rossa"><h4>💸 Hay plata en la sala</h4>' +
+      '<p style="font-size:22px;font-weight:800">' + fmt(st.totale_en_mano) + '</p>' +
+      '<p class="mini">en manos de ' + conPlata.length + ' garzón(es) · ' +
+      (resta > 0 ? 'tienes <b>' + resta + ' min</b> para retirar' : '<b>pasó el tiempo</b>: retira ya') + '</p></div>';
+  } else if (!st.parametri_ok) {
+    h += '<div class="card ambra"><p class="mini">⚠️ Faltan los parámetros de la caja (' + esc((st.parametri_mancanti || []).join(', ')) + '): sin ellos no hay aviso. Avisa a Alberto.</p></div>';
+  }
+  (st.disputas || []).forEach(function (d) {
+    h += '<div class="card rossa"><p>⚠️ <b>' + esc(d.mesero) + '</b> dijo «No coincide»: retiraste ' + fmt(d.monto) +
+      (d.esperado_ora != null ? ', debería tener ' + fmt(d.esperado_ora) : '') + '. Queda registrado con los dos nombres.</p></div>';
+  });
+  (st.por_confirmar || []).forEach(function (p) {
+    h += '<div class="card"><p class="mini">⏳ Esperando que <b>' + esc(p.mesero) + '</b> confirme en su teléfono el retiro de ' + fmt(p.monto) + ' (' + _cjHace(p.ts) + ').</p></div>';
+  });
+  /* ② EL RETIRO */
+  if (CJ1.ret) {
+    const a = CJ1.ret.att;
+    h += '<div class="card"><h4>💸 El retiro · ' + esc(a.mesero) + '</h4>' +
+      '<p class="mini">Cuenta delante de él, y escribe lo que contaste.</p>' +
+      '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Ventas en efectivo</span><span class="val">' + fmt(a.ventas_efectivo) + '</span></div>' +
+      '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Propinas en efectivo</span><span class="val">' + fmt(a.propina_efectivo) + '</span></div>' +
+      (a.residuo ? '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Le quedó de ayer</span><span class="val">' + fmt(a.residuo) + '</span></div>' : '') +
+      (a.entregado ? '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Ya entregó hoy</span><span class="val">−' + fmt(a.entregado) + '</span></div>' : '') +
+      '<div class="pers" style="border:0;padding:6px 0"><span class="nb"><b>Debería tener</b></span><span class="val"><b style="font-size:20px">' + fmt(a.en_mano) + '</b></span></div>' +
+      '<input class="busca" id="cj1Monto" type="text" inputmode="numeric" placeholder="¿Cuánto te entregó? (contado)" oninput="cjRetDif(this)" autocomplete="off">' +
+      '<p class="mini" id="cj1Dif" style="font-weight:700"></p>' +
+      '<button class="btn acc" onclick="cjRetEnviar()"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? 'Enviando…' : 'Confirmar retiro') + '</button>' +
+      '<button class="btn" onclick="cjRetCerrar()">Volver</button>' +
+      '<p class="mini">Después él confirma en su teléfono: «Coincide» o «No coincide».</p></div>';
+  }
+  /* la lista: chi ha plata addosso */
+  const ms = (st.meseros || []).filter(function (m) { return m.en_mano > 0; });
+  const sus = {}; (st.sussurri || []).forEach(function (s) { sus[s.mesero] = s; });
+  h += '<div class="card"><h4>👛 Plata en el bolsillo de cada garzón</h4>' +
+    (ms.length ? ms.map(function (m) {
+      const s = sus[m.mesero];
+      return '<div class="cob"' + (s ? ' style="color:#FFB547"' : '') + '>' + esc(m.mesero) + ' <small style="color:#b9b2a4">' + _cjHace(m.desde_ts) + '</small>' +
+        '<span class="st2 ' + (s ? 'mid' : 'up') + '">' + fmt(m.en_mano) + '</span>' +
+        '<button class="btn gh" style="margin-left:8px;padding:6px 10px" onclick="cjRetAbrir(\'' + esc(m.mesero).replace(/'/g, "\\'") + '\')">Retirar</button></div>';
+    }).join('') : '<p class="mini">Nadie tiene plata en el bolsillo ahora.</p>') + '</div>';
+  /* ④ EL SOBRE — la suma la escribe el JL */
+  const di = st.da_imbustare || { ritiri: [], n: 0, suma_riferimento: 0 };
+  h += '<div class="card"><h4>📩 El sobre</h4>' +
+    (di.n ? '<p class="mini">Retiros desde el último sobre:</p>' + di.ritiri.map(function (r) { return '<div class="cob">' + esc(r.mesero) + '<span class="st2 up">' + fmt(r.monto) + '</span></div>'; }).join('') +
+      '<p class="mini">Suman ' + fmt(di.suma_riferimento) + ' — cuenta tú lo que metes en el sobre.</p>' : '<p class="mini">No hay retiros nuevos desde el último sobre.</p>') +
+    '<input class="busca" id="cj1SobNro" placeholder="Número del sobre (el que escribiste a mano)" autocomplete="off">' +
+    '<input class="busca" id="cj1SobSuma" type="text" inputmode="numeric" placeholder="¿Cuánto metiste en el sobre?" autocomplete="off">' +
+    '<button class="btn acc" onclick="cjSobEnviar()"' + (CJ1.enviando ? ' disabled' : '') + '>Sellado · a la caja fuerte</button></div>';
+  /* ⑤ EL CIERRE DEL TURNO */
+  const sobres = st.sobres || []; let sumaSob = 0; sobres.forEach(function (s) { sumaSob += (+s.suma_ritiri || 0); });
+  const mesas = _cjMesasAbiertas();
+  const hh = new Date().getHours(), mm = new Date().getMinutes(), pm = (hh * 60 + mm) >= (18 * 60 + 30) || hh < 6;
+  h += '<div class="card"><h4>🔒 Cierre del turno</h4>' +
+    '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Sobres a la caja fuerte</span><span class="val">' + sobres.length + (sobres.length ? ' · ' + fmt(sumaSob) : '') + '</span></div>' +
+    '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Garzones con plata</span><span class="val">' + ms.length + '</span></div>' +
+    '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Mesas abiertas</span><span class="val">' + mesas.length + '</span></div>' +
+    (mesas.length ? '<p class="mini" style="color:#FFB547">' + mesas.join(', ') + ' — puedes cerrar igual: queda con aviso.</p>' : '') +
+    '<select class="busca" id="cj1CieTurno"><option value="AM"' + (pm ? '' : ' selected') + '>Turno día (AM)</option><option value="PM"' + (pm ? ' selected' : '') + '>Turno noche (PM)</option></select>' +
+    '<input class="busca" id="cj1CieMonto" type="text" inputmode="numeric" placeholder="Total que queda en la caja fuerte esta noche" autocomplete="off">' +
+    '<button class="btn" onclick="cjCieEnviar()"' + (CJ1.enviando ? ' disabled' : '') + '>Cerrar el turno</button></div>';
+  return h;
 }
 
 /* le SCRITTURE di sala passano dal bordo come in sala.html; fallback GAS
@@ -1727,7 +1940,11 @@ async function asignar() {
 /* ═════ SCHEDA CAJA — materia di 💰 DINERO, letta dal ferro (getCaja) ═════ */
 function vCaja() {
   const c = STATE.caja;
-  if (!c) return '<div class="card"><h4>💰 Caja</h4><p>Cargando detrás… (getCaja es de los verbos lentos — la pantalla no espera).</p></div>';
+  if (!c) {
+    /* [v1.33.0] la caja della notte NON aspetta Google: è tutta al bordo */
+    if (cjAtto1On()) { if (Date.now() - Math.max(CJ1.ts || 0, CJ1.tryTs || 0) > 20000) setTimeout(cjAtto1Giro, 0); return cjAtto1Html(); }
+    return '<div class="card"><h4>💰 Caja</h4><p>Cargando detrás… (getCaja es de los verbos lentos — la pantalla no espera).</p></div>';
+  }
   let h = '<div class="card"><h4>💰 El día <span class="pill off">📷 ' + edadTxt('caja') + '</span></h4>' +
     '<div class="pers" style="border:0;padding:4px 0"><span class="nb"><b>Venta</b></span><span class="val"><b>' + fmt(c.venta || 0) + '</b></span></div>' +
     '<div class="pers" style="border:0;padding:4px 0"><span class="nb"><b>Boletas</b></span><span class="val"><b>' + (c.boletas || 0) + '</b></span></div></div>';
@@ -1764,6 +1981,7 @@ function vCaja() {
      una fuente onesta per calcolarlo, e inventarla sarebbe l'errore già
      pagato con `Efectivo_Esperado` (−7,9%, 21-ago). Il conteo resta ciego
      per el mesero; la comparación llega en un paso futuro, no hoy. */
+  if (cjAtto1On()) { if (Date.now() - Math.max(CJ1.ts || 0, CJ1.tryTs || 0) > 20000) setTimeout(cjAtto1Giro, 0); return h + cjAtto1Html(); }   // [v1.33.0] ATTO I
   h += '<div class="card"><h4>💸 Retiro del mesero</h4>' +
     '<p class="mini">El mesero cuenta y firma, tú firmas — <b>ninguno de los dos ve un número esperado en pantalla</b>. Queda en cola, no se confirma al toque.</p>' +
     cjRitiroPanel() + '</div>';
@@ -1979,7 +2197,7 @@ function _repintaDopo() {
 /* e i due campi del «Mover» sopravvivono a un ridisegno periodico (il battito
    ogni 20 s): si ricopiano se il nuovo campo nasce vuoto. Dopo uno spostamento
    riuscito li svuota `mvLimpiar`, e il ridisegno non li rimette. */
-const _CAMPI_TENUTI = ['mvDe', 'mvA', 'asMesero', 'asPlaza', 'asFranja'];
+const _CAMPI_TENUTI = ['mvDe', 'mvA', 'asMesero', 'asPlaza', 'asFranja', 'cj1Monto', 'cj1SobNro', 'cj1SobSuma', 'cj1CieMonto', 'cj1CieTurno'];
 let _ASIG_ON = false;   // [v1.32.0] la scheda «Asignar / cambiar» è aperta: il battito la ridisegna, non la chiude
 function pintaTab() {
   if (TAB < 0) return;
@@ -2029,6 +2247,7 @@ function boot() {
   setInterval(giroVeloce, CFG.POLL_MS);
   setInterval(() => { if (TAB === 2 || TAB === 0) giroCaja(); }, 60000);
   setInterval(giroTurno, 300000);
+  setInterval(() => { if (TAB === 2 && cjAtto1On()) cjAtto1Giro(); }, 20000);   // [v1.33.0] la caja della notte, solo con la scheda davanti
 }
 /* ── demo: la app si guarda senza turno né PIN (per la revisione, mai in sala) ── */
 function bootDemo() {
