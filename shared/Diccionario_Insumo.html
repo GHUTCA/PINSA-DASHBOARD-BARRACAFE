@@ -580,6 +580,16 @@
       </label>
     </div>
 
+    <div class="sec">
+      <h3><span class="secnum">6</span>Alias <span class="hint">cómo lo dicen en el local</span></h3>
+      <div class="alias" id="ev-aliasbox" style="margin-top:0"></div>
+      <div class="field" style="margin-top:8px">
+        <input type="text" id="ev-alias-new" placeholder="+ alias (ej. coca cero)" onkeydown="evAliasKey(event)" autocomplete="off">
+      </div>
+      <div class="gatewarn" id="ev-aliaswarn" style="display:none"></div>
+    </div>
+    <!-- C2A4 · 01-oct · alias en la edición -->
+
     <div class="actions">
       <button class="btn cancel" onclick="backToGate()">Cancelar</button>
       <button class="btn save" id="ev-savebtn" onclick="guardarEdit()">Guardar cambios</button>
@@ -745,6 +755,7 @@ async function boot(){
     await cargarProveedores(rows);   // 🆕 12-jun · fuente = hoja Proveedores (CTRL_BC), no la col F fósil
     await cargarPesos();             // 🆕 14-jun · PESOS_MEDIOS para granel-por-unidad (no bloqueante)
     await cargarSeccionesEmpresa();  // 🆕 14-jun · fuente autorevole secciones (CTRL_OBJETIVOS · N7/N11)
+    await cargarAlias();             // C2A4 · 01-oct · alias de ALIAS_INSUMOS (no bloqueante)
   }catch(e){
     banner('err','⚠️ No pude leer BD_INSUMOS desde CONTROL_MAESTRO ('+e.message+'). Sin catálogo no hay defensa anti-duplicado: la creación queda bloqueada. Reintenta o avisa.');
   }
@@ -1386,7 +1397,26 @@ function copiarPayload(){
    Inmutables (solo lectura + guard GAS): SKU·UTM·factor·metodo·tipo
    Fuori (Visor): vendible/toteat/precio
    ========================================================================== */
-const E={sku:null,row:null,secc:new Set(),multi:false,emp:new Set(),nombreOrig:''};
+const E={sku:null,row:null,secc:new Set(),multi:false,emp:new Set(),nombreOrig:'',alias:new Set(),aliasNew:new Set()};
+// C2A4 · los alias de TODOS los productos (CSV de ALIAS_INSUMOS, el mismo que lee el Registro): sku → [alias normalizado]
+let ALIAS_MAP={};
+const GID_ALIAS_INSUMOS='745250989';
+async function cargarAlias(){
+  try{
+    const u='https://docs.google.com/spreadsheets/d/e/'+CFG.TOKEN_MAESTRO+'/pub?gid='+GID_ALIAS_INSUMOS+'&single=true&output=csv&t='+Date.now();
+    const r=await fetch(u,{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const m={};
+    csvParse(await r.text()).forEach(x=>{ const k=trimC(x.SKU), a=norm(x.alias); if(k&&a){ (m[k]=m[k]||[]); if(m[k].indexOf(a)<0)m[k].push(a); } });
+    ALIAS_MAP=m; S.aliasCargados=true;
+  }catch(e){ S.aliasCargados=false; }
+}
+// el dueño de un alias, si es OTRO producto (por alias o por nombre): null = libre
+function aliasDeOtro(a,sku){
+  for(const k in ALIAS_MAP){ if(k!==String(sku) && ALIAS_MAP[k].indexOf(a)>=0) return 'ya es alias del SKU '+k; }
+  const p=S.catalog.find(x=>trimC(x[CFG.COL.SKU])!==String(sku) && norm(x[CFG.COL.DESC])===a);
+  return p ? 'es el nombre del SKU '+trimC(p[CFG.COL.SKU])+' ('+trimC(p[CFG.COL.DESC])+')' : null;
+}
 const EMP_ALL=['PINSA','EXO','BKS'];
 
 function openEdit(sku){
@@ -1432,6 +1462,11 @@ function openEdit(sku){
 
   // activo
   $('ev-activo').checked = norm(p[CFG.COL.ACTIVO])==='si';
+
+  // C2A4 · alias: los que ya tiene (del libro) + ninguno nuevo
+  E.alias=new Set(ALIAS_MAP[E.sku]||[]); E.aliasNew.clear();
+  if($('ev-alias-new')) $('ev-alias-new').value='';
+  evRenderAlias();
 
   evRenderSecc();evRenderEmp();evName();
 
@@ -1479,6 +1514,29 @@ function evRenderEmp(){
   evUpdate();
 }
 
+function evRenderAlias(msg){
+  const box=$('ev-aliasbox'); if(!box) return; box.innerHTML='';
+  E.alias.forEach(a=>{ const c=document.createElement('span'); c.className='chip'; c.textContent=a; c.title='ya guardado'; box.appendChild(c); });
+  E.aliasNew.forEach(a=>{ const c=document.createElement('span'); c.className='chip prop'; c.style.cursor='pointer';
+    c.innerHTML=a+' <b>×</b>'; c.title='nuevo: se guarda con «Guardar cambios»';
+    c.onclick=()=>{ E.aliasNew.delete(a); evRenderAlias(); }; box.appendChild(c); });
+  if(!E.alias.size && !E.aliasNew.size){ const v=document.createElement('span'); v.style.color='var(--t3)'; v.style.fontSize='12px';
+    v.textContent=S.aliasCargados===false?'no pude leer los alias: sólo se agregan nuevos':'sin alias todavía'; box.appendChild(v); }
+  // banco C2c nota 3: sin el CSV no se controla contra los alias ANTIGUOS (Postgres no los conoce) ⇒ el aviso NO se apaga
+  const fijo = S.aliasCargados===false ? '⚠️ No pude leer los alias guardados: no puedo avisarte si uno ya es de otro producto. Recarga antes de agregar.' : '';
+  const w=$('ev-aliaswarn'); if(w){ const t=[msg,fijo].filter(Boolean).join(' · '); if(t){ w.style.display='block'; w.textContent=t; } else w.style.display='none'; }
+}
+function evAliasAdd(){
+  const inp=$('ev-alias-new'); const a=norm(inp.value); if(!a){ inp.value=''; return; }
+  if(a.length>60){ evRenderAlias('⚠️ «'+a+'» es demasiado largo (máx. 60).'); return; }
+  if(a===norm($('ev-name').value)){ inp.value=''; evRenderAlias('«'+a+'» ya es el nombre: no hace falta como alias.'); return; }
+  if(E.alias.has(a)||E.aliasNew.has(a)){ inp.value=''; evRenderAlias('«'+a+'» ya está.'); return; }
+  const otro=aliasDeOtro(a,E.sku);
+  if(otro){ evRenderAlias('⚠️ «'+a+'» '+otro+': un alias lleva a UN producto. Elige otro.'); return; }
+  E.aliasNew.add(a); inp.value=''; evRenderAlias();
+}
+function evAliasKey(ev){ if(ev.key==='Enter'||ev.key===','){ ev.preventDefault(); evAliasAdd(); } }
+
 function evName(){
   const v=trimC($('ev-name').value);
   $('t-name').textContent=v||E.nombreOrig;
@@ -1512,7 +1570,8 @@ function buildEditPayload(){
       // estado COMPLETO (sustituye, no agrega) · array vacío = "no tocar" en el GAS
       secciones: E.multi ? [] : [...E.secc],
       multiseccion: E.multi,
-      empresas: [...E.emp]
+      empresas: [...E.emp],
+      alias: [...E.aliasNew]   // C2A4 · sólo los NUEVOS (Postgres agrega sin repetir; el foglio los recibe detrás)
     },
     guard:{   // inmutables como están vivos → el GAS rechaza si cambiaron bajo los pies
       'SKU':E.sku,
@@ -1526,6 +1585,7 @@ function buildEditPayload(){
 }
 
 async function guardarEdit(){
+  if($('ev-alias-new') && trimC($('ev-alias-new').value)){ evAliasAdd(); if(trimC($('ev-alias-new').value)) return; }   // C2A4 · el escrito sin Enter cuenta (o se para con su aviso)
   const payload=buildEditPayload();
   if(!CFG.GAS_URL){
     $('m-title').textContent='Route GAS sin configurar — esto editaría (no escribí nada)';
@@ -1547,6 +1607,7 @@ async function guardarEdit(){
       p['Empresa_PINSA']=E.emp.has('PINSA')?'SI':'NO';
       p['Empresa_EXO']=E.emp.has('EXO')?'SI':'NO';
       p['Empresa_BKS']=E.emp.has('BKS')?'SI':'NO';
+      if(E.aliasNew.size){ ALIAS_MAP[E.sku]=(ALIAS_MAP[E.sku]||[]).concat([...E.aliasNew]); E.aliasNew.clear(); }   // C2A4
       banner('okk','✓ SKU '+j.sku+' actualizado · fila '+(j.fila||'?')+(j.audit_nome?' · nombre auditado':'')+' · '+(j.route||''));
       backToGate();$('q').value='';$('hits').innerHTML='';$('gatewarn').style.display='none';$('createbar').style.display='none';
     } else throw new Error(j&&j.error?j.error:'respuesta inesperada del GAS');
