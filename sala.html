@@ -5349,6 +5349,7 @@ function csQuitaL(k){
     const par=l.dupla;
     n.lineas=n.lineas.filter(function(x){ return x.dupla!==par; });
   } else n.lineas.splice(i,1);
+  if(!l.menu_beb_de) _cmSyncBebMenu();   // [01-ott] tolto il menù, va via la sua bibita
   n.edit=null; _cmRedibujar();
 }
 function _cmPadHtml(){
@@ -6022,7 +6023,8 @@ function _cmPoner(p, op, q, bebNombre, mods, termino){
   const dTot = mods ? mods.reduce(function(s,m){ return s + (m.d||0); }, 0) : 0;
   // v3.0 · il merge guarda ANCHE il término: due filetes a cotture diverse
   // restano DUE righe (stessa regola del menú: id+op+término)
-  const igual = n.lineas.find(function(l){ return l.id===p.id && l.persona===n.pAct && (l.op||'')===(op||'') && (l.termino||'')===(termino||''); });
+  // [01-ott] mai dentro la bibita a $0 di un menù: un Aperol PAGATO si sommerebbe a quella gratis
+  const igual = n.lineas.find(function(l){ return l.id===p.id && !l.menu_beb_de && l.persona===n.pAct && (l.op||'')===(op||'') && (l.termino||'')===(termino||''); });
   if(igual){ igual.qty += q; n.ultima=igual.k; }
   else {
     /* [AUT-EMERG-0314] il prefisso della riga segue la regola: di sera il chit
@@ -6103,6 +6105,31 @@ function _cmPoner(p, op, q, bebNombre, mods, termino){
     }
     n.lineas.push(l); n.ultima=l.k;
   }
+  /* ═══ [01-ott · Alberto, mesa 54: «il liquido è di nuovo stampato in cocina»] ═══
+     La cura del 24-set (AUT-0435, menu_digital v2.108.1) vive nel menù del
+     CLIENTE — e il Menú de la Noche lo vende solo il MESERO: dal 24-set 14
+     pedidos su 14 nati qui, tutti un contenitore coi 4 mods dentro, nessuna
+     bibita come riga ⇒ la bibita usciva SOLO sul chit della cocina (il bordo
+     instrada per `cat` della riga, e il contenitore è `menu_contenitore`).
+     Stessa forma della cura del cliente: il contenitore resta IDENTICO (prezzo,
+     mods, conto) e la bibita nasce come riga a $0 col suo prodotto vero ⇒ la
+     sua `cat` la porta alla barra. Quale mod è la bibita lo dice il DATO, non
+     una lista: il gruppo con `Menu_Categoria = bebida` (MOD_GRUPOS), e il
+     prodotto dal suo `Ref_Producto`. Senza uno dei due: niente riga, come ieri.
+     Col menù scaglionato acceso (`?mesc=1`) la bibita è già una tappa sua: fuori. */
+  if (!MENU_ESC_ON && mods && mods.length) {
+    const _grsB = mods2GruposDe(p);
+    mods.forEach(function (m) {
+      const gr = _grsB.find(function (g) { return g.g === m.g; });
+      if (!gr || gr.mc !== 'bebida' || !m.ref) return;
+      const pb = (STATE.catalogo || []).find(function (x) { return x.id === m.ref; });
+      if (!pb) return;
+      const yb = n.lineas.find(function (x) { return x.id === pb.id && x.menu_beb_de === p.id && x.persona === n.pAct; });
+      if (!yb) n.lineas.push({ k: ++n.seq, id: pb.id, nombre: p.nombre + ' · ' + pb.nombre, precio: 0, qty: 0,
+        cat: pb.cat || '', op: '', termino: '', es_menu: true, promo: '', persona: n.pAct, pri: 0, menu_beb_de: p.id });
+    });
+    _cmSyncBebMenu();
+  }
   /* [AUT-0239] Alberto: «poi SCELGO il bebestible e LA MANDO» — scelta e
      invio sono lo stesso gesto, dopo. Quindi col meccanismo acceso la
      bevanda NON entra qui: resta una tappa pendente, e si sceglie quando
@@ -6118,12 +6145,29 @@ function _cmPoner(p, op, q, bebNombre, mods, termino){
     }
   }
 }
+/* [01-ott · mesa 54] la bibita del contenitore SEGUE il suo contenitore: la sua
+   quantità è la somma dei contenitori (stesso prodotto, stessa persona) che la
+   portano nei mods. Tolto il menù, la bibita se ne va con lui: senza, restava
+   una bibita a $0 per la barra senza menù da pagare. Le righe senza
+   `menu_beb_de` (tutte quelle di ieri) non si toccano. */
+function _cmSyncBebMenu(){
+  const n=STATE.nuevo; if(!n || !n.lineas) return;
+  n.lineas = n.lineas.filter(function(b){
+    if(!b.menu_beb_de) return true;
+    let tot = 0;
+    n.lineas.forEach(function(c){
+      if(c.id===b.menu_beb_de && c.persona===b.persona && (c.mods||[]).some(function(m){ return m.ref===b.id; })) tot += (c.qty||0);
+    });
+    b.qty = tot;
+    return tot > 0;
+  });
+}
 function nuevoMas(k){ const n=STATE.nuevo; if(!n) return;
   const l=n.lineas.find(function(x){ return x.k===k; }); if(!l) return;
   // v3.11 · una pareja 2x1 è indivisibile: per averne un'altra si ripete il
   // prodotto (altrimenti «pagas 2 · regalo 1» nasce da un + distratto)
   if(l.dupla){ toast('warn','Es una pareja 2x1 — para otra, pide el producto de nuevo'); return; }
-  l.qty++; n.ultima=k; _cmRedibujar(); }
+  l.qty++; n.ultima=k; _cmSyncBebMenu(); _cmRedibujar(); }
 function nuevoMenos(k){ const n=STATE.nuevo; if(!n) return;
   const i=n.lineas.findIndex(function(x){ return x.k===k; }); if(i<0) return;
   const l=n.lineas[i];
@@ -6137,6 +6181,7 @@ function nuevoMenos(k){ const n=STATE.nuevo; if(!n) return;
     _cmRedibujar(); return;
   }
   l.qty--; if(l.qty<=0) n.lineas.splice(i,1);
+  if(!l.menu_beb_de) _cmSyncBebMenu();   // il − sulla bibita stessa resta del mesero
   _cmRedibujar(); }
 // v2.4 · ES ENTRADA: el ⬆ marca la línea que sale primero — hecho de la mesa
 function nuevoPri(k){ const n=STATE.nuevo; if(!n) return;
