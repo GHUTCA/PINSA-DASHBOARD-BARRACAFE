@@ -5,26 +5,28 @@
      Fonte: 4_CANTIERE_CAJA/MOCKUP_ATTO_II_CAJERA_02OTT2026.html (⑥⑦⑧⑨ + le due
      aggiunte dichiarate ⑥-vacío/⑦-no cuadra). Tono CHIARO (proposta di DESIGN,
      in attesa del sì di Alberto — vedi bacheca `TERZA PENNA ATTO II APERTA`).
-     Cargo: CAJA. Leva server: CAJA_PG_WRITE_ON (condivisa con tutta la caja,
-     nasce "0" — non ne apro una mia, vedi src/caja_atto2.js). Non deploya
-     questa penna: il cancello (New Version / New Deployment, leve) è di BKP.
+     Cargo: CAJA. Leva server: CAJA_ATTO2_ON (una per penna/atto, come
+     CAJA_ATTO1_ON di BKP — bacheca `ATTO I RAMO E CUCITURE`, 02-ott sera),
+     nasce "0". Non deploya questa penna: il cancello è di BKP.
 
-     🔴 CONTRATTO DI LETTURA, non ancora costruito da nessuno — dichiarato
-        qui perché chi legge il codice lo trovi, non lo deduca al contrario:
-          GET  /caja/:local/manana?t=&dia=YYYY-MM-DD
+     🔴 CONTRATTO DI LETTURA — le quattro funzioni pure+async che lo
+        implementano sono già scritte in `src/caja_atto2.js` (bordo):
+        `cajaAtto2LeerManana/LeerCortesPos/LeerDepositoPendiente/LeerParametro`.
+        Qui resta solo la cucitura Worker (import + leva + rotta), di BKP:
+          GET  /caja/:local/manana?t=&dia=YYYY-MM-DD   (dia = la NOTTE)
                → { sobres:[{sobre_nro,declarado,firma_jl,ts_hecho,conteo:null|
                    {contado,sello_intacto,nota,diferencia}}], aviso_sin_respuesta:
-                   {ts,monto}|null }   (dia = il dia_operativo DELLA NOTTE)
+                   {mesero,motivo,ts}|null }   (caja_aviso non porta un monto)
           GET  /caja/:local/cortes_pos?t=&dia=   → { maquinas:[string,...], libro:int,
-               guardado:[{maquina,corte}] }   (maquinas da caja_parametros.maquinas_pos,
-               se assente l'app lascia aggiungerle a mano)
+               guardado:[{maquina,corte}] }   (libro = solo debito+credito, MAI
+               mpago/fintoc: non passano dalla macchina fisica — BKP, 02-ott)
           GET  /caja/:local/deposito_pendiente?t=&dia= → { salida_pendiente:
                {uid_gesto,contado,reserva,a_depositar}|null }
-          GET  /caja/:local/parametro?t=&clave=reserva_pct → { valor:number }|
-               {ok:false,error:'parametro_ausente'}  (mai un default nel codice)
-        Finché queste rotte non esistono, l'app li chiama, li vede fallire, e
-        lo DICE sullo schermo invece di inventare uno zero — stessa legge di
-        tutta la casa: un'assenza non si traveste da fatto.
+          GET  /caja/:local/parametro?t=&clave=reserva_pct → { valor:number|null }
+               (valor è in PUNTI PERCENTUALI, 5 = 5%, non una frazione — così
+               l'ha seminato MIGRACION; null = parametro assente, mai un default)
+        Finché la cucitura non è incollata, l'app chiama, vede fallire, e lo
+        DICE sullo schermo invece di inventare uno zero.
      ⚠️ Scrittura: POST /caja/:local?t=  body: { verbo:'conteo'|'pos_corte'|
         'deposito', ...campi, fuente:'app_caja' }. 🔎 BKP: `pos_corte` nel verbo
         di rete, `cajaAtto2FilaCortePos` nel codice — nomi diversi per lo
@@ -224,10 +226,11 @@ async function pantalla6() {
       esc(s.firma_jl||'') + '</small></span><span class="v' + (s.conteo ? ' ok' : '') + '">' +
       fmt(s.declarado) + (s.conteo ? ' ✓' : '') + '</span></div>';
   }).join('');
+  var MOTIVO_TXT = { limite_sala: 'pasó el límite de la sala', limite_persona: 'pasó el límite por persona', tiempo: 'demasiado tiempo con plata encima' };
   var avisoHtml = MANANA.aviso_sin_respuesta
     ? '<div class="note bad"><b>Un aviso quedó sin respuesta</b><br>' +
-      new Date(MANANA.aviso_sin_respuesta.ts).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-      ' · ' + fmt(MANANA.aviso_sin_respuesta.monto) + ' en la sala · no hubo retiro.</div>'
+      esc(MANANA.aviso_sin_respuesta.mesero) + ' · ' + (MOTIVO_TXT[MANANA.aviso_sin_respuesta.motivo] || MANANA.aviso_sin_respuesta.motivo) + '<br>' +
+      new Date(MANANA.aviso_sin_respuesta.ts).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) + ' · no hubo retiro.</div>'
     : '';
   app.innerHTML = barra(true) +
     '<div class="kick">La caja fuerte</div><h1>Anoche</h1><p class="sd">' + DIA_NOCHE + ' · turno noche</p>' +
@@ -360,11 +363,13 @@ async function pantalla9() {
     '<div class="note">El camino al banco es el único tramo sin testigo. Por eso los dos números quedan escritos <b>antes</b> de que salgas.</div>' +
     '<button class="btn acc" id="salir">Salir al banco</button>';
   function recalc() {
+    /* RESERVA_PCT llega en PUNTOS porcentuales (5 = 5%), así lo sembró
+       MIGRACIÓN en caja_parametros — no es una fracción (0,05). */
     var c = Number(document.getElementById('contado').value || '') || 0;
-    var reserva = Math.round(c * RESERVA_PCT);
+    var reserva = Math.round(c * RESERVA_PCT / 100);
     var aDep = c - reserva;
     document.getElementById('calc').innerHTML =
-      '<div class="rows"><div class="r"><span class="n">A la reserva (' + Math.round(RESERVA_PCT*100) + '%)</span><span class="v">' + fmt(reserva) + '</span></div>' +
+      '<div class="rows"><div class="r"><span class="n">A la reserva (' + RESERVA_PCT + '%)</span><span class="v">' + fmt(reserva) + '</span></div>' +
       '<div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>';
     return { c: c, reserva: reserva, aDep: aDep };
   }
