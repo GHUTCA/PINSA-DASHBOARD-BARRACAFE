@@ -730,6 +730,7 @@ function csvParse(text){          // parser con comillas (valores tipo "4,000")
 const S={ub:null,dest:null,arch:null,emp:new Set(),secc:new Set(),alias:new Set(),catalog:[],pesos:{},seccEmp:null,filaLibre:null,skuNuevo:null};
 
 async function boot(){
+  S.aliasPromesa=cargarAlias();   // C2A5 · en paralelo, desde el principio (antes llegaba ÚLTIMO, ~15 s)
   const url=`https://docs.google.com/spreadsheets/d/e/${CFG.TOKEN_MAESTRO}/pub?gid=${CFG.GID_BD_INSUMOS}&single=true&output=csv&t=${Date.now()}`;
   try{
     const r=await fetch(url,{cache:'no-store'});
@@ -755,7 +756,7 @@ async function boot(){
     await cargarProveedores(rows);   // 🆕 12-jun · fuente = hoja Proveedores (CTRL_BC), no la col F fósil
     await cargarPesos();             // 🆕 14-jun · PESOS_MEDIOS para granel-por-unidad (no bloqueante)
     await cargarSeccionesEmpresa();  // 🆕 14-jun · fuente autorevole secciones (CTRL_OBJETIVOS · N7/N11)
-    await cargarAlias();             // C2A4 · 01-oct · alias de ALIAS_INSUMOS (no bloqueante)
+    await S.aliasPromesa;            // C2A5 · ya pedido al inicio del boot (no bloqueante)
   }catch(e){
     banner('err','⚠️ No pude leer BD_INSUMOS desde CONTROL_MAESTRO ('+e.message+'). Sin catálogo no hay defensa anti-duplicado: la creación queda bloqueada. Reintenta o avisa.');
   }
@@ -1410,6 +1411,8 @@ async function cargarAlias(){
     csvParse(await r.text()).forEach(x=>{ const k=trimC(x.SKU), a=norm(x.alias); if(k&&a){ (m[k]=m[k]||[]); if(m[k].indexOf(a)<0)m[k].push(a); } });
     ALIAS_MAP=m; S.aliasCargados=true;
   }catch(e){ S.aliasCargados=false; }
+  // C2A5 · si la ficha ya está abierta, se actualiza sola con lo que llegó
+  if(E.sku && $('editview') && $('editview').style.display==='block'){ E.alias=new Set(ALIAS_MAP[E.sku]||[]); evRenderAlias(); }
 }
 // el dueño de un alias, si es OTRO producto (por alias o por nombre): null = libre
 function aliasDeOtro(a,sku){
@@ -1521,13 +1524,14 @@ function evRenderAlias(msg){
     c.innerHTML=a+' <b>×</b>'; c.title='nuevo: se guarda con «Guardar cambios»';
     c.onclick=()=>{ E.aliasNew.delete(a); evRenderAlias(); }; box.appendChild(c); });
   if(!E.alias.size && !E.aliasNew.size){ const v=document.createElement('span'); v.style.color='var(--t3)'; v.style.fontSize='12px';
-    v.textContent=S.aliasCargados===false?'no pude leer los alias: sólo se agregan nuevos':'sin alias todavía'; box.appendChild(v); }
+    v.textContent=S.aliasCargados===false?'no pude leer los alias: sólo se agregan nuevos':(S.aliasCargados===true?'sin alias todavía':'⏳ cargando los alias guardados…'); box.appendChild(v); }
   // banco C2c nota 3: sin el CSV no se controla contra los alias ANTIGUOS (Postgres no los conoce) ⇒ el aviso NO se apaga
   const fijo = S.aliasCargados===false ? '⚠️ No pude leer los alias guardados: no puedo avisarte si uno ya es de otro producto. Recarga antes de agregar.' : '';
   const w=$('ev-aliaswarn'); if(w){ const t=[msg,fijo].filter(Boolean).join(' · '); if(t){ w.style.display='block'; w.textContent=t; } else w.style.display='none'; }
 }
 function evAliasAdd(){
   const inp=$('ev-alias-new'); const a=norm(inp.value); if(!a){ inp.value=''; return; }
+  if(S.aliasCargados!==true && S.aliasCargados!==false){ evRenderAlias('⏳ Espera un momento: estoy cargando los alias guardados para revisar que «'+a+'» no sea de otro producto.'); return; }   // C2A5
   if(a.length>60){ evRenderAlias('⚠️ «'+a+'» es demasiado largo (máx. 60).'); return; }
   if(a===norm($('ev-name').value)){ inp.value=''; evRenderAlias('«'+a+'» ya es el nombre: no hace falta como alias.'); return; }
   if(E.alias.has(a)||E.aliasNew.has(a)){ inp.value=''; evRenderAlias('«'+a+'» ya está.'); return; }
