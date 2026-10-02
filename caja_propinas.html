@@ -132,7 +132,7 @@ h1{font-size:19px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em}
 <div class="wrap" id="app"><p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando…</p></div>
 <div class="sheet" id="sheet"><div class="card" id="sheetCard"></div></div>
 <div class="toast" id="toast"></div>
-<span id="ver" hidden>v1.0.1 · atto3 propinas · sin frases · 02oct</span>
+<span id="ver" hidden>v1.0.2 · atto3 propinas · un toque un hecho · 02oct</span>
 
 <script src="shared/pinsita_auth.js"></script>
 <script>
@@ -169,6 +169,22 @@ function fechaLarga(iso) {
 }
 function fmt(n) { return '$' + Math.round(n||0).toLocaleString('es-CL'); }
 function uidGesto(p) { return p + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,8); }
+
+/* 👆 UN TOCCO = UN FATTO (Alberto, 02-ott: `DOPPIO TOCCO DISEGNO E SISTEMA`).
+   «Veniamo da un sistema lento che non mostrava mai cio' che si cliccava; a sistema
+   450 ms che clicchi e registra. Per cui, se come in passato clicco due volte, sono due
+   prodotti.» ⇒ ogni bottone che crea un fatto ignora un secondo tocco sullo STESSO
+   elemento per una finestra breve, e mostra subito di aver preso il gesto.
+   🔑 Qui i fatti sono SOLDI: un doppio tocco su «Entregado» non e' un prodotto in piu',
+      e' una propina consegnata due volte. */
+var TOCCO_MS = 700;
+function unTocco(el) {
+  if (!el) return false;
+  var t = Date.now();
+  if (el._ultimoTocco && (t - el._ultimoTocco) < TOCCO_MS) return false;
+  el._ultimoTocco = t;
+  return true;
+}
 function esc(s) { return String(s==null?'':s).replace(/[&<>"]/g, function(c){
   return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]; }); }
 function toast(msg, clase) {
@@ -348,7 +364,10 @@ function pantallaReparto() {
   }
   app.innerHTML = h;
   if (D.cerrado) document.getElementById('ir').onclick = function(){ PASO = 2; pintar(); };
-  else document.getElementById('cerrar').onclick = cerrarReparto;
+  else document.getElementById('cerrar').onclick = function(ev){
+    if (!unTocco(ev.currentTarget)) return;     // un tocco = un fatto
+    cerrarReparto();
+  };
 }
 
 /* ⑪ · EL PAGO — una LISTA DI LAVORO: in alto chi manca, sotto chi è già pagato */
@@ -414,15 +433,31 @@ function pantallaPago() {
   document.getElementById('atras').onclick = function(){ PASO = 1; pintar(); };
   document.getElementById('guardar').onclick = function(){ toast('Guardado. Mañana sigue en esta lista.', 'ok'); };
   Array.prototype.forEach.call(app.querySelectorAll('.r.clic[data-pid]'), function(el){
-    el.onclick = function(){ abrirFirma(el.dataset.pid, grupo); };
+    /* anche la RIGA: aprire due volte il pannello conierebbe un uid nuovo e
+       butterebbe quello del gesto in corso — cioè toglierebbe l'idempotenza
+       proprio al retry che serve a non pagare due volte. */
+    el.onclick = function(){ if (!unTocco(el)) return; abrirFirma(el.dataset.pid, grupo); };
   });
 }
 
 /* la firma a PIN di CHI RICEVE — non della cajera */
+var UID_FIRMA = null;        // 🔑 uno per APERTURA del pannello, non uno per tocco
+var UID_CERRAR = null;       // idem per il reparto
+
 function abrirFirma(pid, grupo) {
   var d = D.detalle;
   var p = (d.partes || []).filter(function(x){ return String(x.persona_id) === String(pid) && x.grupo === grupo; })[0];
   if (!p) return;
+  /* 🔴 L'UID NASCE QUI, ALL'APERTURA, e non dentro `confirmarPago`.
+     `_COME_SI_CODIFICA` ①: la chiave d'idempotenza la conia il lato che RIPETE. Se la
+     coniassi al tocco, un secondo invio dello STESSO gesto porterebbe un uid NUOVO ⇒
+     il bordo non lo riconoscerebbe come retry ma come un pago diverso.
+     🩸 E il danno non e' teorico ne' simmetrico: dopo una risposta persa la cajera
+        ritocca, il bordo risponde «ya pagada» su un uid che non e' suo, e il vetro le
+        dice «no le entregues de nuevo» — cioe' **trattiene i soldi di una persona
+        dandogliene una ragione sbagliata**. Con l'uid stabile lo stesso caso torna
+        `retry` e lei vede «Entregado», che e' la verita'. */
+  UID_FIRMA = uidGesto('pp');
   var card = document.getElementById('sheetCard');
   card.innerHTML = '<p class="kick">Firma de quien recibe</p>'
     + '<h1>' + esc(p.nombre) + '</h1>'
@@ -434,9 +469,12 @@ function abrirFirma(pid, grupo) {
   document.getElementById('sheet').className = 'sheet show';
   document.getElementById('pin').focus();
   document.getElementById('can').onclick = cerrarSheet;
-  document.getElementById('ok').onclick = function(){ confirmarPago(p, grupo); };
+  document.getElementById('ok').onclick = function(ev){
+    if (!unTocco(ev.currentTarget)) return;     // un tocco = un fatto
+    confirmarPago(p, grupo);
+  };
 }
-function cerrarSheet(){ document.getElementById('sheet').className = 'sheet'; }
+function cerrarSheet(){ document.getElementById('sheet').className = 'sheet'; UID_FIRMA = null; }
 
 async function confirmarPago(p, grupo) {
   var pin = (document.getElementById('pin') || {}).value || '';
@@ -446,7 +484,7 @@ async function confirmarPago(p, grupo) {
   var btn = document.getElementById('ok'); btn.disabled = true; btn.textContent = 'Enviando…';
   var r = await postCaja({
     verbo: 'propina_pago',
-    uid_gesto: uidGesto('pp'),              // l'uid lo conia il vetro, mai il bordo
+    uid_gesto: UID_FIRMA,                   // coniato all'apertura: un retry porta lo STESSO nome
     reparto_uid: D.reparto_uid || (D.reparto && D.reparto.uid_gesto) || null,
     persona_id: p.persona_id,
     grupo: grupo,
@@ -478,14 +516,16 @@ async function cerrarReparto() {
   var partes = ((D.detalle && D.detalle.partes) || []).map(function(p){
     return { persona_id: p.persona_id, grupo: p.grupo, puntos: p.puntos, concepto: p.concepto || null };
   });
-  var r = await postCaja({ verbo:'reparto_cerrar', uid_gesto: uidGesto('rp'),
+  if (!UID_CERRAR) UID_CERRAR = uidGesto('rp');   // stabile finché non riesce: un retry è lo stesso gesto
+  var r = await postCaja({ verbo:'reparto_cerrar', uid_gesto: UID_CERRAR,
     dia_operativo: DIA, turno: TURNO, partes: partes });
   btn.disabled = false; btn.textContent = 'Cerrar y avisar';
   if (!r.ok) {
     toast(r.motivo === 'gate_spento' ? 'El reparto del sistema aún no está encendido' : ('No se pudo: ' + r.motivo), 'bad');
     return;
   }
-  toast(r.encolado ? 'Sin conexión: queda guardado y se envía solo' : 'Reparto cerrado. Cada uno ya ve su número.', 'ok');
+  UID_CERRAR = null;
+  toast(r.encolado ? 'Sin conexión: queda guardado y se envía solo' : 'Reparto cerrado', 'ok');
   await cargar();
   PASO = 2; pintar();
 }
