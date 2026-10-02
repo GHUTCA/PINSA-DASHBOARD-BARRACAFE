@@ -22,11 +22,15 @@
                mpago/fintoc: non passano dalla macchina fisica — BKP, 02-ott)
           GET  /caja/:local/deposito_pendiente?t=&dia= → { salida_pendiente:
                {uid_gesto,contado,reserva,a_depositar}|null }
-          GET  /caja/:local/parametro?t=&clave=reserva_pct → { valor:number|null }
-               (valor è in PUNTI PERCENTUALI, 5 = 5%, non una frazione — così
-               l'ha seminato MIGRACION; null = parametro assente, mai un default)
         Finché la cucitura non è incollata, l'app chiama, vede fallire, e lo
         DICE sullo schermo invece di inventare uno zero.
+        ✏️ 02-ott notte · Alberto (`CAJA CHICA DUE E PRIMO PAGO STORICO`):
+           «deposito el 100% y retiro del banco lo que necesito» — sparita la
+           riserva del 5% trattenuta PRIMA del deposito (il punto cieco del
+           mockup 14-set). ⑨ deposita `contado` intero, `reserva` resta nello
+           schema (CHECK di forma in `caja_deposito`) ma vale SEMPRE 0: non
+           chiamo più `/parametro?clave=reserva_pct`, la funzione di lettura
+           resta nel bordo (`cajaAtto2LeerParametro`) per un uso futuro.
      ⚠️ Scrittura: POST /caja/:local?t=  body: { verbo:'conteo'|'pos_corte'|
         'deposito', ...campi, fuente:'app_caja' }. 🔎 BKP: `pos_corte` nel verbo
         di rete, `cajaAtto2FilaCortePos` nel codice — nomi diversi per lo
@@ -192,7 +196,6 @@ var MANANA = null;        // respuesta de /manana
 var SOBRE_IDX = 0;        // qué sobre se está contando
 var CORTES = null;        // respuesta de /cortes_pos
 var DEPOSITO_PENDIENTE = null;
-var RESERVA_PCT = null;
 
 /* ═══ 3 · RENDER ══════════════════════════════════════════════════════════ */
 var app = document.getElementById('app');
@@ -326,8 +329,6 @@ async function pantalla8() {
 async function pantalla9() {
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando el depósito…</p>';
   var pend = await getCaja('deposito_pendiente?dia=' + DIA_HOY);
-  var param = await getCaja('parametro?clave=reserva_pct');
-  RESERVA_PCT = param.ok ? param.valor : null;
   DEPOSITO_PENDIENTE = pend.ok ? pend.salida_pendiente : null;
 
   if (DEPOSITO_PENDIENTE) {
@@ -349,28 +350,26 @@ async function pantalla9() {
     return;
   }
 
-  if (RESERVA_PCT == null) {
-    app.innerHTML = barra(true) + '<div class="kick bad">El depósito</div><h1>Falta un parámetro</h1>' +
-      '<div class="note bad">caja sin parámetro <b>reserva_pct</b> — no se puede calcular la reserva sin inventarlo. Avisa a MIGRACIÓN.</div>';
-    return;
-  }
-
+  /* ✏️ 02-ott noche · Alberto («CAJA CHICA DUE E PRIMO PAGO STORICO»): «deposito
+     el 100% y retiro del banco lo que necesito para pagar propinas y gastos».
+     Se fue la reserva del 5% retenida ANTES del depósito (el "punto ciego" del
+     mockup del 14-set) — todo el efectivo contado se deposita entero. El
+     retiro para propinas/gastos es un gesto del banco, aparte, que no toca
+     esta pantalla. `reserva` sigue existiendo en el esquema (CHECK de forma
+     en caja_deposito) pero ahora vale SIEMPRE 0. */
   var contadoTotal = (MANANA && MANANA.sobres || []).reduce(function(a,s){ return a + (s.conteo ? s.conteo.contado : (s.declarado||0)); }, 0);
   app.innerHTML = barra(true) +
-    '<div class="kick">El depósito</div><h1>Antes de salir</h1><p class="sd">Los dos números se escriben ahora</p>' +
+    '<div class="kick">El depósito</div><h1>Antes de salir</h1><p class="sd">Se deposita el 100% contado</p>' +
     '<p class="lb">Contado (editable si hace falta)</p><input class="inp" id="contado" inputmode="numeric" value="' + contadoTotal + '">' +
     '<div id="calc"></div>' +
-    '<div class="note">El camino al banco es el único tramo sin testigo. Por eso los dos números quedan escritos <b>antes</b> de que salgas.</div>' +
+    '<div class="note">El camino al banco es el único tramo sin testigo. Por eso el número queda escrito <b>antes</b> de que salgas.</div>' +
     '<button class="btn acc" id="salir">Salir al banco</button>';
   function recalc() {
-    /* RESERVA_PCT llega en PUNTOS porcentuales (5 = 5%), así lo sembró
-       MIGRACIÓN en caja_parametros — no es una fracción (0,05). */
     var c = Number(document.getElementById('contado').value || '') || 0;
-    var reserva = Math.round(c * RESERVA_PCT / 100);
-    var aDep = c - reserva;
+    var reserva = 0;
+    var aDep = c;
     document.getElementById('calc').innerHTML =
-      '<div class="rows"><div class="r"><span class="n">A la reserva (' + RESERVA_PCT + '%)</span><span class="v">' + fmt(reserva) + '</span></div>' +
-      '<div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>';
+      '<div class="rows"><div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>';
     return { c: c, reserva: reserva, aDep: aDep };
   }
   var ultimo = recalc();
