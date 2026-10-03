@@ -132,7 +132,7 @@ h1{font-size:19px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em}
 <div class="wrap" id="app"><p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando…</p></div>
 <div class="sheet" id="sheet"><div class="card" id="sheetCard"></div></div>
 <div class="toast" id="toast"></div>
-<span id="ver" hidden>v1.0.2 · atto3 propinas · un toque un hecho · 02oct</span>
+<span id="ver" hidden>v1.1.0 · atto3 propinas · tu PIN, su confirmacion · 03oct</span>
 
 <script src="shared/pinsita_auth.js"></script>
 <script>
@@ -386,8 +386,6 @@ function pantallaPago() {
     if (f && f.firmado) hechos.push({ p:p, f:f });
     else { falta.push({ p:p, f:f||null }); faltaTot += Number(p.monto)||0; }
   });
-  var alias = {};
-  (D.personas || []).forEach(function(x){ alias[String(x.persona_id)] = !!x.alias_app_caja; });
 
   var h = barra() + '<p class="kick">Propinas</p>'
     + '<h1>La entrega · ' + hechos.length + ' de ' + filas.length + '</h1>'
@@ -402,12 +400,12 @@ function pantallaPago() {
       h += '<div class="r"><div class="n">Ya están todos</div><div class="v ok">✓</div></div>';
     } else {
       h += falta.map(function(x){
-        var sinAlias = alias[String(x.p.persona_id)] === false;
-        var sub = sinAlias ? 'no puede firmar todavía'
-          : (x.f ? 'esperando su firma' : 'aún no llega');
-        return '<div class="r' + (sinAlias ? ' dim' : ' clic') + '" data-pid="' + esc(x.p.persona_id) + '">'
+        var sub = x.f ? (grupo === 'barra_cocina' ? 'falta su firma en papel'
+                                                  : 'que confirme en su teléfono')
+                      : 'aún no llega';
+        return '<div class="r clic" data-pid="' + esc(x.p.persona_id) + '">'
           + '<div class="n">' + esc(x.p.nombre) + '<small>' + sub + '</small></div>'
-          + '<div class="v ' + (sinAlias ? 'bad' : 'strong') + '">' + fmt(x.p.monto) + (sinAlias ? '' : ' ☝︎') + '</div></div>'; }).join('');
+          + '<div class="v strong">' + fmt(x.p.monto) + ' ☝︎</div></div>'; }).join('');
     }
     h += '</div>';
     if (hechos.length) {
@@ -459,11 +457,20 @@ function abrirFirma(pid, grupo) {
         `retry` e lei vede «Entregado», che e' la verita'. */
   UID_FIRMA = uidGesto('pp');
   var card = document.getElementById('sheetCard');
-  card.innerHTML = '<p class="kick">Firma de quien recibe</p>'
+  /* ✏️ Qui il PIN era di CHI RICEVE. Decisione del 🎛 (`ATTO III ROSSI CHI FA COSA
+     E R4`): quel PIN non esiste e non se ne inventa uno. ⇒ **il PIN è il TUO**, della
+     cajera, e chi riceve confermerà dal suo telefono. Barra e cocina firmano su carta.
+     🔑 Così il pago e la firma vengono da due persone e due telefoni diversi — che è
+        esattamente ciò che una firma deve garantire e che il mio primo disegno
+        non garantiva, perché li scriveva entrambi la cajera. */
+  const esBarra = grupo === 'barra_cocina';
+  card.innerHTML = '<p class="kick">Entregar</p>'
     + '<h1>' + esc(p.nombre) + '</h1>'
     + '<p class="big acc">' + fmt(p.monto) + '</p>'
-    + '<p class="blab">Que entre su PIN. No es el tuyo.</p>'
+    + '<p class="lb">Tu PIN</p>'
     + '<input class="inp pin" id="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="····">'
+    + (esBarra ? '<div class="note">Que firme en el papel.</div>'
+               : '<div class="note">Que confirme en su teléfono.</div>')
     + '<div class="two"><button class="btn gh" id="can">Cancelar</button>'
     + '<button class="btn ok" id="ok">Entregado</button></div>';
   document.getElementById('sheet').className = 'sheet show';
@@ -479,21 +486,33 @@ function cerrarSheet(){ document.getElementById('sheet').className = 'sheet'; UI
 async function confirmarPago(p, grupo) {
   var pin = (document.getElementById('pin') || {}).value || '';
   if (!pin) { toast('Falta el PIN de quien recibe', 'bad'); return; }
-  var per = (D.personas || []).filter(function(x){ return String(x.persona_id) === String(p.persona_id); })[0];
-  if (per && per.alias_app_caja === false) { toast('Sin ficha no se puede firmar', 'bad'); return; }
   var btn = document.getElementById('ok'); btn.disabled = true; btn.textContent = 'Enviando…';
-  var r = await postCaja({
-    verbo: 'propina_pago',
-    uid_gesto: UID_FIRMA,                   // coniato all'apertura: un retry porta lo STESSO nome
+  var base = {
     reparto_uid: D.reparto_uid || (D.reparto && D.reparto.uid_gesto) || null,
     persona_id: p.persona_id,
     grupo: grupo,
     concepto: p.concepto || null,
-    monto: p.monto,
-    tranche: TURNO === 'AM' ? 'AM_cierre' : 'PM_apertura',
-    quien: (per && per.alias_app_caja_nombre) || p.persona_id,   // l'ALIAS registrato, mai testo libero
+    dia_operativo: DIA,
+    fuente: 'app_caja',
+    pagado_por: (SES && SES.user) || '',
     pin: pin
-  });
+  };
+  var r = await postCaja(Object.assign({}, base, {
+    verbo: 'propina_pago',
+    uid_gesto: UID_FIRMA,                   // coniato all'apertura: un retry porta lo STESSO nome
+    monto: p.monto,
+    tranche: TURNO === 'AM' ? 'AM_cierre' : 'PM_apertura'
+  }));
+  /* barra e cocina non hanno la sala: la loro firma è la CARTA, e la registra la
+     cajera subito dopo il pago — due righe, due gesti, un solo tocco per lei. */
+  if (r.ok && grupo === 'barra_cocina') {
+    await postCaja(Object.assign({}, base, {
+      verbo: 'propina_firma_carta',
+      uid_gesto: UID_FIRMA,
+      firma_uid_gesto: uidGesto('fc'),
+      quien: p.nombre
+    }));
+  }
   btn.disabled = false; btn.textContent = 'Entregado';
   if (r.yaPagado) {
     cerrarSheet();
