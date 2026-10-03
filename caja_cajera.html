@@ -29,14 +29,22 @@
                ✏️ 03-ott `_DECISIONI_PRESE.md` "LA RITENUTA DEL 5% — BASE
                UNICA": la base è SEMPRE la propina non efectivo della notte,
                MAI il contante contato — differiscono di decine di migliaia)
+          GET  /caja/:local/busta_roja_numero?t=  → { numero:string }
+               (✏️ 03-ott, bacheca `BUSTA R ROJA SI COSTRUISCE`: RPC SINCRONA
+               — chiama `cajaAtto2NumeroBustaRoja`/`pg.rpc('caja_busta_roja_
+               numero', …)`, mai la riga accodata: lei deve vedere il numero
+               PRIMA di scrivere sulla busta. Schema `caja_busta_roja` ancora
+               da confermare con MIGRACION, bacheca `TERZA PENNA BUSTA ROJA
+               PROPOSTA`.)
         Finché la cucitura non è incollata, l'app chiama, vede fallire, e lo
         DICE sullo schermo invece di inventare uno zero.
      ⚠️ Scrittura: POST /caja/:local?t=  body: { verbo:'conteo'|'pos_corte'|
-        'deposito', ...campi, fuente:'app_caja' }. 🔎 BKP: `pos_corte` nel verbo
-        di rete, `cajaAtto2FilaCortePos` nel codice — nomi diversi per lo
-        stesso gesto, stessa forma di `ritiro`/`cajaFilaRitiro`. I tre nomi
-        vanno nella mappa VERBI di `_caja()` (src/index.js r.~7186), import
-        da `./caja_atto2.js`: non lo tocco io, è la tua cucitura.
+        'deposito'|'busta_roja', ...campi, fuente:'app_caja' }. 🔎 BKP:
+        `pos_corte` nel verbo di rete, `cajaAtto2FilaCortePos` nel codice —
+        nomi diversi per lo stesso gesto, stessa forma di `ritiro`/
+        `cajaFilaRitiro`. I quattro nomi vanno nella mappa VERBI di `_caja()`
+        (src/index.js r.~7186), import da `./caja_atto2.js`: non lo tocco
+        io, è la tua cucitura.
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -446,6 +454,13 @@ async function pantalla9() {
   var pend = await getCaja('deposito_pendiente?dia=' + DIA_HOY);
   DEPOSITO_PENDIENTE = pend.ok ? pend.salida_pendiente : null;
 
+  /* 🔴 LIMITE DICHIARATO, non nascosto: si ella cierra la app entre la
+     salida (ya escrita) y el sello de la busta R, al volver esta pantalla
+     la manda directo a "De vuelta del banco" — la busta R queda pendiente
+     y nadie lo avisa. Arreglarlo pide que /deposito_pendiente diga también
+     si la busta R de esa salida ya existe, y el esquema de caja_busta_roja
+     aún no está confirmado con MIGRACION (bacheca TERZA PENNA BUSTA ROJA
+     PROPOSTA). Lo declaro en vez de fingir que no puede pasar. */
   if (DEPOSITO_PENDIENTE) {
     app.innerHTML = barra(true) +
       '<div class="kick">El depósito</div><h1>De vuelta del banco</h1><p class="sd">Escribe el número cuando lo tengas</p>' +
@@ -501,11 +516,38 @@ async function pantalla9() {
   var ultimo = recalc();
   document.getElementById('contado').addEventListener('input', function(){ ultimo = recalc(); });
   unTocoUnHecho(document.getElementById('salir'), async function(){
-    var r = await postCaja({ verbo:'deposito', uid_gesto: uidGesto('dep'), evento:'salida',
+    var depositoUid = uidGesto('dep');
+    var r = await postCaja({ verbo:'deposito', uid_gesto: depositoUid, evento:'salida',
       contado: ultimo.c, reserva: ultimo.reserva, a_depositar: ultimo.aDep,
       firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
     if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
-    toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok');
+    /* ✏️ 03-ott · BUSTA R ROJA SI COSTRUISCE (Alberto): la confirmación de la
+       busta con la retención pasa AQUÍ, antes de salir — mismo instante que
+       los dos números de arriba, no después de volver del banco. */
+    pantalla9bBustaRoja(depositoUid, ultimo.reserva);
+  });
+}
+
+async function pantalla9bBustaRoja(depositoUid, importo) {
+  app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Emitiendo el número…</p>';
+  var num = await getCaja('busta_roja_numero');
+  if (!num.ok || !num.numero) {
+    app.innerHTML = barra(true) + '<div class="kick bad">La busta ROJA</div><h1>No se pudo emitir el número</h1>' +
+      '<div class="note bad">' + esc(num.error || 'sin_red') + '<br>El depósito ya quedó registrado — reintenta para sellar la busta.</div>' +
+      '<button class="btn gh" id="retry">Reintentar</button>';
+    unTocoUnHecho(document.getElementById('retry'), async function(){ await pantalla9bBustaRoja(depositoUid, importo); });
+    return;
+  }
+  app.innerHTML = barra(true) +
+    '<div class="kick">La busta ROJA</div><h1>' + esc(num.numero) + '</h1><p class="sd">Escribe este número y el monto en la busta</p>' +
+    '<div class="rows"><div class="r tot"><span class="n">Monto a escribir</span><span class="v">' + fmt(importo) + '</span></div></div>' +
+    '<div class="note">La reserva del 5% (propina no efectivo) va aparte, en esta busta numerada — nunca en la que sale al banco.</div>' +
+    '<button class="btn acc" id="sellar">Sellado · a la caja fuerte ROJA</button>';
+  unTocoUnHecho(document.getElementById('sellar'), async function(){
+    var r = await postCaja({ verbo:'busta_roja', uid_gesto: uidGesto('rj'), numero: num.numero,
+      deposito_uid: depositoUid, importo: importo, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+    if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
+    toast('Busta ' + num.numero + ' sellada. Escribe el N° de depósito cuando vuelvas del banco', 'ok');
     pantalla9();
   });
 }
