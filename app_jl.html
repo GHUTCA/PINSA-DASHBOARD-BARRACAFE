@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.33.0</span>
+<span class="ver" id="ver">app_jl v1.34.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -607,7 +607,7 @@ function cjRitiroSet(campo, val) { CJR[campo] = val; }
 function cjRitiroPanel() {
   if (!CJR.abierto) return '<button class="btn acc" onclick="cjRitiroAbrir()">💸 Nuevo retiro</button>';
   const mismoPin = CJR.pin && CJR.pin === STATE.pin;
-  return '<p class="mini"><b>Cuenta la plata que te entrega el mesero, y escribe lo que contaste — sin mirar ningún número en pantalla.</b></p>' +
+  return '<p class="mini"><b>Cuenta el dinero que te entrega el mesero y escribe lo que contaste.</b></p>' +
     '<input class="busca" placeholder="Nombre del mesero" value="' + esc(CJR.mesero) + '" oninput="cjRitiroSet(\'mesero\', this.value)" style="margin-bottom:6px">' +
     '<input class="busca" type="number" inputmode="numeric" placeholder="Monto contado ($)" value="' + esc(CJR.monto) + '" oninput="cjRitiroSet(\'monto\', this.value)" style="margin-bottom:6px">' +
     '<input class="busca" type="password" inputmode="numeric" placeholder="PIN del mesero (firma)" value="' + esc(CJR.pin) + '" oninput="cjRitiroSet(\'pin\', this.value)" style="margin-bottom:6px">' +
@@ -741,14 +741,20 @@ function _cjHace(ts) {
   const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
   return m < 60 ? 'hace ' + m + ' min' : 'hace ' + Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
 }
-function _cjMesasAbiertas() {
+/* le mesas con consumo, dalla sala del BORDO (STATE.vista): numero, totale e chi la tiene */
+function _cjMesasDetalle() {
   const out = {};
   try {
     const ms = (STATE.vista && STATE.vista.meseros) || {};
-    Object.keys(ms).forEach(function (k) { ((ms[k] && ms[k].mesas) || []).forEach(function (m) { if (m && (+m.total || 0) > 0) out[String(m.mesa)] = 1; }); });
+    Object.keys(ms).forEach(function (k) { const v = ms[k]; ((v && v.mesas) || []).forEach(function (m) {
+      if (!m || !((+m.total || 0) > 0)) return;
+      const key = String(m.mesa);
+      if (!out[key] || (+m.mio || 0) > (+out[key]._mio || 0)) out[key] = { mesa: key, total: +m.total || 0, mesero: (v.nombre || k), _mio: +m.mio || 0 };
+    }); });
   } catch (e) {}
-  return Object.keys(out).sort(function (a, b) { return (+a) - (+b); });
+  return Object.keys(out).map(function (k) { return out[k]; }).sort(function (a, b) { return (+a.mesa) - (+b.mesa); });
 }
+function _cjMesasAbiertas() { return _cjMesasDetalle().map(function (m) { return m.mesa; }); }
 function cjRetAbrir(nombre) {
   const m = ((CJ1.st && CJ1.st.meseros) || []).find(function (x) { return x.mesero === nombre; });
   if (!m) return;
@@ -768,10 +774,11 @@ function cjRetDif(inp) {
   d.textContent = dif === 0 ? '✓ Cuadra exacto' : ('Diferencia ' + (dif > 0 ? '+' : '−') + fmt(Math.abs(dif)));
   d.style.color = dif === 0 ? '#3DC97E' : '#FFB547';
 }
-async function cjRetEnviar() {
+async function cjRetEnviar(btn) {
   if (CJ1.enviando || !CJ1.ret) return;
   const monto = parseInt((($('cj1Monto') || {}).value || '').replace(/[^0-9]/g, ''), 10);
-  if (!Number.isFinite(monto) || monto <= 0) { toast('warn', 'Escribe cuánto te entregó (contado delante de él)'); return; }
+  if (!Number.isFinite(monto) || monto <= 0) { toast('warn', 'Escribe lo que contaste'); return; }
+  if (btn) btn.disabled = true;   // un tocco = un fatto
   CJ1.enviando = true;
   const ret = CJ1.ret;
   try {
@@ -791,118 +798,123 @@ async function cjRetEnviar() {
     toast('err', '⏳ ' + (e && e.message === 'timeout' ? 'El sistema tardó: puede que SÍ se haya registrado. Reintenta: no se duplica.' : 'Sin conexión: reintenta, no se duplica.'));
   } finally { CJ1.enviando = false; pintaTab(); }
 }
-async function cjSobEnviar() {
+/* ③ la busta: si manda SOLO il contato. Se quadra il bordo dà il numero; se no si riconta (al 3° il
+   numero arriva «con diferencia»). L'uid della busta vive finché non arriva un numero. */
+function cjSobListo() { CJ1.sob = null; cjAtto1Giro(); pintaTab(); }
+function cjSinPagoMesa(mesa) { _SP.mesa = String(mesa); _SP.motivo = ''; tab(0); setTimeout(function () { const e = $('spMesa'); if (e) { e.scrollIntoView({ block: 'center' }); spVer(); } }, 50); }
+async function cjSobEnviar(btn) {
   if (CJ1.enviando) return;
-  const nro = ((($('cj1SobNro') || {}).value) || '').trim();
-  const suma = parseInt((($('cj1SobSuma') || {}).value || '').replace(/[^0-9]/g, ''), 10);
-  if (!nro) { toast('warn', 'Escribe el número del sobre (el que anotaste en el papel)'); return; }
-  if (!Number.isFinite(suma) || suma < 0) { toast('warn', 'Escribe cuánto metiste en el sobre'); return; }
+  const contado = parseInt((($('cj1SobContado') || {}).value || '').replace(/[^0-9]/g, ''), 10);
+  if (!Number.isFinite(contado) || contado < 0) { toast('warn', 'Escribe lo que contaste'); return; }
+  if (btn) btn.disabled = true;   // un tocco = un fatto: si spegne PRIMA della rete
   if (!CJ1.sobUid) CJ1.sobUid = cajaNuevoUid('CJ-SOB');
   CJ1.enviando = true;
   try {
-    const r = await cajaPost1({ verbo: 'sobre', pin_jl: STATE.pin, sobre_nro: nro, suma_ritiri: suma, uid_gesto: CJ1.sobUid });
-    if (r && r.ok && r.accodato) {
-      toast('ok', '✓ Sobre ' + nro + ' · ' + fmt(suma) + ' · a la caja fuerte');
-      ['cj1SobNro', 'cj1SobSuma'].forEach(function (id) { const e = $(id); if (e) e.value = ''; });
-      CJ1.sobUid = null; cjAtto1Giro();
-    } else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
-    else toast('err', '✋ No se registró: ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
-  } catch (e) { toast('err', '⏳ No sé si se registró: reintenta, no se duplica.'); }
+    const r = await cajaPost1({ verbo: 'sobre', pin_jl: STATE.pin, contado: contado, uid_gesto: CJ1.sobUid });
+    if (r && r.ok && r.sobre_nro) { CJ1.sob = { nro: r.sobre_nro, dif: !!r.con_diferencia }; CJ1.sobUid = null; }
+    else if (r && r.ok && r.cuadra === false) { CJ1.sob = { intento: r.intento, de: r.de }; const e = $('cj1SobContado'); if (e) e.value = ''; }
+    else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
+    else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) { toast('err', '⏳ No sé si llegó: toca de nuevo, no se duplica.'); }
   finally { CJ1.enviando = false; pintaTab(); }
 }
-async function cjCieEnviar() {
+/* ④ el cierre: con mesas abiertas no se ofrece (se cierran una por una, «Cerrar sin pago»). El monto
+   declarado es la SUMA de los sobres que el JL ya declaró esta noche: el total de la caja fuerte no se
+   escribe ni se muestra en un teléfono de sala (Alberto, 02-ott). */
+async function cjCieEnviar(btn) {
   if (CJ1.enviando) return;
   const st = CJ1.st || {};
-  const monto = parseInt((($('cj1CieMonto') || {}).value || '').replace(/[^0-9]/g, ''), 10);
-  if (!Number.isFinite(monto) || monto < 0) { toast('warn', 'Escribe el total que dejas en la caja fuerte esta noche'); return; }
-  const turno = (($('cj1CieTurno') || {}).value) || 'PM';
   const mesas = _cjMesasAbiertas();
-  const conPlata = (st.meseros || []).filter(function (m) { return m.en_mano > 0; });
-  if ((mesas.length || conPlata.length) && !confirm('Cerrar el turno con aviso:\n\n' +
-    (mesas.length ? '· ' + mesas.length + ' mesa(s) abierta(s): ' + mesas.join(', ') + '\n' : '') +
-    (conPlata.length ? '· ' + conPlata.length + ' garzón(es) con plata en el bolsillo\n' : '') + '\nQueda registrado. ¿Cerrar igual?')) return;
+  if (mesas.length) { toast('warn', 'Quedan mesas abiertas'); return; }
+  if (btn) btn.disabled = true;
+  const turno = (($('cj1CieTurno') || {}).value) || 'PM';
+  let monto = 0; (st.sobres || []).forEach(function (x) { monto += (+x.suma_ritiri || 0); });
   if (!CJ1.cieUid) CJ1.cieUid = cajaNuevoUid('CJ-CIE');
   const warnings = (!(st.sobres || []).length && !((st.da_imbustare || {}).n)) ? ['sin_ritiros'] : [];
   CJ1.enviando = true;
   try {
     const r = await cajaPost1({ verbo: 'cierre_turno', pin_jl: STATE.pin, turno: turno, monto_declarado: monto,
-      mesas_abiertas: mesas, warnings: warnings, uid_gesto: CJ1.cieUid });
-    if (r && r.ok && r.accodato) { toast('ok', '✓ Turno cerrado · ' + fmt(monto) + ' en la caja fuerte'); const e = $('cj1CieMonto'); if (e) e.value = ''; CJ1.cieUid = null; cjAtto1Giro(); }
+      mesas_abiertas: [], warnings: warnings, uid_gesto: CJ1.cieUid });
+    if (r && r.ok && r.accodato) { toast('ok', '✓ Turno cerrado'); CJ1.cieUid = null; cjAtto1Giro(); }
     else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
-    else toast('err', '✋ No se registró: ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
-  } catch (e) { toast('err', '⏳ No sé si se registró: reintenta, no se duplica.'); }
+    else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) { toast('err', '⏳ No sé si llegó: toca de nuevo, no se duplica.'); }
   finally { CJ1.enviando = false; pintaTab(); }
 }
+/* [03-ott · i vetri di 🎨 DESIGN, `VETRI CONSEGNA SABATO 12`] ①-④ del JL nelle parole del mockup:
+   nessuna frase dentro il telefono, «dinero» e mai «plata», nessun limite e nessun totale della
+   cassaforte a vista. Un tocco = un fatto: il bottone si spegne sincrono e l'uid nasce nel vetro. */
+function _cjRiga(nb, val, x) { return '<div class="pers" style="border:0;padding:4px 0' + (x || '') + '"><span class="nb">' + nb + '</span><span class="val">' + val + '</span></div>'; }
+function _cjMmSs(ms) { if (!(ms > 0)) return '00:00'; const t = Math.floor(ms / 1000); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); }
+function _cjArg(x) { return esc(x).replace(/'/g, "\\'"); }
 function cjAtto1Html() {
   const st = CJ1.st;
   let h = '';
   if (CJ1.err) h += '<div class="card ' + (st ? 'ambra' : 'rossa') + '"><p>⚠️ ' + esc(CJ1_ERR[CJ1.err] || CJ1.err) + '</p>' +
     (st ? '<p class="mini">Lo de abajo es de ' + _cjHace(CJ1.ts) + '.</p>' : '') + '</div>';
   if (!st) return h + (CJ1.err ? '' : '<div class="card"><p>Cargando la caja…</p></div>');
-  /* ① EL AVISO — cuánto y quién, NUNCA la cifra del límite */
-  if (st.aviso && st.aviso.abierto) {
-    const resta = Math.round(((st.aviso.scade_ts || 0) - Date.now()) / 60000);
-    const conPlata = (st.meseros || []).filter(function (m) { return m.en_mano > 0; });
-    h += '<div class="card rossa"><h4>💸 Hay plata en la sala</h4>' +
-      '<p style="font-size:22px;font-weight:800">' + fmt(st.totale_en_mano) + '</p>' +
-      '<p class="mini">en manos de ' + conPlata.length + ' garzón(es) · ' +
-      (resta > 0 ? 'tienes <b>' + resta + ' min</b> para retirar' : '<b>pasó el tiempo</b>: retira ya') + '</p></div>';
-  } else if (!st.parametri_ok) {
-    h += '<div class="card ambra"><p class="mini">⚠️ Faltan los parámetros de la caja (' + esc((st.parametri_mancanti || []).join(', ')) + '): sin ellos no hay aviso. Avisa a Alberto.</p></div>';
-  }
+  const ms = (st.meseros || []).filter(function (m) { return m.en_mano > 0; });
+  const sus = {}; (st.sussurri || []).forEach(function (x) { sus[x.mesero] = x; });
   (st.disputas || []).forEach(function (d) {
-    h += '<div class="card rossa"><p>⚠️ <b>' + esc(d.mesero) + '</b> dijo «No coincide»: retiraste ' + fmt(d.monto) +
-      (d.esperado_ora != null ? ', debería tener ' + fmt(d.esperado_ora) : '') + '. Queda registrado con los dos nombres.</p></div>';
+    h += '<div class="card rossa">' + _cjRiga('<b>' + esc(d.mesero) + '</b> · No coincide', fmt(d.monto)) + '</div>';
   });
   (st.por_confirmar || []).forEach(function (p) {
-    h += '<div class="card"><p class="mini">⏳ Esperando que <b>' + esc(p.mesero) + '</b> confirme en su teléfono el retiro de ' + fmt(p.monto) + ' (' + _cjHace(p.ts) + ').</p></div>';
+    h += '<div class="card">' + _cjRiga('⏳ ' + esc(p.mesero) + ' · por confirmar', fmt(p.monto)) + '</div>';
   });
-  /* ② EL RETIRO */
+  /* ② EL RETIRO — el monto lo escribe el JL; «Total efectivo», sin diferencia a la vista */
   if (CJ1.ret) {
     const a = CJ1.ret.att;
-    h += '<div class="card"><h4>💸 El retiro · ' + esc(a.mesero) + '</h4>' +
-      '<p class="mini">Cuenta delante de él, y escribe lo que contaste.</p>' +
-      '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Ventas en efectivo</span><span class="val">' + fmt(a.ventas_efectivo) + '</span></div>' +
-      '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Propinas en efectivo</span><span class="val">' + fmt(a.propina_efectivo) + '</span></div>' +
-      (a.residuo ? '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Le quedó de ayer</span><span class="val">' + fmt(a.residuo) + '</span></div>' : '') +
-      (a.entregado ? '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Ya entregó hoy</span><span class="val">−' + fmt(a.entregado) + '</span></div>' : '') +
-      '<div class="pers" style="border:0;padding:6px 0"><span class="nb"><b>Debería tener</b></span><span class="val"><b style="font-size:20px">' + fmt(a.en_mano) + '</b></span></div>' +
-      '<input class="busca" id="cj1Monto" type="text" inputmode="numeric" placeholder="¿Cuánto te entregó? (contado)" oninput="cjRetDif(this)" autocomplete="off">' +
-      '<p class="mini" id="cj1Dif" style="font-weight:700"></p>' +
-      '<button class="btn acc" onclick="cjRetEnviar()"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? 'Enviando…' : 'Confirmar retiro') + '</button>' +
-      '<button class="btn" onclick="cjRetCerrar()">Volver</button>' +
-      '<p class="mini">Después él confirma en su teléfono: «Coincide» o «No coincide».</p></div>';
+    h += '<div class="card"><h4>El retiro</h4><p style="font-size:18px;font-weight:800;margin:2px 0 6px">' + esc(a.mesero) + '</p>' +
+      _cjRiga('Ventas en efectivo', fmt(a.ventas_efectivo)) + _cjRiga('Propinas en efectivo', fmt(a.propina_efectivo)) +
+      (a.residuo ? _cjRiga('De ayer', fmt(a.residuo)) : '') + (a.entregado ? _cjRiga('Ya entregó hoy', '−' + fmt(a.entregado)) : '') +
+      _cjRiga('<b>Total efectivo</b>', '<b style="font-size:20px">' + fmt(a.en_mano) + '</b>', ';padding:8px 0') +
+      '<input class="busca" id="cj1Monto" type="text" inputmode="numeric" placeholder="$" autocomplete="off" style="font-size:22px;font-weight:800;text-align:center">' +
+      '<button class="btn acc" onclick="cjRetEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Confirmar') + '</button>' +
+      '<button class="btn gh" onclick="cjRetCerrar()">Volver</button></div>';
+    return h;
   }
-  /* la lista: chi ha plata addosso */
-  const ms = (st.meseros || []).filter(function (m) { return m.en_mano > 0; });
-  const sus = {}; (st.sussurri || []).forEach(function (s) { sus[s.mesero] = s; });
-  h += '<div class="card"><h4>👛 Plata en el bolsillo de cada garzón</h4>' +
+  /* ① EL AVISO — Dinero en sala · Tiempo para realizar retiro · Garzones (nunca el límite) */
+  const aviso = st.aviso && st.aviso.abierto;
+  h += '<div class="card' + (aviso ? ' rossa' : '') + '">' + (aviso ? '<h4>El aviso</h4>' : '') +
+    _cjRiga('Dinero en sala', '<b style="font-size:22px">' + fmt(st.totale_en_mano || 0) + '</b>') +
+    (aviso ? _cjRiga('Tiempo para<br>realizar retiro', '<b style="font-size:22px" id="cj1Reloj">' + _cjMmSs((st.aviso.scade_ts || 0) - Date.now()) + '</b>') : '') +
+    '<h4 style="margin-top:10px">Garzones</h4>' +
     (ms.length ? ms.map(function (m) {
-      const s = sus[m.mesero];
-      return '<div class="cob"' + (s ? ' style="color:#FFB547"' : '') + '>' + esc(m.mesero) + ' <small style="color:#b9b2a4">' + _cjHace(m.desde_ts) + '</small>' +
-        '<span class="st2 ' + (s ? 'mid' : 'up') + '">' + fmt(m.en_mano) + '</span>' +
-        '<button class="btn gh" style="margin-left:8px;padding:6px 10px" onclick="cjRetAbrir(\'' + esc(m.mesero).replace(/'/g, "\\'") + '\')">Retirar</button></div>';
-    }).join('') : '<p class="mini">Nadie tiene plata en el bolsillo ahora.</p>') + '</div>';
-  /* ④ EL SOBRE — la suma la escribe el JL */
-  const di = st.da_imbustare || { ritiri: [], n: 0, suma_riferimento: 0 };
-  h += '<div class="card"><h4>📩 El sobre</h4>' +
-    (di.n ? '<p class="mini">Retiros desde el último sobre:</p>' + di.ritiri.map(function (r) { return '<div class="cob">' + esc(r.mesero) + '<span class="st2 up">' + fmt(r.monto) + '</span></div>'; }).join('') +
-      '<p class="mini">Suman ' + fmt(di.suma_riferimento) + ' — cuenta tú lo que metes en el sobre.</p>' : '<p class="mini">No hay retiros nuevos desde el último sobre.</p>') +
-    '<input class="busca" id="cj1SobNro" placeholder="Número del sobre (el que escribiste a mano)" autocomplete="off">' +
-    '<input class="busca" id="cj1SobSuma" type="text" inputmode="numeric" placeholder="¿Cuánto metiste en el sobre?" autocomplete="off">' +
-    '<button class="btn acc" onclick="cjSobEnviar()"' + (CJ1.enviando ? ' disabled' : '') + '>Sellado · a la caja fuerte</button></div>';
-  /* ⑤ EL CIERRE DEL TURNO */
-  const sobres = st.sobres || []; let sumaSob = 0; sobres.forEach(function (s) { sumaSob += (+s.suma_ritiri || 0); });
-  const mesas = _cjMesasAbiertas();
-  const hh = new Date().getHours(), mm = new Date().getMinutes(), pm = (hh * 60 + mm) >= (18 * 60 + 30) || hh < 6;
-  h += '<div class="card"><h4>🔒 Cierre del turno</h4>' +
-    '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Sobres a la caja fuerte</span><span class="val">' + sobres.length + (sobres.length ? ' · ' + fmt(sumaSob) : '') + '</span></div>' +
-    '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Garzones con plata</span><span class="val">' + ms.length + '</span></div>' +
-    '<div class="pers" style="border:0;padding:3px 0"><span class="nb">Mesas abiertas</span><span class="val">' + mesas.length + '</span></div>' +
-    (mesas.length ? '<p class="mini" style="color:#FFB547">' + mesas.join(', ') + ' — puedes cerrar igual: queda con aviso.</p>' : '') +
-    '<select class="busca" id="cj1CieTurno"><option value="AM"' + (pm ? '' : ' selected') + '>Turno día (AM)</option><option value="PM"' + (pm ? ' selected' : '') + '>Turno noche (PM)</option></select>' +
-    '<input class="busca" id="cj1CieMonto" type="text" inputmode="numeric" placeholder="Total que queda en la caja fuerte esta noche" autocomplete="off">' +
-    '<button class="btn" onclick="cjCieEnviar()"' + (CJ1.enviando ? ' disabled' : '') + '>Cerrar el turno</button></div>';
+      const x = sus[m.mesero], rojo = x && x.perche === 'ore';
+      return '<div class="cob" onclick="cjRetAbrir(\'' + _cjArg(m.mesero) + '\')" style="cursor:pointer">' + esc(m.mesero) +
+        (rojo ? ' <small style="color:#ff6b6b;font-weight:700">' + _cjHace(m.desde_ts) + '</small>' : '') +
+        '<span class="st2 ' + (x ? 'mid' : 'up') + '">' + fmt(m.en_mano) + '</span></div>';
+    }).join('') : '<p class="mini">—</p>') +
+    (ms.length ? '<button class="btn acc" onclick="cjRetAbrir(\'' + _cjArg(ms[0].mesero) + '\')">Empezar el retiro</button>' : '') + '</div>';
+  /* ③ EL SOBRE — conteo ciego: una casilla; si cuadra, el sistema da el número */
+  const di = st.da_imbustare || { n: 0 };
+  const sob = CJ1.sob || null;
+  if (sob && sob.nro) {
+    h += '<div class="card' + (sob.dif ? ' ambra' : '') + '"><h4>Detalle retiro efectivo</h4>' +
+      '<p style="font-size:34px;font-weight:900;text-align:center;letter-spacing:4px;margin:6px 0;color:' + (sob.dif ? '#FFB547' : '#3ddc84') + '">' + esc(sob.nro) + '</p>' +
+      '<p class="mini" style="text-align:center">número del sobre' + (sob.dif ? ' · con diferencia' : '') + '</p>' +
+      '<button class="btn acc" onclick="cjSobListo()">A la caja fuerte</button></div>';
+  } else if (di.n) {
+    h += '<div class="card"><h4>Detalle retiro efectivo</h4>' + _cjRiga(di.n + ' retiro' + (di.n === 1 ? '' : 's') + ' de la noche', '') +
+      '<input class="busca" id="cj1SobContado" type="text" inputmode="numeric" placeholder="$" autocomplete="off" style="font-size:22px;font-weight:800;text-align:center">' +
+      '<p style="font-size:26px;font-weight:900;text-align:center;letter-spacing:6px;margin:6px 0;color:#6b6676">— — — —</p>' +
+      '<p class="mini" style="text-align:center">número del sobre' + (sob && sob.intento ? ' · conteo ' + (sob.intento + 1) + ' de ' + (sob.de || 3) : '') + '</p>' +
+      '<button class="btn acc" onclick="cjSobEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Confirmar') + '</button></div>';
+  }
+  /* ④ EL CIERRE — ninguna mesa queda abierta; sin el total de la caja fuerte a la vista */
+  const mesas = _cjMesasDetalle();
+  const nGar = (st.meseros || []).length, nCer = (st.meseros || []).filter(function (m) { return !(m.en_mano > 0); }).length;
+  if (mesas.length) {
+    h += '<div class="card"><h4>No se puede cerrar todavía</h4>' + _cjRiga('Quedan ' + mesas.length + ' cuenta' + (mesas.length === 1 ? '' : 's') + ' abierta' + (mesas.length === 1 ? '' : 's'), '') +
+      _cjRiga('Garzones cerrados', nCer + ' de ' + nGar) +
+      mesas.map(function (m) { return '<div class="cob">Mesa ' + esc(m.mesa) + ' <small style="color:#b9b2a4">' + esc(m.mesero) + '</small><span class="st2 mid">' + fmt(m.total) + '</span>' +
+        '<button class="btn gh" style="margin-left:8px;padding:6px 10px" onclick="cjSinPagoMesa(\'' + _cjArg(m.mesa) + '\')">Cerrar sin pago</button></div>'; }).join('') + '</div>';
+  } else {
+    const hh = new Date().getHours(), mm2 = new Date().getMinutes(), pm = (hh * 60 + mm2) >= (18 * 60 + 30) || hh < 6;
+    h += '<div class="card"><h4>Cierre del turno</h4>' + _cjRiga('Garzones cerrados', nCer + ' de ' + nGar) +
+      '<select class="busca" id="cj1CieTurno"><option value="AM"' + (pm ? '' : ' selected') + '>Turno día (AM)</option><option value="PM"' + (pm ? ' selected' : '') + '>Turno noche (PM)</option></select>' +
+      '<button class="btn" onclick="cjCieEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>Cerrar el turno</button></div>';
+  }
   return h;
 }
 
@@ -1383,7 +1395,7 @@ function vSala() {
   let h = '';
   /* [v1.33.0] ① l'aviso della caja arriva anche qui: il JL non deve stare sulla scheda Caja per saperlo */
   if (cjAtto1On() && CJ1.st && CJ1.st.aviso && CJ1.st.aviso.abierto) {
-    h += '<div class="card rossa" onclick="tab(2)" style="cursor:pointer"><b>💸 Hay plata en la sala</b> · ' + fmt(CJ1.st.totale_en_mano) + ' <span class="mini">· toca para retirar</span></div>';
+    h += '<div class="card rossa" onclick="tab(2)" style="cursor:pointer"><b>💸 Dinero en sala</b> · ' + fmt(CJ1.st.totale_en_mano) + ' <span class="mini">· toca para retirar</span></div>';
   }
   /* Mi plaza: OGNI GIORNO in cui c'è un'assegnazione a suo nome (verdetto 05-set) */
   const mia = t && t.asignaciones ? t.asignaciones.filter(a => STATE.user && a.mesero && a.mesero.toLowerCase() === STATE.user.toLowerCase() && a.plaza) : [];
@@ -1652,7 +1664,7 @@ async function moverJL() {
   if (!de || !a || de === a) { toast('warn', '¿De qué mesa a qué mesa?'); return; }
   const pzDe = _plazaDeMesa(de), pzA = _plazaDeMesa(a);
   if (!confirm('¿Mover la mesa ' + de + (pzDe ? ' (' + pzDe + ')' : '') +
-    ' → ' + a + (pzA ? ' (' + pzA + ')' : '') + '?\n\nPasa todo: plata, propina, cobro.')) return;
+    ' → ' + a + (pzA ? ' (' + pzA + ')' : '') + '?\n\nPasa todo: dinero, propina, cobro.')) return;
   const cod = STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo;
   try {
     /* [02-ott · v1.31.5] il bordo accetta `moverMesa` SOLO col `gid` (la chiave
