@@ -1095,7 +1095,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.217.3 · vetro</span>
+      <span class="ver" id="ver">sala v3.217.4 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -8003,7 +8003,39 @@ function vPrecuentaSala(mesa, _seguir) {
    il papel di UNA persona. Il client dice QUALI righe, non quanto: il GAS
    (v3.138.0) le ritrova dentro la sessione una per una e rifiuta tutto se una
    non torna. Così la carta non può dire un numero che il libro non conosce. */
-async function vPrecuentaImprimir(mesa, btn, parte) {
+/* ═══ v3.217.4 · [03-ott · AUT-0557 · Alberto: «una precuenta per conto»] ═══
+   Dalla seconda carta il bordo risponde `ya_emitida` (niente carta, niente
+   libro). La seconda la autorizza SOLO il JL: qui si apre il suo PIN, con la
+   stessa schermata di «Mover» (mascherato, mai salvabile), e la carta si
+   rimanda con `pin_jl` — esce col capo «REIMPRESIÓN n°N». Il PIN vive in una
+   variabile di questo gesto e muore con lui; il freno (5 falliti) è del bordo.
+   Leva spenta sul bordo ⇒ `ya_emitida` non arriva mai e qui non cambia niente. */
+let _pcJlMesa = '', _pcJlPin = '';
+function _pcJlPinta(mesa, msj) {
+  _pcJlMesa = mesa; _pcJlPin = '';
+  vhoja('<h3>Precuenta · mesa ' + esc(mesa) + '</h3>' +
+    '<div class="cs-psub">' + esc(msj || 'La segunda la autoriza el JL.') + '</div>' +
+    '<input class="cs-pin mv-pin" id="pcJlPin" inputmode="numeric" maxlength="4" ' +
+      'autocomplete="off" name="pj' + Math.random().toString(36).slice(2) + '" ' +
+      'data-1p-ignore data-lpignore="true" data-form-type="other" ' +
+      'oninput="_pcJlPinIn(this.value)">' +
+    '<div style="text-align:center;font-size:12.5px;color:var(--cs-mut);margin-top:7px">PIN del JL · no se guarda en el teléfono</div>' +
+    '<button class="btn" id="pcJlGo" disabled onclick="_pcJlHacer(this)">Escribe el PIN del JL</button>' +
+    '<div style="text-align:center;font-size:12px;color:var(--cs-mut);padding:12px 0 2px;' +
+      'text-decoration:underline;cursor:pointer" onclick="_pcJlPin=\'\';vhojaCerrar()">‹ volver</div>');
+  setTimeout(function () { const e = document.getElementById('pcJlPin'); if (e) e.focus(); }, 30);
+}
+function _pcJlPinIn(v) {
+  _pcJlPin = String(v || '').replace(/[^0-9]/g, '').slice(0, 4);
+  const b = document.getElementById('pcJlGo');
+  if (b) { b.disabled = _pcJlPin.length !== 4; b.textContent = _pcJlPin.length === 4 ? 'IMPRIMIR LA SEGUNDA' : 'Escribe el PIN del JL'; }
+}
+function _pcJlHacer(btn) {
+  const pin = _pcJlPin; _pcJlPin = '';
+  if (pin.length !== 4) return;
+  vPrecuentaImprimir(_pcJlMesa, btn, null, pin);
+}
+async function vPrecuentaImprimir(mesa, btn, parte, pinJl) {
   /* v3.4.3 · da qui passano DUE bottoni (il pannello e il 🧾 Cuenta della
      libreta, unificato): l'etichetta da ripristinare su errore è la SUA,
      non una hardcoded */
@@ -8018,7 +8050,16 @@ async function vPrecuentaImprimir(mesa, btn, parte) {
     const body = { codigo: STATE.codigo, nombre: STATE.nombre,
       emitida_por: STATE.nombre, mesa: mesa, canal: 'papel', pc_uid: pcUid };
     if (parte && parte.lineas && parte.lineas.length) body.parte = parte;
+    if (pinJl) {   // [AUT-0557] la ristampa del JL: il PIN nel CORPO, mai in query
+      body.pin_jl = String(pinJl);
+      body.dispositivo_id = (typeof _dispositivoId === 'function' ? _dispositivoId() : '');
+    }
     const r = await staffPost('emitirPreCuenta', body);
+    /* [AUT-0557] carta già uscita per questo conto ⇒ il PIN del JL (o il suo errore) */
+    if (r && r.ok === false && r.ya_emitida && !parte) {
+      if (btn) { btn.disabled = false; btn.textContent = lbl0 || '🖨 IMPRIMIR EN BARRA'; }
+      _pcJlPinta(mesa, r.mensaje || r.msj); return;
+    }
     if (r && r.ok) {
       /* v3.5.6 · il lucchetto «una precuenta por cuenta» NON vale per le parti:
          è nato per non stampare due volte la stessa cuenta, e un tavolo che si
