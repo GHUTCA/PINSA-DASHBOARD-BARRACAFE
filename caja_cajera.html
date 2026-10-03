@@ -29,22 +29,23 @@
                ✏️ 03-ott `_DECISIONI_PRESE.md` "LA RITENUTA DEL 5% — BASE
                UNICA": la base è SEMPRE la propina non efectivo della notte,
                MAI il contante contato — differiscono di decine di migliaia)
-          GET  /caja/:local/busta_roja_numero?t=  → { numero:string }
-               (✏️ 03-ott, bacheca `BUSTA R ROJA SI COSTRUISCE`: RPC SINCRONA
-               — chiama `cajaAtto2NumeroBustaRoja`/`pg.rpc('caja_busta_roja_
-               numero', …)`, mai la riga accodata: lei deve vedere il numero
-               PRIMA di scrivere sulla busta. Schema `caja_busta_roja` ancora
-               da confermare con MIGRACION, bacheca `TERZA PENNA BUSTA ROJA
-               PROPOSTA`.)
         Finché la cucitura non è incollata, l'app chiama, vede fallire, e lo
         DICE sullo schermo invece di inventare uno zero.
      ⚠️ Scrittura: POST /caja/:local?t=  body: { verbo:'conteo'|'pos_corte'|
-        'deposito'|'busta_roja', ...campi, fuente:'app_caja' }. 🔎 BKP:
+        'deposito'|'reserva_sobre', ...campi, fuente:'app_caja' }. 🔎 BKP:
         `pos_corte` nel verbo di rete, `cajaAtto2FilaCortePos` nel codice —
         nomi diversi per lo stesso gesto, stessa forma di `ritiro`/
         `cajaFilaRitiro`. I quattro nomi vanno nella mappa VERBI di `_caja()`
         (src/index.js r.~7186), import da `./caja_atto2.js`: non lo tocco
         io, è la tua cucitura.
+     🔴 `reserva_sobre` NON segue il binario accodato degli altri tre:
+        bacheca `SPECIFICA BUSTA R-nnnn CAJA ROJA` (DESIGN, ordine di
+        Alberto, 03-ott) — la risposta porta `{sobre_nro}` ASSEGNATO DAL
+        SERVER nello stesso giro della scrittura (mai coniato dal client,
+        mai una lettura a parte prima): la scrittura dev'essere SINCRONA
+        lì, non la coda `pg:caja:`. `cajaAtto2FilaReservaSobre` (bordo)
+        resta pura; la RPC sincrona che assegna `sobre_nro` è cucitura,
+        non mia.
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -226,7 +227,10 @@ async function postCaja(body) {
     if (await esRespuestaPin(j)) return { ok:false, motivo: j.error, pin:true };
     if (!r.ok || j.ok === false) return { ok:false, motivo: j.motivo || j.error || ('http_' + r.status) };
     if (j.scritto === false) return { ok:false, motivo: j.motivo || 'no_escrito' };
-    return { ok:true };
+    /* el cuerpo puede traer más que ok/scritto — p.ej. reserva_sobre
+       responde {sobre_nro} en la MISMA escritura (verbo síncrono, no
+       encolado: ver cajaAtto2FilaReservaSobre en el bordo). */
+    return Object.assign({ ok:true }, j);
   } catch (e) {
     /* sin red: no sabemos si el PIN es válido, pero encolar el pin_caja
        junto al gesto es lo correcto — se verifica cuando el bordo responda. */
@@ -455,12 +459,11 @@ async function pantalla9() {
   DEPOSITO_PENDIENTE = pend.ok ? pend.salida_pendiente : null;
 
   /* 🔴 LIMITE DICHIARATO, non nascosto: si ella cierra la app entre la
-     salida (ya escrita) y el sello de la busta R, al volver esta pantalla
-     la manda directo a "De vuelta del banco" — la busta R queda pendiente
-     y nadie lo avisa. Arreglarlo pide que /deposito_pendiente diga también
-     si la busta R de esa salida ya existe, y el esquema de caja_busta_roja
-     aún no está confirmado con MIGRACION (bacheca TERZA PENNA BUSTA ROJA
-     PROPOSTA). Lo declaro en vez de fingir que no puede pasar. */
+     salida (ya escrita) y el sello de la reserva (reserva_sobre), al volver
+     esta pantalla la manda directo a "De vuelta del banco" — la busta R
+     queda pendiente y nadie lo avisa. Arreglarlo pide que
+     /deposito_pendiente diga también si la reserva_sobre de esa salida ya
+     existe. Lo declaro en vez de fingir que no puede pasar. */
   if (DEPOSITO_PENDIENTE) {
     app.innerHTML = barra(true) +
       '<div class="kick">El depósito</div><h1>De vuelta del banco</h1><p class="sd">Escribe el número cuando lo tengas</p>' +
@@ -521,34 +524,38 @@ async function pantalla9() {
       contado: ultimo.c, reserva: ultimo.reserva, a_depositar: ultimo.aDep,
       firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
     if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
-    /* ✏️ 03-ott · BUSTA R ROJA SI COSTRUISCE (Alberto): la confirmación de la
-       busta con la retención pasa AQUÍ, antes de salir — mismo instante que
-       los dos números de arriba, no después de volver del banco. */
-    pantalla9bBustaRoja(depositoUid, ultimo.reserva);
+    /* ✏️ 03-ott · bacheca SPECIFICA BUSTA R-nnnn CAJA ROJA (DESIGN, orden de
+       Alberto): si reserva === 0 la pantalla NO aparece — una busta vacía
+       es peor que ninguna busta. Si hay reserva, se confirma AQUÍ, antes de
+       salir, y pantalla9() se llama recién DESPUÉS de confirmada. */
+    if (ultimo.reserva > 0) pantallaReservaSobre(depositoUid, ultimo.reserva);
+    else { toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok'); pantalla9(); }
   });
 }
 
-async function pantalla9bBustaRoja(depositoUid, importo) {
-  app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Emitiendo el número…</p>';
-  var num = await getCaja('busta_roja_numero');
-  if (!num.ok || !num.numero) {
-    app.innerHTML = barra(true) + '<div class="kick bad">La busta ROJA</div><h1>No se pudo emitir el número</h1>' +
-      '<div class="note bad">' + esc(num.error || 'sin_red') + '<br>El depósito ya quedó registrado — reintenta para sellar la busta.</div>' +
-      '<button class="btn gh" id="retry">Reintentar</button>';
-    unTocoUnHecho(document.getElementById('retry'), async function(){ await pantalla9bBustaRoja(depositoUid, importo); });
-    return;
-  }
+/* ② la pantalla de la busta R — tres cosas, cero mensajes (DESIGN): kick ·
+   h1 · big · sobre, un solo botón. El sobre_nro lo EMITE el servidor en la
+   misma respuesta del verbo 'reserva_sobre' (no una lectura antes): si lo
+   coniara el cliente, un reintento generaría otro y la busta física
+   llevaría un número que el libro no tiene. Por eso el número no puede
+   estar en pantalla ANTES del toque — se escribe recién cuando llega,
+   persistente (no un toast que se borra antes de que ella lo copie). */
+function pantallaReservaSobre(depositoUid, monto) {
   app.innerHTML = barra(true) +
-    '<div class="kick">La busta ROJA</div><h1>' + esc(num.numero) + '</h1><p class="sd">Escribe este número y el monto en la busta</p>' +
-    '<div class="rows"><div class="r tot"><span class="n">Monto a escribir</span><span class="v">' + fmt(importo) + '</span></div></div>' +
-    '<div class="note">La reserva del 5% (propina no efectivo) va aparte, en esta busta numerada — nunca en la que sale al banco.</div>' +
-    '<button class="btn acc" id="sellar">Sellado · a la caja fuerte ROJA</button>';
-  unTocoUnHecho(document.getElementById('sellar'), async function(){
-    var r = await postCaja({ verbo:'busta_roja', uid_gesto: uidGesto('rj'), numero: num.numero,
-      deposito_uid: depositoUid, importo: importo, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+    '<div class="kick">La reserva</div><h1>A la caja fuerte ROJA</h1>' +
+    '<p class="big acc">' + fmt(monto) + '</p>' +
+    '<button class="btn acc" id="sellarRoja">A la caja fuerte ROJA</button>';
+  unTocoUnHecho(document.getElementById('sellarRoja'), async function(){
+    var r = await postCaja({ verbo:'reserva_sobre', uid_gesto: uidGesto('res'),
+      dia_op: DIA_NOCHE, monto: monto, referencia_uid: depositoUid,
+      firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
     if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
-    toast('Busta ' + num.numero + ' sellada. Escribe el N° de depósito cuando vuelvas del banco', 'ok');
-    pantalla9();
+    app.innerHTML = barra(true) +
+      '<div class="kick">La reserva</div><h1>A la caja fuerte ROJA</h1>' +
+      '<p class="big acc">' + fmt(monto) + '</p>' +
+      '<div class="rows"><div class="r tot"><span class="n">Sobre</span><span class="v">' + esc(r.sobre_nro || '—') + '</span></div></div>' +
+      '<button class="btn acc" id="listo">Listo</button>';
+    unTocoUnHecho(document.getElementById('listo'), async function(){ pantalla9(); });
   });
 }
 
