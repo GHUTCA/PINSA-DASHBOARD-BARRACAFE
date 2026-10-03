@@ -132,7 +132,7 @@ h1{font-size:19px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em}
 <div class="wrap" id="app"><p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando…</p></div>
 <div class="sheet" id="sheet"><div class="card" id="sheetCard"></div></div>
 <div class="toast" id="toast"></div>
-<span id="ver" hidden>v1.1.0 · atto3 propinas · tu PIN, su confirmacion · 03oct</span>
+<span id="ver" hidden>v1.1.1 · atto3 propinas · pin_caja y el bordo vivo · 03oct</span>
 
 <script src="shared/pinsita_auth.js"></script>
 <script>
@@ -142,9 +142,14 @@ h1{font-size:19px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em}
 /* ═══ 0 · CONTESTO ══════════════════════════════════════════════════════ */
 var qp = new URLSearchParams(location.search);
 var LOCAL = (qp.get('loc') || '').toLowerCase().trim();
+/* ✏️ L'URL l'avevo copiato dal vetro dell'ATTO II e portava `ghutca.workers.dev`:
+   il bordo VIVO è `alberto-agostini` — verificato sui vetri vivi (`sala.html` e
+   `app_jl.html` lo usano, 🎛 BKP l'aveva segnalato come dubbio). 🎓 *Un valore
+   copiato da un vetro che non è ancora in produzione non è un valore verificato:
+   è lo stesso dubbio, duplicato.* ⚠️ La stessa riga è nel vetro dell'ATTO II. */
 var BORDE = {
-  rsc: 'https://pinsita-borde.ghutca.workers.dev',
-  cdl: 'https://pinsita-borde.ghutca.workers.dev'
+  rsc: 'https://pinsita-borde.alberto-agostini.workers.dev',
+  cdl: 'https://pinsita-borde.alberto-agostini.workers.dev'
 };
 var TOKEN = qp.get('t') || localStorage.getItem('pinsita_borde_t') || '';
 if (qp.get('t')) { try { localStorage.setItem('pinsita_borde_t', qp.get('t')); } catch(e){} }
@@ -223,7 +228,9 @@ async function getReparto(dia, turno) {
   var url = base + '/caja/' + encodeURIComponent(LOCAL) + '/reparto?t=' + encodeURIComponent(TOKEN)
     + '&dia=' + encodeURIComponent(dia) + '&turno=' + encodeURIComponent(turno);
   try {
-    var r = await fetch(url);
+    /* 🔑 il PIN nell'HEADER, mai nell'URL (🎛 BKP): un URL finisce nei log e nella
+       cronologia del telefono. */
+    var r = await fetch(url, PIN_CAJA ? { headers: { 'X-Caja-Pin': PIN_CAJA } } : undefined);
     var j = await r.json();
     if (!r.ok || (j && j.ok === false)) return { ok:false, error:(j && (j.error || j.motivo)) || ('http_' + r.status) };
     return Object.assign({ ok:true }, j);
@@ -439,6 +446,10 @@ function pantallaPago() {
 }
 
 /* la firma a PIN di CHI RICEVE — non della cajera */
+/* 🔑 il PIN della cajera si tiene IN MEMORIA per la sessione, e **non** in
+   localStorage: un PIN che sopravvive alla chiusura del vetro è un PIN che vive su un
+   telefono. Si chiede quando serve, non all'avvio. */
+var PIN_CAJA = '';
 var UID_FIRMA = null;        // 🔑 uno per APERTURA del pannello, non uno per tocco
 var UID_CERRAR = null;       // idem per il reparto
 
@@ -485,7 +496,8 @@ function cerrarSheet(){ document.getElementById('sheet').className = 'sheet'; UI
 
 async function confirmarPago(p, grupo) {
   var pin = (document.getElementById('pin') || {}).value || '';
-  if (!pin) { toast('Falta el PIN de quien recibe', 'bad'); return; }
+  if (!pin) { toast('Falta tu PIN', 'bad'); return; }
+  PIN_CAJA = pin;   // lo tiene per il reparto e per le firme su carta, in memoria
   var btn = document.getElementById('ok'); btn.disabled = true; btn.textContent = 'Enviando…';
   var base = {
     reparto_uid: D.reparto_uid || (D.reparto && D.reparto.uid_gesto) || null,
@@ -494,8 +506,8 @@ async function confirmarPago(p, grupo) {
     concepto: p.concepto || null,
     dia_operativo: DIA,
     fuente: 'app_caja',
-    pagado_por: (SES && SES.user) || '',
-    pin: pin
+    pagado_por: (SES && SES.user) || '',   // il bordo lo sovrascrive con la cajera PROVATA
+    pin_caja: pin                          // 🔑 `pin_caja` nel body (🎛 BKP, INTEGRAZIONE CAJA)
   };
   var r = await postCaja(Object.assign({}, base, {
     verbo: 'propina_pago',
@@ -535,9 +547,16 @@ async function cerrarReparto() {
   var partes = ((D.detalle && D.detalle.partes) || []).map(function(p){
     return { persona_id: p.persona_id, grupo: p.grupo, puntos: p.puntos, concepto: p.concepto || null };
   });
+  if (!PIN_CAJA) {
+    /* il reparto lo chiude la cajera: senza il suo PIN non si manda, e si dice perché
+       invece di mandare e farsi rifiutare dal bordo con un 403. */
+    toast('Entra tu PIN en una entrega primero', 'bad');
+    return;
+  }
   if (!UID_CERRAR) UID_CERRAR = uidGesto('rp');   // stabile finché non riesce: un retry è lo stesso gesto
   var r = await postCaja({ verbo:'reparto_cerrar', uid_gesto: UID_CERRAR,
-    dia_operativo: DIA, turno: TURNO, partes: partes });
+    dia_operativo: DIA, turno: TURNO, partes: partes,
+    fuente: 'app_caja', quien: (SES && SES.user) || '', pin_caja: PIN_CAJA });
   btn.disabled = false; btn.textContent = 'Cerrar y avisar';
   if (!r.ok) {
     toast(r.motivo === 'gate_spento' ? 'El reparto del sistema aún no está encendido' : ('No se pudo: ' + r.motivo), 'bad');
