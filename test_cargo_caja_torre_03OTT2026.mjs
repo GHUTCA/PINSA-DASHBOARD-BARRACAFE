@@ -12,8 +12,9 @@ if (!m) throw new Error('script non trovato');
 /* stub minimo del DOM: il file chiama gid()/addEventListener al caricamento
    per disegnare la torre — qui non disegniamo niente, ci servono solo le
    funzioni pure (ALCANCE, puertasDe, rolPuede, puertasAbiertas, alcanceDe). */
-const nodoFinto = { classList: { toggle(){}, add(){}, remove(){} }, addEventListener(){}, style: {},
-  appendChild(){}, querySelector(){ return null; }, querySelectorAll(){ return []; }, set innerHTML(v){}, get innerHTML(){ return ''; } };
+const nodoFinto = { classList: { toggle(){}, add(){}, remove(){}, contains(){ return false; } }, addEventListener(){}, style: {},
+  appendChild(){}, querySelector(){ return null; }, querySelectorAll(){ return []; }, set innerHTML(v){}, get innerHTML(){ return ''; },
+  setAttribute(){}, removeAttribute(){}, getAttribute(){ return null; }, remove(){}, dataset: {} };
 const documentoFinto = {
   getElementById(){ return nodoFinto; }, addEventListener(){}, querySelector(){ return null; },
   querySelectorAll(){ return []; }, createElement(){ return nodoFinto; },
@@ -27,9 +28,9 @@ vm.createContext(ctx);
    e le altre non sono visibili da fuori. L'estrazione si inietta PRIMA della
    chiusura, non dopo: stessa funzione, un'uscita in più. */
 const scriptConExport = 'var API;\n' + m[1].replace(/\}\)\(\);\s*$/,
-  'API = { ALCANCE, puertasDe, rolPuede, puertasAbiertas, alcanceDe };\n  })();');
+  'API = { ALCANCE, puertasDe, rolPuede, puertasAbiertas, alcanceDe, arrancar };\n  })();');
 vm.runInContext(scriptConExport, ctx);
-const { ALCANCE, puertasDe, rolPuede, puertasAbiertas, alcanceDe } = ctx.API;
+const { ALCANCE, puertasDe, rolPuede, puertasAbiertas, alcanceDe, arrancar } = ctx.API;
 
 let ok = 0, ko = 0;
 const check = (nome, cond) => { console.log((cond ? '🟢' : '🔴') + ' ' + nome); cond ? ok++ : ko++; };
@@ -72,6 +73,30 @@ check('⑧ un CAJA sin local (local vacío) no ve ningún local — prudencia, n
   vm.runInContext(mScript, mCtx);
   const jlVede = mCtx.API.puertasAbiertas(F_BKS, 'JL').some(p => p.href === 'caja_cajera.html');
   check('MUTAZIONE — se roles diventasse "CAJA,JL", il banco lo vede (JL vedrebbe la caja)', jlVede === true);
+}
+
+/* ═══ CAJERA ATTERRA NELLA SUA APP (Alberto, 03-ott) — ⑨-⑫ ═══
+   chi ha come UNICO cargo CAJA entra direttamente in caja_cajera.html, senza
+   il corridoio delle porte; chi ha più cargos (il campo non è esattamente
+   "CAJA") sceglie come oggi — nessun redirect, nessun crash. */
+{
+  ctx.location.href = '';
+  arrancar({ role: 'CAJA', local: 'rsc' });
+  check('⑨ CAJA sola → redirect a caja_cajera.html', ctx.location.href.indexOf('caja_cajera.html') === 0);
+  check('⑩ il redirect porta il suo locale in ?loc=', ctx.location.href === 'caja_cajera.html?loc=rsc');
+
+  ctx.location.href = '';
+  arrancar({ role: 'CAJA,JL', local: 'rsc' });
+  check('⑪ CAJA + un altro cargo → NESSUN redirect (sceglie come oggi)', ctx.location.href === '');
+
+  ctx.location.href = '';
+  arrancar({ role: 'JL', local: 'rsc' });
+  check('⑫ un cargo qualunque diverso da CAJA → nessun redirect, nessun crash', ctx.location.href === '');
+
+  ctx.location.href = '';
+  arrancar({ role: 'CAJA', local: '' });
+  check('⑬ CAJA senza locale risolto → redirect comunque, senza ?loc= (mai inventare un locale)',
+    ctx.location.href === 'caja_cajera.html');
 }
 
 console.log('\n═══ ESITO: ' + ok + '/' + (ok + ko) + ' ═══');
