@@ -143,6 +143,12 @@ function diaAnterior(iso) {
   return d.toISOString().slice(0,10);
 }
 function fmt(n) { return '$' + Math.round(n||0).toLocaleString('es-CL'); }
+/* ✏️ 03-ott · Alberto, a DESIGN: «"Anoche" a mediodía ya no se sabe a qué
+   se refiere — la fecha sí». "2026-10-02" -> "2 Oct". */
+function fechaCorta(iso) {
+  var d = new Date(iso + 'T12:00:00');
+  return d.getDate() + ' ' + d.toLocaleDateString('es-CL', { month: 'short' }).replace('.', '');
+}
 function uidGesto(prefijo) {
   return prefijo + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
 }
@@ -271,8 +277,8 @@ async function pantalla6() {
   var sobres = MANANA.sobres || [];
   if (!sobres.length) {
     app.innerHTML = barra(false) +
-      '<div class="kick ok">La caja fuerte</div><h1>Nada que contar</h1>' +
-      '<p class="sd">Anoche no hubo sobres</p>' +
+      '<div class="kick ok">Sobres en Caja Verde</div><h1>Nada que contar</h1>' +
+      '<p class="sd">' + fechaCorta(DIA_NOCHE) + ' · no hubo sobres</p>' +
       '<div class="vuoto"><div class="ic">🗄</div><b>La caja fuerte está vacía</b>' +
       '<span style="font-size:12.5px;max-width:26ch">Anoche el local estuvo cerrado, o nadie retiró.<br>Nada que abrir, nada que contar.</span></div>' +
       '<div class="note ok"><b>Lo que sí tienes hoy:</b><br>los cortes POS de ayer, que no dependen del efectivo.</div>' +
@@ -298,7 +304,7 @@ async function pantalla6() {
       new Date(MANANA.aviso_sin_respuesta.ts).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) + ' · no hubo retiro.</div>'
     : '';
   app.innerHTML = barra(true) +
-    '<div class="kick">La caja fuerte</div><h1>Anoche</h1><p class="sd">' + DIA_NOCHE + ' · turno noche</p>' +
+    '<div class="kick">Sobres en Caja Verde</div><h1>' + fechaCorta(DIA_NOCHE) + '</h1><p class="sd">turno noche</p>' +
     '<p class="big acc">' + sobres.length + '</p><p class="blab">sobres que tienes que contar</p>' +
     '<div class="rows"><div class="r hd"><span>sobre</span><span>estado</span></div>' + filas + '</div>' +
     avisoHtml +
@@ -382,30 +388,53 @@ function pantalla7() {
   }
 }
 
+/* ✏️ 03-ott · Alberto, a DESIGN: la máquina se ELIGE, no viene fija del
+   backend — una tendina por fila, MPago preseleccionado. */
+var MAQUINAS_CONOCIDAS = ['MPago', 'Getnet', 'Transbank', 'SumUp'];
 async function pantalla8() {
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando cortes POS…</p>';
   CORTES = await getCaja('cortes_pos?dia=' + DIA_HOY);
   if (!CORTES.ok) { renderError('Los cortes POS', CORTES.error); return; }
-  var maquinas = (CORTES.maquinas && CORTES.maquinas.length) ? CORTES.maquinas : ['Máquina 1'];
-  var inputs = maquinas.map(function(m, i){
+  var maquinas = (CORTES.maquinas && CORTES.maquinas.length) ? CORTES.maquinas : ['MPago'];
+  var filas = maquinas.map(function(m, i){
     var prev = (CORTES.guardado||[]).find(function(g){return g.maquina===m;});
-    return '<p class="lb">' + esc(m) + '</p><input class="inp" data-maq="' + esc(m) + '" placeholder="$" inputmode="numeric" value="' + (prev?prev.corte:'') + '">';
+    var conocida = MAQUINAS_CONOCIDAS.filter(function(k){ return k.toLowerCase() === String(m||'').trim().toLowerCase(); })[0];
+    var esOtra = !conocida;
+    var opciones = MAQUINAS_CONOCIDAS.map(function(k){
+      return '<option value="' + esc(k) + '"' + (k === conocida ? ' selected' : '') + '>' + esc(k) + '</option>';
+    }).join('') + '<option value="__otra__"' + (esOtra ? ' selected' : '') + '>Otra</option>';
+    return '<p class="lb">Máquina ' + (i+1) + '</p>' +
+      '<select class="inp" data-maq-select="' + i + '">' + opciones + '</select>' +
+      '<input class="inp" data-maq-otra="' + i + '" placeholder="Nombre de la máquina" value="' + (esOtra ? esc(m) : '') + '" style="' + (esOtra ? '' : 'display:none') + '">' +
+      '<input class="inp" data-maq-corte="' + i + '" placeholder="$" inputmode="numeric" value="' + (prev?prev.corte:'') + '">';
   }).join('');
   app.innerHTML = barra(true) +
     '<div class="kick">Los cortes POS</div><h1>Las máquinas</h1><p class="sd">Un número por máquina, una vez al día</p>' +
-    inputs +
+    filas +
     (CORTES.libro != null ? '<div class="rows"><div class="r"><span class="n">Dice nuestro libro</span><span class="v">' + fmt(CORTES.libro) + '</span></div></div>' : '') +
     '<div class="note ok">El corte de la máquina es <b>el único testigo que no somos nosotros.</b></div>' +
     '<button class="btn acc" id="guardar">Guardar</button>' +
     '<button class="btn gh" id="siguiente">Ir al depósito</button>';
+  maquinas.forEach(function(m, i){
+    var sel = document.querySelector('[data-maq-select="' + i + '"]');
+    sel.addEventListener('change', function(){
+      document.querySelector('[data-maq-otra="' + i + '"]').style.display = (sel.value === '__otra__') ? '' : 'none';
+    });
+  });
+  function nombreMaquina(i) {
+    var sel = document.querySelector('[data-maq-select="' + i + '"]');
+    if (sel.value === '__otra__') return document.querySelector('[data-maq-otra="' + i + '"]').value.trim();
+    return sel.value;
+  }
   unTocoUnHecho(document.getElementById('guardar'), async function(){
-    var inputsEl = app.querySelectorAll('input[data-maq]');
-    for (var i=0;i<inputsEl.length;i++) {
-      var v = Number(inputsEl[i].value || '');
-      if (!Number.isFinite(v) || v < 0) { toast('Falta el corte de ' + inputsEl[i].dataset.maq, 'bad'); return; }
-      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGesto('pos'), maquina: inputsEl[i].dataset.maq,
+    for (var i=0;i<maquinas.length;i++) {
+      var nombre = nombreMaquina(i);
+      if (!nombre) { toast('Falta el nombre de la máquina ' + (i+1), 'bad'); return; }
+      var v = Number(document.querySelector('[data-maq-corte="' + i + '"]').value || '');
+      if (!Number.isFinite(v) || v < 0) { toast('Falta el corte de ' + nombre, 'bad'); return; }
+      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGesto('pos'), maquina: nombre,
         corte: v, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
-      if (!r.ok) { toast('No se guardó ' + inputsEl[i].dataset.maq + ': ' + r.motivo, 'bad'); return; }
+      if (!r.ok) { toast('No se guardó ' + nombre + ': ' + r.motivo, 'bad'); return; }
     }
     toast('Cortes guardados', 'ok');
   });
