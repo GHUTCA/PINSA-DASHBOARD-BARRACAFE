@@ -1095,7 +1095,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.218.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.219.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3681,76 +3681,93 @@ async function _cajaMesero(extra) {
     return await r.json();
   } catch (e) { clearTimeout(to); return null; }
 }
+/* [03-ott · i vetri di 🎨 DESIGN, ⑤] Mi corte nelle parole del mockup: Recaudación en efectivo ·
+   Retiros · Saldo por entregar. Nessuna frase dentro il telefono, «dinero» e mai «plata».
+   Dichiarato: «Tu propina de hoy» e «Mesa N cerrada sin pago» del mockup NON ci sono ancora — il
+   primo arriva con l'ATTO III (il riparto), il secondo vuole un fatto che estado_mesero non porta. */
+function _cieTurnoHoy() {
+  const d = new Date(); const hh = d.getHours(), mm = d.getMinutes();
+  const noche = (hh * 60 + mm) >= (18 * 60 + 30) || hh < 6;
+  const ref = hh < 6 ? new Date(d.getTime() - 6 * 3600000) : d;
+  const dia = ref.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric' });
+  return dia.charAt(0).toUpperCase() + dia.slice(1).replace(',', '') + ' · ' + (noche ? 'noche' : 'día');
+}
 async function _ciePaso2Atto1() {
   CIE.paso = 21;   // non 2: `cierreEnviar` prende la cifra da CIE.uidMonto (la somma dei ritiri), non da una casella
   CIE.motivo = ''; CIE.res = null;
-  _cieRender('<div class="cie-msg">Mirando lo que entregaste…</div>');
+  _cieRender('<div class="cie-msg">…</div>');
   const r = await _cajaMesero({ verbo: 'estado_mesero' });
   if (!r || !r.ok) {
     toast('warn', 'No pude leer tus retiros: cuenta como siempre, y avísale al JL.');
     _ciePaso2Viejo(); return;
   }
   if ((r.por_confirmar || []).length) {
-    const p = r.por_confirmar[0]; _cajaPendCorte = p;
-    _cieRender('<div class="cie-h">💵 Primero confirma el retiro</div>' +
-      '<div class="cie-box"><b>El JL te retiró ' + fmtPrice(p.monto) + '</b><div class="cie-nota">Confírmalo antes de cerrar tu turno.</div></div>' +
-      '<button class="btn" onclick="_cajaConfMostrar(_cajaPendCorte)">Confirmar ahora</button>' +
-      '<div class="cie-out" onclick="_ciePaso1()">← Volver</div>');
+    const p = Object.assign({}, r.por_confirmar[0], { entregado_antes: r.entregado || 0 }); _cajaPendCorte = p;
+    _cajaConfMostrar(p);
     return;
   }
+  const recaud = (r.ventas_efectivo || 0) + (r.propina_efectivo || 0) + (r.residuo || 0);
   if (r.en_mano > 0) {
-    _cieRender('<div class="cie-h">💵 Te queda plata en el bolsillo</div>' +
+    _cieRender('<div class="cie-h">Todavía no puedes cerrar</div>' +
+      '<div class="cie-sub">Entrega de efectivo · ' + esc(_cieTurnoHoy()) + '</div>' +
       '<div class="cie-box"><div class="cie-tot">' + fmtPrice(r.en_mano) + '</div>' +
-      '<div class="cie-nota">Entrégaselo al JL: él hace el último retiro, y tú lo confirmas aquí. Tu turno se cierra con el bolsillo en cero.</div></div>' +
-      '<button class="btn" onclick="_ciePaso2Atto1()">Ya se lo entregué · revisar</button>' +
-      '<div class="cie-out" onclick="_ciePaso1()">← Volver</div>');
+        '<div class="cie-row"><span>Recaudación en efectivo</span><b>' + fmtPrice(recaud) + '</b></div>' +
+        '<div class="cie-row"><span>Retiros</span><b>' + fmtPrice(r.entregado || 0) + '</b></div>' +
+        '<div class="cie-row"><span><b>Saldo por entregar</b></span><b style="color:#FFB547">' + fmtPrice(r.en_mano) + '</b></div>' +
+      '</div>' +
+      '<button class="btn sec" onclick="_ciePaso1()">Volver</button>');
     return;
   }
   CIE.uidMonto = r.entregado || 0;
-  _cieRender('<div class="cie-h">🧾 Mi corte</div>' +
+  _cieRender('<div class="cie-h">Mi corte</div>' +
+    '<div class="cie-sub">Tu turno de hoy · ' + esc(_cieTurnoHoy()) + '</div>' +
     '<div class="cie-box">' +
-      '<div class="cie-row"><span>Ventas en efectivo</span><b>' + fmtPrice(r.ventas_efectivo || 0) + '</b></div>' +
-      '<div class="cie-row"><span>Propinas en efectivo</span><b>' + fmtPrice(r.propina_efectivo || 0) + '</b></div>' +
-      '<div class="cie-row"><span>Entregaste en ' + (r.n_ritiri || 0) + ' retiro' + ((r.n_ritiri || 0) === 1 ? '' : 's') + '</span><b>' + fmtPrice(r.entregado || 0) + '</b></div>' +
-      '<div class="cie-row"><span><b>Te queda en el bolsillo</b></span><b style="color:#3DC97E">' + fmtPrice(0) + ' ✓</b></div>' +
+      '<div class="cie-row"><span>Recaudación en efectivo</span><b>' + fmtPrice(recaud) + '</b></div>' +
+      '<div class="cie-row"><span>Retiros</span><b>' + fmtPrice(r.entregado || 0) + '</b></div>' +
     '</div>' +
-    '<button class="btn" id="cieBtn" onclick="cierreEnviar()">Cerrar mi turno</button>' +
+    '<button class="btn" id="cieBtn" onclick="this.disabled=true;cierreEnviar()">Listo</button>' +
     '<div class="cie-out" onclick="_ciePaso1()">← Volver</div>');
 }
 /* ③ la conferma del ritiro: arriva da sola (giro ogni 30 s) o dal corte */
 let _cajaConfAperta = '', _cajaPendCorte = null;
+/* [03-ott · ② del mockup] «Confirma tu retiro»: la cifra, l'ora, Ya entregaste hoy · Con esta entrega.
+   Premere «Sí, es correcto» È la firma: nessuna frase che annuncia la registrazione. */
 function _cajaConfMostrar(p) {
   if (!p || !p.uid_gesto) return;
   _cajaConfAperta = p.uid_gesto;
   let w = $('cajaConfWrap');
   if (!w) { w = document.createElement('div'); w.id = 'cajaConfWrap'; document.body.appendChild(w); }
   const hh = p.ts ? new Date(p.ts).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '';
+  const antes = +p.entregado_antes || 0;
   w.innerHTML = '<div class="cs-pago"><div class="cs-pcard cie-card"><div class="cs-asa"></div>' +
-    '<div class="cie-h">💵 ' + esc(p.quien_jl || 'El JL') + ' te retiró plata</div>' +
-    '<div class="cie-sub">Confirma tú también.</div>' +
+    '<div class="cie-h">Confirma tu retiro</div>' +
     '<div class="cie-box"><div class="cie-tot">' + fmtPrice(p.monto) + '</div>' +
-      '<div class="cie-nota">contados' + (hh ? ' a las ' + hh : '') + '</div></div>' +
-    '<button class="btn" onclick="_cajaConfResponder(\'coincide\')">Sí, es correcto</button>' +
-    '<button class="btn sec" onclick="_cajaConfResponder(\'no_coincide\')">No coincide</button>' +
+      (hh ? '<div class="cie-nota">contados a las ' + hh + '</div>' : '') +
+      '<div class="cie-row"><span>Ya entregaste hoy</span><b>' + fmtPrice(antes) + '</b></div>' +
+      '<div class="cie-row"><span>Con esta entrega</span><b>' + fmtPrice(antes + (+p.monto || 0)) + '</b></div>' +
+    '</div>' +
+    '<button class="btn" id="cajaConfSi" onclick="_cajaConfResponder(\'coincide\', this)">Sí, es correcto</button>' +
+    '<button class="btn sec" onclick="_cajaConfResponder(\'no_coincide\', this)">No coincide</button>' +
     '</div></div>';
 }
 function _cajaConfCerrar() { const w = $('cajaConfWrap'); if (w) w.innerHTML = ''; _cajaConfAperta = ''; }
-async function _cajaConfResponder(esito) {
+async function _cajaConfResponder(esito, btn) {
   const uid = _cajaConfAperta; if (!uid) return;
-  if (esito === 'no_coincide' && !confirm('¿No coincide lo que contaron?\n\nQueda registrado con tu nombre y el del JL. Hablen ahora para aclararlo.')) return;
+  if (esito === 'no_coincide' && !confirm('¿No coincide?')) return;
+  if (btn) btn.disabled = true;   // [03-ott] un tocco = un fatto: la firma non parte due volte
   const r = await _cajaMesero({ verbo: 'firma', rol: 'mesero', contenedor: 'ritiro', contenedor_uid: uid, esito: esito });
   if (r && r.ok) {
-    toast('ok', esito === 'coincide' ? '✓ Confirmado' : '⚠️ Registrado: no coincide');
+    toast('ok', esito === 'coincide' ? '✓' : '⚠️ No coincide');
     _cajaConfCerrar();
     if (CIE.paso === 21) _ciePaso2Atto1();
   } else if (r && (r.error === 'ritiro_no_pendiente')) { _cajaConfCerrar(); }
-  else toast('err', 'No se registró tu respuesta — reintenta');
+  else { if (btn) btn.disabled = false; toast('err', 'No llegó tu respuesta — toca de nuevo'); }
 }
 async function _cajaGiroMesero() {
   if (!CAJA_ATTO1_ON || JL || !STATE.codigo || !STATE.nombre || _cajaConfAperta) return;
   if (document.visibilityState && document.visibilityState !== 'visible') return;
   const r = await _cajaMesero({ verbo: 'estado_mesero' });
-  if (r && r.ok && (r.por_confirmar || []).length) _cajaConfMostrar(r.por_confirmar[0]);
+  if (r && r.ok && (r.por_confirmar || []).length) _cajaConfMostrar(Object.assign({}, r.por_confirmar[0], { entregado_antes: r.entregado || 0 }));
 }
 setInterval(_cajaGiroMesero, 30000);
 
