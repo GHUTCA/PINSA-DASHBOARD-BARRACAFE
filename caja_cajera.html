@@ -280,12 +280,16 @@ async function pantalla6() {
     document.getElementById('irPos').onclick = function(){ PASO = 3; pantalla8(); };
     return;
   }
-  var total = sobres.reduce(function(a,s){return a+(s.declarado||0);}, 0);
+  /* ✏️ 03-ott · Alberto, a DESIGN («alla cajera dovrebbero apparire i totali
+     da contare per busta e lei dovrebbe inserire quello che conta, anche qui
+     dovrebbe essere alla cieca altrimenti si quadra ovviamente»): NINGÚN
+     monto declarado se muestra antes de contar — ni el total de la noche,
+     ni el de cada sobre. Solo el número de sobres y si ya fueron contados. */
   var filas = sobres.map(function(s){
     return '<div class="r"><span class="n">' + esc(s.sobre_nro) + '<small>' +
       (s.ts_hecho ? new Date(s.ts_hecho).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) + ' · ' : '') +
       esc(s.firma_jl||'') + '</small></span><span class="v' + (s.conteo ? ' ok' : '') + '">' +
-      fmt(s.declarado) + (s.conteo ? ' ✓' : '') + '</span></div>';
+      (s.conteo ? '✓ Contado' : 'Por contar') + '</span></div>';
   }).join('');
   var MOTIVO_TXT = { limite_sala: 'pasó el límite de la sala', limite_persona: 'pasó el límite por persona', tiempo: 'demasiado tiempo con plata encima' };
   var avisoHtml = MANANA.aviso_sin_respuesta
@@ -295,8 +299,8 @@ async function pantalla6() {
     : '';
   app.innerHTML = barra(true) +
     '<div class="kick">La caja fuerte</div><h1>Anoche</h1><p class="sd">' + DIA_NOCHE + ' · turno noche</p>' +
-    '<p class="big acc">' + sobres.length + '</p><p class="blab">sobres esperados · ' + fmt(total) + '</p>' +
-    '<div class="rows"><div class="r hd"><span>sobre</span><span>declarado</span></div>' + filas + '</div>' +
+    '<p class="big acc">' + sobres.length + '</p><p class="blab">sobres que tienes que contar</p>' +
+    '<div class="rows"><div class="r hd"><span>sobre</span><span>estado</span></div>' + filas + '</div>' +
     avisoHtml +
     '<button class="btn acc" id="abrir">Abrir y contar</button>';
   document.getElementById('abrir').onclick = function(){ SOBRE_IDX = sobres.findIndex(function(s){return !s.conteo;}); if (SOBRE_IDX<0) SOBRE_IDX = 0; PASO = 2; pantalla7(); };
@@ -306,21 +310,50 @@ function pantalla7() {
   var sobres = (MANANA && MANANA.sobres) || [];
   if (SOBRE_IDX >= sobres.length) { PASO = 3; pantalla8(); return; }
   var s = sobres[SOBRE_IDX];
+  /* ✏️ 03-ott · Alberto («alla cieca, altrimenti si quadra ovviamente»): ni
+     el monto declarado del sobre NI la diferencia se muestran mientras ella
+     cuenta o escribe — ninguna señal reactiva al tipear. Se cuenta entero
+     (sello + monto), se toca UNA VEZ "Revisar conteo", y solo ENTONCES se
+     revela si cuadra o no — ya no se puede volver a editar el monto de este
+     sobre después de revisarlo: revisar y enviar son el mismo compromiso. */
   app.innerHTML = barra(true) +
     '<div class="kick">El conteo · ' + (SOBRE_IDX+1) + ' de ' + sobres.length + '</div>' +
-    '<h1>Sobre ' + esc(s.sobre_nro) + '</h1><p class="sd">Escrito ' + fmt(s.declarado) + '</p>' +
-    '<div class="rows"><div class="r"><span class="n">Dice el sobre</span><span class="v">' + fmt(s.declarado) + '</span></div></div>' +
-    '<p class="lb">Cuánto contaste · <b>cuéntalo entero</b></p>' +
-    '<input class="inp" id="contado" placeholder="$" inputmode="numeric">' +
+    '<h1>Sobre ' + esc(s.sobre_nro) + '</h1><p class="sd">Cuéntalo entero, sin mirar lo escrito en el sobre</p>' +
     '<p class="lb">¿El sello estaba intacto?</p>' +
     '<div class="two"><button class="btn gh" id="selloSi">Sí, intacto</button><button class="btn gh" id="selloNo">No, roto</button></div>' +
+    '<p class="lb" style="margin-top:12px">Cuánto contaste · <b>cuéntalo entero</b></p>' +
+    '<input class="inp" id="contado" placeholder="$" inputmode="numeric">' +
+    '<button class="btn acc" id="revisar" disabled>Revisar conteo</button>' +
     '<div id="extra" style="margin-top:10px"></div>';
 
   var selloIntacto = null;
-  function pintarExtra() {
-    var dif = (Number(document.getElementById('contado').value || '') || 0) - s.declarado;
+  function actualizarBoton() {
+    var listo = selloIntacto !== null && document.getElementById('contado').value.trim() !== '';
+    document.getElementById('revisar').disabled = !listo;
+  }
+  document.getElementById('contado').addEventListener('input', actualizarBoton);
+  document.getElementById('selloSi').onclick = function(){ selloIntacto = true; marcarSello(this); actualizarBoton(); };
+  document.getElementById('selloNo').onclick = function(){ selloIntacto = false; marcarSello(this); actualizarBoton(); };
+  function marcarSello(btn) {
+    document.getElementById('selloSi').style.outline = '';
+    document.getElementById('selloNo').style.outline = '';
+    btn.style.outline = '2px solid var(--acc)';
+  }
+
+  var contadoRevisado = null;
+  unTocoUnHecho(document.getElementById('revisar'), async function(){
+    var contado = Number(document.getElementById('contado').value || '');
+    if (!Number.isFinite(contado) || contado < 0) { toast('Escribe cuánto contaste', 'bad'); return; }
+    if (selloIntacto === null) { toast('Di si el sello estaba intacto', 'bad'); return; }
+    /* desde aquí el monto queda fijo: revisar ya es un compromiso, no una
+       vista previa que se pueda repetir cambiando el número cada vez */
+    contadoRevisado = contado;
+    document.getElementById('contado').disabled = true;
+    document.getElementById('selloSi').disabled = true;
+    document.getElementById('selloNo').disabled = true;
+    document.getElementById('revisar').style.display = 'none';
+    var dif = contado - (s.declarado || 0);
     var box = document.getElementById('extra');
-    if (selloIntacto === null) { box.innerHTML = ''; return; }
     if (dif === 0) {
       box.innerHTML = '<div class="note ok">El sello estaba ' + (selloIntacto?'intacto':'roto') + ' y cuadra. <b>Nada que declarar.</b></div>' +
         '<button class="btn ok" id="confirmar">Confirmar · siguiente sobre</button>';
@@ -331,24 +364,19 @@ function pantalla7() {
         '<button class="btn acc" id="confirmar">Dejar anotado y seguir</button>';
     }
     unTocoUnHecho(document.getElementById('confirmar'), confirmar);
-  }
-  document.getElementById('contado').addEventListener('input', pintarExtra);
-  document.getElementById('selloSi').onclick = function(){ selloIntacto = true; pintarExtra(); };
-  document.getElementById('selloNo').onclick = function(){ selloIntacto = false; pintarExtra(); };
+  });
 
   async function confirmar() {
-    var contado = Number(document.getElementById('contado').value || '');
-    if (!Number.isFinite(contado) || contado < 0) { toast('Escribe cuánto contaste', 'bad'); return; }
     var nota = document.getElementById('nota');
     var body = {
       verbo: 'conteo', uid_gesto: uidGesto('cnt'),
       sobre_dia_op: DIA_NOCHE, sobre_nro: s.sobre_nro,
-      contado: contado, sello_intacto: selloIntacto, nota: nota ? nota.value : null,
+      contado: contadoRevisado, sello_intacto: selloIntacto, nota: nota ? nota.value : null,
       firma_caja: SES.user, firma_caja_tipo: 'pin', fuente: 'app_caja',
     };
     var r = await postCaja(body);
     if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
-    s.conteo = { contado: contado };
+    s.conteo = { contado: contadoRevisado };
     toast(r.encolado ? 'Guardado sin señal — se enviará solo' : 'Conteo guardado', 'ok');
     SOBRE_IDX++; pantalla7();
   }
