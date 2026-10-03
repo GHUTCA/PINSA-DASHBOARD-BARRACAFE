@@ -111,12 +111,21 @@ h1{font-size:19px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em}
 /* ═══ 0 · CONTESTO ══════════════════════════════════════════════════════ */
 var qp = new URLSearchParams(location.search);
 var LOCAL = (qp.get('loc') || '').toLowerCase().trim();
+/* ✏️ 03-ott · BKP (`INTEGRACIÓN CAJA b50beda`): el bordo vivo es
+   alberto-agostini.workers.dev — el otro dominio (ghutca) que tenía aquí
+   no es el que sala.html usa de verdad (BORDE_SALA.URL, verificado). */
 var BORDE = {
-  rsc: 'https://pinsita-borde.ghutca.workers.dev',
-  cdl: 'https://pinsita-borde.ghutca.workers.dev'
+  rsc: 'https://pinsita-borde.alberto-agostini.workers.dev',
+  cdl: 'https://pinsita-borde.alberto-agostini.workers.dev'
 };
 var TOKEN = qp.get('t') || localStorage.getItem('pinsita_borde_t') || '';
 if (qp.get('t')) { try { localStorage.setItem('pinsita_borde_t', qp.get('t')); } catch(e){} }
+
+/* ✏️ 03-ott · el PIN de la cajera — NUNCA en localStorage (misma disciplina
+   que el PIN del JL): vive solo en memoria, se pide una vez al abrir, y una
+   respuesta pin_caja_invalido lo borra y lo vuelve a pedir. Nunca viaja en
+   la URL: body pin_caja en los POST, header X-Caja-Pin en los GET. */
+var PIN_CAJA = null;
 
 function hoyOperativo(d) {
   /* taglio 06:00 America/Santiago — stessa regola del bordo (sombraFechaOpOf),
@@ -174,17 +183,40 @@ function guardarCola(c) { try { localStorage.setItem(COLA_KEY, JSON.stringify(c)
 function colaEncolar(body) {
   var c = leerCola(); c.push(body); guardarCola(c);
 }
+/* las cuatro respuestas del PIN de la caja (bordo, _cajaPinCaja): si una
+   llamada tropieza con alguna, se trata ANTES de leer "ok"/"motivo" como
+   si fuera un rechazo cualquiera — borra el PIN si está mal, y pide uno
+   nuevo en la próxima pantalla en vez de reintentar a ciegas. */
+async function esRespuestaPin(j) {
+  var err = j && j.error;
+  if (err === 'pin_caja_invalido') {
+    PIN_CAJA = null; toast('PIN incorrecto. Vuelve a escribirlo.', 'bad');
+    await pedirPinCaja();   // la próxima vez que toque el botón, ya tiene PIN fresco
+    return true;
+  }
+  if (err === 'pin_caja_requerido') { PIN_CAJA = null; toast('Falta tu PIN.', 'bad'); await pedirPinCaja(); return true; }
+  if (err === 'pin_caja_bloqueado') {
+    var s = Math.ceil((j.faltan_s || 0));
+    toast('Demasiados intentos. Espera ' + Math.ceil(s / 60) + ' min.', 'bad'); return true;
+  }
+  if (err === 'pin_caja_no_configurado') { toast('La caja todavía no tiene PIN configurado. Avisa a Alberto.', 'bad'); return true; }
+  return false;
+}
 async function postCaja(body) {
   var base = BORDE[LOCAL] || BORDE.rsc;
   var url = base + '/caja/' + encodeURIComponent(LOCAL) + '?t=' + encodeURIComponent(TOKEN);
+  var conPin = Object.assign({ pin_caja: PIN_CAJA }, body);
   try {
-    var r = await fetch(url, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
+    var r = await fetch(url, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(conPin) });
     var j = await r.json();
+    if (await esRespuestaPin(j)) return { ok:false, motivo: j.error, pin:true };
     if (!r.ok || j.ok === false) return { ok:false, motivo: j.motivo || j.error || ('http_' + r.status) };
     if (j.scritto === false) return { ok:false, motivo: j.motivo || 'no_escrito' };
     return { ok:true };
   } catch (e) {
-    colaEncolar(body);
+    /* sin red: no sabemos si el PIN es válido, pero encolar el pin_caja
+       junto al gesto es lo correcto — se verifica cuando el bordo responda. */
+    colaEncolar(conPin);
     return { ok:true, encolado:true };
   }
 }
@@ -204,8 +236,10 @@ async function getCaja(path) {
   var url = base + '/caja/' + encodeURIComponent(LOCAL) + '/' + path +
     (path.indexOf('?') >= 0 ? '&' : '?') + 't=' + encodeURIComponent(TOKEN);
   try {
-    var r = await fetch(url);
+    /* el PIN nunca en la URL: header X-Caja-Pin, como pide BKP */
+    var r = await fetch(url, { headers: { 'X-Caja-Pin': PIN_CAJA || '' } });
     var j = await r.json();
+    if (await esRespuestaPin(j)) return { ok:false, error: j.error, pin:true };
     if (!r.ok || j.ok === false) return { ok:false, error: j.error || ('http_' + r.status) };
     return Object.assign({ ok:true }, j);
   } catch (e) { return { ok:false, error:'sin_red' }; }
@@ -412,13 +446,37 @@ function renderError(titulo, error) {
   app.innerHTML = barra(false) + '<div class="kick bad">' + esc(titulo) + '</div><h1>No se pudo cargar</h1>' +
     '<div class="note bad">' + esc(error || 'sin_red') + '<br>Esta pantalla aún no tiene su lectura en el bordo — contrato pendiente, no es un error del teléfono.</div>' +
     '<button class="btn gh" id="retry">Reintentar</button>';
-  document.getElementById('retry').onclick = function(){ [pantalla6,null,pantalla8,pantalla9][PASO-1](); };
+  document.getElementById('retry').onclick = async function(){
+    if (!PIN_CAJA) await pedirPinCaja();
+    [pantalla6,null,pantalla8,pantalla9][PASO-1]();
+  };
+}
+
+/* ✏️ 03-ott · el PIN de la caja (BKP, `INTEGRACIÓN CAJA b50beda`): se pide
+   UNA vez al abrir, vive solo en memoria (nunca localStorage — misma
+   disciplina que el PIN del JL), y una respuesta pin_caja_invalido lo
+   borra para que esta pantalla lo vuelva a pedir, nunca reintenta a ciegas. */
+function pedirPinCaja() {
+  return new Promise(function (resolve) {
+    app.innerHTML = barra(false) +
+      '<div class="kick">Tu PIN</div><h1>Antes de entrar</h1><p class="sd">El PIN de la caja, el mismo que usas en el panel</p>' +
+      '<input class="inp" id="pin" inputmode="numeric" type="password" placeholder="••••" maxlength="8" autofocus>' +
+      '<button class="btn acc" id="pinGo">Entrar</button>';
+    function ir() {
+      var v = document.getElementById('pin').value.trim();
+      if (!v) { toast('Escribe tu PIN', 'bad'); return; }
+      PIN_CAJA = v; resolve();
+    }
+    document.getElementById('pinGo').onclick = ir;
+    document.getElementById('pin').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') ir(); });
+  });
 }
 
 /* ═══ 4 · ARRANQUE ══════════════════════════════════════════════════════ */
-function arrancar() {
+async function arrancar() {
   SES = (window.PinsitaAuth && PinsitaAuth.sesion && PinsitaAuth.sesion()) || { user:'?', role:'CAJA' };
   if (!LOCAL) LOCAL = (SES.local && SES.local !== '*') ? SES.local : 'rsc';
+  await pedirPinCaja();
   flushCola();
   pantalla6();
 }
