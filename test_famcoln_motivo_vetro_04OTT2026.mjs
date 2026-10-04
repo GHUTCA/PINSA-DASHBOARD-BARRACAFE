@@ -52,7 +52,9 @@ t('«franq» resta pronta', mondo(true, { tipo: 'franq' }).API._dtHay() === true
     const ctx = { FAMCOL_MOTIVO_ON: st.on, FAMCOL_SALUD_TS: st.ts === 'ora' ? Date.now() : st.ts === 'vecchio' ? Date.now() - 120000 : 0,
       DTO_BORDE_ON: dto, chiamate, BORDE_SALA: { URL: 'http://bordo' }, AbortController, setTimeout, clearTimeout, Date,
       _pagoAlBorde: async () => bordo, gasPost: async () => { chiamate.push('gasPost'); return { ok: true, via: 'libro' }; },
-      fetch: async (u) => { fetchate.push(u); if (salud === 'giu') throw new Error('rete'); return salud === 'assente' ? { ok: true, json: async () => ({ ok: true }) } : J(salud); } };
+      fetch: async (u) => { fetchate.push(u); if (salud === 'giu') throw new Error('rete'); if (salud === 'err503json') return { ok: true, json: async () => ({ ok: false, error: 'unavailable' }) };
+        if (salud === 'http503') return { ok: false, status: 503, json: async () => ({ ok: true, datos: { flags: { fam_coln_motivo_on: '0' } } }) };
+        return salud === 'assente' ? { ok: true, json: async () => ({ ok: true }) } : J(salud); } };
     vm.createContext(ctx); vm.runInContext(code + '\n;this.API = { _scontoVia, _esFamColn };', ctx);
     const r = await ctx.API._scontoVia(action, body, 1000); return { r, chiamate, fetchate, stato: ctx.FAMCOL_MOTIVO_ON };
   };
@@ -83,6 +85,16 @@ t('«franq» resta pronta', mondo(true, { tipo: 'franq' }).API._dtHay() === true
   t('leva spenta e nota (fresca): ripiega sul libro come ieri, senza rileggere', o.chiamate.length === 1 && o.r.via === 'libro' && o.fetchate.length === 0, o);
   o = await run({ on: false, ts: 'vecchio' }, 'registrarPago', FAMB, null, '0');
   t('spenta ma vecchia: rilegge /salud, dice «spenta» ⇒ ripiega come ieri', o.chiamate.length === 1 && o.fetchate.length === 1, o);
+  o = await run({ on: null, ts: 0 }, 'registrarPago', FAMB, null, 'assente');
+  // 🔴 RESIDUO TROVATO DA EL GIRO: un /salud che risponde un errore NON è una risposta «spenta»
+  o = await run({ on: null, ts: 0 }, 'registrarPago', FAMB, null, 'err503json');
+  t('RESIDUO · /salud risponde un JSON di errore {ok:false} (senza il campo): NON vale «spenta» ⇒ FERMA, zero gasPost', fermo(o) && o.stato === null, o);
+  o = await run({ on: false, ts: 'vecchio' }, 'registrarPago', FAMB, null, 'err503json');
+  t('RESIDUO · idem a stato vecchio: ferma e non rinfresca il tempo', fermo(o), o);
+  o = await run({ on: null, ts: 0 }, 'registrarPago', FAMB, null, 'http503');
+  t('RESIDUO · HTTP non ok (503) anche con un corpo che dice «0»: NON vale ⇒ FERMA', fermo(o) && o.stato === null, o);
+  o = await run({ on: null, ts: 0 }, 'registrarColacion', COLB, null, 'err503json');
+  t('RESIDUO · idem per la colación', fermo(o), o);
   o = await run({ on: null, ts: 0 }, 'registrarPago', FAMB, null, 'assente');
   t('/salud di un bordo VECCHIO (senza il campo) = «spenta» detta da una risposta vera ⇒ ripiega come ieri', o.chiamate.length === 1 && o.stato === false, o);
   // ciò che il bordo decide passa com'è
