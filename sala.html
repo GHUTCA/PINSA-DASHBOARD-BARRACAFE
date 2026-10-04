@@ -212,6 +212,11 @@
   .toast.err{border-color:var(--bad);color:var(--bad)}
   .toast.ok{border-color:var(--ok);color:var(--ok)}
   .toast.warn{border-color:var(--warn);color:var(--warn)}
+  /* [03-ott · caduta su Google] `sig` = informa (ciano), MAI rosso: il pedido è partito */
+  .toast.sig{border-color:#3FE0F0;color:#3FE0F0}
+  .caida-chip{display:inline-block;font-size:11px;font-weight:800;padding:2px 8px;border-radius:20px;
+    border:1px solid #3FE0F0;color:#3FE0F0;background:rgba(63,224,240,.08)}
+  .caida-banda{font-size:12px;font-weight:600;color:#3FE0F0;margin:0 0 8px}
   /* [AUT-0251] LA BANDA DEL RIFIUTO — il gemello del toast, e la differenza è
      UNA: non ha un `setTimeout`. Il toast dice «è successo»; la banda resta
      finché qualcuno la guarda e la chiude. *Sta SOPRA il pannello del pago
@@ -1095,7 +1100,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.217.4 · vetro</span>
+      <span class="ver" id="ver">sala v3.218.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1482,6 +1487,21 @@ const JFIX_ON = (function () {
     if (q === '0') { localStorage.setItem('sala_jfx', '0'); return false; }
     return localStorage.getItem('sala_jfx') !== '0';
   } catch (e) { return q !== '0'; }
+})();
+/* [03-ott · punto 2 di STASERA AVANZA TUTTO · disegno di 🎨 DESIGN V24] LA CADUTA
+   SU GOOGLE SI DICHIARA SUL VETRO (ordine di Alberto: «ogni caduta su Google si
+   dichiara»). Quando `crearPedidoMesero` non passa dal bordo e va a Google, il
+   pedido è PARTITO — ma la cuenta lo mostrerà dopo. Il mesero vede: una riga che
+   comincia da «Salió» + un chip che RESTA sul pedido finché il bordo non lo vede.
+   NASCE SPENTA: `?cag=1` accende per telefono, `?cag=0` spegne. Spenta = mondo di
+   ieri riga per riga (`staffPost` non marca niente, nessun chip, nessuna banda). */
+const CADUTA_GOOGLE_ON = (function () {
+  const q = QS.get('cag');
+  try {
+    if (q === '1') { localStorage.setItem('sala_cag', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_cag', '0'); return false; }
+    return localStorage.getItem('sala_cag') === '1';   // default SPENTA
+  } catch (e) { return q === '1'; }
 })();
 const TECLADO_ON = (function () {
   const q = QS.get('tecl');
@@ -2072,7 +2092,7 @@ async function staffPost(action, body, opts) {   // [01-ott] opts.ingreso: vedi 
      dopo il cambio del 30-set. L'ingresso bussa al bordo comunque (salvo il
      freno `?bordew=0`): il bordo rifiuta da sé e si ripiega sul libro. */
   const _ingreso = !!(opts && opts.ingreso) && BORDE_W.QS !== '0';
-  if (!bordeWriteOn() && !_ingreso) { _pennaDice('gas:leva-off'); return await gasPost(action, body); }
+  if (!bordeWriteOn() && !_ingreso) { _pennaDice('gas:leva-off'); return _cadutaMarca(action, await gasPost(action, body)); }
   const _VOLO_B = {};   // [AUT-0273 ①] la scatola di QUESTA chiamata, non del modulo
   try {
     const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS')
@@ -2113,7 +2133,69 @@ async function staffPost(action, body, opts) {   // [01-ott] opts.ingreso: vedi 
   } catch (e) {
     _pennaDice('gas:' + (e && e.name === 'AbortError' ? 'timeout' : 'red'));
   }
-  return await gasPost(action, body);
+  return _cadutaMarca(action, await gasPost(action, body));
+}
+/* ═══ [03-ott · LA CADUTA SU GOOGLE SUL VETRO · 🎨 DESIGN V24] ════════════════
+   Il vetro NON nomina Google né il bordo al mesero: gli dà l'unica conseguenza
+   che incontrerà — la cuenta che non lo mostra subito. 🔴 La riga comincia da
+   «Salió», sempre: un avviso dopo un gesto RIUSCITO si legge come un fallimento
+   a meno che la prima parola non dica il contrario (il mesero rimanderebbe il
+   pedido, che c'era già). Chip `sig` (informa), MAI `urge`. Cammino normale =
+   NESSUNA riga e NESSUN chip: il silenzio è l'informazione quando riesce.
+   Dove sta il segno: in RAM (`_CAIDOS`: uuid → {mesa, ts}) — non è un registro,
+   è il promemoria; si SPEGNE quando quel pedido compare in una sala nata dal
+   bordo (`_edad_dato_s` la porta solo la lettura del bordo, e senza `_vieja_s`).
+   Dichiarato: un ricarico della pagina lo azzera (nessun tempo, nessun timer:
+   il segno non sparisce «a tempo»). Il conteggio dei caduti NON va sul vetro del
+   mesero: è del JL e del controllo della serata. */
+const CADUTA_RIGA = 'Salió, pero tardará en aparecer en la cuenta.';
+const CADUTA_CHIP = 'tardará';
+const _CAIDOS = {};
+/* marca SOLO la risposta di un crearPedidoMesero andato a buon fine passando da Google */
+function _cadutaMarca(action, r) {
+  if (CADUTA_GOOGLE_ON && action === 'crearPedidoMesero' && r && typeof r === 'object' && r.ok === true) {
+    try { r._via_google = true; } catch (e) {}
+  }
+  return r;
+}
+/* il pedido è arrivato: se è andato da Google si dichiara e si ricorda. Ritorna
+   la riga da mostrare, o '' (cammino normale, o leva spenta → toast di sempre). */
+function _cadutaDichiara(r, uuid, mesa) {
+  if (!CADUTA_GOOGLE_ON || !r || r._via_google !== true || !uuid) return '';
+  _CAIDOS[uuid] = { mesa: String(mesa == null ? '' : mesa), ts: Date.now() };
+  return CADUTA_RIGA + (mesa != null && mesa !== '' ? ' · Mesa ' + mesa : '');
+}
+/* una sala nata dal bordo e FRESCA (non la foto vecchia, non Google) */
+function _cadutaSalaDelBordo(r) {
+  return !!(r && r._edad_dato_s != null && r._vieja_s == null);
+}
+function _cadutaVisibleNella(r, uuid) {
+  return ['mios', 'pendientes', 'pagados', 'sin_dueno', 'por_limpiar'].some(function (k) {
+    return (r[k] || []).some(function (p) { return p && p.uuid === uuid; });
+  });
+}
+/* si toglie il segno ai pedidos che il bordo ora vede; ritorna quanti ne restano */
+function _cadutaPotatura(r) {
+  const ks = Object.keys(_CAIDOS);
+  if (!ks.length) return 0;
+  if (!_cadutaSalaDelBordo(r)) return ks.length;
+  ks.forEach(function (u) { if (_cadutaVisibleNella(r, u)) delete _CAIDOS[u]; });
+  return Object.keys(_CAIDOS).length;
+}
+function _cadutaChipHtml(uuid) {
+  if (!CADUTA_GOOGLE_ON || !uuid || !_CAIDOS[uuid]) return '';
+  return ' <span class="caida-chip" title="' + esc(CADUTA_RIGA) + '">' + esc(CADUTA_CHIP) + '</span>';
+}
+/* sopra la griglia della plaza: una riga per mesa, sempre visibile finché resta il segno */
+function _cadutaBandaHtml() {
+  if (!CADUTA_GOOGLE_ON) return '';
+  const porMesa = {};
+  Object.keys(_CAIDOS).forEach(function (u) { porMesa[_CAIDOS[u].mesa] = (porMesa[_CAIDOS[u].mesa] || 0) + 1; });
+  const ms = Object.keys(porMesa); if (!ms.length) return '';
+  return ms.map(function (m) {
+    return '<div class="caida-banda">Mesa ' + esc(m) + ' · <span class="caida-chip">' + esc(CADUTA_CHIP) + '</span> ' +
+      esc(CADUTA_RIGA) + '</div>';
+  }).join('');
 }
 /* v3.21.0 · [AUT-EMERG-0004] · due caratteri in fondo alla sala: da dove è
    passato l'ultimo gesto. ✍ verde = bordo · ⚠ ambra = ripiego, col motivo.
@@ -6385,7 +6467,10 @@ async function nuevoEnviar__in(btn) {
   try {
     const r = await staffPost('crearPedidoMesero', body);
     if (r && r.ok) {
-      toast('ok', '✓ ' + (r.id_pedido || 'Pedido') + ' — Mesa ' + mesa + (r.plaza ? ' · ' + r.plaza : '') + ' · en tus MÍOS');
+      /* [03-ott · caduta su Google] se è andato da Google la riga comincia da «Salió» e il chip resta */
+      const _caida = _cadutaDichiara(r, n.uuid, mesa);
+      if (_caida) toast('sig', _caida, 6000);
+      else toast('ok', '✓ ' + (r.id_pedido || 'Pedido') + ' — Mesa ' + mesa + (r.plaza ? ' · ' + r.plaza : '') + ' · en tus MÍOS');
       STATE.nuevo = null; renderNuevo();
       refrescar(false);
       return;
@@ -6751,7 +6836,9 @@ async function _menuEnviarCategoria__in(mesa, grupoId, categoria, lineas, esPrim
   try {
     const r = await staffPost('crearPedidoMesero', body);
     if (r && r.ok) {
-      toast('ok', '🍽 ' + categoria + ' → cocina · mesa ' + mesa + (esPrimera ? ' · ' + fmtPrice(precioFormula) : ' · $0 (ya pagada en la fórmula)'));
+      const _caida = _cadutaDichiara(r, body.uuid, mesa);   // [03-ott · caduta su Google]
+      if (_caida) toast('sig', _caida, 6000);
+      else toast('ok', '🍽 ' + categoria + ' → cocina · mesa ' + mesa + (esPrimera ? ' · ' + fmtPrice(precioFormula) : ' · $0 (ya pagada en la fórmula)'));
       refrescar(false);
       return true;
     }
@@ -11153,6 +11240,7 @@ function _mesasModel(r) {
 function renderMesas(r) {
   const list = _mesasModel(r);
   STATE.mesasModel = list;
+  _cadutaPotatura(r);   // [03-ott] il bordo ora vede quel pedido? il chip se ne va
   _gestoRiconcilia(list);   // v3.27.0 · [AUT-0078] · l'effetto si è visto? se no, dopo 90 s è un rosso
   /* CONSOLA v1 (10-ago): la tessera dice numero · da quanto · stato IN PAROLA
      · consumo aperto. Il tempo esce da hace_s (il piu vecchio della sessione),
@@ -11196,6 +11284,7 @@ function renderMesas(r) {
          ricompare QUI, sopra la griglia: lo vede anche chi sta guardando un
          altro tavolo, e non se ne va da solo. */
       _gestoAvvisoHtml() +
+      _cadutaBandaHtml() +
       '<div class="mesa-grid" id="mapaGrid">';
     const jDib = {};   // v3.4.1 · junta già disegnata → i membri non si ripetono
     todas.forEach(function (mesa) {
@@ -15117,7 +15206,7 @@ function cardPedido(p, umb, urgente) {
     '<div class="cs-fila"><div class="cs-ico">' + (esRegalo ? '🎁' : '🔔') + '</div>' +
     '<div class="cs-body"><div class="cs-tit"><b>' + titulo + grupoB + '</b>' +
     '<span class="espera ' + esperaClass(p.hace_s, umb) + '">⏱ ' + fmtHace(p.hace_s) + '</span></div>' +
-    '<div class="cs-det">' + esc(p.plaza || 'sin plaza') +
+    '<div class="cs-det">' + esc(p.plaza || 'sin plaza') + _cadutaChipHtml(p.uuid) +
     (urgente ? ' · <b style="color:var(--cs-urge)">nadie lo tomó</b>' : '') + '</div></div></div>' +
     regaloHtml + prodHtml +
     bodyItems(p) +
