@@ -138,7 +138,7 @@ h1{font-size:19px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em}
 <div class="wrap" id="app"><p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando…</p></div>
 <div class="sheet" id="sheet"><div class="card" id="sheetCard"></div></div>
 <div class="toast" id="toast"></div>
-<span id="ver" hidden>v1.3.0 · atto3 propinas · el PIN del cierre + falta alguien · 03oct</span>
+<span id="ver" hidden>v1.4.0 · atto3 propinas · quién estuvo en turno · 03oct</span>
 
 <script src="shared/pinsita_auth.js"></script>
 <script>
@@ -367,7 +367,14 @@ function pantallaReparto() {
      avviso che non si può agire si impara a non leggere. */
   if (!D.cerrado && (D.personas || []).some(function(x){
         return !meseros.some(function(m){ return String(m.persona_id) === String(x.persona_id); }); })) {
-    h += '<button class="addr" id="addm">+ Falta alguien</button>';
+    /* 🔑 il NUMERO sul tasto quando il libro dice che qualcuno c'era e non è in lista:
+       un tasto muto si impara a non premere, un tasto che porta un numero si guarda.
+       Niente frase: il numero e due parole (Alberto, 02-ott). */
+    var nSug = ((D.sugeridos || []).filter(function(x){
+      return !meseros.some(function(m){ return String(m.persona_id) === String(x.persona_id); }); })).length
+      + (D.presenti_non_riconosciuti || []).length;
+    h += '<button class="addr" id="addm">+ Falta alguien'
+      + (nSug ? ' <b>· ' + nSug + ' en turno</b>' : '') + '</button>';
   }
   h += '</div>';
 
@@ -460,14 +467,35 @@ var PARTES_EXTRA = [];        // i persona_id aggiunti a mano, per questo repart
 function abrirFaltaAlguien(meseros) {
   var dentro = {};
   (meseros || []).forEach(function(m){ dentro[String(m.persona_id)] = true; });
-  var fuera = (D.personas || []).filter(function(x){ return !dentro[String(x.persona_id)]; });
+  /* 🔑 IN CIMA CHI IL LIBRO DICE CHE ERA PRESENTE (`sugeridos`, dai `clock_in`): misurato
+     su 22 giorni-locale, 19 volte una persona ha lavorato e non ha incassato propina ⇒
+     col solo «chi ha incassato» il tronco si divideva fra meno teste, 14 giorni su 22.
+     Non li aggiungo io: il `clock_in` non dice il turno, e metterne uno nel turno
+     sbagliato sbaglierebbe nei due versi. Un tocco, e lo decide lei. */
+  var sug = (D.sugeridos || []).filter(function(x){ return !dentro[String(x.persona_id)]; });
+  var sugId = {};
+  sug.forEach(function(x){ sugId[String(x.persona_id)] = true; });
+  var fuera = (D.personas || []).filter(function(x){
+    return !dentro[String(x.persona_id)] && !sugId[String(x.persona_id)]; });
+  var riga = function(pid, nombre, marca){
+    return '<div class="r pick" data-pid="' + esc(pid) + '"><div class="n">' + esc(nombre)
+      + (marca ? '<span class="prop">estuvo en turno</span>' : '')
+      + '</div><div class="v acc">+</div></div>'; };
   var card = document.getElementById('sheetCard');
   card.innerHTML = '<p class="kick">Agregar</p><h1>¿Quién trabajó?</h1>'
     + '<div class="rows">'
-    + fuera.map(function(x){
-        return '<div class="r pick" data-pid="' + esc(x.persona_id) + '"><div class="n">'
-          + esc(x.nombre_legal || x.persona_id) + '</div><div class="v acc">+</div></div>'; }).join('')
-    + '</div><button class="btn gh" id="canf">Cancelar</button>';
+    + sug.map(function(x){ return riga(x.persona_id, x.nombre || x.persona_id, true); }).join('')
+    + fuera.map(function(x){ return riga(x.persona_id, x.nombre_legal || x.persona_id, false); }).join('')
+    + '</div>'
+    /* 🔴 i presenti che il libro non sa nominare (`Esuardo`, `Hurley`, `carlo`…: grafie
+       storte nei clock_in, senza alias). Non si indovinano e non si tacciono: senza
+       questa riga sparirebbero in silenzio, ed è la forma peggiore del buco. */
+    + ((D.presenti_non_riconosciuti || []).length
+       ? '<div class="note">No reconozco: ' + (D.presenti_non_riconosciuti).map(esc).join(', ')
+         + '</div>' : '')
+    + (D.presenti_fonte === 'solo_cobros'
+       ? '<div class="note">No pude leer el turno. Esta lista es solo de quien cobró.</div>' : '')
+    + '<button class="btn gh" id="canf">Cancelar</button>';
   document.getElementById('sheet').className = 'sheet show';
   document.getElementById('canf').onclick = cerrarSheet;
   Array.prototype.forEach.call(card.querySelectorAll('.pick'), function(el){
