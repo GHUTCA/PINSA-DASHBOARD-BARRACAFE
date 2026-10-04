@@ -1100,7 +1100,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.218.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.218.1 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2696,7 +2696,21 @@ async function _scontoVia(action, body, consumo) {
     const rB = await _pagoAlBorde(body, consumo, action);
     if (rB) return rB;
   }
+  /* [04-ott · AUT-0566 · condizione di 🎛 CONTROLLER `FAM SENZA PIN NON ESCE DAL BORDO`] a leva accesa una FAM o una
+     colación NON ripiega sul libro: il libro non chiede il motivo, e sarebbe la porta di servizio da cui passa una FAM
+     senza chi e senza perché. Se il bordo non l'ha accettata (rete, leva, pausa, `need:gas`) il gesto si FERMA e lo dice;
+     il mesero riprova. `_esFamColn` guarda il payload GIÀ costruito. */
+  if (_esFamColn(action, body)) {
+    return { ok: false, borde: true, definitivo: true, error: 'sin_bordo',
+      mensaje: 'No se pudo cerrar por el bordo — reintenta en unos segundos.' };
+  }
   return gasPost(action, body);
+}
+function _esFamColn(action, body) {
+  if (!FAMCOL_MOTIVO_ON) return false;
+  const b = body || {};
+  if (b.sin_pago === 1 || b.sin_pago === '1' || b.sin_pago === true) return false;
+  return action === 'registrarColacion' || b.fam === 1 || b.fam === '1' || b.fam === true || String(b.pin_fam || '').trim() !== '';
 }
 async function _pagoAlBorde(body, consumo, action) {
   /* v3.19.0 · [AUT-EMERG 22-ago] · stessa sganciata di staffPost: il pago al
@@ -8763,6 +8777,9 @@ var FINTURNO_BLOQUEO_ON = false;
    schermo del corte si disegna dalla sala che il telefono HA GIÀ (nata al
    bordo), senza aspettare il libro; il libro completa dietro. Nasce spenta. */
 var CORTE_LOCAL_ON = false;
+/* [04-ott · AUT-0566] FAM e colación esigono il MOTIVO (e, nel bordo, firma e codice): leva del bordo (/salud →
+   fam_coln_motivo_on). Nasce spenta: finché il bordo non risponde, il vetro di ieri, esatto. */
+var FAMCOL_MOTIVO_ON = false;
 /* [29-set · Alberto: «il tetto del 30% fallo subito»] il tetto NON e' piu' una
    copia del vetro: si legge dal bordo (/salud → desc_max_pct), che e' la fonte
    unica e lo applica. 30 resta solo finche' il bordo non ha risposto. */
@@ -8786,6 +8803,7 @@ var CORTE_LOCAL_ON = false;
       };
       FINTURNO_BLOQUEO_ON = String(cercaK(j, 'finturno_bloqueo_on')) === '1';   // [30-set]
       CORTE_LOCAL_ON = String(cercaK(j, 'corte_local_on')) === '1';             // [30-set]
+      FAMCOL_MOTIVO_ON = String(cercaK(j, 'fam_coln_motivo_on')) === '1';       // [04-ott · AUT-0566]
     }).catch(function () {});
   } catch (e) { /* senza il bordo resta 30 */ }
 })();
@@ -8958,13 +8976,22 @@ function _dtProdVuelve() { _dt.pr = null; _dt.pmot = ''; _dt.pin = ''; _dtPinta(
 /* quanto scende il conto: le unità tolte per il loro prezzo */
 function _dtProdMonto() { return _dt && _dt.pr ? Math.round(_dt.pr.pu * _dt.pr.quita) : 0; }
 
+/* [04-ott · AUT-0566] a leva accesa FAM e colación non partono senza il perché (8 lettere, come il bordo) */
+function _dtMotOk() { return !FAMCOL_MOTIVO_ON || ((_dt && _dt.mtx) || '').trim().length >= 8; }
+/* [04-ott · AUT-0566] il PERCHÉ di FAM e colación: scritto dal JL con le sue parole, minimo 8 lettere */
+function _dtMotBox() {
+  return FAMCOL_MOTIVO_ON
+    ? '<div class="c4lab">Motivo</div><textarea class="cs-pin" id="dtMt" rows="2" maxlength="80" style="resize:none;font-size:16px" ' +
+      'placeholder="¿Por qué? (mínimo 8 letras)" oninput="_dtEscribe(\'mtx\',this.value,\'dtMt\')">' + esc(_dt.mtx || '') + '</textarea>'
+    : '';
+}
 function _dtHay() {
   if (!_dt || !_dt.tipo) return false;
   if (_dt.tipo === 'prod')  return !!(_dt.pr && _dt.pmot);
   if (_dt.tipo === 'conv')  return !!_dt.conv;
   if (_dt.tipo === 'dto')   { var m = _dtMot(_dt.mot); return !!m && (!m.esc || (_dt.txt || '').trim().length >= 12); }
-  if (_dt.tipo === 'fam')   return !!_dt.fam;
-  if (_dt.tipo === 'coln')  return !!_dt.col;
+  if (_dt.tipo === 'fam')   return !!_dt.fam && _dtMotOk();
+  if (_dt.tipo === 'coln')  return !!_dt.col && _dtMotOk();
   if (_dt.tipo === 'otro')  return (_dt.cob || 0) > 0 && _dt.cob >= _dtMin() && (_dt.txt || '').trim().length >= 12;
   if (_dt.tipo === 'franq') return true;
   return false;
@@ -8985,6 +9012,7 @@ function _dtFalta() {
     return 'Escribe qué pasó';
   if (_dt.tipo === 'fam'  && !_dt.fam) return '¿Quién es?';
   if (_dt.tipo === 'coln' && !_dt.col) return '¿Para quién es?';
+  if ((_dt.tipo === 'fam' || _dt.tipo === 'coln') && !_dtMotOk()) return 'Escribe el motivo';   // [AUT-0566]
   if (_dt.tipo === 'prod' && !_dt.pr)   return '¿Cuál producto?';
   if (_dt.tipo === 'prod' && !_dt.pmot) return '¿Por qué vuelve?';
   if (_dt.tipo === 'otro' && !(_dt.cob > 0)) return '¿Cuánto cobraste?';
@@ -9019,7 +9047,7 @@ function _dtTipo(t) {
     toast('warn', '🔄 La mesa cambió: ' + fmtPrice(_dt.tot) + ' → ' + fmtPrice(fresco));
     _dt.tot = fresco; _dt.promo = _dtPromo(_dt.mesa);
   }
-  _dt.tipo = t; _dt.conv = ''; _dt.mot = ''; _dt.txt = '';
+  _dt.tipo = t; _dt.conv = ''; _dt.mot = ''; _dt.txt = ''; _dt.mtx = '';
   _dt.fam = ''; _dt.col = ''; _dt.cob = 0; _dt.pin = '';
   _dtPinta();
 }
@@ -9269,7 +9297,7 @@ function _dtPinta() {
     if (_dt.tipo === 'fam')
       b += '<div class="c4lab">¿Quién?</div>' +
         _dtLista('fam', DTO_FAMILIA,
-          function (n) { return n; }, function (n) { return n; }, null);
+          function (n) { return n; }, function (n) { return n; }, null) + _dtMotBox();
     /* ═══ 🍱 LA COLACIÓN: TRE NOMI FISSI, NON IL TURNO ═════════════════════════
        Alberto, 1-set, dopo il primo giro sul vivo: *«non complichiamoci con il
        turno, ti do io i nomi: Pedro · Eduardo · Guía Turística.»*
@@ -9290,7 +9318,7 @@ function _dtPinta() {
     if (_dt.tipo === 'coln') {
       b += '<div class="c4lab">¿Para quién?</div>' +
         _dtLista('col', DTO_COLACION,
-          function (n) { return n; }, function (n) { return n; }, null);
+          function (n) { return n; }, function (n) { return n; }, null) + _dtMotBox();
     }
     /* 🍽 la sesta porta, dentro la card. Due stati soli: scegli la riga, poi
        dici perché. Niente quantità da comporre, niente «agregar producto»:
@@ -9768,15 +9796,20 @@ function _dtGo() {
     /* la chiave la conia il CLIENT, una per gesto: il retry non duplica */
     var uid = 'col-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     _scontoVia('registrarColacion', { codigo: STATE.codigo, nombre: STATE.nombre,
-      mesa: mesa, para: d.col, pin_jl: d.pin, uid: uid, pago_uid: uid }, d.tot || _vpTot(mesa) || 0).then(function (r) {
+      mesa: mesa, para: d.col, pin_jl: d.pin, uid: uid, pago_uid: uid,
+      motivo: String(d.mtx || '').trim().slice(0, 80) }, d.tot || _vpTot(mesa) || 0).then(function (r) {   // [AUT-0566]
       if (r && r.ok) {
         _limpiarMesaLocal(mesa);
         _marcarCierreInstante(mesa);   // [AUT-0422 ⓐ]
         toast('ok', '🍱 Colación de ' + d.col + ' ✓ mesa ' + mesa + ' · $0');
         refrescar(false); return;
       }
+      if (r && r.error === 'motivo_requerido') FAMCOL_MOTIVO_ON = true;   // [AUT-0566] un telefono caricato prima dell'accensione: dal prossimo gesto chiede il motivo
       toast('err', /action not found/.test((r && r.error) || '')
         ? 'El servidor aún no conoce la colación'
+        : (r && r.error === 'motivo_requerido') ? 'Falta el motivo — vuelve a abrir ELIMINAR y escríbelo'
+        : (r && r.error === 'pin_jl_no_configurado') ? 'PIN del JL no configurado — avisa a Alberto'
+        : (r && r.error === 'sin_bordo') ? 'Sin conexión con el bordo — reintenta en unos segundos'
         : ((r && (r.error === 'pin_jl_invalido' || r.error === 'pin_invalido'))
             ? 'PIN del JL incorrecto' : 'No se pudo: ' + ((r && r.error) || '?')));
     }).catch(function () { toast('err', 'Sin conexión — reintenta'); });
@@ -9807,7 +9840,9 @@ function _dtGo() {
     d.uid = d.uid || ('PU-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7));
     _scontoVia('registrarPago', { codigo: STATE.codigo, nombre: STATE.nombre,
       registrado_por: STATE.nombre, mesa: mesa, medio: 'fam', fam: 1,
-      pin_fam: (d.pin || '').trim(), pago_uid: d.uid }, d.tot || _vpTot(mesa) || 0).then(function (r) {
+      pin_fam: (d.pin || '').trim(), pago_uid: d.uid,
+      para: String(d.fam || '').slice(0, 60),
+      motivo: String(d.mtx || '').trim().slice(0, 80) }, d.tot || _vpTot(mesa) || 0).then(function (r) {   // [AUT-0566]
       if (r && r.ok) {
         _dt = null; _dtPinta();
         _limpiarMesaLocal(mesa);
@@ -9818,9 +9853,12 @@ function _dtGo() {
         refrescar(false); return;
       }
       d.env = 0;
+      if (r && r.error === 'motivo_requerido') FAMCOL_MOTIVO_ON = true;   // [AUT-0566]
       bordeHecho('pago_fam_rechazado', { mesa: mesa, error: (r && r.error) || '?' });
       var errFam = { pin_fam_requerido: 'Falta el código FAM', pin_fam_invalido: 'Código FAM incorrecto',
-        pin_fam_bloqueado: 'Código bloqueado 10 min (5 intentos)', pin_fam_no_configurado: 'Código FAM no configurado — avisa a Alberto' };
+        pin_fam_bloqueado: 'Código bloqueado 10 min (5 intentos)', pin_fam_no_configurado: 'Código FAM no configurado — avisa a Alberto',
+        motivo_requerido: 'Falta el motivo', para_requerido: 'Elige quién es',
+        sin_bordo: 'Sin conexión con el bordo — reintenta en unos segundos', codigo_turno: 'No se pudo verificar el turno — reintenta' };   // [AUT-0566]
       /* [29-set · Alberto: «dovrebbe essere informato come negli altri sconti,
          per avere uno standard»] il rifiuto del codice resta FISSO sotto la
          casella, come il PIN del JL — non un toast che sparisce. */
@@ -9949,6 +9987,9 @@ function colnPara(el, n) {
 }
 async function colnConfirmar(btn) {
   const c = STATE.coln || {};
+  /* [AUT-0566 · N9] la PORTA VECCHIA (solo con `?desc2=0`): non sa chiedere il motivo, e il bordo a leva accesa lo esige.
+     Dichiarato invece di lasciarla rifiutare muta: si dice dove si fa. */
+  if (FAMCOL_MOTIVO_ON) { toast('warn', 'Esta pantalla vieja no pide el motivo — usa ELIMINAR (?desc2=1)', 5000); return; }
   if (!c.para) { toast('warn', '¿Para quién es? Toca el nombre'); return; }
   if (!(c.pin || '').trim()) { toast('warn', 'Falta el PIN del JL'); return; }
   /* la chiave la conia il client, UNA per apertura: il retry non duplica */
@@ -12220,6 +12261,7 @@ function pagoImprimirToggle() { if (STATE.pago) { STATE.pago.imprimir = !STATE.p
 function pagoFamAsk() { if (STATE.pago) { STATE.pago.famAsk = !STATE.pago.famAsk; renderPago(); } }
 async function pagoFamConfirmar() {
   const pg = STATE.pago; if (!pg || pg.enviando) return;
+  if (FAMCOL_MOTIVO_ON) { toast('warn', 'Esta pantalla vieja no pide el motivo — usa ELIMINAR (?desc2=1)', 5000); return; }   // [AUT-0566 · N9] porta vecchia: dichiarato
   if (!String(pg.pinFam || '').trim()) { toast('err', 'Escribe el código FAM'); return; }
   pg.enviando = true; renderPago();
   try {
@@ -14407,6 +14449,14 @@ async function pagoConfirmar(btn) {
     }
     if (pg.montoOn && _pagoMonto() !== pg.tot) {
       body.monto = _pagoMonto(); body.monto_manual = 1; body.pin_jl = (pg.pinJL || '').trim();
+      /* [01-ott · #67 AUTORE E MOTIVO, Alberto: «ogni sconto porta autore e motivo»]
+         il PERCHÉ viaggia col pago: il NOME e la % (`et`, mai l'indice della
+         lista: il fossile deve portarsi dentro il convenio) e il racconto
+         scritto («Otro reclamo», «Otro monto»). L'autore lo firma il PIN. */
+      if (pg.dto) {
+        body.motivo = String(pg.dto.et || '').slice(0, 80);
+        if (pg.dto.txt) body.motivo_detalle = String(pg.dto.txt).slice(0, 500);
+      }
     }
     body.boleta = 1;
     if (pg.imprimir) body.imprimir = 1;   // v1.7 · la vuole in mano anche con la mail
