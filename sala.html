@@ -2614,7 +2614,21 @@ async function _scontoVia(action, body, consumo) {
     const rB = await _pagoAlBorde(body, consumo, action);
     if (rB) return rB;
   }
+  /* [04-ott · AUT-0566 · condizione di 🎛 CONTROLLER `FAM SENZA PIN NON ESCE DAL BORDO`] a leva accesa una FAM o una
+     colación NON ripiega sul libro: il libro non chiede il motivo, e sarebbe la porta di servizio da cui passa una FAM
+     senza chi e senza perché. Se il bordo non l'ha accettata (rete, leva, pausa, `need:gas`) il gesto si FERMA e lo dice;
+     il mesero riprova. `_esFamColn` guarda il payload GIÀ costruito. */
+  if (_esFamColn(action, body)) {
+    return { ok: false, borde: true, definitivo: true, error: 'sin_bordo',
+      mensaje: 'No se pudo cerrar por el bordo — reintenta en unos segundos.' };
+  }
   return gasPost(action, body);
+}
+function _esFamColn(action, body) {
+  if (!FAMCOL_MOTIVO_ON) return false;
+  const b = body || {};
+  if (b.sin_pago === 1 || b.sin_pago === '1' || b.sin_pago === true) return false;
+  return action === 'registrarColacion' || b.fam === 1 || b.fam === '1' || b.fam === true || String(b.pin_fam || '').trim() !== '';
 }
 async function _pagoAlBorde(body, consumo, action) {
   /* v3.19.0 · [AUT-EMERG 22-ago] · stessa sganciata di staffPost: il pago al
@@ -9708,6 +9722,7 @@ function _dtGo() {
         ? 'El servidor aún no conoce la colación'
         : (r && r.error === 'motivo_requerido') ? 'Falta el motivo — vuelve a abrir ELIMINAR y escríbelo'
         : (r && r.error === 'pin_jl_no_configurado') ? 'PIN del JL no configurado — avisa a Alberto'
+        : (r && r.error === 'sin_bordo') ? 'Sin conexión con el bordo — reintenta en unos segundos'
         : ((r && (r.error === 'pin_jl_invalido' || r.error === 'pin_invalido'))
             ? 'PIN del JL incorrecto' : 'No se pudo: ' + ((r && r.error) || '?')));
     }).catch(function () { toast('err', 'Sin conexión — reintenta'); });
@@ -9755,7 +9770,8 @@ function _dtGo() {
       bordeHecho('pago_fam_rechazado', { mesa: mesa, error: (r && r.error) || '?' });
       var errFam = { pin_fam_requerido: 'Falta el código FAM', pin_fam_invalido: 'Código FAM incorrecto',
         pin_fam_bloqueado: 'Código bloqueado 10 min (5 intentos)', pin_fam_no_configurado: 'Código FAM no configurado — avisa a Alberto',
-        motivo_requerido: 'Falta el motivo', para_requerido: 'Elige quién es' };   // [AUT-0566]
+        motivo_requerido: 'Falta el motivo', para_requerido: 'Elige quién es',
+        sin_bordo: 'Sin conexión con el bordo — reintenta en unos segundos', codigo_turno: 'No se pudo verificar el turno — reintenta' };   // [AUT-0566]
       /* [29-set · Alberto: «dovrebbe essere informato come negli altri sconti,
          per avere uno standard»] il rifiuto del codice resta FISSO sotto la
          casella, come il PIN del JL — non un toast che sparisce. */

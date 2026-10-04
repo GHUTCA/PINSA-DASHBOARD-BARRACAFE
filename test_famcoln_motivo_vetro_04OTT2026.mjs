@@ -42,6 +42,41 @@ t('colación senza persona: prima «¿Para quién es?»', mondo(true, COL({ col:
 t('«otro» non è toccato dalla leva', mondo(true, { tipo: 'otro', cob: 0, txt: '' }, { _dtMin: () => 1 }).API._dtHay() === false);
 t('«franq» resta pronta', mondo(true, { tipo: 'franq' }).API._dtHay() === true);
 
+// ── CONDIZIONE DI 🎛 CONTROLLER: FAM/colación non ripiegano mai sul libro (gasPost)
+{ const fnA = (nome) => { const i = SRC.indexOf((nome === '_scontoVia' ? 'async function ' : 'function ') + nome + '('); const j = SRC.indexOf('\n}\n', i) + 3; if (i < 0) throw new Error(nome); return SRC.slice(i, j); };
+  const code = fnA('_scontoVia') + '\n' + fnA('_esFamColn');
+  const run = async (leva, action, body, bordo, dto = true) => {
+    const chiamate = [];
+    const ctx = { FAMCOL_MOTIVO_ON: leva, DTO_BORDE_ON: dto, chiamate,
+      _pagoAlBorde: async () => bordo, gasPost: async (a, b) => { chiamate.push('gasPost'); return { ok: true, via: 'libro' }; } };
+    vm.createContext(ctx); vm.runInContext(code + '\n;this.API = { _scontoVia, _esFamColn };', ctx);
+    const r = await ctx.API._scontoVia(action, body, 1000); return { r, chiamate };
+  };
+  const FAMB = { fam: 1, pin_fam: '9999', medio: 'fam' };
+  let o = await run(true, 'registrarPago', FAMB, null);
+  t('FAM, il bordo non la prende (null), leva accesa: NESSUNA chiamata al libro', o.chiamate.length === 0, o);
+  t('… e il vetro dice sin_bordo, definitivo, con un messaggio', o.r && o.r.ok === false && o.r.error === 'sin_bordo' && o.r.definitivo === true && !!o.r.mensaje, o.r);
+  o = await run(true, 'registrarColacion', { para: 'Pedro', pin_jl: '2222' }, null);
+  t('colación, il bordo non la prende, leva accesa: nessuna chiamata al libro', o.chiamate.length === 0 && o.r.error === 'sin_bordo', o);
+  o = await run(true, 'registrarPago', FAMB, null, false);
+  t('FAM con ?dtoborde=0 (il bordo spento dal telefono), leva accesa: nessuna chiamata al libro', o.chiamate.length === 0 && o.r.error === 'sin_bordo', o);
+  o = await run(true, 'registrarPago', FAMB, { ok: true, borde: true });
+  t('FAM accettata dal bordo: si restituisce la risposta del bordo, nessuna chiamata al libro', o.chiamate.length === 0 && o.r.ok === true && o.r.borde === true, o);
+  o = await run(true, 'registrarPago', FAMB, { ok: false, borde: true, definitivo: true, error: 'motivo_requerido' });
+  t('un NO definitivo del bordo passa com è', o.r.error === 'motivo_requerido' && o.chiamate.length === 0, o);
+  // leva SPENTA = ieri: il ripiego sul libro resta
+  o = await run(false, 'registrarPago', FAMB, null);
+  t('leva spenta: FAM ripiega sul libro come ieri', o.chiamate.length === 1 && o.r.via === 'libro', o);
+  o = await run(false, 'registrarColacion', { para: 'Pedro' }, null);
+  t('leva spenta: colación ripiega sul libro come ieri', o.chiamate.length === 1, o);
+  // gli altri gesti non cambiano a leva accesa
+  o = await run(true, 'registrarPago', { medio: 'efectivo', monto_manual: 1, pin_jl: '2222' }, null);
+  t('leva accesa: uno sconto (dto) ripiega sul libro come ieri', o.chiamate.length === 1, o);
+  o = await run(true, 'registrarPago', { sin_pago: 1, fam: 1, pin_fam: '1' }, null);
+  t('leva accesa: sin_pago (JL) non è FAM e ripiega come ieri', o.chiamate.length === 1, o);
+  o = await run(true, 'registrarPago', { medio: 'efectivo' }, null);
+  t('leva accesa: un pago normale ripiega come ieri', o.chiamate.length === 1, o); }
+
 // ── cablaggio sul sorgente
 t('leva letta da /salud (cercaK fam_coln_motivo_on)', /FAMCOL_MOTIVO_ON = String\(cercaK\(j, 'fam_coln_motivo_on'\)\) === '1'/.test(SRC));
 t('leva nasce spenta: var FAMCOL_MOTIVO_ON = false', /var FAMCOL_MOTIVO_ON = false;/.test(SRC));
@@ -50,6 +85,7 @@ t('FAM (pannello nuovo) invia para E motivo', /para: String\(d\.fam \|\| ''\)\.s
 t('un motivo_requerido dal bordo accende il campo (telefono caricato prima)', (SRC.match(/error === 'motivo_requerido'\) FAMCOL_MOTIVO_ON = true/g) || []).length === 2);
 t('le due PORTE VECCHIE dichiarano invece di rifiutare mute', (SRC.match(/Esta pantalla vieja no pide el motivo/g) || []).length === 2);
 t('il campo motivo si azzera al cambio di tipo', /_dt\.txt = ''; _dt\.mtx = '';/.test(SRC));
+t('sin_bordo ha il suo messaggio in FAM e colación', (SRC.match(/sin_bordo: 'Sin conexión con el bordo/g) || []).length === 1 && /error === 'sin_bordo'\) \? 'Sin conexión con el bordo/.test(SRC));
 t('versione bumpata 3.217.5', /id="ver">sala v3\.217\.5/.test(SRC));
 // MUTAZIONE: senza _dtMotOk in _dtHay la FAM senza motivo diventerebbe pronta a leva accesa
 const mutB = blocco.replace("return !!_dt.fam && _dtMotOk();", 'return !!_dt.fam;');
