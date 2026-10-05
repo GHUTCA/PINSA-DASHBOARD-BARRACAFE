@@ -1100,7 +1100,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.218.3 · vetro</span>
+      <span class="ver" id="ver">sala v3.220.1 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3791,6 +3791,10 @@ function _ciePaso1() {
 function _ciePasar() { CIE.pasarMesas = true; _ciePaso2(); }
 
 function _ciePaso2() {
+  if (CAJA_ATTO1_ON) { _ciePaso2Atto1(); return; }   // [02-ott · ATTO I] senza conteggio, a tasca zero
+  _ciePaso2Viejo();
+}
+function _ciePaso2Viejo() {
   CIE.paso = 2;
   // chi torna a contare riparte pulito: un motivo scelto per il conteggio di
   // prima non deve appiccicarsi a una dichiarazione nuova
@@ -3807,6 +3811,144 @@ function _ciePaso2() {
     '<div class="cie-out" onclick="_ciePaso1()">← Volver</div>');
   setTimeout(() => { const i = $('cieMonto'); if (i) i.focus(); }, 120);
 }
+
+/* ═══ [02-ott · v3.218.0 · 🎛 BKP V29] CAJA · ATTO I nella sala del mesero ═══
+   ③ la conferma del ritiro («Coincide / No coincide») e ⑥ «Mi corte» SENZA
+   conteggio: il contante del mesero è la somma dei ritiri firmati dal JL
+   (Alberto: «il mesero non conta più, anche perché non lo ricorderà»), e il
+   corte si chiude solo a tasca zero. Dal bordo, leva CAJA_ATTO1_ON.
+   🔴 FALLISCE APERTO SUL CORTE, CHIUSO SUI NUMERI: se il bordo non sa dire quanto
+   ha in tasca, NON si inventa uno zero — si torna a contare come prima, e si dice. */
+async function _cajaMesero(extra) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const r = await fetch(BORDE_SALA.URL + '/caja/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?t=' + encodeURIComponent(BORDE_SALA.T),
+      { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctrl.signal, cache: 'no-store',
+        body: JSON.stringify(Object.assign({ codigo: STATE.codigo, nombre: STATE.nombre }, extra || {})) });
+    clearTimeout(to);
+    return await r.json();
+  } catch (e) { clearTimeout(to); return null; }
+}
+/* [03-ott · i vetri di 🎨 DESIGN, ⑤] Mi corte nelle parole del mockup: Recaudación en efectivo ·
+   Retiros · Saldo por entregar. Nessuna frase dentro il telefono, «dinero» e mai «plata».
+   Dichiarato: «Tu propina de hoy» e «Mesa N cerrada sin pago» del mockup NON ci sono ancora — il
+   primo arriva con l'ATTO III (il riparto), il secondo vuole un fatto che estado_mesero non porta. */
+function _cieTurnoHoy() {
+  const d = new Date(); const hh = d.getHours(), mm = d.getMinutes();
+  const noche = (hh * 60 + mm) >= (18 * 60 + 30) || hh < 6;
+  const ref = hh < 6 ? new Date(d.getTime() - 6 * 3600000) : d;
+  const dia = ref.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric' });
+  return dia.charAt(0).toUpperCase() + dia.slice(1).replace(',', '') + ' · ' + (noche ? 'noche' : 'día');
+}
+async function _ciePaso2Atto1() {
+  CIE.paso = 21;   // non 2: `cierreEnviar` prende la cifra da CIE.uidMonto (la somma dei ritiri), non da una casella
+  CIE.motivo = ''; CIE.res = null;
+  _cieRender('<div class="cie-msg">…</div>');
+  const r = await _cajaMesero({ verbo: 'estado_mesero' });
+  if (!r || !r.ok) {
+    toast('warn', 'No pude leer tus retiros: cuenta como siempre, y avísale al JL.');
+    _ciePaso2Viejo(); return;
+  }
+  if ((r.por_confirmar || []).length) {
+    const p = Object.assign({}, r.por_confirmar[0], { entregado_antes: r.entregado || 0 }); _cajaPendCorte = p;
+    _cajaConfMostrar(p);
+    return;
+  }
+  const recaud = (r.ventas_efectivo || 0) + (r.propina_efectivo || 0) + (r.residuo || 0);
+  if (r.en_mano > 0) {
+    _cieRender('<div class="cie-h">Todavía no puedes cerrar</div>' +
+      '<div class="cie-sub">Entrega de efectivo · ' + esc(_cieTurnoHoy()) + '</div>' +
+      '<div class="cie-box"><div class="cie-tot">' + fmtPrice(r.en_mano) + '</div>' +
+        '<div class="cie-row"><span>Recaudación en efectivo</span><b>' + fmtPrice(recaud) + '</b></div>' +
+        '<div class="cie-row"><span>Retiros</span><b>' + fmtPrice(r.entregado || 0) + '</b></div>' +
+        '<div class="cie-row"><span><b>Saldo por entregar</b></span><b style="color:#FFB547">' + fmtPrice(r.en_mano) + '</b></div>' +
+      '</div>' +
+      '<button class="btn sec" onclick="_ciePaso1()">Volver</button>');
+    return;
+  }
+  CIE.uidMonto = r.entregado || 0;
+  _cieRender('<div class="cie-h">Mi corte</div>' +
+    '<div class="cie-sub">Tu turno de hoy · ' + esc(_cieTurnoHoy()) + '</div>' +
+    '<div class="cie-box">' +
+      '<div class="cie-row"><span>Recaudación en efectivo</span><b>' + fmtPrice(recaud) + '</b></div>' +
+      '<div class="cie-row"><span>Retiros</span><b>' + fmtPrice(r.entregado || 0) + '</b></div>' +
+    '</div>' +
+    '<button class="btn" id="cieBtn" onclick="this.disabled=true;cierreEnviar()">Listo</button>' +
+    '<div class="cie-out" onclick="_ciePaso1()">← Volver</div>');
+}
+/* ③ la conferma del ritiro: arriva da sola (giro ogni 30 s) o dal corte */
+let _cajaConfAperta = '', _cajaPendCorte = null;
+/* [03-ott · ② del mockup] «Confirma tu retiro»: la cifra, l'ora, Ya entregaste hoy · Con esta entrega.
+   Premere «Sí, es correcto» È la firma: nessuna frase che annuncia la registrazione. */
+function _cajaConfMostrar(p) {
+  if (!p || !p.uid_gesto) return;
+  _cajaConfAperta = p.uid_gesto;
+  let w = $('cajaConfWrap');
+  if (!w) { w = document.createElement('div'); w.id = 'cajaConfWrap'; document.body.appendChild(w); }
+  const hh = p.ts ? new Date(p.ts).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '';
+  const antes = +p.entregado_antes || 0;
+  w.innerHTML = '<div class="cs-pago"><div class="cs-pcard cie-card"><div class="cs-asa"></div>' +
+    '<div class="cie-h">Confirma tu retiro</div>' +
+    '<div class="cie-box"><div class="cie-tot">' + fmtPrice(p.monto) + '</div>' +
+      (hh ? '<div class="cie-nota">contados a las ' + hh + '</div>' : '') +
+      '<div class="cie-row"><span>Ya entregaste hoy</span><b>' + fmtPrice(antes) + '</b></div>' +
+      '<div class="cie-row"><span>Con esta entrega</span><b>' + fmtPrice(antes + (+p.monto || 0)) + '</b></div>' +
+    '</div>' +
+    '<button class="btn" id="cajaConfSi" onclick="_cajaConfResponder(\'coincide\', this)">Sí, es correcto</button>' +
+    '<button class="btn sec" onclick="_cajaConfResponder(\'no_coincide\', this)">No coincide</button>' +
+    '</div></div>';
+}
+function _cajaConfCerrar() { const w = $('cajaConfWrap'); if (w) w.innerHTML = ''; _cajaConfAperta = ''; }
+async function _cajaConfResponder(esito, btn) {
+  const uid = _cajaConfAperta; if (!uid) return;
+  if (esito === 'no_coincide' && !confirm('¿No coincide?')) return;
+  if (btn) btn.disabled = true;   // [03-ott] un tocco = un fatto: la firma non parte due volte
+  const r = await _cajaMesero({ verbo: 'firma', rol: 'mesero', contenedor: 'ritiro', contenedor_uid: uid, esito: esito });
+  if (r && r.ok) {
+    toast('ok', esito === 'coincide' ? '✓' : '⚠️ No coincide');
+    _cajaConfCerrar();
+    if (CIE.paso === 21) _ciePaso2Atto1();
+  } else if (r && (r.error === 'ritiro_no_pendiente')) { _cajaConfCerrar(); }
+  else { if (btn) btn.disabled = false; toast('err', 'No llegó tu respuesta — toca de nuevo'); }
+}
+/* [03-ott · ATTO III · il «Recibido»] la cajera consegna la propina e il mesero la FIRMA dal suo telefono:
+   la scheda nasce quando il bordo ha un pago a suo nome da firmare (`propinas_mesero`, col codice del turno),
+   e «Recibido» manda `propina_recibido` (uid del pago, uid della firma coniato all'APERTURA della scheda,
+   `quien` = il suo nome). Per la regola 14 senza questa firma la persona non è pagata. */
+let _propAperta = '', _propFirmaUid = '';
+function _propMostrar(p) {
+  if (!p || !p.uid_gesto) return;
+  if (_propAperta !== p.uid_gesto) { _propAperta = p.uid_gesto; _propFirmaUid = 'fr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+  let w = $('propRecWrap');
+  if (!w) { w = document.createElement('div'); w.id = 'propRecWrap'; document.body.appendChild(w); }
+  w.innerHTML = '<div class="cs-pago"><div class="cs-pcard cie-card"><div class="cs-asa"></div>' +
+    '<div class="cie-h">Tu propina</div>' +
+    '<div class="cie-box"><div class="cie-tot">' + fmtPrice(p.monto) + '</div></div>' +
+    '<button class="btn" onclick="_propRecibido(this)">Recibido</button>' +
+    '</div></div>';
+}
+function _propCerrar() { const w = $('propRecWrap'); if (w) w.innerHTML = ''; _propAperta = ''; _propFirmaUid = ''; }
+async function _propRecibido(btn) {
+  const uid = _propAperta, fu = _propFirmaUid; if (!uid || !fu) return;
+  if (btn) btn.disabled = true;   // un tocco = un fatto
+  const r = await _cajaMesero({ verbo: 'propina_recibido', uid_gesto: uid, firma_uid_gesto: fu, quien: STATE.nombre, fuente: 'borde' });
+  if (r && r.ok) { toast('ok', '✓'); _propCerrar(); }
+  else { if (btn) btn.disabled = false; toast('err', 'No llegó tu firma — toca de nuevo'); }
+}
+async function _cajaGiroMesero() {
+  if (JL || !STATE.codigo || !STATE.nombre) return;
+  if (document.visibilityState && document.visibilityState !== 'visible') return;
+  if (CAJA_ATTO1_ON && !_cajaConfAperta) {
+    const r = await _cajaMesero({ verbo: 'estado_mesero' });
+    if (r && r.ok && (r.por_confirmar || []).length) { _cajaConfMostrar(Object.assign({}, r.por_confirmar[0], { entregado_antes: r.entregado || 0 })); return; }
+  }
+  if (CAJA_ATTO3_ON && !_propAperta && !_cajaConfAperta) {
+    const q = await _cajaMesero({ verbo: 'propinas_mesero' });
+    if (q && q.ok && (q.por_firmar || []).length) _propMostrar(q.por_firmar[0]);
+  }
+}
+setInterval(_cajaGiroMesero, 30000);
 
 /* «vacío» y «cero» no son lo mismo: el botón se habilita cuando hay ALGO
    escrito, aunque sea 0 — un turno sin un solo pago en efectivo es una
@@ -8809,6 +8951,9 @@ var CORTE_LOCAL_ON = false;
    fam_coln_motivo_on). Nasce spenta: finché il bordo non risponde, il vetro di ieri, esatto. */
 var FAMCOL_MOTIVO_ON = null;   // null = /salud non ha ancora risposto (NON «spenta»); true/false = lo ha detto il bordo
 var FAMCOL_SALUD_TS = 0;       // quando /salud ha risposto l'ultima volta (0 = mai)
+/* [02-ott · ATTO I] la caja della notte al bordo: conferma dei ritiri e «Mi corte» senza conteggio. Nasce spenta. */
+var CAJA_ATTO1_ON = false;
+var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propina
 /* [29-set · Alberto: «il tetto del 30% fallo subito»] il tetto NON e' piu' una
    copia del vetro: si legge dal bordo (/salud → desc_max_pct), che e' la fonte
    unica e lo applica. 30 resta solo finche' il bordo non ha risposto. */
@@ -8833,6 +8978,8 @@ var FAMCOL_SALUD_TS = 0;       // quando /salud ha risposto l'ultima volta (0 = 
       FINTURNO_BLOQUEO_ON = String(cercaK(j, 'finturno_bloqueo_on')) === '1';   // [30-set]
       CORTE_LOCAL_ON = String(cercaK(j, 'corte_local_on')) === '1';             // [30-set]
       if (!(j && j.ok === false)) { FAMCOL_MOTIVO_ON = String(cercaK(j, 'fam_coln_motivo_on')) === '1'; FAMCOL_SALUD_TS = Date.now(); }       // [04-ott · AUT-0566] un JSON d'errore non vale come risposta
+      CAJA_ATTO1_ON = String(cercaK(j, 'caja_atto1_on')) === '1';           // [02-ott · ATTO I]
+      CAJA_ATTO3_ON = String(cercaK(j, 'caja_atto3_on')) === '1';           // [03-ott · ATTO III]
     }).catch(function () {});
   } catch (e) { /* senza il bordo resta 30 */ }
 })();
