@@ -220,7 +220,7 @@ async function esRespuestaPin(j) {
 async function postCaja(body) {
   var base = BORDE[LOCAL] || BORDE.rsc;
   var url = base + '/caja/' + encodeURIComponent(LOCAL) + '?t=' + encodeURIComponent(TOKEN);
-  var conPin = Object.assign({ pin_caja: PIN_CAJA }, body);
+  var conPin = Object.assign({ pin_caja: PIN_CAJA }, body, PROVA ? { dia_prueba: DIA_HOY } : {});   // [05-ott] en modo prueba el «hoy» es de prueba, y lo dice el vetro
   try {
     var r = await fetch(url, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(conPin) });
     var j = await r.json();
@@ -267,7 +267,13 @@ async function getCaja(path) {
 var SES = null;          // { user, role, local, turno }
 var DIA_HOY = hoyOperativo();
 var DIA_NOCHE = diaAnterior(DIA_HOY);
-var PASO = 1;             // 1 caja fuerte · 2 conteo · 3 cortes pos · 4 deposito
+/* ═══ [05-ott · MARCIA BIANCA · modo de collaudo] `?prova=1` ═══════════════════════════════════════════
+   Los días de prueba son 2099-…: un día que no existe para los datos reales. El bordo deja operar ese día SOLO al
+   PIN COLLAUDO, y cierra el día real a ese PIN (y el día de prueba a los PIN reales): el collaudo no ve datos
+   verdaderos y los datos verdaderos no ven el collaudo. Sin `?prova=1` la app es la de siempre, byte por byte. */
+var PROVA = (function () { try { return new URLSearchParams(location.search).get('prova') === '1'; } catch (e) { return false; } })();
+if (PROVA) { DIA_HOY = '2099-12-31'; DIA_NOCHE = '2099-12-30'; }
+var PASO = 1;            // 1 caja fuerte · 2 conteo · 3 cortes pos · 4 deposito
 var MANANA = null;        // respuesta de /manana
 var SOBRE_IDX = 0;        // qué sobre se está contando
 var CORTES = null;        // respuesta de /cortes_pos
@@ -276,12 +282,22 @@ var DEPOSITO_PENDIENTE = null;
 /* ═══ 3 · RENDER ══════════════════════════════════════════════════════════ */
 var app = document.getElementById('app');
 function barra(titulo) {
-  return '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
+  return (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
+    '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
     '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + '</span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 
+/* [05-ott · modo prueba] planta una caja_sobre de PRUEBA (día 2099) para poder contar y depositar hoy */
+async function plantarBustaPrueba() {
+  var nro = (document.getElementById('psNro').value || '').replace(/[^0-9]/g, '');
+  var monto = parseInt((document.getElementById('psMonto').value || '').replace(/[^0-9]/g, ''), 10);
+  if (!nro || !(monto >= 0)) { toast('Escribe el número y el monto de la busta.', 'bad'); return; }
+  var r = await postCaja({ verbo: 'prueba_sobre', uid_gesto: 'ps-' + nro + '-' + Date.now().toString(36), sobre_nro: nro, suma_ritiri: monto });
+  if (r.ok) { toast('Busta de prueba ' + nro + ' creada', 'ok'); pantalla6(); }
+  else if (!r.pin) toast('No se pudo: ' + (r.motivo || '?'), 'bad');
+}
 async function pantalla6() {
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando la caja fuerte…</p>';
   MANANA = await getCaja('manana?dia=' + DIA_NOCHE);
@@ -294,8 +310,13 @@ async function pantalla6() {
       '<div class="vuoto"><div class="ic">🗄</div><b>La caja fuerte está vacía</b>' +
       '<span style="font-size:12.5px;max-width:26ch">Anoche el local estuvo cerrado, o nadie retiró.<br>Nada que abrir, nada que contar.</span></div>' +
       '<div class="note ok"><b>Lo que sí tienes hoy:</b><br>los cortes POS de ayer, que no dependen del efectivo.</div>' +
+      (PROVA ? '<div class="note"><b>Preparar una busta de prueba</b><br>' +
+        '<input id="psNro" inputmode="numeric" placeholder="Número de busta (ej. 9001)" style="width:100%;margin:6px 0;padding:10px;font-size:16px">' +
+        '<input id="psMonto" inputmode="numeric" placeholder="Monto que tiene (ej. 43000)" style="width:100%;margin:6px 0;padding:10px;font-size:16px">' +
+        '<button class="btn" id="psPlantar">Crear busta de prueba</button></div>' : '') +
       '<button class="btn acc" id="irPos">Ir a los cortes POS</button>';
     document.getElementById('irPos').onclick = function(){ PASO = 3; pantalla8(); };
+    if (PROVA) document.getElementById('psPlantar').onclick = plantarBustaPrueba;
     return;
   }
   /* ✏️ 03-ott · Alberto, a DESIGN («alla cajera dovrebbero apparire i totali
