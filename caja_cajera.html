@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="es-CL">
+<!-- DEVICE-CLASS: 1 · cattura in movimento · mobile-only · UI es-CL registro tú
+     💵 TERZA PENNA · 02-ott-2026 · ATTO II — l'app della cajera, sul suo telefono
+     Fonte: 4_CANTIERE_CAJA/MOCKUP_ATTO_II_CAJERA_02OTT2026.html (⑥⑦⑧⑨ + le due
+     aggiunte dichiarate ⑥-vacío/⑦-no cuadra). Tono CHIARO (proposta di DESIGN,
+     in attesa del sì di Alberto — vedi bacheca `TERZA PENNA ATTO II APERTA`).
+     Cargo: CAJA. Leva server: CAJA_ATTO2_ON (una per penna/atto, come
+     CAJA_ATTO1_ON di BKP — bacheca `ATTO I RAMO E CUCITURE`, 02-ott sera),
+     nasce "0". Non deploya questa penna: il cancello è di BKP.
+
+     🔴 CONTRATTO DI LETTURA — le quattro funzioni pure+async che lo
+        implementano sono già scritte in `src/caja_atto2.js` (bordo):
+        `cajaAtto2LeerManana/LeerCortesPos/LeerDepositoPendiente/LeerParametro`.
+        Qui resta solo la cucitura Worker (import + leva + rotta), di BKP:
+          GET  /caja/:local/manana?t=&dia=YYYY-MM-DD   (dia = la NOTTE)
+               → { sobres:[{sobre_nro,declarado,firma_jl,ts_hecho,conteo:null|
+                   {contado,sello_intacto,nota,diferencia}}], aviso_sin_respuesta:
+                   {mesero,motivo,ts}|null }   (caja_aviso non porta un monto)
+          GET  /caja/:local/cortes_pos?t=&dia=   → { maquinas:[string,...], libro:int,
+               guardado:[{maquina,corte}] }   (libro = solo debito+credito, MAI
+               mpago/fintoc: non passano dalla macchina fisica — BKP, 02-ott)
+          GET  /caja/:local/deposito_pendiente?t=&dia= → { salida_pendiente:
+               {uid_gesto,contado,reserva,a_depositar}|null }
+        Finché la cucitura non è incollata, l'app chiama, vede fallire, e lo
+        DICE sullo schermo invece di inventare uno zero.
+        ✏️ 02-ott notte · Alberto (`CAJA CHICA DUE E PRIMO PAGO STORICO`):
+           «deposito el 100% y retiro del banco lo que necesito» — sparita la
+           riserva del 5% trattenuta PRIMA del deposito (il punto cieco del
+           mockup 14-set). ⑨ deposita `contado` intero, `reserva` resta nello
+           schema (CHECK di forma in `caja_deposito`) ma vale SEMPRE 0: non
+           chiamo più `/parametro?clave=reserva_pct`, la funzione di lettura
+           resta nel bordo (`cajaAtto2LeerParametro`) per un uso futuro.
+     ⚠️ Scrittura: POST /caja/:local?t=  body: { verbo:'conteo'|'pos_corte'|
+        'deposito', ...campi, fuente:'app_caja' }. 🔎 BKP: `pos_corte` nel verbo
+        di rete, `cajaAtto2FilaCortePos` nel codice — nomi diversi per lo
+        stesso gesto, stessa forma di `ritiro`/`cajaFilaRitiro`. I tre nomi
+        vanno nella mappa VERBI di `_caja()` (src/index.js r.~7186), import
+        da `./caja_atto2.js`: non lo tocco io, è la tua cucitura.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Caja · la mañana</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F7F6F3; --surf:#FFFFFF; --surf2:#F0EEE9;
+  --ink:#1B1A17; --ink2:#5A564E; --edge:#8A8579; --hair:#D7D4CD;
+  --acc:#8c6a20; --ok:#1F7A4D; --warn:#8A5A00; --bad:#B3261E;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.5 Outfit,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+body{padding:14px 14px calc(26px + env(safe-area-inset-bottom))}
+.wrap{max-width:460px;margin:0 auto}
+.bar{display:flex;align-items:center;gap:9px;margin-bottom:14px;font-size:12px;color:var(--ink2);
+  font-family:'IBM Plex Mono',monospace}
+.bar b{color:var(--ink);font-weight:600}
+.pasos{display:flex;gap:5px;margin:10px 0 16px}
+.pasos i{flex:1;height:4px;border-radius:3px;background:var(--hair);font-style:normal}
+.pasos i.on{background:var(--acc)}
+.kick{font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;font-weight:700;color:var(--acc);margin:0 0 6px}
+.kick.ok{color:var(--ok)} .kick.bad{color:var(--bad)}
+h1{font-size:19px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em}
+.sd{font-size:12.5px;color:var(--ink2);margin:0 0 14px}
+.big{font-size:30px;font-weight:800;letter-spacing:-.02em;margin:2px 0;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+.big.acc{color:var(--acc)} .big.ok{color:var(--ok)} .big.bad{color:var(--bad)}
+.blab{font-size:11.5px;color:var(--ink2);margin:0 0 14px}
+.rows{border:1px solid var(--edge);border-radius:11px;overflow:hidden;background:var(--surf);margin-bottom:12px}
+.r{display:flex;align-items:center;gap:9px;padding:10px 12px;border-bottom:1px solid var(--hair);font-size:13.5px}
+.r:last-child{border-bottom:0}
+.r .n small{display:block;font-size:10.5px;color:var(--ink2);margin-top:1px}
+.r .v{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;color:var(--ink2);white-space:nowrap}
+.r .v.ok{color:var(--ok)} .r .v.bad{color:var(--bad)} .r .v.acc{color:var(--acc)}
+.r.hd{background:var(--surf2);font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink2);font-weight:700;padding:7px 12px}
+.r.tot{background:var(--surf2)} .r.tot .n{font-weight:700} .r.tot .v{color:var(--ink);font-weight:700}
+.r.clic{cursor:pointer}
+.inp{width:100%;background:var(--surf);border:1.5px solid var(--edge);border-radius:11px;padding:12px;
+  font:inherit;font-size:16px;font-weight:600;color:var(--ink);margin-bottom:9px}
+.inp::placeholder{color:var(--ink2);font-weight:400;font-size:14px;opacity:.75}
+.lb{font-size:11.5px;color:var(--ink2);margin:0 0 6px}
+.note{background:var(--surf);border:1px solid var(--edge);border-left-width:3px;border-radius:0 9px 9px 0;
+  padding:10px 12px;margin:0 0 12px;font-size:12px;color:var(--ink2);line-height:1.5}
+.note.bad{border-left-color:var(--bad)} .note.ok{border-left-color:var(--ok)}
+.note b{color:var(--ink)}
+.btn{width:100%;border:0;border-radius:13px;padding:14px;font:inherit;font-size:15px;font-weight:700;cursor:pointer;margin-top:4px}
+.btn.acc{background:var(--acc);color:#fff} .btn.ok{background:var(--ok);color:#fff}
+.btn.gh{background:transparent;color:var(--ink2);border:1px solid var(--edge)}
+.btn[disabled]{opacity:.45;pointer-events:none}
+.two{display:flex;gap:9px;margin-top:4px} .two .btn{margin-top:0}
+.vuoto{min-height:260px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:7px;color:var(--ink2)}
+.vuoto .ic{font-size:36px;opacity:.5}
+.vuoto b{color:var(--ink);font-size:16.5px}
+.toast{position:fixed;left:14px;right:14px;bottom:calc(14px + env(safe-area-inset-bottom));
+  background:var(--ink);color:#fff;padding:11px 14px;border-radius:11px;font-size:13px;
+  box-shadow:0 10px 30px rgba(0,0,0,.25);display:none;z-index:50}
+.toast.show{display:block}
+.toast.bad{background:var(--bad)} .toast.ok{background:var(--ok)}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando…</p></div>
+<div class="toast" id="toast"></div>
+
+<script src="shared/pinsita_auth.js"></script>
+<script>
+(function(){
+'use strict';
+
+/* ═══ 0 · CONTESTO ══════════════════════════════════════════════════════ */
+var qp = new URLSearchParams(location.search);
+var LOCAL = (qp.get('loc') || '').toLowerCase().trim();
+/* ✏️ 03-ott · BKP (`INTEGRACIÓN CAJA b50beda`): el bordo vivo es
+   alberto-agostini.workers.dev — el otro dominio (ghutca) que tenía aquí
+   no es el que sala.html usa de verdad (BORDE_SALA.URL, verificado). */
+var BORDE = {
+  rsc: 'https://pinsita-borde.alberto-agostini.workers.dev',
+  cdl: 'https://pinsita-borde.alberto-agostini.workers.dev'
+};
+var TOKEN = qp.get('t') || localStorage.getItem('pinsita_borde_t') || '';
+if (qp.get('t')) { try { localStorage.setItem('pinsita_borde_t', qp.get('t')); } catch(e){} }
+
+/* ✏️ 03-ott · el PIN de la cajera — NUNCA en localStorage (misma disciplina
+   que el PIN del JL): vive solo en memoria, se pide una vez al abrir, y una
+   respuesta pin_caja_invalido lo borra y lo vuelve a pedir. Nunca viaja en
+   la URL: body pin_caja en los POST, header X-Caja-Pin en los GET. */
+var PIN_CAJA = null;
+
+function hoyOperativo(d) {
+  /* taglio 06:00 America/Santiago — stessa regola del bordo (sombraFechaOpOf),
+     qui solo per ETICHETTARE lo schermo: il dia_operativo VERO lo scrive il
+     bordo stesso in ogni verbo (`caja_atto2.js` lo riceve, non lo calcola). */
+  var now = d || new Date();
+  var santiago = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }));
+  if (santiago.getHours() < 6) santiago.setDate(santiago.getDate() - 1);
+  var y = santiago.getFullYear(), m = String(santiago.getMonth()+1).padStart(2,'0'), day = String(santiago.getDate()).padStart(2,'0');
+  return y + '-' + m + '-' + day;
+}
+function diaAnterior(iso) {
+  var d = new Date(iso + 'T12:00:00');
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0,10);
+}
+function fmt(n) { return '$' + Math.round(n||0).toLocaleString('es-CL'); }
+function uidGesto(prefijo) {
+  return prefijo + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
+}
+function toast(msg, clase) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show' + (clase ? ' ' + clase : '');
+  clearTimeout(toast._h); toast._h = setTimeout(function(){ t.classList.remove('show'); }, 3200);
+}
+
+/* ✏️ 02-ott sera · Alberto («DOPPIO TOCCO DISEGNO E SISTEMA»): «se clicco due
+   volte, sono dos fatti» — un sistema a 450ms premia el doble toque que el
+   sistema lento (Google) castigaba sin querer. UN TOQUE = UN HECHO: en cada
+   botón que escribe un fatto (confirmar conteo · guardar corte · salir al
+   banco · guardar depósito), el segundo toque se ignora hasta que el primero
+   termina (éxito o error) — nunca "mientras dure la red", siempre hasta que
+   el gesto esté confirmado. La etiqueta cambia al tocar: prueba visible de
+   que SÍ tomó el gesto, no solo un botón apagado. */
+function unTocoUnHecho(btn, fn) {
+  btn.addEventListener('click', async function(ev){
+    if (btn.dataset.tocado === '1') return;   // el segundo toque, ignorado
+    btn.dataset.tocado = '1';
+    var texto = btn.textContent;
+    btn.textContent = '… ' + texto;
+    btn.disabled = true;
+    try { await fn(ev); }
+    finally {
+      btn.dataset.tocado = '';
+      btn.disabled = false;
+      btn.textContent = texto;
+    }
+  });
+}
+
+/* ═══ 1 · RED — llamadas al bordo, con cola si falla ════════════════════ */
+var COLA_KEY = 'caja_atto2_cola';
+function leerCola() { try { return JSON.parse(localStorage.getItem(COLA_KEY) || '[]'); } catch(e){ return []; } }
+function guardarCola(c) { try { localStorage.setItem(COLA_KEY, JSON.stringify(c)); } catch(e){} }
+function colaEncolar(body) {
+  var c = leerCola(); c.push(body); guardarCola(c);
+}
+/* las cuatro respuestas del PIN de la caja (bordo, _cajaPinCaja): si una
+   llamada tropieza con alguna, se trata ANTES de leer "ok"/"motivo" como
+   si fuera un rechazo cualquiera — borra el PIN si está mal, y pide uno
+   nuevo en la próxima pantalla en vez de reintentar a ciegas. */
+async function esRespuestaPin(j) {
+  var err = j && j.error;
+  if (err === 'pin_caja_invalido') {
+    PIN_CAJA = null; toast('PIN incorrecto. Vuelve a escribirlo.', 'bad');
+    await pedirPinCaja();   // la próxima vez que toque el botón, ya tiene PIN fresco
+    return true;
+  }
+  if (err === 'pin_caja_requerido') { PIN_CAJA = null; toast('Falta tu PIN.', 'bad'); await pedirPinCaja(); return true; }
+  if (err === 'pin_caja_bloqueado') {
+    var s = Math.ceil((j.faltan_s || 0));
+    toast('Demasiados intentos. Espera ' + Math.ceil(s / 60) + ' min.', 'bad'); return true;
+  }
+  if (err === 'pin_caja_no_configurado') { toast('La caja todavía no tiene PIN configurado. Avisa a Alberto.', 'bad'); return true; }
+  return false;
+}
+async function postCaja(body) {
+  var base = BORDE[LOCAL] || BORDE.rsc;
+  var url = base + '/caja/' + encodeURIComponent(LOCAL) + '?t=' + encodeURIComponent(TOKEN);
+  var conPin = Object.assign({ pin_caja: PIN_CAJA }, body);
+  try {
+    var r = await fetch(url, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(conPin) });
+    var j = await r.json();
+    if (await esRespuestaPin(j)) return { ok:false, motivo: j.error, pin:true };
+    if (!r.ok || j.ok === false) return { ok:false, motivo: j.motivo || j.error || ('http_' + r.status) };
+    if (j.scritto === false) return { ok:false, motivo: j.motivo || 'no_escrito' };
+    return { ok:true };
+  } catch (e) {
+    /* sin red: no sabemos si el PIN es válido, pero encolar el pin_caja
+       junto al gesto es lo correcto — se verifica cuando el bordo responda. */
+    colaEncolar(conPin);
+    return { ok:true, encolado:true };
+  }
+}
+async function flushCola() {
+  var c = leerCola();
+  if (!c.length) return;
+  var resto = [];
+  for (var i=0;i<c.length;i++) {
+    var r = await postCaja(c[i]);
+    if (!r.ok) resto.push(c[i]);
+  }
+  guardarCola(resto);
+  if (resto.length < c.length) toast((c.length-resto.length) + ' envíos pendientes se enviaron', 'ok');
+}
+async function getCaja(path) {
+  var base = BORDE[LOCAL] || BORDE.rsc;
+  var url = base + '/caja/' + encodeURIComponent(LOCAL) + '/' + path +
+    (path.indexOf('?') >= 0 ? '&' : '?') + 't=' + encodeURIComponent(TOKEN);
+  try {
+    /* el PIN nunca en la URL: header X-Caja-Pin, como pide BKP */
+    var r = await fetch(url, { headers: { 'X-Caja-Pin': PIN_CAJA || '' } });
+    var j = await r.json();
+    if (await esRespuestaPin(j)) return { ok:false, error: j.error, pin:true };
+    if (!r.ok || j.ok === false) return { ok:false, error: j.error || ('http_' + r.status) };
+    return Object.assign({ ok:true }, j);
+  } catch (e) { return { ok:false, error:'sin_red' }; }
+}
+
+/* ═══ 2 · ESTADO ══════════════════════════════════════════════════════════ */
+var SES = null;          // { user, role, local, turno }
+var DIA_HOY = hoyOperativo();
+var DIA_NOCHE = diaAnterior(DIA_HOY);
+var PASO = 1;             // 1 caja fuerte · 2 conteo · 3 cortes pos · 4 deposito
+var MANANA = null;        // respuesta de /manana
+var SOBRE_IDX = 0;        // qué sobre se está contando
+var CORTES = null;        // respuesta de /cortes_pos
+var DEPOSITO_PENDIENTE = null;
+
+/* ═══ 3 · RENDER ══════════════════════════════════════════════════════════ */
+var app = document.getElementById('app');
+function barra(titulo) {
+  return '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + '</span></div>' +
+    (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+async function pantalla6() {
+  app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando la caja fuerte…</p>';
+  MANANA = await getCaja('manana?dia=' + DIA_NOCHE);
+  if (!MANANA.ok) { renderError('La caja fuerte', MANANA.error); return; }
+  var sobres = MANANA.sobres || [];
+  if (!sobres.length) {
+    app.innerHTML = barra(false) +
+      '<div class="kick ok">La caja fuerte</div><h1>Nada que contar</h1>' +
+      '<p class="sd">Anoche no hubo sobres</p>' +
+      '<div class="vuoto"><div class="ic">🗄</div><b>La caja fuerte está vacía</b>' +
+      '<span style="font-size:12.5px;max-width:26ch">Anoche el local estuvo cerrado, o nadie retiró.<br>Nada que abrir, nada que contar.</span></div>' +
+      '<div class="note ok"><b>Lo que sí tienes hoy:</b><br>los cortes POS de ayer, que no dependen del efectivo.</div>' +
+      '<button class="btn acc" id="irPos">Ir a los cortes POS</button>';
+    document.getElementById('irPos').onclick = function(){ PASO = 3; pantalla8(); };
+    return;
+  }
+  var total = sobres.reduce(function(a,s){return a+(s.declarado||0);}, 0);
+  var filas = sobres.map(function(s){
+    return '<div class="r"><span class="n">' + esc(s.sobre_nro) + '<small>' +
+      (s.ts_hecho ? new Date(s.ts_hecho).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) + ' · ' : '') +
+      esc(s.firma_jl||'') + '</small></span><span class="v' + (s.conteo ? ' ok' : '') + '">' +
+      fmt(s.declarado) + (s.conteo ? ' ✓' : '') + '</span></div>';
+  }).join('');
+  var MOTIVO_TXT = { limite_sala: 'pasó el límite de la sala', limite_persona: 'pasó el límite por persona', tiempo: 'demasiado tiempo con plata encima' };
+  var avisoHtml = MANANA.aviso_sin_respuesta
+    ? '<div class="note bad"><b>Un aviso quedó sin respuesta</b><br>' +
+      esc(MANANA.aviso_sin_respuesta.mesero) + ' · ' + (MOTIVO_TXT[MANANA.aviso_sin_respuesta.motivo] || MANANA.aviso_sin_respuesta.motivo) + '<br>' +
+      new Date(MANANA.aviso_sin_respuesta.ts).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) + ' · no hubo retiro.</div>'
+    : '';
+  app.innerHTML = barra(true) +
+    '<div class="kick">La caja fuerte</div><h1>Anoche</h1><p class="sd">' + DIA_NOCHE + ' · turno noche</p>' +
+    '<p class="big acc">' + sobres.length + '</p><p class="blab">sobres esperados · ' + fmt(total) + '</p>' +
+    '<div class="rows"><div class="r hd"><span>sobre</span><span>declarado</span></div>' + filas + '</div>' +
+    avisoHtml +
+    '<button class="btn acc" id="abrir">Abrir y contar</button>';
+  document.getElementById('abrir').onclick = function(){ SOBRE_IDX = sobres.findIndex(function(s){return !s.conteo;}); if (SOBRE_IDX<0) SOBRE_IDX = 0; PASO = 2; pantalla7(); };
+}
+
+function pantalla7() {
+  var sobres = (MANANA && MANANA.sobres) || [];
+  if (SOBRE_IDX >= sobres.length) { PASO = 3; pantalla8(); return; }
+  var s = sobres[SOBRE_IDX];
+  app.innerHTML = barra(true) +
+    '<div class="kick">El conteo · ' + (SOBRE_IDX+1) + ' de ' + sobres.length + '</div>' +
+    '<h1>Sobre ' + esc(s.sobre_nro) + '</h1><p class="sd">Escrito ' + fmt(s.declarado) + '</p>' +
+    '<div class="rows"><div class="r"><span class="n">Dice el sobre</span><span class="v">' + fmt(s.declarado) + '</span></div></div>' +
+    '<p class="lb">Cuánto contaste · <b>cuéntalo entero</b></p>' +
+    '<input class="inp" id="contado" placeholder="$" inputmode="numeric">' +
+    '<p class="lb">¿El sello estaba intacto?</p>' +
+    '<div class="two"><button class="btn gh" id="selloSi">Sí, intacto</button><button class="btn gh" id="selloNo">No, roto</button></div>' +
+    '<div id="extra" style="margin-top:10px"></div>';
+
+  var selloIntacto = null;
+  function pintarExtra() {
+    var dif = (Number(document.getElementById('contado').value || '') || 0) - s.declarado;
+    var box = document.getElementById('extra');
+    if (selloIntacto === null) { box.innerHTML = ''; return; }
+    if (dif === 0) {
+      box.innerHTML = '<div class="note ok">El sello estaba ' + (selloIntacto?'intacto':'roto') + ' y cuadra. <b>Nada que declarar.</b></div>' +
+        '<button class="btn ok" id="confirmar">Confirmar · siguiente sobre</button>';
+    } else {
+      box.innerHTML = '<div class="note bad"><b>' + (selloIntacto ? 'El sello estaba intacto.' : 'El sello estaba roto.') + '</b><br>' +
+        (selloIntacto ? 'Entonces pasó <b>antes</b> de cerrarlo: lo firmaron el JL y el garzón.<br>No lo resuelves tú — queda anotado.' : 'Pudo pasar en cualquier momento. Queda anotado.') + '</div>' +
+        '<p class="lb">Qué viste al abrirlo</p><input class="inp" id="nota" placeholder="En tus palabras">' +
+        '<button class="btn acc" id="confirmar">Dejar anotado y seguir</button>';
+    }
+    unTocoUnHecho(document.getElementById('confirmar'), confirmar);
+  }
+  document.getElementById('contado').addEventListener('input', pintarExtra);
+  document.getElementById('selloSi').onclick = function(){ selloIntacto = true; pintarExtra(); };
+  document.getElementById('selloNo').onclick = function(){ selloIntacto = false; pintarExtra(); };
+
+  async function confirmar() {
+    var contado = Number(document.getElementById('contado').value || '');
+    if (!Number.isFinite(contado) || contado < 0) { toast('Escribe cuánto contaste', 'bad'); return; }
+    var nota = document.getElementById('nota');
+    var body = {
+      verbo: 'conteo', uid_gesto: uidGesto('cnt'),
+      sobre_dia_op: DIA_NOCHE, sobre_nro: s.sobre_nro,
+      contado: contado, sello_intacto: selloIntacto, nota: nota ? nota.value : null,
+      firma_caja: SES.user, firma_caja_tipo: 'pin', fuente: 'app_caja',
+    };
+    var r = await postCaja(body);
+    if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
+    s.conteo = { contado: contado };
+    toast(r.encolado ? 'Guardado sin señal — se enviará solo' : 'Conteo guardado', 'ok');
+    SOBRE_IDX++; pantalla7();
+  }
+}
+
+async function pantalla8() {
+  app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando cortes POS…</p>';
+  CORTES = await getCaja('cortes_pos?dia=' + DIA_HOY);
+  if (!CORTES.ok) { renderError('Los cortes POS', CORTES.error); return; }
+  var maquinas = (CORTES.maquinas && CORTES.maquinas.length) ? CORTES.maquinas : ['Máquina 1'];
+  var inputs = maquinas.map(function(m, i){
+    var prev = (CORTES.guardado||[]).find(function(g){return g.maquina===m;});
+    return '<p class="lb">' + esc(m) + '</p><input class="inp" data-maq="' + esc(m) + '" placeholder="$" inputmode="numeric" value="' + (prev?prev.corte:'') + '">';
+  }).join('');
+  app.innerHTML = barra(true) +
+    '<div class="kick">Los cortes POS</div><h1>Las máquinas</h1><p class="sd">Un número por máquina, una vez al día</p>' +
+    inputs +
+    (CORTES.libro != null ? '<div class="rows"><div class="r"><span class="n">Dice nuestro libro</span><span class="v">' + fmt(CORTES.libro) + '</span></div></div>' : '') +
+    '<div class="note ok">El corte de la máquina es <b>el único testigo que no somos nosotros.</b></div>' +
+    '<button class="btn acc" id="guardar">Guardar</button>' +
+    '<button class="btn gh" id="siguiente">Ir al depósito</button>';
+  unTocoUnHecho(document.getElementById('guardar'), async function(){
+    var inputsEl = app.querySelectorAll('input[data-maq]');
+    for (var i=0;i<inputsEl.length;i++) {
+      var v = Number(inputsEl[i].value || '');
+      if (!Number.isFinite(v) || v < 0) { toast('Falta el corte de ' + inputsEl[i].dataset.maq, 'bad'); return; }
+      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGesto('pos'), maquina: inputsEl[i].dataset.maq,
+        corte: v, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+      if (!r.ok) { toast('No se guardó ' + inputsEl[i].dataset.maq + ': ' + r.motivo, 'bad'); return; }
+    }
+    toast('Cortes guardados', 'ok');
+  });
+  document.getElementById('siguiente').onclick = function(){ PASO = 4; pantalla9(); };
+}
+
+async function pantalla9() {
+  app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando el depósito…</p>';
+  var pend = await getCaja('deposito_pendiente?dia=' + DIA_HOY);
+  DEPOSITO_PENDIENTE = pend.ok ? pend.salida_pendiente : null;
+
+  if (DEPOSITO_PENDIENTE) {
+    app.innerHTML = barra(true) +
+      '<div class="kick">El depósito</div><h1>De vuelta del banco</h1><p class="sd">Escribe el número cuando lo tengas</p>' +
+      '<div class="rows"><div class="r tot"><span class="n">Depositaste</span><span class="v">' + fmt(DEPOSITO_PENDIENTE.a_depositar) + '</span></div></div>' +
+      '<p class="lb">N° de depósito</p><input class="inp" id="nro" placeholder="Lo escribes cuando vuelves">' +
+      '<button class="btn acc" id="cerrar">Guardar número de depósito</button>';
+    unTocoUnHecho(document.getElementById('cerrar'), async function(){
+      var nro = document.getElementById('nro').value.trim();
+      if (!nro) { toast('Escribe el número de depósito', 'bad'); return; }
+      var r = await postCaja({ verbo:'deposito', uid_gesto: uidGesto('dep'), evento:'vuelta',
+        referencia_uid: DEPOSITO_PENDIENTE.uid_gesto, nro_deposito: nro,
+        firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+      if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
+      toast('Depósito cerrado', 'ok');
+      PASO = 1; pantalla6();
+    });
+    return;
+  }
+
+  /* ✏️ 02-ott noche · Alberto («CAJA CHICA DUE E PRIMO PAGO STORICO»): «deposito
+     el 100% y retiro del banco lo que necesito para pagar propinas y gastos».
+     Se fue la reserva del 5% retenida ANTES del depósito (el "punto ciego" del
+     mockup del 14-set) — todo el efectivo contado se deposita entero. El
+     retiro para propinas/gastos es un gesto del banco, aparte, que no toca
+     esta pantalla. `reserva` sigue existiendo en el esquema (CHECK de forma
+     en caja_deposito) pero ahora vale SIEMPRE 0. */
+  var contadoTotal = (MANANA && MANANA.sobres || []).reduce(function(a,s){ return a + (s.conteo ? s.conteo.contado : (s.declarado||0)); }, 0);
+  app.innerHTML = barra(true) +
+    '<div class="kick">El depósito</div><h1>Antes de salir</h1><p class="sd">Se deposita el 100% contado</p>' +
+    '<p class="lb">Contado (editable si hace falta)</p><input class="inp" id="contado" inputmode="numeric" value="' + contadoTotal + '">' +
+    '<div id="calc"></div>' +
+    '<div class="note">El camino al banco es el único tramo sin testigo. Por eso el número queda escrito <b>antes</b> de que salgas.</div>' +
+    '<button class="btn acc" id="salir">Salir al banco</button>';
+  function recalc() {
+    var c = Number(document.getElementById('contado').value || '') || 0;
+    var reserva = 0;
+    var aDep = c;
+    document.getElementById('calc').innerHTML =
+      '<div class="rows"><div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>';
+    return { c: c, reserva: reserva, aDep: aDep };
+  }
+  var ultimo = recalc();
+  document.getElementById('contado').addEventListener('input', function(){ ultimo = recalc(); });
+  unTocoUnHecho(document.getElementById('salir'), async function(){
+    var r = await postCaja({ verbo:'deposito', uid_gesto: uidGesto('dep'), evento:'salida',
+      contado: ultimo.c, reserva: ultimo.reserva, a_depositar: ultimo.aDep,
+      firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+    if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
+    toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok');
+    pantalla9();
+  });
+}
+
+function renderError(titulo, error) {
+  app.innerHTML = barra(false) + '<div class="kick bad">' + esc(titulo) + '</div><h1>No se pudo cargar</h1>' +
+    '<div class="note bad">' + esc(error || 'sin_red') + '<br>Esta pantalla aún no tiene su lectura en el bordo — contrato pendiente, no es un error del teléfono.</div>' +
+    '<button class="btn gh" id="retry">Reintentar</button>';
+  document.getElementById('retry').onclick = async function(){
+    if (!PIN_CAJA) await pedirPinCaja();
+    [pantalla6,null,pantalla8,pantalla9][PASO-1]();
+  };
+}
+
+/* ✏️ 03-ott · el PIN de la caja (BKP, `INTEGRACIÓN CAJA b50beda`): se pide
+   UNA vez al abrir, vive solo en memoria (nunca localStorage — misma
+   disciplina que el PIN del JL), y una respuesta pin_caja_invalido lo
+   borra para que esta pantalla lo vuelva a pedir, nunca reintenta a ciegas. */
+function pedirPinCaja() {
+  return new Promise(function (resolve) {
+    app.innerHTML = barra(false) +
+      '<div class="kick">Tu PIN</div><h1>Antes de entrar</h1><p class="sd">El PIN de la caja, el mismo que usas en el panel</p>' +
+      '<input class="inp" id="pin" inputmode="numeric" type="password" placeholder="••••" maxlength="8" autofocus>' +
+      '<button class="btn acc" id="pinGo">Entrar</button>';
+    function ir() {
+      var v = document.getElementById('pin').value.trim();
+      if (!v) { toast('Escribe tu PIN', 'bad'); return; }
+      PIN_CAJA = v; resolve();
+    }
+    document.getElementById('pinGo').onclick = ir;
+    document.getElementById('pin').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') ir(); });
+  });
+}
+
+/* ═══ 4 · ARRANQUE ══════════════════════════════════════════════════════ */
+async function arrancar() {
+  SES = (window.PinsitaAuth && PinsitaAuth.sesion && PinsitaAuth.sesion()) || { user:'?', role:'CAJA' };
+  if (!LOCAL) LOCAL = (SES.local && SES.local !== '*') ? SES.local : 'rsc';
+  await pedirPinCaja();
+  flushCola();
+  pantalla6();
+}
+if (window.PinsitaAuth) {
+  PinsitaAuth.init({ local: '*', accent: '#8c6a20' });
+  // init() de-rendering el overlay de login cuando hay sesión; arrancamos
+  // igual: si no hay sesión, init() ya muestra el login y bloquea la UI.
+  setTimeout(arrancar, 50);
+} else {
+  app.innerHTML = '<p style="color:var(--bad)">No se pudo cargar pinsita_auth.js</p>';
+}
+window.addEventListener('online', flushCola);
+})();
+</script>
+</html>
