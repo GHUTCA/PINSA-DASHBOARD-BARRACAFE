@@ -99,6 +99,7 @@ h1{font-size:19px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em}
    (il reparto si può chiudere così) ⇒ non è rossa: è la voce neutra dell'incertezza. */
 .prop{float:right;font-size:9px;letter-spacing:.08em;background:var(--surf);color:var(--ink2);
       border:1px solid var(--line);border-radius:999px;padding:1px 7px;text-transform:none;letter-spacing:0}
+.addr small{font-weight:700;color:var(--ink2);letter-spacing:.04em}
 .addr{display:block;width:100%;background:none;border:0;border-top:1px solid var(--line);
       color:var(--acc);font:inherit;font-size:13px;font-weight:600;padding:10px;cursor:pointer;text-align:center}
 .r.tot{background:var(--surf2)} .r.tot .n{font-weight:700} .r.tot .v{color:var(--ink);font-weight:700}
@@ -138,7 +139,7 @@ h1{font-size:19px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em}
 <div class="wrap" id="app"><p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando…</p></div>
 <div class="sheet" id="sheet"><div class="card" id="sheetCard"></div></div>
 <div class="toast" id="toast"></div>
-<span id="ver" hidden>v1.4.1 · atto3 propinas · el éxito vacío también se declara · 03oct</span>
+<span id="ver" hidden>v1.5.0 · atto3 propinas · agregar a alguien lo hace el JL · 05oct</span>
 
 <script src="shared/pinsita_auth.js"></script>
 <script>
@@ -373,7 +374,10 @@ function pantallaReparto() {
     var nSug = ((D.sugeridos || []).filter(function(x){
       return !meseros.some(function(m){ return String(m.persona_id) === String(x.persona_id); }); })).length
       + (D.presenti_non_riconosciuti || []).length;
-    h += '<button class="addr" id="addm">+ Falta alguien'
+    /* 🔑 l'etichetta dice DI CHI E' il gesto. Un tasto che si puo' premere e poi
+       rifiuta insegna che il sistema dice no a caso; un tasto che dice «JL» dice
+       chi deve venire. (Alberto: niente frasi — due parole e un numero.) */
+    h += '<button class="addr" id="addm">+ Falta alguien <small>· JL</small>'
       + (nSug ? ' <b>· ' + nSug + ' en turno</b>' : '') + '</button>';
   }
   h += '</div>';
@@ -413,7 +417,7 @@ function pantallaReparto() {
   }
   app.innerHTML = h;
   var am = document.getElementById('addm');
-  if (am) am.onclick = function(){ abrirFaltaAlguien(meseros); };
+  if (am) am.onclick = function(){ abrirPuertaJl(meseros); };   // ③: prima il PIN del JL
   if (D.cerrado) document.getElementById('ir').onclick = function(){ PASO = 2; pintar(); };
   else document.getElementById('cerrar').onclick = function(ev){
     if (!unTocco(ev.currentTarget)) return;     // un tocco = un fatto
@@ -463,6 +467,44 @@ function abrirPinCerrar() {
       quanto prende ognuno. Per questo `reparto_vista` è un verbo e non una GET: la
       lista non viaggia in una URL, e un'anteprima non deve scrivere niente. */
 var PARTES_EXTRA = [];        // i persona_id aggiunti a mano, per questo reparto
+
+/* ③ DI ALBERTO (lun 05-ott, `FALTA ALGUIEN NON SI PREME`): chi ha lavorato senza
+   `clock_in` lo aggiunge **SOLO IL JL, col PIN del JL e il motivo**, e il fatto scrive
+   chi e perché. La cajera non vede la lista.
+   🔑 PERCIÒ IL PIN VIENE PRIMA DELLA LISTA, non dopo: se la lista si vedesse e il PIN
+      si chiedesse al momento di confermare, la cajera avrebbe già visto chi si può
+      aggiungere — e «la cajera non lo vede» sarebbe mezzo vero.
+   🩸 E la cura vera non è in questo pannello: è nel BORDO, che ora costruisce lui
+      l'elenco e accetta solo `agregados` firmati. *Nascondere il tasto non avrebbe
+      tolto niente: chiunque parli col bordo decideva chi viene pagato.* Questo
+      pannello è la porta; la serratura sta dall'altra parte. */
+var JL_PIN = '';          // in memoria, per il giro corrente. Mai scritto da nessuna parte.
+var JL_MOTIVO = '';
+
+function abrirPuertaJl(meseros) {
+  var card = document.getElementById('sheetCard');
+  card.innerHTML = '<p class="kick">Agregar</p><h1>Esto lo hace el JL</h1>'
+    + '<p class="lb">PIN del JL</p>'
+    + '<input class="inp pin" id="pjl" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="····">'
+    + '<p class="lb">Por qué</p>'
+    + '<input class="inp" id="mjl" type="text" maxlength="120" placeholder="entró a las 21, sin marcar">'
+    + '<div class="two"><button class="btn gh" id="canj">Cancelar</button>'
+    + '<button class="btn acc" id="okj">Seguir</button></div>';
+  document.getElementById('sheet').className = 'sheet show';
+  document.getElementById('pjl').focus();
+  document.getElementById('canj').onclick = cerrarSheet;
+  document.getElementById('okj').onclick = function(ev){
+    if (!unTocco(ev.currentTarget)) return;
+    var p = (document.getElementById('pjl') || {}).value || '';
+    var m = ((document.getElementById('mjl') || {}).value || '').trim();
+    if (!p) { toast('Falta el PIN del JL', 'bad'); return; }
+    /* il motivo si chiede QUI e non dopo: il bordo lo esige (409 `motivo_mancante`),
+       e farglielo rifiutare dopo aver scelto la persona è un giro in più per niente. */
+    if (!m) { toast('Falta el por qué', 'bad'); return; }
+    JL_PIN = p; JL_MOTIVO = m;
+    abrirFaltaAlguien(meseros);
+  };
+}
 
 function abrirFaltaAlguien(meseros) {
   var dentro = {};
@@ -515,20 +557,19 @@ function abrirFaltaAlguien(meseros) {
 
 async function recalcular() {
   if (!PIN_CAJA) { abrirPinCerrar(); return; }
-  var nombre = {};
-  (D.personas || []).forEach(function(x){ nombre[String(x.persona_id)] = x.nombre_legal || ''; });
-  var partes = ((D.detalle && D.detalle.partes) || []).map(function(p){
-    return { persona_id: p.persona_id, grupo: p.grupo, puntos: p.puntos, concepto: p.concepto || null };
-  });
-  var dentro = {};
-  partes.forEach(function(p){ dentro[String(p.persona_id)] = true; });
-  PARTES_EXTRA.forEach(function(pid){
-    if (!dentro[pid]) partes.push({ persona_id: pid, nombre: nombre[pid] || '',
-      grupo: 'mesero', puntos: 1, concepto: null });
+  /* ✏️ 🔴 QUI PRIMA FONDEVO `PARTES_EXTRA` DENTRO `partes` E MANDAVO L'ELENCO INTERO.
+     Era il buco di ③ visto dal lato del vetro: l'elenco di chi viene pagato lo
+     decideva questo file. Ora il bordo costruisce la sua proposta e accetta SOLO
+     `agregados`, firmati col PIN del JL e col motivo ⇒ qui si manda la DIFFERENZA,
+     non il risultato. *Chi manda il risultato chiede di essere creduto; chi manda la
+     differenza chiede di essere verificato.* */
+  var agregados = PARTES_EXTRA.map(function(pid){
+    return { persona_id: pid, motivo: JL_MOTIVO };
   });
   cargando();
-  var r = await postCaja({ verbo:'reparto_vista', dia_operativo: DIA, turno: TURNO,
-    partes: partes, fuente: 'app_caja', quien: (SES && SES.user) || '', pin_caja: PIN_CAJA });
+  var r = await postCaja(Object.assign({ verbo:'reparto_vista', dia_operativo: DIA,
+    turno: TURNO, fuente: 'app_caja', quien: (SES && SES.user) || '', pin_caja: PIN_CAJA },
+    agregados.length ? { agregados: agregados, pin_jl: JL_PIN } : {}));
   if (!r.ok || !r.reparto) {
     /* un'anteprima che non riesce NON cancella quella che c'era: si dice e si resta */
     toast(r.falta ? 'Revisa la lista' : ('No se pudo recalcular: ' + (r.motivo || r.error || '')), 'bad');
@@ -717,16 +758,19 @@ async function confirmarPago(p, grupo) {
 
 async function cerrarReparto() {
   var btn = document.getElementById('cerrar'); btn.disabled = true; btn.textContent = 'Cerrando…';
-  var partes = ((D.detalle && D.detalle.partes) || []).map(function(p){
-    return { persona_id: p.persona_id, grupo: p.grupo, puntos: p.puntos, concepto: p.concepto || null };
-  });
-  /* 🔑 chi è stato aggiunto a mano entra ANCHE SE il ricalcolo non era riuscito: senza
-     questa riga una persona segnata dalla cajera poteva sparire in silenzio fra il
-     tocco e la chiusura, e il suo dinero finire diviso fra gli altri. */
-  var dentro = {};
-  partes.forEach(function(p){ dentro[String(p.persona_id)] = true; });
-  PARTES_EXTRA.forEach(function(pid){
-    if (!dentro[pid]) partes.push({ persona_id: pid, grupo: 'mesero', puntos: 1, concepto: null });
+  /* ✏️ 🔴 ANCHE QUI FONDEVO `PARTES_EXTRA` IN `partes` E MANDAVO L'ELENCO — ed era la
+     porta che SCRIVE, quindi la più importante delle due. Il commento che c'era diceva
+     «chi è stato aggiunto a mano entra ANCHE SE il ricalcolo non era riuscito», e la
+     ragione era buona (una persona non deve sparire fra il tocco e la chiusura) **ma la
+     cura era nel posto sbagliato**: tenerla qui vuol dire che l'elenco di chi viene
+     pagato lo decide il vetro.
+     ⇒ si manda la DIFFERENZA (`agregados` + il PIN del JL), e la ragione buona resta
+       servita: il bordo riceve le aggiunte anche se l'anteprima non era riuscita,
+       perché gliele mando qui di nuovo invece di fidarmi di `D.detalle`.
+     🎓 *Una cura giusta nel posto sbagliato si riconosce dal fatto che il suo commento
+        parla di un rischio vero. Il rischio era vero; il posto no.* */
+  var agregados = PARTES_EXTRA.map(function(pid){
+    return { persona_id: pid, motivo: JL_MOTIVO };
   });
   if (!PIN_CAJA) {
     /* ✏️ Qui c'era «Entra tu PIN en una entrega primero», e MANDAVA DALLA PARTE
@@ -740,9 +784,10 @@ async function cerrarReparto() {
     return;
   }
   if (!UID_CERRAR) UID_CERRAR = uidGesto('rp');   // stabile finché non riesce: un retry è lo stesso gesto
-  var r = await postCaja({ verbo:'reparto_cerrar', uid_gesto: UID_CERRAR,
-    dia_operativo: DIA, turno: TURNO, partes: partes,
-    fuente: 'app_caja', quien: (SES && SES.user) || '', pin_caja: PIN_CAJA });
+  var r = await postCaja(Object.assign({ verbo:'reparto_cerrar', uid_gesto: UID_CERRAR,
+    dia_operativo: DIA, turno: TURNO,
+    fuente: 'app_caja', quien: (SES && SES.user) || '', pin_caja: PIN_CAJA },
+    agregados.length ? { agregados: agregados, pin_jl: JL_PIN } : {}));
   btn.disabled = false; btn.textContent = 'Cerrar y avisar';
   if (!r.ok) {
     toast(r.motivo === 'gate_spento' ? 'El reparto del sistema aún no está encendido' : ('No se pudo: ' + r.motivo), 'bad');
@@ -750,6 +795,9 @@ async function cerrarReparto() {
   }
   UID_CERRAR = null;
   PARTES_EXTRA = [];        // il reparto è fissato: le aggiunte sono dentro il fatto
+  /* 🔑 e il PIN del JL NON resta in memoria dopo il gesto per cui è stato dato: un
+     segreto che sopravvive al suo scopo diventa un segreto di chi tiene il tablet. */
+  JL_PIN = ''; JL_MOTIVO = '';
   toast(r.encolado ? 'Sin conexión: queda guardado y se envía solo' : 'Reparto cerrado', 'ok');
   await cargar();
   PASO = 2; pintar();
