@@ -9,10 +9,11 @@
      CAJA_ATTO1_ON di BKP — bacheca `ATTO I RAMO E CUCITURE`, 02-ott sera),
      nasce "0". Non deploya questa penna: il cancello è di BKP.
 
-     🔴 CONTRATTO DI LETTURA — le quattro funzioni pure+async che lo
+     🔴 CONTRATTO DI LETTURA — le cinque funzioni pure+async che lo
         implementano sono già scritte in `src/caja_atto2.js` (bordo):
-        `cajaAtto2LeerManana/LeerCortesPos/LeerDepositoPendiente/LeerParametro`.
-        Qui resta solo la cucitura Worker (import + leva + rotta), di BKP:
+        `cajaAtto2LeerManana/LeerCortesPos/LeerDepositoPendiente/LeerParametro/
+        LeerReserva`. Qui resta solo la cucitura Worker (import + leva +
+        rotta), di BKP:
           GET  /caja/:local/manana?t=&dia=YYYY-MM-DD   (dia = la NOTTE)
                → { sobres:[{sobre_nro,declarado,firma_jl,ts_hecho,conteo:null|
                    {contado,sello_intacto,nota,diferencia}}], aviso_sin_respuesta:
@@ -22,21 +23,29 @@
                mpago/fintoc: non passano dalla macchina fisica — BKP, 02-ott)
           GET  /caja/:local/deposito_pendiente?t=&dia= → { salida_pendiente:
                {uid_gesto,contado,reserva,a_depositar}|null }
+          GET  /caja/:local/reserva?t=&dia=YYYY-MM-DD  (dia = la NOTTE)
+               → { propina_no_efectivo:int, reserva_pct:number|null, reserva:int|null }
+               (reserva null = parametro assente, mai un default muto —
+               ✏️ 03-ott `_DECISIONI_PRESE.md` "LA RITENUTA DEL 5% — BASE
+               UNICA": la base è SEMPRE la propina non efectivo della notte,
+               MAI il contante contato — differiscono di decine di migliaia)
         Finché la cucitura non è incollata, l'app chiama, vede fallire, e lo
         DICE sullo schermo invece di inventare uno zero.
-        ✏️ 02-ott notte · Alberto (`CAJA CHICA DUE E PRIMO PAGO STORICO`):
-           «deposito el 100% y retiro del banco lo que necesito» — sparita la
-           riserva del 5% trattenuta PRIMA del deposito (il punto cieco del
-           mockup 14-set). ⑨ deposita `contado` intero, `reserva` resta nello
-           schema (CHECK di forma in `caja_deposito`) ma vale SEMPRE 0: non
-           chiamo più `/parametro?clave=reserva_pct`, la funzione di lettura
-           resta nel bordo (`cajaAtto2LeerParametro`) per un uso futuro.
      ⚠️ Scrittura: POST /caja/:local?t=  body: { verbo:'conteo'|'pos_corte'|
-        'deposito', ...campi, fuente:'app_caja' }. 🔎 BKP: `pos_corte` nel verbo
-        di rete, `cajaAtto2FilaCortePos` nel codice — nomi diversi per lo
-        stesso gesto, stessa forma di `ritiro`/`cajaFilaRitiro`. I tre nomi
-        vanno nella mappa VERBI di `_caja()` (src/index.js r.~7186), import
-        da `./caja_atto2.js`: non lo tocco io, è la tua cucitura.
+        'deposito'|'reserva_sobre', ...campi, fuente:'app_caja' }. 🔎 BKP:
+        `pos_corte` nel verbo di rete, `cajaAtto2FilaCortePos` nel codice —
+        nomi diversi per lo stesso gesto, stessa forma di `ritiro`/
+        `cajaFilaRitiro`. I quattro nomi vanno nella mappa VERBI di `_caja()`
+        (src/index.js r.~7186), import da `./caja_atto2.js`: non lo tocco
+        io, è la tua cucitura.
+     🔴 `reserva_sobre` NON segue il binario accodato degli altri tre:
+        bacheca `SPECIFICA BUSTA R-nnnn CAJA ROJA` (DESIGN, ordine di
+        Alberto, 03-ott) — la risposta porta `{sobre_nro}` ASSEGNATO DAL
+        SERVER nello stesso giro della scrittura (mai coniato dal client,
+        mai una lettura a parte prima): la scrittura dev'essere SINCRONA
+        lì, non la coda `pg:caja:`. `cajaAtto2FilaReservaSobre` (bordo)
+        resta pura; la RPC sincrona che assegna `sobre_nro` è cucitura,
+        non mia.
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -143,6 +152,12 @@ function diaAnterior(iso) {
   return d.toISOString().slice(0,10);
 }
 function fmt(n) { return '$' + Math.round(n||0).toLocaleString('es-CL'); }
+/* ✏️ 03-ott · Alberto, a DESIGN: «"Anoche" a mediodía ya no se sabe a qué
+   se refiere — la fecha sí». "2026-10-02" -> "2 Oct". */
+function fechaCorta(iso) {
+  var d = new Date(iso + 'T12:00:00');
+  return d.getDate() + ' ' + d.toLocaleDateString('es-CL', { month: 'short' }).replace('.', '');
+}
 function uidGesto(prefijo) {
   return prefijo + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
 }
@@ -212,7 +227,10 @@ async function postCaja(body) {
     if (await esRespuestaPin(j)) return { ok:false, motivo: j.error, pin:true };
     if (!r.ok || j.ok === false) return { ok:false, motivo: j.motivo || j.error || ('http_' + r.status) };
     if (j.scritto === false) return { ok:false, motivo: j.motivo || 'no_escrito' };
-    return { ok:true };
+    /* el cuerpo puede traer más que ok/scritto — p.ej. reserva_sobre
+       responde {sobre_nro} en la MISMA escritura (verbo síncrono, no
+       encolado: ver cajaAtto2FilaReservaSobre en el bordo). */
+    return Object.assign({ ok:true }, j);
   } catch (e) {
     /* sin red: no sabemos si el PIN es válido, pero encolar el pin_caja
        junto al gesto es lo correcto — se verifica cuando el bordo responda. */
@@ -271,8 +289,8 @@ async function pantalla6() {
   var sobres = MANANA.sobres || [];
   if (!sobres.length) {
     app.innerHTML = barra(false) +
-      '<div class="kick ok">La caja fuerte</div><h1>Nada que contar</h1>' +
-      '<p class="sd">Anoche no hubo sobres</p>' +
+      '<div class="kick ok">Sobres en Caja Verde</div><h1>Nada que contar</h1>' +
+      '<p class="sd">' + fechaCorta(DIA_NOCHE) + ' · no hubo sobres</p>' +
       '<div class="vuoto"><div class="ic">🗄</div><b>La caja fuerte está vacía</b>' +
       '<span style="font-size:12.5px;max-width:26ch">Anoche el local estuvo cerrado, o nadie retiró.<br>Nada que abrir, nada que contar.</span></div>' +
       '<div class="note ok"><b>Lo que sí tienes hoy:</b><br>los cortes POS de ayer, que no dependen del efectivo.</div>' +
@@ -280,12 +298,16 @@ async function pantalla6() {
     document.getElementById('irPos').onclick = function(){ PASO = 3; pantalla8(); };
     return;
   }
-  var total = sobres.reduce(function(a,s){return a+(s.declarado||0);}, 0);
+  /* ✏️ 03-ott · Alberto, a DESIGN («alla cajera dovrebbero apparire i totali
+     da contare per busta e lei dovrebbe inserire quello che conta, anche qui
+     dovrebbe essere alla cieca altrimenti si quadra ovviamente»): NINGÚN
+     monto declarado se muestra antes de contar — ni el total de la noche,
+     ni el de cada sobre. Solo el número de sobres y si ya fueron contados. */
   var filas = sobres.map(function(s){
     return '<div class="r"><span class="n">' + esc(s.sobre_nro) + '<small>' +
       (s.ts_hecho ? new Date(s.ts_hecho).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) + ' · ' : '') +
       esc(s.firma_jl||'') + '</small></span><span class="v' + (s.conteo ? ' ok' : '') + '">' +
-      fmt(s.declarado) + (s.conteo ? ' ✓' : '') + '</span></div>';
+      (s.conteo ? '✓ Contado' : 'Por contar') + '</span></div>';
   }).join('');
   var MOTIVO_TXT = { limite_sala: 'pasó el límite de la sala', limite_persona: 'pasó el límite por persona', tiempo: 'demasiado tiempo con plata encima' };
   var avisoHtml = MANANA.aviso_sin_respuesta
@@ -294,9 +316,9 @@ async function pantalla6() {
       new Date(MANANA.aviso_sin_respuesta.ts).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) + ' · no hubo retiro.</div>'
     : '';
   app.innerHTML = barra(true) +
-    '<div class="kick">La caja fuerte</div><h1>Anoche</h1><p class="sd">' + DIA_NOCHE + ' · turno noche</p>' +
-    '<p class="big acc">' + sobres.length + '</p><p class="blab">sobres esperados · ' + fmt(total) + '</p>' +
-    '<div class="rows"><div class="r hd"><span>sobre</span><span>declarado</span></div>' + filas + '</div>' +
+    '<div class="kick">Sobres en Caja Verde</div><h1>' + fechaCorta(DIA_NOCHE) + '</h1><p class="sd">turno noche</p>' +
+    '<p class="big acc">' + sobres.length + '</p><p class="blab">sobres que tienes que contar</p>' +
+    '<div class="rows"><div class="r hd"><span>sobre</span><span>estado</span></div>' + filas + '</div>' +
     avisoHtml +
     '<button class="btn acc" id="abrir">Abrir y contar</button>';
   document.getElementById('abrir').onclick = function(){ SOBRE_IDX = sobres.findIndex(function(s){return !s.conteo;}); if (SOBRE_IDX<0) SOBRE_IDX = 0; PASO = 2; pantalla7(); };
@@ -306,21 +328,50 @@ function pantalla7() {
   var sobres = (MANANA && MANANA.sobres) || [];
   if (SOBRE_IDX >= sobres.length) { PASO = 3; pantalla8(); return; }
   var s = sobres[SOBRE_IDX];
+  /* ✏️ 03-ott · Alberto («alla cieca, altrimenti si quadra ovviamente»): ni
+     el monto declarado del sobre NI la diferencia se muestran mientras ella
+     cuenta o escribe — ninguna señal reactiva al tipear. Se cuenta entero
+     (sello + monto), se toca UNA VEZ "Revisar conteo", y solo ENTONCES se
+     revela si cuadra o no — ya no se puede volver a editar el monto de este
+     sobre después de revisarlo: revisar y enviar son el mismo compromiso. */
   app.innerHTML = barra(true) +
     '<div class="kick">El conteo · ' + (SOBRE_IDX+1) + ' de ' + sobres.length + '</div>' +
-    '<h1>Sobre ' + esc(s.sobre_nro) + '</h1><p class="sd">Escrito ' + fmt(s.declarado) + '</p>' +
-    '<div class="rows"><div class="r"><span class="n">Dice el sobre</span><span class="v">' + fmt(s.declarado) + '</span></div></div>' +
-    '<p class="lb">Cuánto contaste · <b>cuéntalo entero</b></p>' +
-    '<input class="inp" id="contado" placeholder="$" inputmode="numeric">' +
+    '<h1>Sobre ' + esc(s.sobre_nro) + '</h1><p class="sd">Cuéntalo entero, sin mirar lo escrito en el sobre</p>' +
     '<p class="lb">¿El sello estaba intacto?</p>' +
     '<div class="two"><button class="btn gh" id="selloSi">Sí, intacto</button><button class="btn gh" id="selloNo">No, roto</button></div>' +
+    '<p class="lb" style="margin-top:12px">Cuánto contaste · <b>cuéntalo entero</b></p>' +
+    '<input class="inp" id="contado" placeholder="$" inputmode="numeric">' +
+    '<button class="btn acc" id="revisar" disabled>Revisar conteo</button>' +
     '<div id="extra" style="margin-top:10px"></div>';
 
   var selloIntacto = null;
-  function pintarExtra() {
-    var dif = (Number(document.getElementById('contado').value || '') || 0) - s.declarado;
+  function actualizarBoton() {
+    var listo = selloIntacto !== null && document.getElementById('contado').value.trim() !== '';
+    document.getElementById('revisar').disabled = !listo;
+  }
+  document.getElementById('contado').addEventListener('input', actualizarBoton);
+  document.getElementById('selloSi').onclick = function(){ selloIntacto = true; marcarSello(this); actualizarBoton(); };
+  document.getElementById('selloNo').onclick = function(){ selloIntacto = false; marcarSello(this); actualizarBoton(); };
+  function marcarSello(btn) {
+    document.getElementById('selloSi').style.outline = '';
+    document.getElementById('selloNo').style.outline = '';
+    btn.style.outline = '2px solid var(--acc)';
+  }
+
+  var contadoRevisado = null;
+  unTocoUnHecho(document.getElementById('revisar'), async function(){
+    var contado = Number(document.getElementById('contado').value || '');
+    if (!Number.isFinite(contado) || contado < 0) { toast('Escribe cuánto contaste', 'bad'); return; }
+    if (selloIntacto === null) { toast('Di si el sello estaba intacto', 'bad'); return; }
+    /* desde aquí el monto queda fijo: revisar ya es un compromiso, no una
+       vista previa que se pueda repetir cambiando el número cada vez */
+    contadoRevisado = contado;
+    document.getElementById('contado').disabled = true;
+    document.getElementById('selloSi').disabled = true;
+    document.getElementById('selloNo').disabled = true;
+    document.getElementById('revisar').style.display = 'none';
+    var dif = contado - (s.declarado || 0);
     var box = document.getElementById('extra');
-    if (selloIntacto === null) { box.innerHTML = ''; return; }
     if (dif === 0) {
       box.innerHTML = '<div class="note ok">El sello estaba ' + (selloIntacto?'intacto':'roto') + ' y cuadra. <b>Nada que declarar.</b></div>' +
         '<button class="btn ok" id="confirmar">Confirmar · siguiente sobre</button>';
@@ -331,53 +382,71 @@ function pantalla7() {
         '<button class="btn acc" id="confirmar">Dejar anotado y seguir</button>';
     }
     unTocoUnHecho(document.getElementById('confirmar'), confirmar);
-  }
-  document.getElementById('contado').addEventListener('input', pintarExtra);
-  document.getElementById('selloSi').onclick = function(){ selloIntacto = true; pintarExtra(); };
-  document.getElementById('selloNo').onclick = function(){ selloIntacto = false; pintarExtra(); };
+  });
 
   async function confirmar() {
-    var contado = Number(document.getElementById('contado').value || '');
-    if (!Number.isFinite(contado) || contado < 0) { toast('Escribe cuánto contaste', 'bad'); return; }
     var nota = document.getElementById('nota');
     var body = {
       verbo: 'conteo', uid_gesto: uidGesto('cnt'),
       sobre_dia_op: DIA_NOCHE, sobre_nro: s.sobre_nro,
-      contado: contado, sello_intacto: selloIntacto, nota: nota ? nota.value : null,
+      contado: contadoRevisado, sello_intacto: selloIntacto, nota: nota ? nota.value : null,
       firma_caja: SES.user, firma_caja_tipo: 'pin', fuente: 'app_caja',
     };
     var r = await postCaja(body);
     if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
-    s.conteo = { contado: contado };
+    s.conteo = { contado: contadoRevisado };
     toast(r.encolado ? 'Guardado sin señal — se enviará solo' : 'Conteo guardado', 'ok');
     SOBRE_IDX++; pantalla7();
   }
 }
 
+/* ✏️ 03-ott · Alberto, a DESIGN: la máquina se ELIGE, no viene fija del
+   backend — una tendina por fila, MPago preseleccionado. */
+var MAQUINAS_CONOCIDAS = ['MPago', 'Getnet', 'Transbank', 'SumUp'];
 async function pantalla8() {
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando cortes POS…</p>';
   CORTES = await getCaja('cortes_pos?dia=' + DIA_HOY);
   if (!CORTES.ok) { renderError('Los cortes POS', CORTES.error); return; }
-  var maquinas = (CORTES.maquinas && CORTES.maquinas.length) ? CORTES.maquinas : ['Máquina 1'];
-  var inputs = maquinas.map(function(m, i){
+  var maquinas = (CORTES.maquinas && CORTES.maquinas.length) ? CORTES.maquinas : ['MPago'];
+  var filas = maquinas.map(function(m, i){
     var prev = (CORTES.guardado||[]).find(function(g){return g.maquina===m;});
-    return '<p class="lb">' + esc(m) + '</p><input class="inp" data-maq="' + esc(m) + '" placeholder="$" inputmode="numeric" value="' + (prev?prev.corte:'') + '">';
+    var conocida = MAQUINAS_CONOCIDAS.filter(function(k){ return k.toLowerCase() === String(m||'').trim().toLowerCase(); })[0];
+    var esOtra = !conocida;
+    var opciones = MAQUINAS_CONOCIDAS.map(function(k){
+      return '<option value="' + esc(k) + '"' + (k === conocida ? ' selected' : '') + '>' + esc(k) + '</option>';
+    }).join('') + '<option value="__otra__"' + (esOtra ? ' selected' : '') + '>Otra</option>';
+    return '<p class="lb">Máquina ' + (i+1) + '</p>' +
+      '<select class="inp" data-maq-select="' + i + '">' + opciones + '</select>' +
+      '<input class="inp" data-maq-otra="' + i + '" placeholder="Nombre de la máquina" value="' + (esOtra ? esc(m) : '') + '" style="' + (esOtra ? '' : 'display:none') + '">' +
+      '<input class="inp" data-maq-corte="' + i + '" placeholder="$" inputmode="numeric" value="' + (prev?prev.corte:'') + '">';
   }).join('');
   app.innerHTML = barra(true) +
     '<div class="kick">Los cortes POS</div><h1>Las máquinas</h1><p class="sd">Un número por máquina, una vez al día</p>' +
-    inputs +
+    filas +
     (CORTES.libro != null ? '<div class="rows"><div class="r"><span class="n">Dice nuestro libro</span><span class="v">' + fmt(CORTES.libro) + '</span></div></div>' : '') +
     '<div class="note ok">El corte de la máquina es <b>el único testigo que no somos nosotros.</b></div>' +
     '<button class="btn acc" id="guardar">Guardar</button>' +
     '<button class="btn gh" id="siguiente">Ir al depósito</button>';
+  maquinas.forEach(function(m, i){
+    var sel = document.querySelector('[data-maq-select="' + i + '"]');
+    sel.addEventListener('change', function(){
+      document.querySelector('[data-maq-otra="' + i + '"]').style.display = (sel.value === '__otra__') ? '' : 'none';
+    });
+  });
+  function nombreMaquina(i) {
+    var sel = document.querySelector('[data-maq-select="' + i + '"]');
+    if (sel.value === '__otra__') return document.querySelector('[data-maq-otra="' + i + '"]').value.trim();
+    return sel.value;
+  }
   unTocoUnHecho(document.getElementById('guardar'), async function(){
-    var inputsEl = app.querySelectorAll('input[data-maq]');
-    for (var i=0;i<inputsEl.length;i++) {
-      var v = Number(inputsEl[i].value || '');
-      if (!Number.isFinite(v) || v < 0) { toast('Falta el corte de ' + inputsEl[i].dataset.maq, 'bad'); return; }
-      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGesto('pos'), maquina: inputsEl[i].dataset.maq,
+    for (var i=0;i<maquinas.length;i++) {
+      var nombre = nombreMaquina(i);
+      if (!nombre) { toast('Falta el nombre de la máquina ' + (i+1), 'bad'); return; }
+      var v = Number(document.querySelector('[data-maq-corte="' + i + '"]').value || '');
+      if (!Number.isFinite(v) || v < 0) { toast('Falta el corte de ' + nombre, 'bad'); return; }
+      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGesto('pos'), maquina: nombre,
         corte: v, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
-      if (!r.ok) { toast('No se guardó ' + inputsEl[i].dataset.maq + ': ' + r.motivo, 'bad'); return; }
+      if (!r.ok) { toast('No se guardó ' + nombre + ': ' + r.motivo, 'bad'); return; }
     }
     toast('Cortes guardados', 'ok');
   });
@@ -389,6 +458,12 @@ async function pantalla9() {
   var pend = await getCaja('deposito_pendiente?dia=' + DIA_HOY);
   DEPOSITO_PENDIENTE = pend.ok ? pend.salida_pendiente : null;
 
+  /* 🔴 LIMITE DICHIARATO, non nascosto: si ella cierra la app entre la
+     salida (ya escrita) y el sello de la reserva (reserva_sobre), al volver
+     esta pantalla la manda directo a "De vuelta del banco" — la busta R
+     queda pendiente y nadie lo avisa. Arreglarlo pide que
+     /deposito_pendiente diga también si la reserva_sobre de esa salida ya
+     existe. Lo declaro en vez de fingir que no puede pasar. */
   if (DEPOSITO_PENDIENTE) {
     app.innerHTML = barra(true) +
       '<div class="kick">El depósito</div><h1>De vuelta del banco</h1><p class="sd">Escribe el número cuando lo tengas</p>' +
@@ -408,37 +483,86 @@ async function pantalla9() {
     return;
   }
 
-  /* ✏️ 02-ott noche · Alberto («CAJA CHICA DUE E PRIMO PAGO STORICO»): «deposito
-     el 100% y retiro del banco lo que necesito para pagar propinas y gastos».
-     Se fue la reserva del 5% retenida ANTES del depósito (el "punto ciego" del
-     mockup del 14-set) — todo el efectivo contado se deposita entero. El
-     retiro para propinas/gastos es un gesto del banco, aparte, que no toca
-     esta pantalla. `reserva` sigue existiendo en el esquema (CHECK de forma
-     en caja_deposito) pero ahora vale SIEMPRE 0. */
+  /* ✏️ 03-ott · _DECISIONI_PRESE.md «LA RITENUTA DEL 5% — BASE UNICA»: «il 5%
+     si ritiene SOLO sul monto propinas NO efectivo» — tolto dal contante
+     PRIMA del depósito (busta numerada a la caja fuerte ROJA, pieza aparte
+     y no decidida todavía — pregunta ③ de DESIGN, responde Alberto). La
+     base NUNCA es el contado: con los números reales la diferencia es de
+     decenas de miles ($17.190 contra $41.290 en el ejemplo real).
+     El "depósito al 100%" del 02-ott sigue siendo cierto para los gastos
+     de propinas (se retiran del banco aparte): las dos órdenes conviven. */
+  var RESERVA = await getCaja('reserva?dia=' + DIA_NOCHE);
+  if (!RESERVA.ok || RESERVA.reserva == null) {
+    app.innerHTML = barra(true) + '<div class="kick bad">El depósito</div><h1>Falta un parámetro</h1>' +
+      '<div class="note bad">caja sin parámetro <b>propina_desc_no_efectivo_pct</b> — no se puede calcular la retención sin inventarlo. Avisa a MIGRACIÓN.</div>';
+    return;
+  }
   var contadoTotal = (MANANA && MANANA.sobres || []).reduce(function(a,s){ return a + (s.conteo ? s.conteo.contado : (s.declarado||0)); }, 0);
   app.innerHTML = barra(true) +
-    '<div class="kick">El depósito</div><h1>Antes de salir</h1><p class="sd">Se deposita el 100% contado</p>' +
+    '<div class="kick">El depósito</div><h1>Antes de salir</h1><p class="sd">Los dos números se escriben ahora</p>' +
     '<p class="lb">Contado (editable si hace falta)</p><input class="inp" id="contado" inputmode="numeric" value="' + contadoTotal + '">' +
     '<div id="calc"></div>' +
-    '<div class="note">El camino al banco es el único tramo sin testigo. Por eso el número queda escrito <b>antes</b> de que salgas.</div>' +
+    '<div class="note">El camino al banco es el único tramo sin testigo. Por eso los números quedan escritos <b>antes</b> de que salgas.</div>' +
     '<button class="btn acc" id="salir">Salir al banco</button>';
   function recalc() {
     var c = Number(document.getElementById('contado').value || '') || 0;
-    var reserva = 0;
-    var aDep = c;
+    /* la retención es un PESO FIJO (de la propina no efectivo de anoche), no
+       un porcentaje del contado: si ella ajusta el contado, cambia cuánto
+       deposita, nunca cuánto se retiene. */
+    var reserva = RESERVA.reserva;
+    var aDep = c - reserva;
     document.getElementById('calc').innerHTML =
-      '<div class="rows"><div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>';
+      '<div class="rows"><div class="r"><span class="n">A la reserva (' + RESERVA.reserva_pct + '% de la propina no efectivo)</span><span class="v">' + fmt(reserva) + '</span></div>' +
+      '<div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>';
     return { c: c, reserva: reserva, aDep: aDep };
   }
   var ultimo = recalc();
   document.getElementById('contado').addEventListener('input', function(){ ultimo = recalc(); });
   unTocoUnHecho(document.getElementById('salir'), async function(){
-    var r = await postCaja({ verbo:'deposito', uid_gesto: uidGesto('dep'), evento:'salida',
+    var depositoUid = uidGesto('dep');
+    var r = await postCaja({ verbo:'deposito', uid_gesto: depositoUid, evento:'salida',
       contado: ultimo.c, reserva: ultimo.reserva, a_depositar: ultimo.aDep,
       firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
     if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
-    toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok');
-    pantalla9();
+    /* ✏️ 03-ott · bacheca SPECIFICA BUSTA R-nnnn CAJA ROJA (DESIGN, orden de
+       Alberto): si reserva === 0 la pantalla NO aparece — una busta vacía
+       es peor que ninguna busta. Si hay reserva, se confirma AQUÍ, antes de
+       salir, y pantalla9() se llama recién DESPUÉS de confirmada. */
+    if (ultimo.reserva > 0) pantallaReservaSobre(depositoUid, ultimo.reserva);
+    else { toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok'); pantalla9(); }
+  });
+}
+
+/* ② la pantalla de la busta R — tres cosas, cero mensajes (DESIGN): kick ·
+   h1 · big · sobre, un solo botón. El sobre_nro lo EMITE el servidor en la
+   misma respuesta del verbo 'reserva_sobre' (no una lectura antes): si lo
+   coniara el cliente, un reintento generaría otro y la busta física
+   llevaría un número que el libro no tiene. Por eso el número no puede
+   estar en pantalla ANTES del toque — se escribe recién cuando llega,
+   persistente (no un toast que se borra antes de que ella lo copie). */
+function pantallaReservaSobre(depositoUid, monto) {
+  app.innerHTML = barra(true) +
+    '<div class="kick">La reserva</div><h1>A la caja fuerte ROJA</h1>' +
+    '<p class="big acc">' + fmt(monto) + '</p>' +
+    '<button class="btn acc" id="sellarRoja">A la caja fuerte ROJA</button>';
+  unTocoUnHecho(document.getElementById('sellarRoja'), async function(){
+    /* ✏️ 03-ott sera · EL GIRO (L1, `BANCO BUSTA R 7f2159c UN ROSSO LA RIGA`):
+       un uid al azar a cada toque rompe el retry — si la primera respuesta
+       se pierde pero la fila ya quedó escrita, un segundo toque con OTRO
+       uid no se reconoce como el mismo gesto (gia_presenti): cae en la
+       unicidad de negocio (segunda busta para la misma salida) y ella ve
+       un rechazo confuso sobre una busta que ya existe. Derivado de
+       depositoUid: el mismo depósito siempre pide la MISMA busta. */
+    var r = await postCaja({ verbo:'reserva_sobre', uid_gesto: 'res-' + depositoUid,
+      dia_op: DIA_NOCHE, monto: monto, referencia_uid: depositoUid,
+      firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+    if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
+    app.innerHTML = barra(true) +
+      '<div class="kick">La reserva</div><h1>A la caja fuerte ROJA</h1>' +
+      '<p class="big acc">' + fmt(monto) + '</p>' +
+      '<div class="rows"><div class="r tot"><span class="n">Sobre</span><span class="v">' + esc(r.sobre_nro || '—') + '</span></div></div>' +
+      '<button class="btn acc" id="listo">Listo</button>';
+    unTocoUnHecho(document.getElementById('listo'), async function(){ pantalla9(); });
   });
 }
 
