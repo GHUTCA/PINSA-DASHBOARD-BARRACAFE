@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="es-CL">
+<!-- DEVICE-CLASS: 1 · cattura in movimento · mobile-only · UI es-CL registro tú
+     🖐 QUARTA PENNA · 02-ott-2026 · ATTO III — LE PROPINAS, dal telefono della cajera
+     Fonte dei vetri: 4_CANTIERE_CAJA/MOCKUP_CAJA_TRE_ATTI_01OTT2026.html (⑩ nelle due
+     forme · ⑪ · ⑫) di 🎨 DESIGN · mockup madre MOCKUP_GIRO_EFECTIVO_14SET2026.html.
+     Regole: 4_CANTIERE_CAJA/REGLAS_PROPINAS_01OTT2026.html — le SEDICI, tutte di Alberto.
+     Cargo: CAJA. Leva server: CAJA_ATTO3_ON (una per penna/atto, come CAJA_ATTO1_ON di
+     🎛 BKP), nasce "0". Il calcolo vive al bordo in `src/caja_atto3.js` — qui non si
+     calcola NIENTE: si mostra e si consegna. Non deploya questa penna: il cancello è di BKP.
+
+     🔴 COSA NASCE SPENTO, E PERCHÉ — Alberto, ven 02-ott sera (bacheca
+        `CAJA CHICA DUE E PRIMO PAGO STORICO`):
+        · le spese fisse NON escono dalla propina (seconda caja chica) ⇒ dal pozo non si
+          sottrae niente oltre il 5%;
+        · il 70% lo calcola e lo paga il sistema;
+        · il 30% il sistema lo CALCOLA e lo MOSTRA, e lo divide Alberto A MANO.
+        ⇒ ⑫ e la divisione per punti sono dietro `reparto_30_por_puntos` del SERVER, non
+          dietro una costante di questo file. 🔑 Così il giorno che la regola del 30%
+          esiste si accende UNA leva, non una leva più un deploy del vetro.
+        · il pago di lun 5 è a mano, su carta: il sistema paga la prima volta mar 6.
+
+     🔴 CONTRATTO DI LETTURA — il bordo ha già le funzioni pure (`caja_atto3.js`);
+        qui resta la cucitura Worker (import + leva + rotta), di 🎛 BKP:
+          GET  /caja/:local/reparto?t=&dia=YYYY-MM-DD&turno=AM|PM
+               → { gate:bool, reparto:{turno,modo,regola_id,pozo_efectivo,
+                   pozo_no_efectivo,quota_meseros_pct,desc_no_efectivo_pct}|null,
+                   detalle:{...}|null, falta:{alias:[]|cobraron_y_no_estan:[]|
+                   dos_grupos_mismo_turno:[]|modo:string}|null,
+                   personas:[{persona_id,nombre,grupo,puntos,alias_app_caja:bool}],
+                   pagados:[{persona_id,concepto,monto,ts,firmado}] }
+          POST /caja/:local  { verbo:'reparto_cerrar', uid_gesto, dia_operativo, turno,
+                               partes:[{persona_id,grupo,puntos}] }
+          POST /caja/:local  { verbo:'propina_pago', uid_gesto, reparto_uid, persona_id,
+                               grupo, concepto, monto, tranche, quien }
+        Nomi di colonna: schema di 🚚 `64ad57c0b1` — `grupo` ammette `mesero` ·
+        `barra_cocina` · `gasto_fijo`, e il `concepto` (`anfitriona`/`limpieza_banos`/
+        `fabian`) è obbligatoria solo lì. L'indice unico è
+        `(reparto_uid, persona_id, coalesce(concepto,''))`: la stessa persona può avere la
+        sua quota E una spesa fissa, quindi la porta del pago guarda tutti e tre.
+        A leva spenta i POST tornano { ok:true, scritto:false, motivo:'gate_spento' },
+        la stessa forma dell'ATTO I che i vetri già leggono.
+        Finché la cucitura non è incollata, l'app chiama, vede fallire e lo DICE sullo
+        schermo invece di inventare uno zero.
+
+     🔑 TRE COSE CHE QUESTO VETRO NON FA, DI PROPOSITO
+        ① non conia un numero: ogni cifra viene dal `detalle` del bordo;
+        ② non scrive un nome a mano in `quien`: manda l'ALIAS REGISTRATO (`app_caja`), e
+           se la persona non ne ha uno lo dice PRIMA che il dinero esca — un pago che
+           risulta non firmato dopo la consegna è peggio di un pago rifiutato prima
+           (🚚, `CAJA SQL 9f84f85d01`: senza alias `firmado` è false e la regola 14 dice
+           «nadie queda pagado sin su firma»);
+        ③ non legge un `gia_presenti` come un pago riuscito: è «Ya pagado», e la cajera
+           NON riconsegna il dinero (🎛 BKP, `ATTO I BUSTA DOPPIA ALLA PORTA`).
+-->
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Propinas · Pinsita</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F7F6F3; --surf:#FFFFFF; --surf2:#F0EEE9;
+  --ink:#1B1A17; --ink2:#5A564E; --edge:#8A8579; --hair:#D7D4CD;
+  --acc:#8c6a20; --ok:#1F7A4D; --warn:#8A5A00; --bad:#B3261E;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.5 Outfit,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+body{padding:14px 14px calc(26px + env(safe-area-inset-bottom))}
+.wrap{max-width:460px;margin:0 auto}
+.bar{display:flex;align-items:center;gap:9px;margin-bottom:14px;font-size:12px;color:var(--ink2);
+  font-family:'IBM Plex Mono',monospace}
+.bar b{color:var(--ink);font-weight:600}
+.bar .sp{margin-left:auto}
+.pasos{display:flex;gap:5px;margin:10px 0 16px}
+.pasos i{flex:1;height:4px;border-radius:3px;background:var(--hair);font-style:normal}
+.pasos i.on{background:var(--acc)}
+.kick{font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;font-weight:700;color:var(--acc);margin:0 0 6px}
+.kick.ok{color:var(--ok)} .kick.bad{color:var(--bad)}
+h1{font-size:19px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em}
+.sd{font-size:12.5px;color:var(--ink2);margin:0 0 14px}
+.modo{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  background:var(--surf2);border:1px solid var(--hair);border-radius:7px;padding:3px 8px;color:var(--acc)}
+.modo i{font-style:normal;font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink2);font-size:11px}
+.big{font-size:30px;font-weight:800;letter-spacing:-.02em;margin:2px 0;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+.big.acc{color:var(--acc)} .big.ok{color:var(--ok)} .big.bad{color:var(--bad)}
+.blab{font-size:11.5px;color:var(--ink2);margin:0 0 14px}
+.rows{border:1px solid var(--edge);border-radius:11px;overflow:hidden;background:var(--surf);margin-bottom:12px}
+.r{display:flex;align-items:center;gap:9px;padding:10px 12px;border-bottom:1px solid var(--hair);font-size:13.5px}
+.r:last-child{border-bottom:0}
+.r .n small{display:block;font-size:10.5px;color:var(--ink2);margin-top:1px}
+.r .v{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;color:var(--ink2);white-space:nowrap}
+.r .v.ok{color:var(--ok)} .r .v.bad{color:var(--bad)} .r .v.acc{color:var(--acc)}
+.r .v.strong{color:var(--ink);font-weight:700}
+.r.hd{background:var(--surf2);font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink2);font-weight:700;padding:7px 12px}
+/* `propuesta`: l'etichetta di stato della lista di chi ha lavorato. Non è un allarme
+   (il reparto si può chiudere così) ⇒ non è rossa: è la voce neutra dell'incertezza. */
+.prop{float:right;font-size:9px;letter-spacing:.08em;background:var(--surf);color:var(--ink2);
+      border:1px solid var(--line);border-radius:999px;padding:1px 7px;text-transform:none;letter-spacing:0}
+.addr{display:block;width:100%;background:none;border:0;border-top:1px solid var(--line);
+      color:var(--acc);font:inherit;font-size:13px;font-weight:600;padding:10px;cursor:pointer;text-align:center}
+.r.tot{background:var(--surf2)} .r.tot .n{font-weight:700} .r.tot .v{color:var(--ink);font-weight:700}
+.r.clic{cursor:pointer}
+.r.sub{padding-top:2px;border-bottom:0}
+.r.sub .n{font-size:11px;color:var(--ink2)}
+.r.dim{opacity:.55}
+.inp{width:100%;background:var(--surf);border:1.5px solid var(--edge);border-radius:11px;padding:12px;
+  font:inherit;font-size:16px;font-weight:600;color:var(--ink);margin-bottom:9px}
+.inp::placeholder{color:var(--ink2);font-weight:400;font-size:14px;opacity:.75}
+.lb{font-size:11.5px;color:var(--ink2);margin:0 0 6px}
+.note{background:var(--surf);border:1px solid var(--edge);border-left-width:3px;border-radius:0 9px 9px 0;
+  padding:10px 12px;margin:0 0 12px;font-size:12px;color:var(--ink2);line-height:1.5}
+.note.bad{border-left-color:var(--bad)} .note.ok{border-left-color:var(--ok)}
+.note b{color:var(--ink)}
+.btn{width:100%;border:0;border-radius:13px;padding:14px;font:inherit;font-size:15px;font-weight:700;cursor:pointer;margin-top:4px}
+.btn.acc{background:var(--acc);color:#fff} .btn.ok{background:var(--ok);color:#fff}
+.btn.gh{background:transparent;color:var(--ink2);border:1px solid var(--edge)}
+.btn[disabled]{opacity:.45;pointer-events:none}
+.two{display:flex;gap:9px;margin-top:4px} .two .btn{margin-top:0}
+.vuoto{min-height:260px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:7px;color:var(--ink2)}
+.vuoto .ic{font-size:36px;opacity:.5}
+.vuoto b{color:var(--ink);font-size:16.5px}
+.sheet{position:fixed;inset:0;background:rgba(27,26,23,.55);display:none;z-index:40;align-items:flex-end}
+.sheet.show{display:flex}
+.sheet .card{background:var(--bg);width:100%;border-radius:17px 17px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-width:460px;margin:0 auto}
+.pin{letter-spacing:.5em;text-align:center;font-size:22px}
+.toast{position:fixed;left:14px;right:14px;bottom:calc(14px + env(safe-area-inset-bottom));
+  background:var(--ink);color:#fff;padding:11px 14px;border-radius:11px;font-size:13px;
+  box-shadow:0 10px 30px rgba(0,0,0,.25);display:none;z-index:50}
+.toast.show{display:block}
+.toast.bad{background:var(--bad)} .toast.ok{background:var(--ok)}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando…</p></div>
+<div class="sheet" id="sheet"><div class="card" id="sheetCard"></div></div>
+<div class="toast" id="toast"></div>
+<span id="ver" hidden>v1.4.0 · atto3 propinas · quién estuvo en turno · 03oct</span>
+
+<script src="shared/pinsita_auth.js"></script>
+<script>
+(function(){
+'use strict';
+
+/* ═══ 0 · CONTESTO ══════════════════════════════════════════════════════ */
+var qp = new URLSearchParams(location.search);
+var LOCAL = (qp.get('loc') || '').toLowerCase().trim();
+/* ✏️ L'URL l'avevo copiato dal vetro dell'ATTO II e portava `ghutca.workers.dev`:
+   il bordo VIVO è `alberto-agostini` — verificato sui vetri vivi (`sala.html` e
+   `app_jl.html` lo usano, 🎛 BKP l'aveva segnalato come dubbio). 🎓 *Un valore
+   copiato da un vetro che non è ancora in produzione non è un valore verificato:
+   è lo stesso dubbio, duplicato.* ⚠️ La stessa riga è nel vetro dell'ATTO II. */
+var BORDE = {
+  rsc: 'https://pinsita-borde.alberto-agostini.workers.dev',
+  cdl: 'https://pinsita-borde.alberto-agostini.workers.dev'
+};
+var TOKEN = qp.get('t') || localStorage.getItem('pinsita_borde_t') || '';
+if (qp.get('t')) { try { localStorage.setItem('pinsita_borde_t', qp.get('t')); } catch(e){} }
+
+/* il taglio delle 06:00 serve SOLO a etichettare lo schermo e a scegliere il giorno da
+   chiedere: il `dia_operativo` vero lo scrive il bordo in ogni verbo. */
+function hoyOperativo(d) {
+  var now = d || new Date();
+  var s = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }));
+  if (s.getHours() < 6) s.setDate(s.getDate() - 1);
+  return s.getFullYear() + '-' + String(s.getMonth()+1).padStart(2,'0') + '-' + String(s.getDate()).padStart(2,'0');
+}
+function diaAnterior(iso) {
+  var d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0,10);
+}
+var DIAS = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+var MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function fechaLarga(iso) {
+  var d = new Date(iso + 'T12:00:00');
+  return DIAS[d.getDay()] + ' ' + d.getDate() + ' ' + MESES[d.getMonth()];
+}
+function fmt(n) { return '$' + Math.round(n||0).toLocaleString('es-CL'); }
+function uidGesto(p) { return p + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,8); }
+
+/* 👆 UN TOCCO = UN FATTO (Alberto, 02-ott: `DOPPIO TOCCO DISEGNO E SISTEMA`).
+   «Veniamo da un sistema lento che non mostrava mai cio' che si cliccava; a sistema
+   450 ms che clicchi e registra. Per cui, se come in passato clicco due volte, sono due
+   prodotti.» ⇒ ogni bottone che crea un fatto ignora un secondo tocco sullo STESSO
+   elemento per una finestra breve, e mostra subito di aver preso il gesto.
+   🔑 Qui i fatti sono SOLDI: un doppio tocco su «Entregado» non e' un prodotto in piu',
+      e' una propina consegnata due volte. */
+var TOCCO_MS = 700;
+function unTocco(el) {
+  if (!el) return false;
+  var t = Date.now();
+  if (el._ultimoTocco && (t - el._ultimoTocco) < TOCCO_MS) return false;
+  el._ultimoTocco = t;
+  return true;
+}
+function esc(s) { return String(s==null?'':s).replace(/[&<>"]/g, function(c){
+  return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]; }); }
+function toast(msg, clase) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show' + (clase ? ' ' + clase : '');
+  clearTimeout(toast._h); toast._h = setTimeout(function(){ t.classList.remove('show'); }, 3600);
+}
+
+/* ═══ 1 · RED ═══════════════════════════════════════════════════════════ */
+var COLA_KEY = 'caja_atto3_cola';
+function leerCola(){ try { return JSON.parse(localStorage.getItem(COLA_KEY) || '[]'); } catch(e){ return []; } }
+function guardarCola(c){ try { localStorage.setItem(COLA_KEY, JSON.stringify(c)); } catch(e){} }
+
+async function postCaja(body) {
+  var base = BORDE[LOCAL] || BORDE.rsc;
+  var url = base + '/caja/' + encodeURIComponent(LOCAL) + '?t=' + encodeURIComponent(TOKEN);
+  try {
+    var r = await fetch(url, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
+    var j = await r.json();
+    /* 🔴 «ya pagado» NON è un pago riuscito e NON è «non è successo niente»:
+       è il dinero che è già uscito una volta. Lo diciamo con il suo nome. */
+    if (j && j.motivo === 'propina_ya_pagada') return { ok:false, yaPagado:true, ya: j.ya || null };
+    /* 🔴 un ARRESTO non è un guasto: il bordo risponde 409 con `falta` e dentro c'è il
+       nome di ciò che manca. Senza questa riga diventava un `http_409` muto, e le
+       quattro schermate di ⑩ (che esistono) non si sarebbero mai viste. */
+    if (r.status === 409 && j && j.falta) return { ok:false, falta: j.falta, motivo:'falta' };
+    if (!r.ok || (j && j.ok === false)) return { ok:false, motivo:(j && (j.motivo || j.error)) || ('http_' + r.status) };
+    /* ✏️ 03-ott: `scritto === false` era letto SEMPRE come un fallimento — e
+       un'anteprima risponde esattamente così (`scritto:false, vista:true`), perché il
+       suo mestiere è non scrivere. ⇒ un `reparto_vista` riuscito sarebbe diventato
+       «no_escrito» e il ricalcolo non avrebbe funzionato mai.
+       🎓 «non ha scritto» e «non è riuscito» sono due fatti diversi con la stessa
+          faccia, e li distingue solo chi sa cosa aveva chiesto. */
+    if (j && j.scritto === false && !j.vista) return { ok:false, motivo: j.motivo || 'no_escrito' };
+    /* il CORPO passa: prima tornava `{ok:true}` secco e chi chiamava non poteva leggere
+       niente di ciò che il bordo aveva calcolato. */
+    return Object.assign({ ok:true }, j);
+  } catch (e) {
+    /* un pago NON si accoda: se il dinero esce, deve esserci una riga adesso.
+       Accodare un pago vuol dire consegnare contante contro una promessa di scrittura.
+       🔑 E una LETTURA non si accoda mai: rimandarla non serve a nessuno, e in coda
+          diventerebbe un invio che «riesce» domani senza aver mostrato niente oggi. */
+    if (body && (body.verbo === 'propina_pago' || body.verbo === 'reparto_vista')) {
+      return { ok:false, motivo:'sin_red' };
+    }
+    var c = leerCola(); c.push(body); guardarCola(c);
+    return { ok:true, encolado:true };
+  }
+}
+async function getReparto(dia, turno) {
+  var base = BORDE[LOCAL] || BORDE.rsc;
+  var url = base + '/caja/' + encodeURIComponent(LOCAL) + '/reparto?t=' + encodeURIComponent(TOKEN)
+    + '&dia=' + encodeURIComponent(dia) + '&turno=' + encodeURIComponent(turno);
+  try {
+    /* 🔑 il PIN nell'HEADER, mai nell'URL (🎛 BKP): un URL finisce nei log e nella
+       cronologia del telefono. */
+    var r = await fetch(url, PIN_CAJA ? { headers: { 'X-Caja-Pin': PIN_CAJA } } : undefined);
+    var j = await r.json();
+    if (!r.ok || (j && j.ok === false)) return { ok:false, error:(j && (j.error || j.motivo)) || ('http_' + r.status) };
+    return Object.assign({ ok:true }, j);
+  } catch (e) { return { ok:false, error:'sin_red' }; }
+}
+
+/* ═══ 2 · ESTADO ════════════════════════════════════════════════════════ */
+var SES = null;
+var DIA_HOY = hoyOperativo();
+var DIA = diaAnterior(DIA_HOY);     // la propina che si paga oggi è di IERI (regola 7)
+var TURNO = 'PM';                   // il turno del reparto che si sta pagando
+var PASO = 1;                       // 1 reparto · 2 pago · 3 barra y cocina (solo a leva accesa)
+var D = null;                       // la risposta di /reparto
+
+/* ═══ 3 · RENDER ════════════════════════════════════════════════════════ */
+var app = document.getElementById('app');
+
+function barra() {
+  return '<div class="bar"><b>Propinas</b> · ' + esc(fechaLarga(DIA)) + ' · ' + esc(TURNO)
+    + '<span class="sp">' + esc((SES && SES.user) || '') + '</span></div>'
+    + '<div class="pasos"><i class="' + (PASO>=1?'on':'') + '"></i><i class="' + (PASO>=2?'on':'') + '"></i>'
+    + (verBarra() ? '<i class="' + (PASO>=3?'on':'') + '"></i>' : '') + '</div>';
+}
+/* ⑫ e la divisione per punti seguono la LEVA DEL SERVER, non una costante di qui:
+   accendere il 30% è una leva sola, non una leva più un deploy del vetro. */
+function verBarra() { return !!(D && D.detalle && D.detalle.reparto_30_por_puntos); }
+
+function cargando() { app.innerHTML = barra() + '<p style="text-align:center;color:var(--ink2);padding:30px 0">Cargando…</p>'; }
+
+function sinRed(err) {
+  app.innerHTML = barra()
+    + '<div class="vuoto"><div class="ic">📵</div><b>No puedo leer el reparto</b>'
+    + '<p style="margin:0;font-size:13px">' + esc(err === 'sin_red' ? 'Sin conexión.' : ('El bordo respondió: ' + err)) + '</p>'
+    + '<p style="margin:0;font-size:12px">No te muestro números hasta poder leerlos.</p></div>'
+    + '<button class="btn gh" id="rec">Reintentar</button>';
+  document.getElementById('rec').onclick = cargar;
+}
+
+/* ⑩ · gli ARRESTI: il reparto non si chiude e si dice CHI manca. */
+function pantallaFalta(f) {
+  var h = barra() + '<p class="kick bad">Falta algo antes de cerrar</p>';
+  if (f.alias && f.alias.length) {
+    h += '<h1>No sé quién es</h1><p class="sd">Alguien cobró propina anoche con un nombre que no está en la lista de personas.</p>'
+      + '<div class="rows"><div class="r hd">nombres sin ficha</div>'
+      + f.alias.map(function(n){ return '<div class="r"><div class="n">' + esc(n) + '</div><div class="v bad">sin ficha</div></div>'; }).join('')
+      + '</div><div class="note bad">Avisa a administración.</div>';
+  } else if (f.cobraron_y_no_estan && f.cobraron_y_no_estan.length) {
+    h += '<h1>Falta marcar a alguien</h1><p class="sd">Cobraron propina anoche y no están entre los que trabajaron.</p>'
+      + '<div class="rows"><div class="r hd">cobraron y no están marcados</div>'
+      + f.cobraron_y_no_estan.map(function(x){
+          return '<div class="r"><div class="n">' + esc((x.grafias||[]).join(' · ')) + '</div><div class="v">' + fmt(x.propina) + '</div></div>'; }).join('')
+      + '</div><div class="note bad">Márcalos, o déjalos fuera a propósito.</div>';
+  } else if (f.dos_grupos_mismo_turno && f.dos_grupos_mismo_turno.length) {
+    h += '<h1>Alguien está en dos grupos</h1><p class="sd">En un turno cada persona recibe de un solo grupo.</p>'
+      + '<div class="rows">'
+      + f.dos_grupos_mismo_turno.map(function(x){
+          return '<div class="r"><div class="n">' + esc(x.nombre || x.persona_id) + '<small>' + esc((x.grupos||[]).join(' + ')) + '</small></div></div>'; }).join('')
+      + '</div>';
+  } else if (f.modo) {
+    h += '<h1>No sé cómo se reparte hoy</h1><p class="sd">' + esc(f.modo) + '</p>'
+      + '<div class="note bad">La regla del día y del turno no está escrita.</div>';
+  } else {
+    h += '<h1>Falta algo</h1><p class="sd">' + esc(JSON.stringify(f)) + '</p>';
+  }
+  h += '<button class="btn gh" id="rec">Volver a leer</button>';
+  app.innerHTML = h;
+  document.getElementById('rec').onclick = cargar;
+}
+
+/* ⑩ · EL REPARTO */
+function pantallaReparto() {
+  var d = D.detalle, rp = D.reparto;
+  var meseros = (d.partes || []).filter(function(p){ return p.grupo === 'mesero'; });
+  var esTronco = rp.modo === 'tronco';
+  var h = barra()
+    + '<p class="kick">Propinas</p><h1>El reparto</h1>'
+    + '<p class="sd"><span class="modo">' + (esTronco ? 'Al tronco' : 'Individual') + '</span> '
+    + '<i>' + (esTronco ? 'parte igual para todos' : 'cada uno lo suyo') + '</i></p>'
+    /* il pozo, di sopra: le tre righe che lo formano e il totale */
+    + '<div class="rows">'
+    + '<div class="r"><div class="n">Propina en tarjeta</div><div class="v">' + fmt(rp.pozo_no_efectivo) + '</div></div>'
+    + '<div class="r"><div class="n">Descuento tarjeta ' + esc(rp.desc_no_efectivo_pct) + '%</div><div class="v bad">−' + fmt(d.descuento) + '</div></div>'
+    + '<div class="r"><div class="n">Propina en efectivo</div><div class="v">' + fmt(rp.pozo_efectivo) + '</div></div>'
+    + (d.residuo_arrastrado > 0
+       ? '<div class="r"><div class="n">Queda de ayer<small>el redondeo del reparto anterior</small></div><div class="v">' + fmt(d.residuo_arrastrado) + '</div></div>' : '')
+    + '<div class="r tot"><div class="n">El pozo</div><div class="v">' + fmt(d.pozo_neto) + '</div></div>'
+    + '</div>';
+
+  /* i garzones: il 70%, che è ciò che il sistema paga.
+     🔑 `partes_propuestas`: il bordo NON sa chi ha lavorato (le plazas vivono nel
+        foglio, in `asignaciones`) e deduce la lista da chi ha incassato. In TRONCO chi
+        ha lavorato senza incassare non comparirebbe e il pozo si dividerebbe fra meno
+        teste ⇒ l'etichetta dice che è una proposta e c'è una porta per aggiungere.
+        Una parola, non una frase (Alberto, 02-ott). */
+  h += '<div class="rows"><div class="r hd">garzones · ' + esc(rp.quota_meseros_pct) + '%'
+    + (D.partes_propuestas ? '<span class="prop">propuesta</span>' : '') + '</div>';
+  if (esTronco) {
+    var cu = meseros.length ? meseros[0].monto : 0;
+    h += '<div class="r tot"><div class="n">' + meseros.length + ' ' + (meseros.length === 1 ? 'garzón' : 'garzones')
+      + '<small>' + fmt(cu) + ' cada uno</small></div><div class="v">' + fmt(d.monto_meseros) + '</div></div>';
+    h += meseros.map(function(p){
+      return '<div class="r"><div class="n">' + esc(p.nombre) + '</div><div class="v strong">' + fmt(p.monto) + '</div></div>'; }).join('');
+  } else {
+    h += meseros.map(function(p){
+      return '<div class="r"><div class="n">' + esc(p.nombre)
+        + '<small>tarjeta ' + fmt(p.propia_no_efectivo) + ' · efectivo ' + fmt(p.propia_efectivo) + '</small></div>'
+        + '<div class="v strong">' + fmt(p.monto) + '</div></div>'; }).join('');
+    h += '<div class="r tot"><div class="n">A los garzones</div><div class="v">' + fmt(d.monto_meseros) + '</div></div>';
+  }
+  /* la porta per il buco della proposta: chi ha lavorato e non ha incassado nada.
+     Senza questa riga l'etichetta «propuesta» sarebbe un avviso senza rimedio — e un
+     avviso che non si può agire si impara a non leggere. */
+  if (!D.cerrado && (D.personas || []).some(function(x){
+        return !meseros.some(function(m){ return String(m.persona_id) === String(x.persona_id); }); })) {
+    /* 🔑 il NUMERO sul tasto quando il libro dice che qualcuno c'era e non è in lista:
+       un tasto muto si impara a non premere, un tasto che porta un numero si guarda.
+       Niente frase: il numero e due parole (Alberto, 02-ott). */
+    var nSug = ((D.sugeridos || []).filter(function(x){
+      return !meseros.some(function(m){ return String(m.persona_id) === String(x.persona_id); }); })).length
+      + (D.presenti_non_riconosciuti || []).length;
+    h += '<button class="addr" id="addm">+ Falta alguien'
+      + (nSug ? ' <b>· ' + nSug + ' en turno</b>' : '') + '</button>';
+  }
+  h += '</div>';
+
+  /* il 30%. A leva spenta: una riga e l'etichetta di stato — le parole sono di 🎨 DESIGN,
+     e sono poche di proposito: nessun «por ahora», nessun perché. */
+  h += '<div class="rows">';
+  if (!verBarra()) {
+    h += '<div class="r tot"><div class="n">Barra y cocina · ' + (100 - Number(rp.quota_meseros_pct)) + '%'
+      + '<small>lo reparte Alberto</small></div><div class="v">' + fmt(d.monto_30) + '</div></div>';
+  } else {
+    var bc = (d.partes || []).filter(function(p){ return p.grupo === 'barra_cocina'; });
+    var pts = bc.reduce(function(a,p){ return a + (Number(p.puntos) === 0.5 ? 0.5 : 1); }, 0);
+    h += '<div class="r hd">barra y cocina · ' + (100 - Number(rp.quota_meseros_pct)) + '%</div>';
+    if (d.gastos_fijos > 0) {
+      h += '<div class="r"><div class="n">Gastos fijos del día</div><div class="v bad">−' + fmt(d.gastos_fijos) + '</div></div>';
+    }
+    if (d.gastos_alcanzan === false) {
+      h += '<div class="r"><div class="n">Faltan</div><div class="v bad">−' + fmt(d.gastos_faltan) + '</div></div>';
+    }
+    h += '<div class="r tot"><div class="n">' + pts + ' ' + (pts === 1 ? 'punto' : 'puntos') + '</div>'
+      + '<div class="v">' + fmt(d.monto_barra_cocina) + '</div></div>';
+  }
+  h += '</div>';
+
+  if (d.residuo > 0) {
+    /* ✏️ era una frase («Quedan $X del redondeo. Van al pozo de mañana»). Alberto,
+       02-ott: niente frasi esplicative sul vetro. ⇒ diventa una RIGA: l'etichetta dice
+       dove va e il numero resta visibile, perché è dinero di qualcuno. */
+    h += '<div class="rows"><div class="r"><div class="n">Redondeo<small>va al pozo de mañana</small></div>'
+      + '<div class="v">' + fmt(d.residuo) + '</div></div></div>';
+  }
+  if (D.cerrado) {
+    h += '<button class="btn ok" id="ir">Ir a la entrega</button>';
+  } else {
+    h += '<button class="btn acc" id="cerrar">Cerrar y avisar</button>';
+  }
+  app.innerHTML = h;
+  var am = document.getElementById('addm');
+  if (am) am.onclick = function(){ abrirFaltaAlguien(meseros); };
+  if (D.cerrado) document.getElementById('ir').onclick = function(){ PASO = 2; pintar(); };
+  else document.getElementById('cerrar').onclick = function(ev){
+    if (!unTocco(ev.currentTarget)) return;     // un tocco = un fatto
+    if (PIN_CAJA) cerrarReparto();
+    else abrirPinCerrar();
+  };
+}
+
+/* ⑩-bis · IL PANNELLO DEL PIN PER CHIUDERE IL REPARTO
+   🩸 PERCHÉ ESISTE: senza, l'ATTO III non partiva nemmeno una volta. `cerrarReparto()`
+      rifiutava con «Entra tu PIN en una entrega primero» — ma `PIN_CAJA` si riempie solo
+      dentro `confirmarPago()`, che vive in ⑪, e a ⑪ si arriva SOLO dopo che ⑩ ha chiuso
+      (`PASO = 2` dopo il `cerrarReparto` riuscito). ⇒ il primo reparto del giorno non si
+      poteva chiudere mai: un giro chiuso, silenzioso, col messaggio che indicava come
+      cura una strada che passava dalla porta che stava bloccando.
+   🎓 Non l'ha trovato nessun banco, perché nessun banco apre il vetro: l'ho visto
+      leggendo il vetro per un'altra ragione. Un difetto di SEQUENZA fra due schermate
+      non sta in nessuna delle due — sta nell'ordine, e l'ordine non ha un file.
+   🔑 E la cura non è togliere il controllo: è metterlo dove il gesto nasce. Chi chiude
+      il reparto è la cajera, e il suo PIN si chiede a lei, qui, come in ⑪. */
+function abrirPinCerrar() {
+  var card = document.getElementById('sheetCard');
+  card.innerHTML = '<p class="kick">Cerrar</p>'
+    + '<h1>El reparto</h1>'
+    + '<p class="lb">Tu PIN</p>'
+    + '<input class="inp pin" id="pinc" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="····">'
+    + '<div class="two"><button class="btn gh" id="canc">Cancelar</button>'
+    + '<button class="btn acc" id="okc">Cerrar y avisar</button></div>';
+  document.getElementById('sheet').className = 'sheet show';
+  document.getElementById('pinc').focus();
+  document.getElementById('canc').onclick = cerrarSheet;
+  document.getElementById('okc').onclick = function(ev){
+    if (!unTocco(ev.currentTarget)) return;
+    var pin = (document.getElementById('pinc') || {}).value || '';
+    if (!pin) { toast('Falta tu PIN', 'bad'); return; }
+    PIN_CAJA = pin;                 // in memoria, come in ⑪: non si scrive da nessuna parte
+    cerrarSheet();
+    cerrarReparto();
+  };
+}
+
+/* ⑩-ter · «FALTA ALGUIEN» — e il RICALCOLO, che è il motivo per cui esiste
+   `reparto_vista`
+   🔑 Aggiungere una persona cambia TUTTI i numeri (in tronco il pozo si divide fra una
+      testa in più) ⇒ non si tocca la lista sul vetro e si manda il risultato: si manda
+      la LISTA e si fa ricalcolare al bordo, che è l'unico che ha il diritto di dire
+      quanto prende ognuno. Per questo `reparto_vista` è un verbo e non una GET: la
+      lista non viaggia in una URL, e un'anteprima non deve scrivere niente. */
+var PARTES_EXTRA = [];        // i persona_id aggiunti a mano, per questo reparto
+
+function abrirFaltaAlguien(meseros) {
+  var dentro = {};
+  (meseros || []).forEach(function(m){ dentro[String(m.persona_id)] = true; });
+  /* 🔑 IN CIMA CHI IL LIBRO DICE CHE ERA PRESENTE (`sugeridos`, dai `clock_in`): misurato
+     su 22 giorni-locale, 19 volte una persona ha lavorato e non ha incassato propina ⇒
+     col solo «chi ha incassato» il tronco si divideva fra meno teste, 14 giorni su 22.
+     Non li aggiungo io: il `clock_in` non dice il turno, e metterne uno nel turno
+     sbagliato sbaglierebbe nei due versi. Un tocco, e lo decide lei. */
+  var sug = (D.sugeridos || []).filter(function(x){ return !dentro[String(x.persona_id)]; });
+  var sugId = {};
+  sug.forEach(function(x){ sugId[String(x.persona_id)] = true; });
+  var fuera = (D.personas || []).filter(function(x){
+    return !dentro[String(x.persona_id)] && !sugId[String(x.persona_id)]; });
+  var riga = function(pid, nombre, marca){
+    return '<div class="r pick" data-pid="' + esc(pid) + '"><div class="n">' + esc(nombre)
+      + (marca ? '<span class="prop">estuvo en turno</span>' : '')
+      + '</div><div class="v acc">+</div></div>'; };
+  var card = document.getElementById('sheetCard');
+  card.innerHTML = '<p class="kick">Agregar</p><h1>¿Quién trabajó?</h1>'
+    + '<div class="rows">'
+    + sug.map(function(x){ return riga(x.persona_id, x.nombre || x.persona_id, true); }).join('')
+    + fuera.map(function(x){ return riga(x.persona_id, x.nombre_legal || x.persona_id, false); }).join('')
+    + '</div>'
+    /* 🔴 i presenti che il libro non sa nominare (`Esuardo`, `Hurley`, `carlo`…: grafie
+       storte nei clock_in, senza alias). Non si indovinano e non si tacciono: senza
+       questa riga sparirebbero in silenzio, ed è la forma peggiore del buco. */
+    + ((D.presenti_non_riconosciuti || []).length
+       ? '<div class="note">No reconozco: ' + (D.presenti_non_riconosciuti).map(esc).join(', ')
+         + '</div>' : '')
+    /* due modi di non sapere, e si dicono con le stesse parole perché per la cajera
+       sono la stessa cosa: la lista è solo di chi ha incassato. `vuota_sospetta` è il
+       caso in cui il libro ha risposto «nessuno» mentre qualcuno incassava — un
+       successo vuoto, che senza questa riga sarebbe indistinguibile da una sala vuota. */
+    + (D.presenti_fonte === 'solo_cobros' || D.presenti_fonte === 'vuota_sospetta'
+       ? '<div class="note">No pude leer el turno. Esta lista es solo de quien cobró.</div>' : '')
+    + '<button class="btn gh" id="canf">Cancelar</button>';
+  document.getElementById('sheet').className = 'sheet show';
+  document.getElementById('canf').onclick = cerrarSheet;
+  Array.prototype.forEach.call(card.querySelectorAll('.pick'), function(el){
+    el.onclick = function(){
+      if (!unTocco(el)) return;
+      var pid = el.dataset.pid;
+      if (PARTES_EXTRA.indexOf(pid) < 0) PARTES_EXTRA.push(pid);
+      cerrarSheet();
+      recalcular();
+    };
+  });
+}
+
+async function recalcular() {
+  if (!PIN_CAJA) { abrirPinCerrar(); return; }
+  var nombre = {};
+  (D.personas || []).forEach(function(x){ nombre[String(x.persona_id)] = x.nombre_legal || ''; });
+  var partes = ((D.detalle && D.detalle.partes) || []).map(function(p){
+    return { persona_id: p.persona_id, grupo: p.grupo, puntos: p.puntos, concepto: p.concepto || null };
+  });
+  var dentro = {};
+  partes.forEach(function(p){ dentro[String(p.persona_id)] = true; });
+  PARTES_EXTRA.forEach(function(pid){
+    if (!dentro[pid]) partes.push({ persona_id: pid, nombre: nombre[pid] || '',
+      grupo: 'mesero', puntos: 1, concepto: null });
+  });
+  cargando();
+  var r = await postCaja({ verbo:'reparto_vista', dia_operativo: DIA, turno: TURNO,
+    partes: partes, fuente: 'app_caja', quien: (SES && SES.user) || '', pin_caja: PIN_CAJA });
+  if (!r.ok || !r.reparto) {
+    /* un'anteprima che non riesce NON cancella quella che c'era: si dice e si resta */
+    toast(r.falta ? 'Revisa la lista' : ('No se pudo recalcular: ' + (r.motivo || r.error || '')), 'bad');
+    if (r.falta) { D = Object.assign({}, D, { falta: r.falta }); }
+    pintar();
+    return;
+  }
+  /* 🔑 i numeri nuovi vengono dalla risposta, non dal vetro: è la stessa regola per cui
+     il bordo ignora gli importi del payload. Qui sarebbe stato comodo ricalcolare in JS
+     e invece si rifà il giro — ed è il punto: due calcoli sono due verità. */
+  D = Object.assign({}, D, { reparto: r.reparto, detalle: r.detalle,
+    por_persona: r.por_persona, partes_propuestas: false, falta: null });
+  pintar();
+}
+
+/* ⑪ · EL PAGO — una LISTA DI LAVORO: in alto chi manca, sotto chi è già pagato */
+function pantallaPago() {
+  var d = D.detalle;
+  var pagados = {};
+  (D.pagados || []).forEach(function(p){
+    var k = String(p.persona_id) + '|' + String(p.concepto == null ? '' : p.concepto);
+    if (!pagados[k] || String(p.ts||'') > String(pagados[k].ts||'')) pagados[k] = p;
+  });
+  var grupo = (PASO === 3) ? 'barra_cocina' : 'mesero';
+  var filas = (d.partes || []).filter(function(p){ return p.grupo === grupo && Number(p.monto) > 0; });
+  var falta = [], hechos = [], faltaTot = 0;
+  filas.forEach(function(p){
+    var f = pagados[String(p.persona_id) + '|'];
+    if (f && f.firmado) hechos.push({ p:p, f:f });
+    else { falta.push({ p:p, f:f||null }); faltaTot += Number(p.monto)||0; }
+  });
+
+  var h = barra() + '<p class="kick">Propinas</p>'
+    + '<h1>La entrega · ' + hechos.length + ' de ' + filas.length + '</h1>'
+    + '<p class="sd">Cambio de turno · le toca a quien tienes delante</p>';
+
+  if (!filas.length) {
+    h += '<div class="vuoto"><div class="ic">✓</div><b>Nada que entregar</b>'
+      + '<p style="margin:0;font-size:13px">Este turno no dejó propina para este grupo.</p></div>';
+  } else {
+    h += '<div class="rows"><div class="r hd">falta entregar · ' + fmt(faltaTot) + '</div>';
+    if (!falta.length) {
+      h += '<div class="r"><div class="n">Ya están todos</div><div class="v ok">✓</div></div>';
+    } else {
+      h += falta.map(function(x){
+        var sub = x.f ? (grupo === 'barra_cocina' ? 'falta su firma en papel'
+                                                  : 'que confirme en su teléfono')
+                      : 'aún no llega';
+        return '<div class="r clic" data-pid="' + esc(x.p.persona_id) + '">'
+          + '<div class="n">' + esc(x.p.nombre) + '<small>' + sub + '</small></div>'
+          + '<div class="v strong">' + fmt(x.p.monto) + ' ☝︎</div></div>'; }).join('');
+    }
+    h += '</div>';
+    if (hechos.length) {
+      h += '<div class="rows"><div class="r hd">ya entregados</div>'
+        + hechos.map(function(x){
+            return '<div class="r"><div class="n">' + esc(x.p.nombre) + '<small>firmado</small></div>'
+              + '<div class="v ok">' + fmt(x.f.monto) + ' ✓</div></div>'; }).join('')
+        + '</div>';
+    }
+    if (falta.some(function(x){ return alias[String(x.p.persona_id)] === false; })) {
+      /* questa RESTA, ridotta all'osso: non spiega una regola, dice cosa fare adesso
+         con il dinero in mano. Toglierla sposterebbe un rischio sulla memoria. */
+      h += '<div class="note bad"><b>Sin ficha no se puede firmar.</b> No le entregues todavía.</div>';
+    }
+    /* ✏️ via la frase «Nadie queda pagado sin su firma…»: la regola 14 è già nella
+       FORMA (senza PIN il pago non parte) e il «no pierde nada» è già nella forma
+       (chi non viene resta in cima alla lista domani). Una riga che ripete quello che
+       lo schermo fa da sé è esattamente ciò che Alberto ha chiesto di togliere. */
+  }
+  h += '<div class="two"><button class="btn gh" id="atras">‹ El reparto</button>'
+    + '<button class="btn ok" id="guardar">Guardar</button></div>';
+  app.innerHTML = h;
+  document.getElementById('atras').onclick = function(){ PASO = 1; pintar(); };
+  document.getElementById('guardar').onclick = function(){ toast('Guardado. Mañana sigue en esta lista.', 'ok'); };
+  Array.prototype.forEach.call(app.querySelectorAll('.r.clic[data-pid]'), function(el){
+    /* anche la RIGA: aprire due volte il pannello conierebbe un uid nuovo e
+       butterebbe quello del gesto in corso — cioè toglierebbe l'idempotenza
+       proprio al retry che serve a non pagare due volte. */
+    el.onclick = function(){ if (!unTocco(el)) return; abrirFirma(el.dataset.pid, grupo); };
+  });
+}
+
+/* la firma a PIN di CHI RICEVE — non della cajera */
+/* 🔑 il PIN della cajera si tiene IN MEMORIA per la sessione, e **non** in
+   localStorage: un PIN che sopravvive alla chiusura del vetro è un PIN che vive su un
+   telefono. Si chiede quando serve, non all'avvio. */
+var PIN_CAJA = '';
+var UID_FIRMA = null;        // 🔑 uno per APERTURA del pannello, non uno per tocco
+var UID_CERRAR = null;       // idem per il reparto
+
+function abrirFirma(pid, grupo) {
+  var d = D.detalle;
+  var p = (d.partes || []).filter(function(x){ return String(x.persona_id) === String(pid) && x.grupo === grupo; })[0];
+  if (!p) return;
+  /* 🔴 L'UID NASCE QUI, ALL'APERTURA, e non dentro `confirmarPago`.
+     `_COME_SI_CODIFICA` ①: la chiave d'idempotenza la conia il lato che RIPETE. Se la
+     coniassi al tocco, un secondo invio dello STESSO gesto porterebbe un uid NUOVO ⇒
+     il bordo non lo riconoscerebbe come retry ma come un pago diverso.
+     🩸 E il danno non e' teorico ne' simmetrico: dopo una risposta persa la cajera
+        ritocca, il bordo risponde «ya pagada» su un uid che non e' suo, e il vetro le
+        dice «no le entregues de nuevo» — cioe' **trattiene i soldi di una persona
+        dandogliene una ragione sbagliata**. Con l'uid stabile lo stesso caso torna
+        `retry` e lei vede «Entregado», che e' la verita'. */
+  UID_FIRMA = uidGesto('pp');
+  var card = document.getElementById('sheetCard');
+  /* ✏️ Qui il PIN era di CHI RICEVE. Decisione del 🎛 (`ATTO III ROSSI CHI FA COSA
+     E R4`): quel PIN non esiste e non se ne inventa uno. ⇒ **il PIN è il TUO**, della
+     cajera, e chi riceve confermerà dal suo telefono. Barra e cocina firmano su carta.
+     🔑 Così il pago e la firma vengono da due persone e due telefoni diversi — che è
+        esattamente ciò che una firma deve garantire e che il mio primo disegno
+        non garantiva, perché li scriveva entrambi la cajera. */
+  const esBarra = grupo === 'barra_cocina';
+  card.innerHTML = '<p class="kick">Entregar</p>'
+    + '<h1>' + esc(p.nombre) + '</h1>'
+    + '<p class="big acc">' + fmt(p.monto) + '</p>'
+    + '<p class="lb">Tu PIN</p>'
+    + '<input class="inp pin" id="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="····">'
+    + (esBarra ? '<div class="note">Que firme en el papel.</div>'
+               : '<div class="note">Que confirme en su teléfono.</div>')
+    + '<div class="two"><button class="btn gh" id="can">Cancelar</button>'
+    + '<button class="btn ok" id="ok">Entregado</button></div>';
+  document.getElementById('sheet').className = 'sheet show';
+  document.getElementById('pin').focus();
+  document.getElementById('can').onclick = cerrarSheet;
+  document.getElementById('ok').onclick = function(ev){
+    if (!unTocco(ev.currentTarget)) return;     // un tocco = un fatto
+    confirmarPago(p, grupo);
+  };
+}
+function cerrarSheet(){ document.getElementById('sheet').className = 'sheet'; UID_FIRMA = null; }
+
+async function confirmarPago(p, grupo) {
+  var pin = (document.getElementById('pin') || {}).value || '';
+  if (!pin) { toast('Falta tu PIN', 'bad'); return; }
+  PIN_CAJA = pin;   // lo tiene per il reparto e per le firme su carta, in memoria
+  var btn = document.getElementById('ok'); btn.disabled = true; btn.textContent = 'Enviando…';
+  var base = {
+    reparto_uid: D.reparto_uid || (D.reparto && D.reparto.uid_gesto) || null,
+    persona_id: p.persona_id,
+    grupo: grupo,
+    concepto: p.concepto || null,
+    dia_operativo: DIA,
+    fuente: 'app_caja',
+    pagado_por: (SES && SES.user) || '',   // il bordo lo sovrascrive con la cajera PROVATA
+    pin_caja: pin                          // 🔑 `pin_caja` nel body (🎛 BKP, INTEGRAZIONE CAJA)
+  };
+  var r = await postCaja(Object.assign({}, base, {
+    verbo: 'propina_pago',
+    uid_gesto: UID_FIRMA,                   // coniato all'apertura: un retry porta lo STESSO nome
+    monto: p.monto,
+    tranche: TURNO === 'AM' ? 'AM_cierre' : 'PM_apertura',
+    /* 🔑 IL PONTE PER IL «RECIBIDO» (🎛 BKP, `RECIBIDO NOME DI SALA`): il telefono del
+       mesero sa il suo NOME DI SALA, il pago sa il `persona_id`. Qui viaggiano le
+       grafie con cui ha davvero cobrato stanotte — **un elenco, non un nome**, perché
+       una persona può averne due (`Diego` / `Diego V.`) e la sua sessione della sala
+       usa quella che usa. Non entra nella riga: `propina_pago` non ha la colonna. */
+    quien_sala: (p.grafias_sala || [])
+  }));
+  /* barra e cocina non hanno la sala: la loro firma è la CARTA, e la registra la
+     cajera subito dopo il pago — due righe, due gesti, un solo tocco per lei. */
+  if (r.ok && grupo === 'barra_cocina') {
+    await postCaja(Object.assign({}, base, {
+      verbo: 'propina_firma_carta',
+      uid_gesto: UID_FIRMA,
+      firma_uid_gesto: uidGesto('fc'),
+      quien: p.nombre
+    }));
+  }
+  btn.disabled = false; btn.textContent = 'Entregado';
+  if (r.yaPagado) {
+    cerrarSheet();
+    toast('Ya pagado' + (r.ya && r.ya.monto ? ' · ' + fmt(r.ya.monto) : '') + '. No le entregues de nuevo.', 'bad');
+    await cargar();
+    return;
+  }
+  if (!r.ok) {
+    toast(r.motivo === 'gate_spento' ? 'El pago del sistema aún no está encendido'
+      : (r.motivo === 'sin_red' ? 'Sin conexión: no entregues hasta que quede escrito' : ('No se pudo: ' + r.motivo)), 'bad');
+    return;
+  }
+  cerrarSheet();
+  toast('Entregado y firmado', 'ok');
+  await cargar();
+}
+
+async function cerrarReparto() {
+  var btn = document.getElementById('cerrar'); btn.disabled = true; btn.textContent = 'Cerrando…';
+  var partes = ((D.detalle && D.detalle.partes) || []).map(function(p){
+    return { persona_id: p.persona_id, grupo: p.grupo, puntos: p.puntos, concepto: p.concepto || null };
+  });
+  /* 🔑 chi è stato aggiunto a mano entra ANCHE SE il ricalcolo non era riuscito: senza
+     questa riga una persona segnata dalla cajera poteva sparire in silenzio fra il
+     tocco e la chiusura, e il suo dinero finire diviso fra gli altri. */
+  var dentro = {};
+  partes.forEach(function(p){ dentro[String(p.persona_id)] = true; });
+  PARTES_EXTRA.forEach(function(pid){
+    if (!dentro[pid]) partes.push({ persona_id: pid, grupo: 'mesero', puntos: 1, concepto: null });
+  });
+  if (!PIN_CAJA) {
+    /* ✏️ Qui c'era «Entra tu PIN en una entrega primero», e MANDAVA DALLA PARTE
+       SBAGLIATA: l'entrega sta in ⑪, e a ⑪ si arriva solo dopo questa chiusura ⇒ il
+       primo reparto del giorno non si chiudeva mai. Ora il PIN si chiede qui
+       (`abrirPinCerrar`), e questa riga resta solo come rete: se ci si arriva, si apre
+       il pannello invece di dare un'istruzione impossibile.
+       🎓 Un messaggio d'errore che indica una cura è una PROMESSA: se la strada che
+          nomina non esiste, non è un errore chiaro — è un errore convincente. */
+    abrirPinCerrar();
+    return;
+  }
+  if (!UID_CERRAR) UID_CERRAR = uidGesto('rp');   // stabile finché non riesce: un retry è lo stesso gesto
+  var r = await postCaja({ verbo:'reparto_cerrar', uid_gesto: UID_CERRAR,
+    dia_operativo: DIA, turno: TURNO, partes: partes,
+    fuente: 'app_caja', quien: (SES && SES.user) || '', pin_caja: PIN_CAJA });
+  btn.disabled = false; btn.textContent = 'Cerrar y avisar';
+  if (!r.ok) {
+    toast(r.motivo === 'gate_spento' ? 'El reparto del sistema aún no está encendido' : ('No se pudo: ' + r.motivo), 'bad');
+    return;
+  }
+  UID_CERRAR = null;
+  PARTES_EXTRA = [];        // il reparto è fissato: le aggiunte sono dentro il fatto
+  toast(r.encolado ? 'Sin conexión: queda guardado y se envía solo' : 'Reparto cerrado', 'ok');
+  await cargar();
+  PASO = 2; pintar();
+}
+
+function pintar() {
+  if (!D) { cargando(); return; }
+  if (!D.ok) { sinRed(D.error || 'error'); return; }
+  if (D.falta) { pantallaFalta(D.falta); return; }
+  if (!D.detalle) {
+    app.innerHTML = barra() + '<div class="vuoto"><div class="ic">🌙</div><b>Todavía no hay propinas</b>'
+      + '<p style="margin:0;font-size:13px">' + esc(fechaLarga(DIA)) + ' · ' + esc(TURNO) + ' no dejó propina.</p></div>'
+      + '<button class="btn gh" id="rec">Volver a leer</button>';
+    document.getElementById('rec').onclick = cargar;
+    return;
+  }
+  if (PASO === 1) pantallaReparto();
+  else pantallaPago();
+}
+
+async function cargar() {
+  cargando();
+  D = await getReparto(DIA, TURNO);
+  if (D && D.ok && D.gate === false) {
+    /* la leva spenta si DICE, non si traveste da «niente da fare» */
+    app.innerHTML = barra() + '<div class="vuoto"><div class="ic">🔌</div><b>El reparto del sistema está apagado</b>'
+      + '<p style="margin:0;font-size:13px">Hoy la entrega se hace a mano, en papel.</p></div>';
+    return;
+  }
+  pintar();
+}
+
+/* ═══ 4 · ARRANQUE ══════════════════════════════════════════════════════
+   ✏️ Al primo giro avevo scritto `init({ cargos:[…], onReady: … })`: **due opzioni
+      che non esistono.** `pinsita_auth.js` prende `{ local, accent }` e la sessione si
+      legge con `PinsitaAuth.sesion()`; il gating di cargo lo fa `aplicarGating` sugli
+      attributi delle card, non un parametro di `init`.
+   🩸 E non avrebbe dato nessun errore: `init` sarebbe partito con `local` di default e
+      `onReady` **non sarebbe mai stato chiamato** ⇒ schermo fermo su «Cargando…»,
+      senza una riga rossa in console. L'ho trovato leggendo la fonte di `init`, non
+      provando il vetro — ed è il tipo di difetto per cui si legge la fonte. */
+async function flushCola() {
+  var c = leerCola();
+  if (!c.length) return;
+  var resto = [];
+  for (var i = 0; i < c.length; i++) {
+    var r = await postCaja(c[i]);
+    if (!r.ok) resto.push(c[i]);
+  }
+  guardarCola(resto);
+  if (resto.length < c.length) { toast((c.length - resto.length) + ' envíos pendientes se enviaron', 'ok'); cargar(); }
+}
+
+function arrancar() {
+  SES = (window.PinsitaAuth && PinsitaAuth.sesion && PinsitaAuth.sesion()) || { user:'?', role:'CAJA' };
+  if (!LOCAL) LOCAL = (SES.local && SES.local !== '*') ? SES.local : 'rsc';
+  /* AM = día, PM = noche (🎛, `AM DIA PM NOCHE CONFERMATO`). Regola 7: ai meseros AM si
+     paga alla chiusura del loro turno, ai PM all'apertura del loro ⇒ la mattina si paga
+     il PM della notte prima, dal pomeriggio l'AM di oggi. */
+  var hh = new Date(new Date().toLocaleString('en-US', { timeZone:'America/Santiago' })).getHours();
+  if (hh >= 14) { DIA = DIA_HOY; TURNO = 'AM'; } else { DIA = diaAnterior(DIA_HOY); TURNO = 'PM'; }
+  flushCola();
+  cargar();
+}
+
+if (!window.PinsitaAuth) {
+  app.innerHTML = '<p style="color:var(--bad)">No se pudo cargar pinsita_auth.js</p>';
+} else {
+  /* init() toglie l'overlay di login quando c'è sessione; se non c'è, mostra il login
+     e blocca la UI da sé. Si parte comunque, come fa il vetro dell'ATTO II. */
+  PinsitaAuth.init({ local: '*', accent: '#8c6a20' });
+  setTimeout(arrancar, 50);
+}
+window.addEventListener('online', flushCola);
+})();
+</script>
+</body>
+</html>
