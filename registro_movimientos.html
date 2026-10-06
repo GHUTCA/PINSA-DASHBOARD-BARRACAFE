@@ -558,7 +558,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v93 · bodega con su nombre · 01oct</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v94 · ingreso directo a sección · 06oct</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -1071,8 +1071,19 @@ var VERBOS = [
   {id:'Entrega Secc',   label:'→ Entrega a sección',          nat:'registrar', qReq:true, min:'JL'},
   {id:'Ajuste - menos', label:'− Ajuste / Merma (menos)',     nat:'registrar', qReq:true, min:'JL'},
   {id:'Ingreso BLoc',   label:'↓ Ingreso a '+BL_NOM,     nat:'registrar', qReq:true, min:'JL'},
+  // v94 · 06-oct · el proveedor entrega DIRECTO a la sección, sin pasar por la bodega (decisión de Alberto:
+  // «no son excepciones, pasa seguido»). Antes sólo existía «Entrega» desde la bodega, que esa mercadería
+  // nunca recibió ⇒ la bodega quedaba en negativo (auditoría 06-oct: 39 entregas, 29 SKU). La sección se
+  // DEDUCE como en el Mapa (skuSecInv, N16). Sólo con el LIBRO NUEVO encendido aquí (el GAS no conoce el verbo).
+  {id:'Ingreso Directo Secc', label:'↓ Ingreso directo a sección', nat:'registrar', qReq:true, min:'JL', soloLibroNuevo:true},
   {id:'Conteo Fisico',  label:'☑ Inventario',                nat:'conteo',    qReq:true, min:'JL'}
 ];
+// v94 · ¿este verbo se puede usar aquí? Los de `soloLibroNuevo` existen sólo donde el bordo dijo «leva accesa»
+// (y nunca en Bodega Central, que no tiene secciones).
+function verboDisponible(v){
+  if(!v.soloLibroNuevo) return true;
+  return CTX_CODE!=='bc' && typeof INV_PG!=='undefined' && INV_PG.leva==='accesa';
+}
 
 // ══════════════════════════════════════════════════════════════════════
 //  v79 (08-ago) · EL ALCANCE DENTRO DE LA APP — una tabla, un solo sitio
@@ -1173,7 +1184,7 @@ async function _ajusteSondaLeva(){
   _ajusteSondaEnCurso=true;
   try{ await _invBordo({ action:'getMisMovimientosHoy', responsable:OPERADOR }, 6000); }catch(e){}
   finally{ _ajusteSondaEnCurso=false; }
-  if(INV_PG.leva==='accesa') render();
+  if(INV_PG.leva==='accesa'){ render(); pintarVerboBtns(); }   // v94 · aparece «Ingreso directo a sección»
 }
 // v60 · ¿el producto se cuenta por PIEZAS? (UTM discreta: lata, pinsa, galleta)
 // Decide el idioma de la Q en BD_CODIGOS: piezas para lo discreto (la lata
@@ -1546,10 +1557,11 @@ verboSel.innerHTML = VERBOS.map(function(v){return '<option value="'+v.id+'">'+v
 verboSel.value='';  // ningún verbo preseleccionado
 function _natClase(v){
   if(v.nat==='conteo') return 'nat-conteo';
-  if(v.id==='Ingreso BLoc') return 'nat-ingreso';
+  if(v.id==='Ingreso BLoc' || v.id==='Ingreso Directo Secc') return 'nat-ingreso';
   return 'nat-salida';  // Entrega / Ajuste-Merma: mueven stock fuera → naranja
 }
 var _verboExpandido=false;   // el OP tocó «cambiar» → muestra la grilla aunque haya lista
+var _sondaVerbosTs=0;        // v94 · última vez que se preguntó la palanca para los verbos del libro nuevo
 function pintarVerboBtns(){
   var cont=document.getElementById('verboBtns'); if(!cont) return;
   var elegido=verboSel.value;
@@ -1568,7 +1580,12 @@ function pintarVerboBtns(){
   // GRILLA completa (sin verbo, o lista vacía, o el OP pidió cambiar)
   // v79 · sólo los verbos que tu cargo abre (tabla RANGO/min, arriba)
   cont.className='verbo-btns';
-  cont.innerHTML = VERBOS.filter(function(v){ return puedeMin(v.min); }).map(function(v){
+  // v94 · si la palanca del libro nuevo aún no se conoce, se pregunta (lectura liviana) y se repinta
+  //      (una vez por minuto como mucho: sin red, cada repintado no debe disparar otra lectura)
+  if(typeof INV_PG!=='undefined' && INV_PG.leva==='ignota' && Date.now()-_sondaVerbosTs>60000 && VERBOS.some(function(v){ return v.soloLibroNuevo; })){
+    _sondaVerbosTs=Date.now(); _ajusteSondaLeva();
+  }
+  cont.innerHTML = VERBOS.filter(function(v){ return puedeMin(v.min) && verboDisponible(v); }).map(function(v){
     var on = (verboSel.value===v.id) ? ' on '+_natClase(v) : '';
     return '<button class="vbtn'+on+'" data-vid="'+v.id+'">'+esc(v.label)+'</button>';
   }).join('');
@@ -4861,7 +4878,7 @@ function mostrarRecibo(titulo, sub, movs, alCerrar, deshacer, porLote){
 //  · sólo los verbos manuales (Entrega/Ajuste/Ingreso): el conteo y el Mapa
 //    ajustan contra el teórico y deshacerlos es otro oficio (igual que la recepción);
 //  · un lote que ya tiene su «ANU-» en la lista no se ofrece: ya está deshecho.
-var VERBOS_DESHACIBLES={'Entrega Secc':1,'Ingreso BLoc':1,'Ingreso Proveedor':1,'Ajuste - menos':1,'Ajuste + mas':1};
+var VERBOS_DESHACIBLES={'Entrega Secc':1,'Ingreso BLoc':1,'Ingreso Proveedor':1,'Ajuste - menos':1,'Ajuste + mas':1,'Ingreso Directo Secc':1};
 function _lotesDeshacibles(movs){
   var lotes={}, orden=[], anulados={};
   (movs||[]).forEach(function(m){
@@ -4946,6 +4963,12 @@ $('btnConfirm').onclick=async function(){
     alert('El ajuste en sección necesita el libro nuevo y ahora no responde.\n\nIntenta de nuevo en un momento, o regístralo desde '+BL_NOM+'.');
     AJUSTE_NIVEL=null; render(); return;
   }
+  // v94 · el ingreso directo vive sólo en el libro nuevo, y cada producto necesita su sección (deducida)
+  if(v.id==='Ingreso Directo Secc'){
+    if(!verboDisponible(v)){ alert('El ingreso directo a sección necesita el libro nuevo y ahora no responde.\n\nIntenta de nuevo en un momento.'); return; }
+    var _sinSec=ITEMS.filter(function(it){ return it.sku && !skuSecInv(it.sku); }).map(function(it){ return '· '+(it.nombre||it.sku); });
+    if(_sinSec.length){ alert('Estos productos no tienen sección en el catálogo:\n\n'+_sinSec.join('\n')+'\n\nIngrésalos a '+BL_NOM+'.'); return; }
+  }
   if(ajusteEnSeccionPosible()){
     if(!AJUSTE_NIVEL){ alert('¿Dónde se perdió?\n\nElige arriba de la lista: '+BL_NOM+' o En su sección.'); return; }
     if(AJUSTE_NIVEL==='seccion'){
@@ -4997,7 +5020,12 @@ $('btnConfirm').onclick=async function(){
     // batch único — destino/origen/tipo por item (Entrega: destino=sección, N16)
     var movItems=ITEMS.map(function(it){
       var origen, destino;
-      if(tipo==='Entrega Secc'){ origen='Bodega Local'; destino=capSec(skuSec(it.sku)||'Cocina Central'); }
+      // v94 · R5 (auditoría Riesco 06-oct): la entrega va a la MISMA sección donde el Mapa la cuenta
+      // (skuSecInv, sin Cocina Central si hay otra). Con skuSec[0] caía en Cocina Central y el conteo de
+      // Barra Alimentos la buscaba en otro lado: 13 SKU, $374.182 entregados donde nadie contaba.
+      if(tipo==='Entrega Secc'){ origen='Bodega Local'; destino=capSec(skuSecInv(it.sku)||'Cocina Central'); }
+      // v94 · el proveedor entrega directo a la sección (sin bodega) · sección deducida igual que el conteo
+      else if(tipo==='Ingreso Directo Secc'){ origen='Proveedor'; destino=capSec(skuSecInv(it.sku)); }
       // v90 · R3: la merma en su sección (validada arriba; sólo con el libro nuevo encendido)
       else if(tipo==='Ajuste - menos' && AJUSTE_NIVEL==='seccion'){
         origen=ajusteSeccionDe(it); destino='Bodega Local'; }
