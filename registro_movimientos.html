@@ -3474,6 +3474,13 @@ function _invCodigoDe(url){
   for (var k in CONTEXTOS) { if (CONTEXTOS.hasOwnProperty(k) && CONTEXTOS[k].gas === url) return k; }
   return null;   // un endpoint che non e' di un locale: non e' inventario, va al GAS
 }
+/* v94 · ② della seconda testa (EL GIRO, `BANCO CATENA INGRESO DIRETTO SECONDA TESTA`): un lote con un verbo
+   che SOLO il libro nuovo conosce (Ingreso Directo Secc) non scende MAI al GAS — lo scriverebbe con un verbo che
+   non sa. Se la leva risulta spenta, il lote non si segna «gas» e RESTA IN CODA finché il libro nuovo risponde. */
+function _soloLibroNuovo(payload){
+  return !!payload && payload.action==='registrarMovimientoBatch' && Array.isArray(payload.items)
+    && payload.items.some(function(it){ return it && it.tipo==='Ingreso Directo Secc'; });
+}
 async function _invBordo(payload, timeoutMs, urlOverride){
   var lettura = INV_PG.LETTURE[payload.action] || '';
   /* 🔴 la memoria «spenta» vale SOLO per le LETTURE. Una SCRITTURA chiede
@@ -3505,6 +3512,7 @@ async function _invBordo(payload, timeoutMs, urlOverride){
        (index.js 13507, `ruta_desconocida`); la rotta nuova non risponde mai 404. */
     if ((r.status === 404 && (!j || j.error === 'ruta_desconocida')) || (j && j.error === 'leva_spenta')) {
       INV_PG.leva = 'spenta'; INV_PG.spentaHasta = Date.now() + 5*60*1000;
+      if (_soloLibroNuovo(payload)) return { ok: false, error: 'el libro nuevo no responde: el ingreso directo queda en cola' };   // v94 · MAI al GAS
       if (loteChiave) _invLibroSegna(loteChiave, 'gas');   // da qui in poi QUESTO lote e' del GAS
       return null;
     }
@@ -3533,7 +3541,7 @@ async function _invBordo(payload, timeoutMs, urlOverride){
        oggi e il lote RESTA del GAS. ⚠️ Rischio residuo: la leva accesa proprio
        in quei 5 minuti E la richiesta arrivata al bordo E la risposta persa —
        contromisura nel giorno della leva (§⑦bis). */
-    if (!lettura && INV_PG.leva === 'spenta' && Date.now() < INV_PG.spentaHasta) {
+    if (!lettura && INV_PG.leva === 'spenta' && Date.now() < INV_PG.spentaHasta && !_soloLibroNuovo(payload)) {   // v94 · il verbo nuovo MAI al GAS
       if (loteChiave) _invLibroSegna(loteChiave, 'gas');
       return null;
     }
@@ -3564,6 +3572,8 @@ async function callGAS(payload, timeoutMs, urlOverride){
   if (payload && INV_PG.ACT[payload.action]) {
     var inv = await _invBordo(payload, timeoutMs, urlOverride);
     if (inv) return inv;
+    // v94 · cinturón: si por cualquier camino llega null, el verbo del libro nuevo igual NO baja al GAS
+    if (_soloLibroNuovo(payload)) return { ok: false, error: 'el libro nuevo no responde: el ingreso directo queda en cola' };
   }
   // v66 · le tre letture dell'apertura provano prima il bordo; null → GAS di sempre
   // v76 · e la foto vecchia del bordo è la riserva se il GAS muore (ultimo gradino)
@@ -4966,8 +4976,8 @@ $('btnConfirm').onclick=async function(){
   // v94 · el ingreso directo vive sólo en el libro nuevo, y cada producto necesita su sección (deducida)
   if(v.id==='Ingreso Directo Secc'){
     if(!verboDisponible(v)){ alert('El ingreso directo a sección necesita el libro nuevo y ahora no responde.\n\nIntenta de nuevo en un momento.'); return; }
-    var _sinSec=ITEMS.filter(function(it){ return it.sku && !skuSecInv(it.sku); }).map(function(it){ return '· '+(it.nombre||it.sku); });
-    if(_sinSec.length){ alert('Estos productos no tienen sección en el catálogo:\n\n'+_sinSec.join('\n')+'\n\nIngrésalos a '+BL_NOM+'.'); return; }
+    var _sinSec=ITEMS.filter(function(it){ return it.sku && !secsDeducidas(it.sku).length; }).map(function(it){ return '· '+(it.nombre||it.sku); });
+    if(_sinSec.length){ alert('Estos productos no tienen una sección de este local (o viven sólo en Cocina Central):\n\n'+_sinSec.join('\n')+'\n\nIngrésalos a '+BL_NOM+'.'); return; }
   }
   if(ajusteEnSeccionPosible()){
     if(!AJUSTE_NIVEL){ alert('¿Dónde se perdió?\n\nElige arriba de la lista: '+BL_NOM+' o En su sección.'); return; }
@@ -5025,7 +5035,9 @@ $('btnConfirm').onclick=async function(){
       // Barra Alimentos la buscaba en otro lado: 13 SKU, $374.182 entregados donde nadie contaba.
       if(tipo==='Entrega Secc'){ origen='Bodega Local'; destino=capSec(skuSecInv(it.sku)||'Cocina Central'); }
       // v94 · el proveedor entrega directo a la sección (sin bodega) · sección deducida igual que el conteo
-      else if(tipo==='Ingreso Directo Secc'){ origen='Proveedor'; destino=capSec(skuSecInv(it.sku)); }
+      //      ① de la segunda testa: NUNCA Cocina Central (se inventaría aparte; desde un local es la fila fantasma
+      //      «Cocina Central|Riesco»). secsDeducidas ya la excluye; sin otra sección el envío se paró arriba.
+      else if(tipo==='Ingreso Directo Secc'){ origen='Proveedor'; destino=secsDeducidas(it.sku)[0]||''; }
       // v90 · R3: la merma en su sección (validada arriba; sólo con el libro nuevo encendido)
       else if(tipo==='Ajuste - menos' && AJUSTE_NIVEL==='seccion'){
         origen=ajusteSeccionDe(it); destino='Bodega Local'; }
