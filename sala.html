@@ -1100,7 +1100,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.220.1 · vetro</span>
+      <span class="ver" id="ver">sala v3.220.2 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -8951,6 +8951,10 @@ var CORTE_LOCAL_ON = false;
    fam_coln_motivo_on). Nasce spenta: finché il bordo non risponde, il vetro di ieri, esatto. */
 var FAMCOL_MOTIVO_ON = null;   // null = /salud non ha ancora risposto (NON «spenta»); true/false = lo ha detto il bordo
 var FAMCOL_SALUD_TS = 0;       // quando /salud ha risposto l'ultima volta (0 = mai)
+/* [06-ott · #67 MOTIVO NEL VETRO · 🎛 CONTROLLER `67 MOTIVO NEL VETRO A TERZA OGGI`] lo SCONTO senza motivo non parte: leva del bordo
+   (/salud → sconto_motivo_obligatorio_on). Nasce spenta = il vetro di ieri; un `motivo_requerido` dal bordo la accende
+   anche su un telefono caricato prima dell'accensione (si autocura al primo rifiuto). */
+var SCONTOMOT_ON = false;
 /* [02-ott · ATTO I] la caja della notte al bordo: conferma dei ritiri e «Mi corte» senza conteggio. Nasce spenta. */
 var CAJA_ATTO1_ON = false;
 var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propina
@@ -8977,7 +8981,7 @@ var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propi
       };
       FINTURNO_BLOQUEO_ON = String(cercaK(j, 'finturno_bloqueo_on')) === '1';   // [30-set]
       CORTE_LOCAL_ON = String(cercaK(j, 'corte_local_on')) === '1';             // [30-set]
-      if (!(j && j.ok === false)) { FAMCOL_MOTIVO_ON = String(cercaK(j, 'fam_coln_motivo_on')) === '1'; FAMCOL_SALUD_TS = Date.now(); }       // [04-ott · AUT-0566] un JSON d'errore non vale come risposta
+      if (!(j && j.ok === false)) { FAMCOL_MOTIVO_ON = String(cercaK(j, 'fam_coln_motivo_on')) === '1'; FAMCOL_SALUD_TS = Date.now(); SCONTOMOT_ON = String(cercaK(j, 'sconto_motivo_obligatorio_on')) === '1'; }       // [04-ott · AUT-0566] un JSON d'errore non vale come risposta
       CAJA_ATTO1_ON = String(cercaK(j, 'caja_atto1_on')) === '1';           // [02-ott · ATTO I]
       CAJA_ATTO3_ON = String(cercaK(j, 'caja_atto3_on')) === '1';           // [03-ott · ATTO III]
     }).catch(function () {});
@@ -12498,6 +12502,20 @@ function _pagoMonto() {
   const mc = String(pg.montoCustom || '').replace(/[^0-9]/g, '');
   return (pg.montoOn && mc) ? parseInt(mc, 10) : pg.tot;
 }
+/* [06-ott · #67] ¿este pago se va como `monto_manual` SIN motivo? Mismo predicado que el envío (montoOn + monto distinto
+   del consumo, no cortesía), más «no viene de la lista de motivos» (`pg.dto`). Solo a leva accesa. */
+function _scontoSinMotivo(pg) {
+  if (!SCONTOMOT_ON || !pg || pg.medio === 'cortesia' || pg.dto) return false;
+  if (!(pg.montoOn && _pagoMonto() !== pg.tot)) return false;
+  return String(pg.motivoMan || '').trim().length < 5;
+}
+/* la casilla del motivo de las tres strade (solo a leva accesa, solo cuando hay un monto a mano y no hay lista) */
+function _motivoManHtml(pg) {
+  if (!SCONTOMOT_ON || !pg || pg.medio === 'cortesia' || pg.dto || !(pg.montoOn && _pagoMonto() !== pg.tot)) return '';
+  return '<div class="cs-psec">Motivo del descuento</div>' +
+    '<textarea class="cs-pin" id="motivoManTx" rows="2" maxlength="80" style="resize:none;font-size:16px" ' +
+    'placeholder="¿Por qué? (mínimo 5 letras)" oninput="pagoInput(\'motivoMan\',this.value)" onchange="renderPago()">' + esc(pg.motivoMan || '') + '</textarea>';
+}
 function pagoMontoToggle() { if (STATE.pago) { STATE.pago.montoOn = !STATE.pago.montoOn; if (!STATE.pago.montoOn) STATE.pago.montoCustom = ''; renderPago(); } }
 /* ═══ [AUT-0248 ④] · C'È DAVVERO UNA DICHIARAZIONE DEL JL? ═══════════════════
    🔬 Rilievo del 🎛 CONTROLLER: `pg.montoOn` dice che **l'interruttore è
@@ -14042,7 +14060,7 @@ function renderPago() {
         '<div class="cs-chip' + (pg.montoOn ? ' sel' : '') + '" onclick="pagoMontoToggle()">¿Cobraste otro monto?<small>el fósil lleva lo cobrado</small></div>' +
       '</div>' +
       (!esCort && pg.montoOn
-        ? '<input class="cs-pin" inputmode="numeric" placeholder="Monto cobrado $" value="' + esc(pg.montoCustom) + '" oninput="pagoInput(\'montoCustom\',this.value)" onchange="renderPago()">'
+        ? '<input class="cs-pin" inputmode="numeric" placeholder="Monto cobrado $" value="' + esc(pg.montoCustom) + '" oninput="pagoInput(\'montoCustom\',this.value)" onchange="renderPago()">' + _motivoManHtml(pg)
         : '');
     }
   } else if (pg.pinAsk) {
@@ -14496,6 +14514,10 @@ async function pagoConfirmar(btn) {
   // v2.0 · seconda cintura del medio: la UI lo esige già, ma una funzione
   // che scrive denaro non si fida del solo vetro
   if (!pg.medio) { toast('err', 'Elige el medio de pago'); return; }
+  /* [06-ott · #67] las TRES strade que ponen un importe a mano SIN pasar por la lista de motivos (`_dtoOtroMonto`, `_dtoPct`,
+     el chip «¿Cobraste otro monto?») convergen aquí: a leva accesa un monto_manual sin motivo NO sale (el bordo lo
+     rechazaría igual, pero delante del cliente). `pg.dto` ya trae su motivo de la lista. */
+  if (_scontoSinMotivo(pg)) { toast('warn', 'Escribe el motivo del descuento (mínimo 5 letras)'); renderPago(); return; }
   /* v3.0 · CAMBIO 4 · MIXTO: ≥2 parti, tutte >0, somma ESATTA al monto —
      la stessa legge che il GAS rivalida (mixto_no_cuadra). Qui si ferma
      PRIMA, col resto sotto gli occhi. */
@@ -14632,6 +14654,9 @@ async function pagoConfirmar(btn) {
       if (pg.dto) {
         body.motivo = String(pg.dto.et || '').slice(0, 80);
         if (pg.dto.txt) body.motivo_detalle = String(pg.dto.txt).slice(0, 500);
+      } else if (String(pg.motivoMan || '').trim()) {
+        /* [06-ott · #67] las tres strade sin lista: el motivo lo escribe el JL (casilla `motivoMan`) */
+        body.motivo = String(pg.motivoMan).trim().slice(0, 80);
       }
     }
     body.boleta = 1;
@@ -14929,6 +14954,10 @@ async function pagoConfirmar(btn) {
     if (r && errPin[r.error]) { pg.jl = false; pg.pinAsk = true; pg.pinJL = ''; _rech('🔐 ' + errPin[r.error]); }
     /* v1.8 · il tetto dello sconto (GAS v3.81.0): il server dice fin dove
        si può scendere — la toast lo ripete in parole di sala */
+    else if (r && r.error === 'motivo_requerido') {
+      /* [06-ott · #67] el bordo exige el motivo (telefono cargado antes de la activación): se aprende del rechazo */
+      SCONTOMOT_ON = true; _rech('📝 ' + (r.mensaje || 'Escribe el motivo del descuento')); renderPago();
+    }
     else if (r && r.error === 'descuento_max') {
       _rech('✋ Descuento supera el ' + r.max_pct + '% (pediste ' + r.pct + '%). ' +
         'Mínimo cobrable: $' + _fmtMiles(r.monto_minimo) + '. Más abajo = cortesía.');
