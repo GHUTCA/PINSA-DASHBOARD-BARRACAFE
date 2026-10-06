@@ -1100,7 +1100,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.220.2 · vetro</span>
+      <span class="ver" id="ver">sala v3.220.3 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3851,7 +3851,7 @@ async function _ciePaso2Atto1() {
     _ciePaso2Viejo(); return;
   }
   if ((r.por_confirmar || []).length) {
-    const p = Object.assign({}, r.por_confirmar[0], { entregado_antes: r.entregado || 0 }); _cajaPendCorte = p;
+    const p = Object.assign({}, r.por_confirmar[0], { entregado_antes: _cajaYaEntregue(r) }); _cajaPendCorte = p;   // [06-ott · D8] sin el retiro que se está confirmando
     _cajaConfMostrar(p);
     return;
   }
@@ -3881,6 +3881,20 @@ async function _ciePaso2Atto1() {
 let _cajaConfAperta = '', _cajaPendCorte = null;
 /* [03-ott · ② del mockup] «Confirma tu retiro»: la cifra, l'ora, Ya entregaste hoy · Con esta entrega.
    Premere «Sí, es correcto» È la firma: nessuna frase che annuncia la registrazione. */
+/* ═══ [06-ott · D8 de 💵 EL GIRO, `DEMO CONFIRMA TU RETIRO DOPPIO E 30 SECONDI`] «YA ENTREGASTE HOY» NO CUENTA EL RETIRO QUE SE ESTÁ CONFIRMANDO ═══
+   🩸 En el giro demo con Alberto (mesa 999, Wilbert): la tarjeta decía «Ya entregaste hoy $35.299 · Con esta entrega $70.598»
+      — la cifra grande ($35.299) era la justa. Es la pantalla donde el mesero decide «Sí, es correcto» o «No coincide»:
+      con $70.598 un mesero atento dice NO, y escribe un `caja_aviso` verdadero por un error de pantalla.
+   🔑 La causa: `entregado` del bordo es la suma de TODOS los retiros escritos (`cajaAtteso`), y el retiro que espera tu firma
+      YA está escrito (lo escribió el JL al confirmarlo): `por_confirmar` es un subconjunto de lo contado en `entregado`.
+      «Ya entregaste hoy» = lo ya CONFIRMADO = `entregado` − la suma de los retiros por confirmar; «Con esta entrega» le
+      suma el de la tarjeta. Nunca negativo. Sin retiros previos: $0 / monto; con $10.000 previos: $10.000 / monto + $10.000. */
+function _cajaYaEntregue(r) {
+  const ent = +(r && r.entregado) || 0;
+  let pend = 0;
+  ((r && r.por_confirmar) || []).forEach(function (x) { pend += (+(x && x.monto) || 0); });
+  return Math.max(0, ent - pend);
+}
 function _cajaConfMostrar(p) {
   if (!p || !p.uid_gesto) return;
   _cajaConfAperta = p.uid_gesto;
@@ -3936,19 +3950,24 @@ async function _propRecibido(btn) {
   if (r && r.ok) { toast('ok', '✓'); _propCerrar(); }
   else { if (btn) btn.disabled = false; toast('err', 'No llegó tu firma — toca de nuevo'); }
 }
-async function _cajaGiroMesero() {
+/* [06-ott · D8 ②] la tarjeta «Confirma tu retiro» llegaba a los 20-30 s: el JL espera al mesero con el contante en la mano, en
+   servicio. `que`: 'ritiro' (cada 10 s, la lectura pasa por la caché del DO de 15 s) · 'propina' (cada 30 s, como antes) ·
+   sin argumento = los dos, como ayer. Con ATTO I apagado el giro no hace NINGUNA llamada (sale antes de la red).
+   ⚠️ Es un poll más rápido, no el empuje: la deuda N2 («el dato se empuja, no se pide») sigue abierta, ver la bacheca. */
+async function _cajaGiroMesero(que) {
   if (JL || !STATE.codigo || !STATE.nombre) return;
   if (document.visibilityState && document.visibilityState !== 'visible') return;
-  if (CAJA_ATTO1_ON && !_cajaConfAperta) {
+  if (CAJA_ATTO1_ON && !_cajaConfAperta && (!que || que === 'ritiro')) {
     const r = await _cajaMesero({ verbo: 'estado_mesero' });
-    if (r && r.ok && (r.por_confirmar || []).length) { _cajaConfMostrar(Object.assign({}, r.por_confirmar[0], { entregado_antes: r.entregado || 0 })); return; }
+    if (r && r.ok && (r.por_confirmar || []).length) { _cajaConfMostrar(Object.assign({}, r.por_confirmar[0], { entregado_antes: _cajaYaEntregue(r) })); return; }   // [06-ott · D8]
   }
-  if (CAJA_ATTO3_ON && !_propAperta && !_cajaConfAperta) {
+  if (CAJA_ATTO3_ON && !_propAperta && !_cajaConfAperta && (!que || que === 'propina')) {
     const q = await _cajaMesero({ verbo: 'propinas_mesero' });
     if (q && q.ok && (q.por_firmar || []).length) _propMostrar(q.por_firmar[0]);
   }
 }
-setInterval(_cajaGiroMesero, 30000);
+setInterval(function () { _cajaGiroMesero('ritiro'); }, 10000);    // [06-ott · D8 ②] antes 30 s
+setInterval(function () { _cajaGiroMesero('propina'); }, 30000);   // la propina no tiene prisa: como antes
 
 /* «vacío» y «cero» no son lo mismo: el botón se habilita cuando hay ALGO
    escrito, aunque sea 0 — un turno sin un solo pago en efectivo es una
