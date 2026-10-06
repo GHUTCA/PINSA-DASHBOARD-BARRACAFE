@@ -1100,7 +1100,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.220.1 · vetro</span>
+      <span class="ver" id="ver">sala v3.220.3 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3851,7 +3851,7 @@ async function _ciePaso2Atto1() {
     _ciePaso2Viejo(); return;
   }
   if ((r.por_confirmar || []).length) {
-    const p = Object.assign({}, r.por_confirmar[0], { entregado_antes: r.entregado || 0 }); _cajaPendCorte = p;
+    const p = Object.assign({}, r.por_confirmar[0], { entregado_antes: _cajaEntregadoAntes(r) }); _cajaPendCorte = p;
     _cajaConfMostrar(p);
     return;
   }
@@ -3877,8 +3877,18 @@ async function _ciePaso2Atto1() {
     '<button class="btn" id="cieBtn" onclick="this.disabled=true;cierreEnviar()">Listo</button>' +
     '<div class="cie-out" onclick="_ciePaso1()">← Volver</div>');
 }
-/* ③ la conferma del ritiro: arriva da sola (giro ogni 30 s) o dal corte */
+/* ③ la conferma del ritiro: arriva da sola (giro ogni 10 s con ATTO I) o dal corte */
 let _cajaConfAperta = '', _cajaPendCorte = null;
+/* [06-ott · v3.220.3 · 🎛 BKP V29 · EL GIRO D8 `DEMO CONFIRMA TU RETIRO DOPPIO E 30 SECONDI`]
+   `estado_mesero.entregado` conta GIÀ i ritiri che aspettano la firma (il ritiro si scrive quando il JL
+   conferma, non quando firma il mesero). Il demo della 999 mostrava «Ya entregaste hoy $35.299 · Con
+   esta entrega $70.598»: lo stesso ritiro due volte, sulla schermata dove il mesero decide «No coincide».
+   ⇒ «Ya entregaste hoy» = entregado MENO tutti i ritiri ancora da firmare (con due in attesa, il primo
+   non deve contare il secondo come già consegnato). Mai sotto zero. */
+function _cajaEntregadoAntes(r) {
+  const pend = ((r && r.por_confirmar) || []).reduce(function (s, x) { return s + (+(x && x.monto) || 0); }, 0);
+  return Math.max(0, (+(r && r.entregado) || 0) - pend);
+}
 /* [03-ott · ② del mockup] «Confirma tu retiro»: la cifra, l'ora, Ya entregaste hoy · Con esta entrega.
    Premere «Sí, es correcto» È la firma: nessuna frase che annuncia la registrazione. */
 function _cajaConfMostrar(p) {
@@ -3941,14 +3951,22 @@ async function _cajaGiroMesero() {
   if (document.visibilityState && document.visibilityState !== 'visible') return;
   if (CAJA_ATTO1_ON && !_cajaConfAperta) {
     const r = await _cajaMesero({ verbo: 'estado_mesero' });
-    if (r && r.ok && (r.por_confirmar || []).length) { _cajaConfMostrar(Object.assign({}, r.por_confirmar[0], { entregado_antes: r.entregado || 0 })); return; }
+    if (r && r.ok && (r.por_confirmar || []).length) { _cajaConfMostrar(Object.assign({}, r.por_confirmar[0], { entregado_antes: _cajaEntregadoAntes(r) })); return; }
   }
-  if (CAJA_ATTO3_ON && !_propAperta && !_cajaConfAperta) {
+  if (CAJA_ATTO3_ON && !_propAperta && !_cajaConfAperta && Date.now() - _propUltGiro >= 30000) {
+    _propUltGiro = Date.now();
     const q = await _cajaMesero({ verbo: 'propinas_mesero' });
     if (q && q.ok && (q.por_firmar || []).length) _propMostrar(q.por_firmar[0]);
   }
 }
-setInterval(_cajaGiroMesero, 30000);
+/* [06-ott · v3.220.3 · EL GIRO D8 ②] il JL aspetta il mesero col contante in mano: la scheda arrivava
+   dopo 20-30 s. Ora il giro è ogni 10 s (la lettura passa dalla cache di 15 s del DO: costa poco; con le
+   leve a 0 il giro non chiama nessuno). La propina dell'ATTO III resta a 30 s.
+   ⚠️ POLL NUOVO, debito dichiarato (N2 del cammino PRO): lo uccide la SPINTA dal bordo al telefono del
+   mesero quando il JL conferma un ritiro. Proprietario 🎛 BKP, data: con l'ATTO II (mer 07-ott) entra
+   nel piano, non resta qui. */
+let _propUltGiro = 0;
+setInterval(_cajaGiroMesero, 10000);
 
 /* «vacío» y «cero» no son lo mismo: el botón se habilita cuando hay ALGO
    escrito, aunque sea 0 — un turno sin un solo pago en efectivo es una
