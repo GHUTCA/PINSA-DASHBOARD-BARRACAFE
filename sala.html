@@ -998,6 +998,14 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
 /* norma del 20-set: toccato → embossed e non più toccabile. Frena il VERBO, mai l'USCITA. */
 .cmAsk-si[disabled]{background:rgba(255,107,107,.12);border-style:dashed;
   color:var(--cs-ink2);cursor:default;box-shadow:inset 0 2px 5px rgba(0,0,0,.45)}
+/* [06-ott · v3.220.5 · AUT-0580 · mockup 🎨 DESIGN e1723ce] la conferma che NOMINA LA CIFRA */
+.cmAsk-num.plata{font-size:min(56px,14vw);letter-spacing:-.03em;margin:4px 0 0}
+.cmAsk-mesa{font-size:14px;color:var(--cs-ink2);text-align:center;margin:6px 0 0}
+.cmAsk-mesa b{color:var(--cs-ink);font-size:17px}
+.cmAsk-resto{border:1.5px solid rgba(255,107,107,.5);background:rgba(255,107,107,.08);
+  border-radius:10px;padding:8px;text-align:center;font-size:13px;color:var(--cs-urge);
+  font-weight:800;margin:10px 0 0}
+.cmAsk-si.tarde{color:#7D8F9E;border:1.5px dashed rgba(255,255,255,.22);background:transparent;cursor:default;box-shadow:none}
 </style>
 </head>
 <body>
@@ -1100,7 +1108,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.220.4 · vetro</span>
+      <span class="ver" id="ver">sala v3.220.5 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -14489,6 +14497,25 @@ const CERRAR_ASK_ON = (function () {
     return localStorage.getItem('sala_cerrarask') !== '0';   // default ACCESA
   } catch (e) { return q !== '0'; }
 })();
+/* [06-ott · v3.220.5 · AUT-0580 · 🎨 DESIGN `DESIGN COBRAR CONFERMA APPROVATA`, Alberto: «ok proviamolo e vediamo
+   se diminuiscono gli errori»] LA CONFERMA CHE NOMINA LA CIFRA: il grande è QUANTO incassa (la mesa l'ha scelta
+   lui due tocchi prima), il bottone ripete la cifra, in un parcial c'è scritto quanto RESTA, e il «Sí» arriva
+   dopo COBRAR_ASK_RITARDO_MS — chi ha il tocco già partito lo scarica nel vuoto. SOLO il COBRAR: ELIMINAR e FAM
+   passano da `_scontoVia`, fuori perimetro.
+   🟢 NASCE SPENTA (`COBRAR_ASK_DEF = false`): la condizione del 🎛 è il «PRIMA» scritto da 💵 EL GIRO (7 serate di
+   conti pagati sotto il consumo + i parziali senza il resto). Forma di casa: `?cobrarask=1` accende per apparecchio
+   e si ricorda, `?cobrarask=0` spegne. Accenderla per tutti = `COBRAR_ASK_DEF = true` e un deploy. */
+const COBRAR_ASK_DEF = false;
+const COBRAR_ASK_RITARDO_MS = 700;   // scelto a mano (DESIGN ⓐ): se dà fastidio a chi lavora bene si abbassa, non si difende
+const COBRAR_ASK_ON = (function () {
+  const q = QS.get('cobrarask');
+  try {
+    if (q === '1') { localStorage.setItem('sala_cobrarask', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_cobrarask', '0'); return false; }
+    const v = localStorage.getItem('sala_cobrarask');
+    return v === null ? COBRAR_ASK_DEF : v === '1';
+  } catch (e) { return q === '1' || (q !== '0' && COBRAR_ASK_DEF); }
+})();
 
 /* Quello che la mesa sa DAVVERO al momento del cobro. Niente `personas`:
    quel campo vive in STATE.nuevo (la libreta), non sul modello della mesa. */
@@ -14518,6 +14545,29 @@ function _cerrarAsk(pg) {
 
     const ov = document.createElement('div');
     ov.className = 'cmAsk';
+    if (COBRAR_ASK_ON) {
+      /* [v3.220.5 · AUT-0580] la cifra è QUELLA DEL BOTTONE «PAGAR $…» appena premuto: `_bMonto()` (la parte del
+         flusso c4, o la porta del JL) + la propina — r.~13236 e `totB`. ⚠️ NON `_pagoMonto()`: in un pago a parti è il
+         conto INTERO (trovato nel banco del browser: «iguales» in 2 diceva $64.900 invece di $32.450 — e la conferma
+         di oggi, «cobras $…», ha lo stesso difetto). Il resto è lo STESSO numero di «después de este pago queda». */
+      const _cifraN = _bMonto() + _pagoPropina();
+      const cifra = '$' + _fmtMiles(_cifraN);
+      /* solo con un modo SCELTO (todo · iguales · por producto): senza, c4Bruto è 0 e il resto sarebbe il conto intero
+         (trovato nel banco del browser chiamando la conferma prima della scelta). Meglio niente che un numero falso. */
+      const resto = (pg.c4 && pg.c4.modo && !pg.montoOn) ? c4Resta(pg) : 0;
+      const dat2  = [r.lineas ? r.lineas + (r.lineas === 1 ? ' línea' : ' líneas') : 'sin líneas',
+        r.min ? 'hace ' + r.min + ' min' : null].filter(Boolean).join(' · ');
+      ov.innerHTML =
+        '<div class="cmAsk-box" role="alertdialog" aria-label="Confirmar cobro de ' + esc(cifra) + ' en la mesa ' + esc(mesa) + '">' +
+          '<div class="cmAsk-tit">⚠ Vas a cobrar</div>' +
+          '<div class="cmAsk-num plata">' + esc(cifra) + '</div>' +
+          '<div class="cmAsk-mesa">mesa <b>' + esc(mesa) + '</b> · ' + (MEDIO_TXT[pg.medio] || esc(pg.medio || '')) + '</div>' +
+          (resto > 0 ? '<div class="cmAsk-resto">quedan ' + fmtPrice(resto) + ' sin cobrar</div>' : '') +
+          '<div class="cmAsk-dat" style="margin-top:8px">' + dat2 + '</div>' +
+          '<button class="cmAsk-si tarde" type="button" disabled>· · ·</button>' +
+          '<button class="cmAsk-no" type="button">No, volver</button>' +
+        '</div>';
+    } else {
     ov.innerHTML =
       '<div class="cmAsk-box" role="alertdialog" aria-label="Confirmar mesa ' + esc(mesa) + '">' +
         '<div class="cmAsk-tit">⚠ Vas a ' + (esP ? 'cobrar la mesa' : 'cerrar la mesa') + '</div>' +
@@ -14526,14 +14576,24 @@ function _cerrarAsk(pg) {
         '<button class="cmAsk-si" type="button">Sí, ' + verb + ' ' + esc(mesa) + '</button>' +
         '<button class="cmAsk-no" type="button">No, volver</button>' +
       '</div>';
+    }
     document.body.appendChild(ov);
 
     const bSi = ov.querySelector('.cmAsk-si');
     const bNo = ov.querySelector('.cmAsk-no');
-    function fin(v) { try { ov.remove(); } catch (e) {} resolve(v); }
+    let finito = false;
+    function fin(v) { if (finito) return; finito = true; try { ov.remove(); } catch (e) {} resolve(v); }
     /* embossed + non toccabile: la mano vede di aver toccato e non ribatte.
        L'uscita NON si frena mai — si frena il verbo, mai la porta. */
-    bSi.onclick = function () { bSi.disabled = true; bSi.textContent = 'Cerrando…'; fin(true); };
+    bSi.onclick = function () { if (bSi.disabled) return; bSi.disabled = true; bSi.textContent = 'Cerrando…'; fin(true); };
+    if (COBRAR_ASK_ON) {
+      /* [v3.220.5] il «Sí» ARRIVA dopo il ritardo: fino ad allora è un segnaposto spento. «No, volver» c'è da subito. */
+      setTimeout(function () {
+        if (finito) return;
+        bSi.disabled = false; bSi.classList.remove('tarde');
+        bSi.textContent = 'Sí, cobrar $' + _fmtMiles(_bMonto() + _pagoPropina());
+      }, COBRAR_ASK_RITARDO_MS);
+    }
     bNo.onclick = function () { fin(false); };
     ov.onclick   = function (e) { if (e.target === ov) fin(false); };   // fuori = no
   });
