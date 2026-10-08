@@ -1905,13 +1905,36 @@ async function cerrarT() {
      nelle assegnazioni di oggi — così il menu non è mai vuoto mentre la lista
      arriva (N1: la schermata non aspetta la rete). La riga della plaza mostra
      l'assegnazione IN CORSO al posto della vecchia, e l'esito si dice in chiaro. */
-let _STAFF_JL = null, _STAFF_JL_TS = 0;
+/* ═══ [08-ott · 👥 RRHH · 6.3 fetta A] LA LISTA DEI MESEROS DA POSTGRES (via bordo), il GAS solo come ripiego ═══════════
+   Alberto, 06-ott: «la sezione turno non carica i meseros». Il vecchio giro era UNA chiamata GAS (`getStaffSala`, ~1 s di pavimento, cache 10 min) con il fallimento MUTO:
+   un `pin_invalid`, un timeout o un GAS saturo lasciavano il menu con i soli nomi già assegnati oggi — e nessuno lo vedeva.
+   ORA: `GET /turno/estado/<local>` (bordo → `staff_locale_vigente`: persone con asignación attiva al locale, col NOME COME LO CHIAMA LA SALA). Se il bordo è spento (503), vuoto o rotto,
+   si torna al GAS di sempre. E se NESSUNO risponde, l'errore SI VEDE (`_STAFF_JL_ERR`) invece di restare muto. Il segreto di lettura viaggia in HEADER, mai in `?t=`.
+   Il locale del bordo è RSC/CDL (non RIESCO/CANDELARIA): `LOC_PG`. La SCRITTURA (Guardar) NON cambia: è la fetta B, col freno del PIN che vive nel Durable Object. */
+let _STAFF_JL = null, _STAFF_JL_TS = 0, _STAFF_JL_ERR = '', _STAFF_JL_FONTE = '';
+const LOC_PG = { BKS: 'BKS', RIESCO: 'RSC', CANDELARIA: 'CDL' };
 function _staffJLCarga() {
   if (!STATE.pin || (_STAFF_JL && Date.now() - _STAFF_JL_TS < 10 * 60000)) return;
   _STAFF_JL_TS = Date.now();
-  gasPost('getStaffSala', { pin: STATE.pin }).then(function (r) {
-    if (r && r.ok && Array.isArray(r.staff)) { _STAFF_JL = r.staff; if (TAB === 1) pintaTab(); }
-  }).catch(function () { _STAFF_JL_TS = 0; });
+  const dalGas = function () {
+    return gasPost('getStaffSala', { pin: STATE.pin }).then(function (r) {
+      if (r && r.ok && Array.isArray(r.staff)) { _STAFF_JL = r.staff; _STAFF_JL_ERR = ''; _STAFF_JL_FONTE = 'gas'; }
+      else { _STAFF_JL_TS = 0; _STAFF_JL_ERR = (r && (r.error || r.exige)) || 'sin_respuesta'; }
+    }).catch(function (e) { _STAFF_JL_TS = 0; _STAFF_JL_ERR = (e && e.message === 'timeout') ? 'timeout' : 'sin_red'; });
+  };
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
+  fetch(CFG.BORDE + '/turno/estado/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, cache: 'no-store', signal: ctrl.signal })
+    .then(function (r) { return r.json(); })
+    .then(function (r) {
+      clearTimeout(to);
+      if (r && r.ok && Array.isArray(r.staff) && r.staff.length) {
+        _STAFF_JL = r.staff.filter(function (s) { return s.en_plaza; }).map(function (s) { return { nombre: s.nombre, activo: true, persona_id: s.persona_id, cargo: s.cargo }; });
+        _STAFF_JL_ERR = ''; _STAFF_JL_FONTE = 'bordo'; return null;
+      }
+      return dalGas();   // bordo spento (503) o senza persone: il GAS di sempre
+    })
+    .catch(function () { clearTimeout(to); return dalGas(); })
+    .then(function () { if (TAB === 1) pintaTab(); });
 }
 function _meserosJL() {
   const vist = {}, out = [];
@@ -1954,7 +1977,7 @@ function tabAsig(ridisegno) {
   let h = '<div class="card"><h4>＋ Asignar / cambiar</h4>' +
     '<select class="busca" id="asMesero"><option value="">— mesero —</option>' +
       mes.map(function (n) { return opt(n, n); }).join('') + '</select>' +
-    (_STAFF_JL ? '' : '<p class="mini">Cargando el personal… (ya están los del turno de hoy)</p>') +
+    (_STAFF_JL ? '' : (_STAFF_JL_ERR ? '<p class="mini" style="color:#E8B23A">⚠️ No pude traer la lista de meseros (' + esc(_STAFF_JL_ERR) + ') · reintento solo — por ahora salen solo los del turno de hoy.</p>' : '<p class="mini">Cargando el personal… (ya están los del turno de hoy)</p>')) +
     '<select class="busca" id="asPlaza"><option value="">— plaza —</option>' +
       pls.map(function (p) { return opt(p.plaza, p.plaza + (p.mesas ? ' · ' + p.mesas : '')); }).join('') + '</select>' +
     '<select class="busca" id="asFranja">' + (function () { const fs = _franjasJL(), ora = _franjaAdesso(fs);
