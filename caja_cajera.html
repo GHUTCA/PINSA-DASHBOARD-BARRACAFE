@@ -469,8 +469,8 @@ async function pantalla8() {
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando cortes POS…</p>';
   CORTES = await getCaja('cortes_pos?dia=' + DIA_HOY);
   if (!CORTES.ok) { renderError('Los cortes POS', CORTES.error); return; }
-  var maquinas = (CORTES.maquinas && CORTES.maquinas.length) ? CORTES.maquinas : ['MPago'];
-  var filas = maquinas.map(function(m, i){
+  var maquinas = (CORTES.maquinas && CORTES.maquinas.length) ? CORTES.maquinas.slice() : ['MPago'];   // copia: «+ Otra máquina» agrega y no debe ensuciar la lectura
+  function filaHtml(m, i){
     var prev = (CORTES.guardado||[]).find(function(g){return g.maquina===m;});
     var conocida = MAQUINAS_CONOCIDAS.filter(function(k){ return k.toLowerCase() === String(m||'').trim().toLowerCase(); })[0];
     var esOtra = !conocida;
@@ -481,20 +481,31 @@ async function pantalla8() {
       '<select class="inp" data-maq-select="' + i + '">' + opciones + '</select>' +
       '<input class="inp" data-maq-otra="' + i + '" placeholder="Nombre de la máquina" value="' + (esOtra ? esc(m) : '') + '" style="' + (esOtra ? '' : 'display:none') + '">' +
       '<input class="inp" data-maq-corte="' + i + '" placeholder="$" inputmode="numeric" value="' + (prev?prev.corte:'') + '">';
-  }).join('');
+  }
+  var filas = maquinas.map(filaHtml).join('');
   app.innerHTML = barra(true) +
     '<div class="kick">Los cortes POS</div><h1>Las máquinas</h1><p class="sd">Un número por máquina, una vez al día</p>' +
-    filas +
+    '<div id="filasMaq">' + filas + '</div>' +
+    '<button class="btn gh" id="otraMaq">+ Otra máquina</button>' +
     (CORTES.libro != null ? '<div class="rows"><div class="r"><span class="n">Dice nuestro libro</span><span class="v">' + fmt(CORTES.libro) + '</span></div></div>' : '') +
     '<div class="note ok">El corte de la máquina es <b>el único testigo que no somos nosotros.</b></div>' +
     '<button class="btn acc" id="guardar">Guardar</button>' +
     '<button class="btn gh" id="siguiente">Ir al depósito</button>';
-  maquinas.forEach(function(m, i){
+  function ligarFila(i) {
     var sel = document.querySelector('[data-maq-select="' + i + '"]');
     sel.addEventListener('change', function(){
       document.querySelector('[data-maq-otra="' + i + '"]').style.display = (sel.value === '__otra__') ? '' : 'none';
     });
-  });
+  }
+  maquinas.forEach(function(m, i){ ligarFila(i); });
+  /* [08-ott · V28 `CORTES POS MANCA SECONDA MACCHINA`] el primer dia hay UNA maquina conocida y no habia como escribir la segunda: «+ Otra máquina» agrega una fila (la primera conocida que aun no esta usada, o «Otra» para escribir el nombre). */
+  document.getElementById('otraMaq').onclick = function(){
+    var usadas = []; for (var k = 0; k < maquinas.length; k++) usadas.push(String(nombreMaquina(k) || maquinas[k] || '').toLowerCase());
+    var libre = MAQUINAS_CONOCIDAS.filter(function(c){ return usadas.indexOf(c.toLowerCase()) < 0; })[0] || '';
+    var idx = maquinas.length; maquinas.push(libre);
+    document.getElementById('filasMaq').insertAdjacentHTML('beforeend', filaHtml(libre, idx));
+    ligarFila(idx);
+  };
   function nombreMaquina(i) {
     var sel = document.querySelector('[data-maq-select="' + i + '"]');
     if (sel.value === '__otra__') return document.querySelector('[data-maq-otra="' + i + '"]').value.trim();
@@ -510,7 +521,9 @@ async function pantalla8() {
         corte: v, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
       if (!r.ok) { toast('No se guardó ' + nombre + ': ' + r.motivo, 'bad'); return; }
     }
+    /* [08-ott · V28 `CORTES GUARDAR NON AVANZA`] un guardado que no cambia de pantalla parece no haber funcionado: tras guardar todo, sigue sola al deposito. */
     toast('Cortes guardados', 'ok');
+    PASO = 4; pantalla9();
   });
   document.getElementById('siguiente').onclick = function(){ PASO = 4; pantalla9(); };
 }
