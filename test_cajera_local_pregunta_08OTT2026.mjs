@@ -37,4 +37,5 @@ for (const loc of ['*', '', undefined, 'rsc']) {
 t('no queda `BORDE.rsc` como ripiego', !/BORDE\.rsc/.test(SRC));
 t('no queda `: \'rsc\'` como ripiego de LOCAL', !/:\s*'rsc'\s*;/.test(fn('arrancar', true)));
 t('BORDE tiene bks', /BORDE = \{[\s\S]*?bks:\s*'https:/.test(SRC));
+t('il login NON e filtrato su local "*" (con "*" la lista era la sola corporate e Mayra non c era): init con "todos"', /PinsitaAuth\.init\(\{ local: 'todos'/.test(SRC) && !/PinsitaAuth\.init\(\{ local: '\*'/.test(SRC));
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdes` : `❌ ${ko} rojos de ${ok + ko}`); process.exit(ko ? 1 : 0);
