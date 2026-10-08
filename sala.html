@@ -1108,7 +1108,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.220.10 · vetro</span>
+      <span class="ver" id="ver">sala v3.221.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -4019,8 +4019,18 @@ async function cierreEnviar() {
        fa dedup lato GAS, quindi non duplica nulla. Inerte oggi
        (`CERRARMESERO_BORDE_ON`="0"): la leva la gira ⚙️ V28 dopo il suo
        banco denaro, non questa riga. */
-    _cerrarMeseroAlBorde(_cierreBody).catch(function () {});
-    const r = await gasPost('cerrarMesero', _cierreBody);
+    /* [08-ott · 1.6 · 🎛 BKP V29] con CORTE_BORDE_ON e l'ATTO I accesi il corte lo CALCOLA il bordo (src/corte.js) e
+       risponde con la forma del GAS: si ASPETTA la sua risposta e il GAS non si chiama. Un corte con mesas da passare
+       resta sul GAS (il traspaso vive lì fino al 6.3), e così ogni risposta del bordo che non sia sua (`need:'gas'`,
+       rete, timeout): il ripiego è il cammino di ieri, mai due corti. A leva spenta questa riga è quella di ieri. */
+    let r = null;
+    if (CORTE_BORDE_ON && CAJA_ATTO1_ON && !CIE.pasarMesas) {
+      const rb = await _cerrarMeseroAlBorde(_cierreBody);
+      if (rb && (rb.ok || rb.error === 'mesas_abiertas')) { r = rb; bordeHecho('corte_borde', { ok: !!rb.ok }); }
+    } else {
+      _cerrarMeseroAlBorde(_cierreBody).catch(function () {});
+    }
+    if (!r) r = await gasPost('cerrarMesero', _cierreBody);
     if (r && r.ok) {
       /* v2.0.1 · REPERTO ROSSO del collaudo a teste diverse: l'uid persistito
          NON moriva mai — il secondo cierre del giorno con lo STESSO monto
@@ -4119,7 +4129,7 @@ function _ciePaso4(r) {
     '<div class="cie-sub">' + esc(r.mesero) + ' · ' + esc(r.id) + '</div>' +
     '<div class="cie-box"><b>Lo que cobraste</b>' + (medios || '<div class="cie-nota">Ningún cobro hoy</div>') +
     '<div class="cie-row" style="border-top:1px solid rgba(255,255,255,.12);margin-top:6px;padding-top:6px">' +
-    '<span>🧾 Boletas</span><b>' + (r.boletas || 0) + '</b></div></div>' +
+    (r.boletas == null ? '' : '<span>🧾 Boletas</span><b>' + r.boletas + '</b>') + '</div></div>' +   // [08-ott · 1.6] null = il bordo non lo sa: niente 0 inventato
     '<div class="cie-box"><b>El efectivo</b>' +
     '<div class="cie-row"><span>Ventas en efectivo</span><b>' + fmtPrice(r.efectivo_ventas) + '</b></div>' +
     '<div class="cie-row"><span>Propinas en efectivo</span><b>' + fmtPrice(r.propina_efectivo) + '</b></div>' +
@@ -4132,9 +4142,9 @@ function _ciePaso4(r) {
     '<div class="cie-box"><b>Tu propina</b>' +
     '<div class="cie-row"><span>En tarjeta</span><b>' + fmtPrice(r.propina_tarjeta) + '</b></div>' +
     '<div class="cie-row"><span>En efectivo</span><b>' + fmtPrice(r.propina_efectivo) + '</b></div>' +
-    '<div class="cie-nota" style="margin-top:4px">' + (r.regimen === 'individual'
+    (r.regimen == null ? '</div>' : '<div class="cie-nota" style="margin-top:4px">' + (r.regimen === 'individual'
       ? 'Hoy la propina es <b>individual</b>: esta noche es tuya.'
-      : 'Hoy la propina va al <b>pozo común</b>: el JL la reparte al cerrar el turno.') + '</div></div>';
+      : 'Hoy la propina va al <b>pozo común</b>: el JL la reparte al cerrar el turno.') + '</div></div>');   // [08-ott · 1.6] null = non si sa
   if (r.traspasos && r.traspasos.length) {
     h += '<div class="cie-box ok"><b>🔄 Pasaste ' + r.traspasos.length + ' mesa(s)</b>' +
       r.traspasos.map(t => '<div class="cie-row"><span>Mesa ' + esc(t.mesa) + ' → <b>' + esc(t.a) + '</b></span><b>' +
@@ -8986,6 +8996,7 @@ var FAMCOL_SALUD_TS = 0;       // quando /salud ha risposto l'ultima volta (0 = 
 var SCONTOMOT_ON = false;
 /* [02-ott · ATTO I] la caja della notte al bordo: conferma dei ritiri e «Mi corte» senza conteggio. Nasce spenta. */
 var CAJA_ATTO1_ON = false;
+var CORTE_BORDE_ON = false;   // [08-ott · 1.6] il corte del mesero calcolato dal bordo (vale con CAJA_ATTO1_ON)
 var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propina
 /* [29-set · Alberto: «il tetto del 30% fallo subito»] il tetto NON e' piu' una
    copia del vetro: si legge dal bordo (/salud → desc_max_pct), che e' la fonte
@@ -9012,6 +9023,7 @@ var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propi
       CORTE_LOCAL_ON = String(cercaK(j, 'corte_local_on')) === '1';             // [30-set]
       if (!(j && j.ok === false)) { FAMCOL_MOTIVO_ON = String(cercaK(j, 'fam_coln_motivo_on')) === '1'; FAMCOL_SALUD_TS = Date.now(); SCONTOMOT_ON = String(cercaK(j, 'sconto_motivo_obligatorio_on')) === '1'; }       // [04-ott · AUT-0566] un JSON d'errore non vale come risposta
       CAJA_ATTO1_ON = String(cercaK(j, 'caja_atto1_on')) === '1';           // [02-ott · ATTO I]
+      CORTE_BORDE_ON = String(cercaK(j, 'corte_borde_on')) === '1';         // [08-ott · 1.6]
       CAJA_ATTO3_ON = String(cercaK(j, 'caja_atto3_on')) === '1';           // [03-ott · ATTO III]
     }).catch(function () {});
   } catch (e) { /* senza il bordo resta 30 */ }
