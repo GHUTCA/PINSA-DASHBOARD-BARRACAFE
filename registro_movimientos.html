@@ -558,7 +558,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v95 · movimientos · 08oct</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v96 · 5xxx fuera del local · 08oct</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -666,11 +666,45 @@ function cleanName(nm){
     return true;
   }).join(' ');
 }
+// ── v96 · 08-oct · LOS 5xxx NO SE VEN EN LOS LOCALES ───────────────────────────────────────────────────────
+// Alberto: «los productos 5000 no los pueden ver los locales: indujeron al error de registro de Octavio». El 07-oct
+// una Entrega de mechada salió como 5003 (la PREPARACIÓN de Cocina Central) y no como 1169 (el PRODUCTO que el local
+// recibe y cuenta): la Bodega quedó en −10 en un código y la Barra con 10 de más en el otro.
+// En los locales PINSA (Riesco, Candelaria) un 5xxx NO se ve, salvo dos casos:
+//  · tiene su gemelo 1xxx con el MISMO formato → se ve el 1xxx (5003 = 1169: bolsa de 10 porciones, Sellado), y el QR
+//    de un lote 5003 se registra como 1169 (el código escaneado sigue viajando a Observaciones: la traza no se pierde);
+//  · está en CC_VIVE_EN_LOCAL: los 5xxx SIN gemelo que el local maneja HOY (movidos en un local en 90 días, o en el giro
+//    del Mapa, o con una sección de local en BD_INSUMOS — LETTURA_SKU_5000_USATI.mjs, 08-oct). Esconderlos borraría su
+//    conteo diario (syrups, cremas, bases, salmón…). Ojo con el pesto: 1170 es bolsa de 1000 g y 5001 de 500 g — NO
+//    son gemelos hasta que el 1xxx tenga el formato real.
+// Alberto crea los 1xxx que faltan → el 5xxx SALE de CC_VIVE_EN_LOCAL y ENTRA en GEMELO_LOCAL (y si está en el giro del
+// Mapa, el giro se corrige en el mismo commit). Cuando la lista quede vacía, ningún 5xxx se ve en un local.
+// En BC (la bodega madre) se ven todos. EXO y BKS tienen catálogo propio por empresa (5066 brocheta es de BKS): ahí
+// sólo vale la regla del gemelo.
+var GEMELO_LOCAL = { '5003':'1169' };
+var CC_VIVE_EN_LOCAL = ['5001','5004','5006','5007','5008','5009','5011','5014','5018','5019','5020','5021','5023',
+                        '5024','5025','5026','5027','5028','5029','5045','5048','5049','5058','5059','5062','5063'];
+function _ctxEsBC(){ return typeof CTX_CODE !== 'undefined' && CTX_CODE === 'bc'; }
+function gemeloLocal(sku){
+  if (_ctxEsBC()) return '';
+  var g = GEMELO_LOCAL[String(sku||'').trim()];
+  return (g && skuItem(g)) ? g : '';   // sin el gemelo activo en el catálogo el 5xxx NO se esconde: el producto no puede desaparecer
+}
+function skuParaLocal(sku){ return gemeloLocal(sku) || sku; }
+function skuOcultoLocal(sku){
+  var s = String(sku||'').trim();
+  if (_ctxEsBC()) return false;
+  if (gemeloLocal(s)) return true;
+  if (!/^5\d{3}$/.test(s)) return false;
+  if (typeof CTX === 'undefined' || !CTX || CTX.empresa !== 'pinsa') return false;
+  return CC_VIVE_EN_LOCAL.indexOf(s) < 0;
+}
 // índice nombre+alias -> sku  (reconstruible cuando VOCAB cambia)
 var NAME_IDX=[];
 function rebuildNameIdx(){
   NAME_IDX=[];
   VOCAB.forEach(function(v){
+    if (skuOcultoLocal(v.sku)) return;   // v96: el 5xxx escondido no entra ni al teclado ni a la voz
     NAME_IDX.push({key:cleanName(v.nombre),v:v});
     (v.alias||[]).forEach(function(a){ if(a) NAME_IDX.push({key:norm(a),v:v}); });
   });
@@ -723,6 +757,7 @@ var CTX_ADMIN=false, CTX_CODE=(function(){
 var CTX = CONTEXTOS[CTX_CODE];
 try{ document.documentElement.setAttribute('data-ident', CTX.ident); }catch(e){}
 var LOCAL_ACTUAL=CTX.nombre;  // local del operador (payloads, MAPA_ORDEN, repo)
+rebuildNameIdx();   // v96: el primer índice nació antes del contexto; ahora que se sabe el local, los 5xxx escondidos salen también del catálogo de reserva
 // v93 · 01-oct: el NOMBRE que se ve de la bodega, como la llama el terreno («el −6» en Riesco). El DATO sigue
 // siendo 'Bodega Local' (libro, stock, filtros): esto sólo cambia lo que se lee. Francisco contó la bodega «del
 // local» (la sala) creyendo contar el −6, porque eso decía la pantalla.
@@ -2279,11 +2314,14 @@ function codResolver(txt){
   var cod=String(txt||'').trim();
   if(!cod) return null;
   var L=codParseLote(cod);
-  if(L) return { codigo:cod, tipo:'QR_LOTE', sku:L.sku, q:null, formato:'',
-                 nuestro:true, conocido:!!skuItem(L.sku), lote:L };
+  // v96: el lote de CC (5xxx) con gemelo entra como el producto del local (5003 → 1169); el código queda en 'said'
+  if(L){ var sL=skuParaLocal(L.sku);
+    return { codigo:cod, tipo:'QR_LOTE', sku:sL, q:null, formato:'',
+             nuestro:true, conocido:!!skuItem(sL) && !skuOcultoLocal(sL), lote:L }; }   // lote de CC sin gemelo: «no está en el catálogo del local»
   var c=CODIGOS_MAP[cod];
-  if(c && c.sku) return { codigo:cod, tipo:'EAN', sku:c.sku, q:c.q||1, formato:c.formato||'',
-                          nuestro:false, conocido:!!skuItem(c.sku) };
+  if(c && c.sku){ var sC=skuParaLocal(c.sku);
+    return { codigo:cod, tipo:'EAN', sku:sC, q:c.q||1, formato:c.formato||'',
+             nuestro:false, conocido:!!skuItem(sC) && !skuOcultoLocal(sC) }; }
   return { codigo:cod, tipo:'EAN', sku:null, q:null, formato:'',
            nuestro:false, conocido:false, nuevo:true };
 }
@@ -2575,8 +2613,8 @@ function abrirEscaner(){
     if(msg) msg.textContent='▦ '+cod+' · verificando…';
     codVerificarVivo(r.codigo).then(function(c2){
       cerrar();
-      if(c2 && c2.sku && skuItem(c2.sku)){
-        abrirPickerAdd(false, { sku:c2.sku, q:c2.q||1, codigo:r.codigo, tipo:r.tipoDet, formato:c2.formato||'' });
+      if(c2 && c2.sku && skuItem(skuParaLocal(c2.sku)) && !skuOcultoLocal(skuParaLocal(c2.sku))){
+        abrirPickerAdd(false, { sku:skuParaLocal(c2.sku), q:c2.q||1, codigo:r.codigo, tipo:r.tipoDet, formato:c2.formato||'' });
       } else {
         abrirPickerAdd(false, { codigo:r.codigo, tipo:r.tipoDet, aprender:true });
       }
@@ -3944,7 +3982,7 @@ function abrirPickerExtra(estCode, cont, donde){
     var q = nrm(inp.value).trim();
     var base = (typeof VOCAB !== 'undefined' && VOCAB.length) ? VOCAB : [];
     var res = (q.length < 2) ? [] : base.filter(function(v){
-      if (!v.sku) return false;
+      if (!v.sku || skuOcultoLocal(v.sku)) return false;   // v96
       if (nrm(v.nombre).indexOf(q) >= 0) return true;
       return (v.alias||[]).some(function(a){ return nrm(a).indexOf(q) >= 0; });
     }).slice(0, 25);
@@ -6211,10 +6249,11 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
     <div class="mov-f">
       <label>Desde<input type="date" id="movDesde"></label>
       <label>Hasta<input type="date" id="movHasta"></label>
-      <label class="mov-q">Producto (nombre o SKU)<input type="text" id="movQ" placeholder="ej. mechada · 1169" autocomplete="off"></label>
+      <label class="mov-q">Producto (vacío = todos, máx. 7 días)<input type="text" id="movQ" list="movLista" placeholder="ej. mechada · 1169 · o vacío" autocomplete="off"></label>
+      <datalist id="movLista"></datalist>
       <button class="mov-go" id="movGo">Ver</button>
     </div>
-    <div class="mov-body" id="movBody"><div class="mov-vacio">Elige las fechas y un producto, y toca «Ver».</div></div>
+    <div class="mov-body" id="movBody"><div class="mov-vacio">Elige las fechas y, si quieres, un producto. Toca «Ver».</div></div>
   </div>
 </div>
 <script>
@@ -6232,16 +6271,27 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
     gid('movLocal').textContent = (typeof LOCAL_ACTUAL!=='undefined' ? LOCAL_ACTUAL : '—');
     if(!gid('movHasta').value) gid('movHasta').value = hoy();
     if(!gid('movDesde').value) gid('movDesde').value = menos(gid('movHasta').value, 6);
+    llenarLista();
     gid('movModal').classList.add('on');
     setTimeout(function(){ try{ gid('movQ').focus(); }catch(e){} }, 60);
+  }
+  /* v96 · Alberto 08-oct: «la casilla por nombre no tiene lista». La lista es el catálogo del local (VOCAB, sin los 5xxx escondidos):
+     cada opción es «SKU · nombre», y al elegirla se busca por SKU exacto. Escribir a mano sigue valiendo (texto o SKU). */
+  function llenarLista(){
+    var dl=gid('movLista'); if(!dl || typeof VOCAB==='undefined') return;   // se rehace en cada apertura: el catálogo vivo puede haber llegado después
+    dl.innerHTML = VOCAB.filter(function(v){ return v.sku && !(typeof skuOcultoLocal==='function' && skuOcultoLocal(v.sku)); })
+      .map(function(v){ return '<option value="'+esc(v.sku+' · '+v.nombre)+'">'; }).join('');
   }
 
   async function ver(){
     var q = gid('movQ').value.trim(), desde = gid('movDesde').value, hasta = gid('movHasta').value;
-    if(!q){ gid('movBody').innerHTML='<div class="mov-vacio">Escribe un producto (nombre o SKU).</div>'; return; }
+    var m = /^(\d{3,6}) · /.exec(q); if(m) q = m[1];   // opción de la lista → SKU exacto
+    /* v96 · sin producto: todo el local, máximo 7 días (lo vuelve a controlar el borde) */
+    if(!q && (Date.parse(hasta)-Date.parse(desde))/86400000 > 6){
+      gid('movBody').innerHTML='<div class="mov-vacio">Sin producto se ven como máximo <b>7 días</b>: acorta las fechas o elige un producto.</div>'; return; }
     var code = (typeof _invCodigoDe==='function') ? _invCodigoDe() : null;
     if(!code || typeof BORDE_REG==='undefined'){ gid('movBody').innerHTML='<div class="mov-vacio">⚠ Este local no tiene el libro nuevo.</div>'; return; }
-    var par = /^\d+$/.test(q) ? 'sku='+encodeURIComponent(q) : 'q='+encodeURIComponent(q);
+    var par = !q ? 'todo=1' : /^\d+$/.test(q) ? 'sku='+encodeURIComponent(q) : 'q='+encodeURIComponent(q);
     gid('movBody').innerHTML='<div class="inv-load">Buscando movimientos…</div>';
     var ctl = (typeof AbortController!=='undefined') ? new AbortController() : null;
     var tid = ctl ? setTimeout(function(){ try{ctl.abort();}catch(e){} }, 15000) : null;
@@ -6257,7 +6307,8 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
       gid('movBody').innerHTML='<div class="mov-vacio">⚠ '+esc(e.name==='AbortError'?'sin señal: reintenta':e.message)+'</div>';
     }finally{ if(tid) clearTimeout(tid); }
   }
-  var MSJ={ sku_o_q_richiesto:'escribe al menos 3 letras del producto, o su SKU', periodo_max_62_dias:'el período máximo es de 62 días',
+  var MSJ={ sku_o_q_richiesto:'escribe al menos 3 letras del producto, o su SKU', q_min_3:'escribe al menos 3 letras del producto, o su SKU',
+            sin_producto_max_7_dias:'sin producto se ven como máximo 7 días', periodo_max_62_dias:'el período máximo es de 62 días',
             desde_dopo_hasta:'«desde» es después de «hasta»' };
 
   function render(j){
@@ -6266,9 +6317,11 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
     if((av.codigos||[]).length>1) h+='<div class="mov-av">⚠ Este producto aparece con <b>'+av.codigos.length+' códigos</b>: '+
       av.codigos.map(function(c){ return '<b>'+esc(c.sku)+'</b> '+esc(c.desc); }).join(' · ')+'. Revisa con qué código se registra cada movimiento.</div>';
     if((av.negativos||[]).length) h+='<div class="mov-av">⚠ <b>'+av.negativos.length+'</b> movimiento(s) dejan un lugar <b>bajo cero</b> (en rojo): salió algo que, para el sistema, no había entrado.</div>';
-    (av.dias_sin_conteo||[]).forEach(function(d){
-      h+='<div class="mov-av">⚠ <b>'+esc(d.seccion)+'</b> · SKU '+esc(d.sku)+': <b>sin conteo</b> el '+d.dias.map(fd).join(', ')+'.</div>';
-    });
+    var dsc=av.dias_sin_conteo||[], linea=function(d){ return '<b>'+esc(d.seccion)+'</b> · SKU '+esc(d.sku)+': <b>sin conteo</b> el '+d.dias.map(fd).join(', ')+'.'; };
+    if(dsc.length>4)   // v96: sin producto pueden ser decenas — un solo aviso que se abre
+      h+='<details class="mov-av"><summary>⚠ <b>'+dsc.length+'</b> productos recibidos en una sección y <b>sin conteo</b> algún día (toca para ver)</summary>'+
+         dsc.map(function(d){ return '<div style="margin-top:4px">'+linea(d)+'</div>'; }).join('')+'</details>';
+    else dsc.forEach(function(d){ h+='<div class="mov-av">⚠ '+linea(d)+'</div>'; });
     if(!j.filas.length){ gid('movBody').innerHTML=h+'<div class="mov-vacio">Sin movimientos entre el '+fd(j.desde)+' y el '+fd(j.hasta)+'.</div>'; return; }
     var porSku={}, orden=[];
     j.filas.forEach(function(f){ if(!porSku[f.sku]){ porSku[f.sku]=[]; orden.push(f.sku); } porSku[f.sku].push(f); });
