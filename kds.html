@@ -75,6 +75,16 @@
     --t1:#f2ead8; --t2:#b8b0a0; --t3:#8a8577;
     --acc:#d9a441; --ok:#3db876; --warn:#f5a623; --bad:#e05252;
     --est:#e07b39;              /* cocina */
+    /* [AUT-0610b · 08-ott · 🍳 COCINA] --sector: il piatto e' di un SETTORE a parte
+       (oggi la pizzeria). Nome del RUOLO, non del colore (legge del colore §③).
+       🔴 Tinta VIOLA perche' nel censimento di QUESTA superficie era l'unica NON
+       SPESA: --ok verde = fatto compiuto · --warn ambra = nessuno ritira · --bad
+       rosso = danno · --acc oro = accento · --est arancione/azzurro = «in quale
+       schermo sei». E fra i tag: rosso = termino · azzurro = opciones · ambra =
+       PRIMERO · oro = promo. Prendere l'ambra o il rosso avrebbe speso un'urgenza
+       (§②: «la schermata ha speso il suo unico rosso per decorarsi, e quando e'
+       arrivato l'allarme non ne aveva piu' uno libero»). */
+    --sector:#b084e8;
   }
   body[data-st="barra"]{ --est:#39a8e0; }
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;
@@ -166,6 +176,9 @@
   .tag.pri{background:rgba(245,196,81,.16);color:#f5c451;border:1px solid rgba(245,196,81,.45);font-weight:700}
   .it.pri{border-left:3px solid #f5c451;padding-left:6px}
   .tag.promo{background:rgba(217,164,65,.14);color:var(--acc);border:1px solid rgba(217,164,65,.4)}
+  /* [AUT-0610b] il settore a parte. 🔴 NESSUN bordo sinistro: quello e' il canale
+     di `.it.pri` («sale solo»), e due marcatori sullo stesso lato si confondono. */
+  .tag.piz{background:rgba(176,132,232,.16);color:#c6a8f0;border:1px solid rgba(176,132,232,.45)}
   .c-nota{margin:0 14px 10px;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.35);
     color:#f0c078;border-radius:10px;padding:7px 10px;font-size:14px;font-weight:600}
   .c-mesero{padding:0 14px 10px;font-size:12px;color:var(--t3)}
@@ -287,7 +300,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.27</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.28</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -341,6 +354,23 @@ const CFG = {
   // umbrales del "nadie retira" (el GAS avisa al mesero a los 120s)
   MAX_CARDS: 8, RETIRO_WARN_S: 180, RETIRO_BAD_S: 360,
   SK: { COD: 'kds_codigo', EST: 'kds_estacion', LOC: 'kds_local', TOK: 'kds_token' },
+  /* [AUT-0610b · 08-ott · 🍳 COCINA · TAMPONE DICHIARATO, muore il 13-ott]
+     I piatti di un settore a parte si riconoscono DAL NOME, non dalla categoria.
+     🩹 La cosa giusta sarebbe la CATEGORIA, ma `getKds` (MENU_GAS r.10181) manda
+     `{nombre, llevar, op, termino, promo, pri}` e NON manda `cat`: questo schermo
+     non sa a quale categoria appartiene un piatto. Toccare `getKds` — il poll di
+     TUTTI gli schermi — alla vigilia dell'apertura del settore e del deploy di
+     4.1 non vale un colore.
+     ⚰️ COSA LO UCCIDE: `cat` nell'item di `getKds` + la categoria `pinsas` creata
+     nel Taller (dipendenza di 📖 MENU). 📅 MARTEDI' 13, insieme al filtro per
+     categoria che ha la stessa dipendenza: cosi' il GAS si tocca una volta sola.
+     ⚠️ DEBOLEZZA, detta prima: un piatto della cucina grande chiamato «Pizza ...»
+     si marcherebbe anche lui. Oggi il falso positivo NON PUO' esistere (misurato
+     l'08-ott: zero item col nome «pinsa» e zero pizze negli ultimi 2.999 pedidos;
+     `pizzas_burger` contiene solo i due hamburger), ma diventa possibile il giorno
+     che la cucina grande mette una pizza in carta.
+     🧯 RITORNO: lista vuota. Il marcatore sparisce e non resta niente. */
+  SECTOR_NOMBRES: ['pinsa', 'pizza'],
 };
 
 /* v1.11 · PATCH ② · tablet battezzato: al primo login col código il tablet
@@ -458,6 +488,22 @@ async function gasPost(action, body) {
 /* ═════ HELPERS ═════ */
 const $ = id => document.getElementById(id);
 const esc = s => (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* [AUT-0610b] il piatto e' del settore a parte? Si guarda il NOME. Lista vuota =
+   nessun marcatore, ed e' il ritorno. `includes` su minuscolo, quindi «Pinsa
+   Margarita» e «PIZZA Napoli» matchano: i nomi del menu non hanno una forma
+   garantita e una sottostringa e' piu' robusta di un prefisso.
+   ✏️ CORREZIONE: la prima stesura di questo commento diceva che anche «pizzeta»
+   matcha. FALSO — «pizzeta» non contiene «pizza», e me l'ha detto il banco, non
+   la rilettura. 🔴 Quindi e' un LIMITE, non un comportamento: un diminutivo
+   («pizzeta», «pizzita») NON si marca. Si cura aggiungendo la parola alla lista
+   quando quel piatto esiste — non prima, perche' «pizz» allargherebbe i falsi
+   positivi senza nessun piatto vero da coprire. */
+const esSector = (n) => {
+  const L = (CFG.SECTOR_NOMBRES || []);
+  if (!L.length) return false;
+  const x = (n || '').toString().toLowerCase();
+  return L.some(w => x.includes(w));
+};
 const fmtHace = s => { s = Math.max(0, s); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
 let toastT = null;
 function toast(tipo, msg) {
@@ -945,7 +991,7 @@ function renderVer(){
   const its = (p.items || []).map(it => {
     const q = parseInt(it.llevar, 10) || 1;
     const extra = [it.termino, it.op].filter(Boolean).join(' · ');
-    return '<div class="vit">' + q + '× ' + esc(it.nombre || '?') +
+    return '<div class="vit">' + q + '× ' + (esSector(it.nombre) ? '🍕 ' : '') + esc(it.nombre || '?') +
       (extra ? '<span class="vop">' + esc(extra) + '</span>' : '') + '</div>';
   }).join('');
   cont.innerHTML =
@@ -987,7 +1033,8 @@ function cardHTML(p, multiBadge, espera){
     '<div class="c-items">' + p.items.slice().sort((a, b) => (b.pri ? 1 : 0) - (a.pri ? 1 : 0)).map(it =>
       '<div class="it' + (it.pri ? ' pri' : '') + '"><div class="it-q">' + (parseInt(it.llevar, 10) || 1) + '×</div>' +
       '<div class="it-body"><div class="it-n">' + esc(it.nombre) + '</div>' +
-      ((it.pri || it.termino || it.op || it.promo) ? '<div class="it-tags">' +
+      ((it.pri || it.termino || it.op || it.promo || esSector(it.nombre)) ? '<div class="it-tags">' +
+        (esSector(it.nombre) ? '<span class="tag piz">🍕 PIZZERÍA</span>' : '') +
         (it.pri ? '<span class="tag pri">⬆ PRIMERO — sale solo</span>' : '') +
         (it.termino ? '<span class="tag term">🥩 ' + esc(it.termino) + '</span>' : '') +
         (it.op ? '<span class="tag op">🥤 ' + esc(it.op) + '</span>' : '') +
