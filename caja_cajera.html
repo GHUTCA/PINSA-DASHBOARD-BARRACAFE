@@ -169,6 +169,14 @@ function fechaCorta(iso) {
 function uidGesto(prefijo) {
   return prefijo + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
 }
+/* [08-ott · EMERG CAJERA ACCODATO LETTO COME ERRORE 5 CONTEOS] el uid nace con el GESTO, no con el tocco: «el retry crea una fila nueva» fue lo que paso (5 conteos de la 1002 en 32 s, cada uno con su uid).
+   La clave describe el contenido del gesto (que fila, que cifra): el mismo gesto repetido (retry, segundo tocco, red incierta) recibe el MISMO uid y el bordo lo reconoce (`ya`);
+   un gesto CON OTRO CONTENIDO (otra cifra) es un hecho nuevo y recibe uno nuevo. */
+var UIDS_GESTO = {};
+function uidGestoEstable(clave, prefijo) {
+  if (!UIDS_GESTO[clave]) UIDS_GESTO[clave] = uidGesto(prefijo);
+  return UIDS_GESTO[clave];
+}
 function toast(msg, clase) {
   var t = document.getElementById('toast');
   t.textContent = msg; t.className = 'toast show' + (clase ? ' ' + clase : '');
@@ -235,7 +243,8 @@ async function postCaja(body) {
     var j = await r.json();
     if (await esRespuestaPin(j)) return { ok:false, motivo: j.error, pin:true };
     if (!r.ok || j.ok === false) return { ok:false, motivo: j.motivo || j.error || ('http_' + r.status) };
-    if (j.scritto === false) return { ok:false, motivo: j.motivo || 'no_escrito' };
+    /* `accodato:true` = en cola de Postgres, que es el exito de este verbo (el bordo lo dice con dos palabras distintas a proposito: «accodato NO es scritto»). Leerlo como fallo hizo repetir el toque. */
+    if (j.scritto === false && !j.accodato && !j.ya) return { ok:false, motivo: j.motivo || 'no_escrito' };
     /* el cuerpo puede traer más que ok/scritto — p.ej. reserva_sobre
        responde {sobre_nro} en la MISMA escritura (verbo síncrono, no
        encolado: ver cajaAtto2FilaReservaSobre en el bordo). */
@@ -328,6 +337,7 @@ async function pantalla6() {
     if (!MANANA.ok) { renderError('La caja fuerte', MANANA.error); return; }
   }
   var sobres = MANANA.sobres || [];
+  var faltan = sobres.filter(function(s){ return !s.conteo; }).length;   // [08-ott · AUT-EMERG] cuántos quedan por contar
   if (!sobres.length) {
     app.innerHTML = barra(false) +
       '<div class="kick ok">Sobres en Caja Verde</div><h1>Nada que contar</h1>' +
@@ -364,11 +374,13 @@ async function pantalla6() {
     : '';
   app.innerHTML = barra(true) +
     '<div class="kick">Sobres en Caja Verde</div><h1>' + (MULTI ? (NOCHES.length > 1 ? NOCHES.length + ' noches' : fechaCorta(NOCHES[0] || DIA_NOCHE)) : fechaCorta(DIA_NOCHE)) + '</h1><p class="sd">' + (MULTI && NOCHES.length > 1 ? 'acumulado sin depositar' : 'turno noche') + '</p>' +
-    '<p class="big acc">' + sobres.length + '</p><p class="blab">sobres que tienes que contar</p>' +
+    /* [08-ott · AUT-EMERG · `EMERG CAJERA TUTTE CONTATE RIPARTE DA CAPO` · 🎛 BKP V29] con todos contados NO se vuelve al primero:
+       el número dice cuántos FALTAN, y si no falta ninguno se sigue a los cortes (paso 3). */
+    '<p class="big acc">' + (faltan ? faltan : sobres.length) + '</p><p class="blab">' + (faltan ? (faltan === 1 ? 'sobre que tienes que contar' : 'sobres que tienes que contar') : (sobres.length === 1 ? 'ya contaste el sobre' : 'ya contaste los ' + sobres.length + ' sobres')) + '</p>' +
     '<div class="rows"><div class="r hd"><span>sobre</span><span>estado</span></div>' + filas + '</div>' +
     avisoHtml +
-    '<button class="btn acc" id="abrir">Abrir y contar</button>';
-  document.getElementById('abrir').onclick = function(){ SOBRE_IDX = sobres.findIndex(function(s){return !s.conteo;}); if (SOBRE_IDX<0) SOBRE_IDX = 0; PASO = 2; pantalla7(); };
+    '<button class="btn acc" id="abrir">' + (faltan ? 'Abrir y contar' : 'Seguir') + '</button>';
+  document.getElementById('abrir').onclick = function(){ SOBRE_IDX = sobres.findIndex(function(s){return !s.conteo;}); if (SOBRE_IDX < 0) { PASO = 3; pantalla8(); return; } PASO = 2; pantalla7(); };
 }
 
 function pantalla7() {
@@ -434,7 +446,7 @@ function pantalla7() {
   async function confirmar() {
     var nota = document.getElementById('nota');
     var body = {
-      verbo: 'conteo', uid_gesto: uidGesto('cnt'),
+      verbo: 'conteo', uid_gesto: uidGestoEstable('cnt|' + (s.dia || DIA_NOCHE) + '|' + s.sobre_nro + '|' + contadoRevisado + '|' + selloIntacto, 'cnt'),
       sobre_dia_op: (s.dia || DIA_NOCHE), sobre_nro: s.sobre_nro,
       contado: contadoRevisado, sello_intacto: selloIntacto, nota: nota ? nota.value : null,
       firma_caja: SES.user, firma_caja_tipo: 'pin', fuente: 'app_caja',
@@ -491,7 +503,7 @@ async function pantalla8() {
       if (!nombre) { toast('Falta el nombre de la máquina ' + (i+1), 'bad'); return; }
       var v = Number(document.querySelector('[data-maq-corte="' + i + '"]').value || '');
       if (!Number.isFinite(v) || v < 0) { toast('Falta el corte de ' + nombre, 'bad'); return; }
-      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGesto('pos'), maquina: nombre,
+      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGestoEstable('pos|' + DIA_HOY + '|' + nombre + '|' + v, 'pos'), maquina: nombre,
         corte: v, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
       if (!r.ok) { toast('No se guardó ' + nombre + ': ' + r.motivo, 'bad'); return; }
     }
@@ -520,7 +532,7 @@ async function pantalla9() {
     unTocoUnHecho(document.getElementById('cerrar'), async function(){
       var nro = document.getElementById('nro').value.trim();
       if (!nro) { toast('Escribe el número de depósito', 'bad'); return; }
-      var r = await postCaja({ verbo:'deposito', uid_gesto: uidGesto('dep'), evento:'vuelta',
+      var r = await postCaja({ verbo:'deposito', uid_gesto: uidGestoEstable('depv|' + DEPOSITO_PENDIENTE.uid_gesto + '|' + nro, 'dep'), evento:'vuelta',
         referencia_uid: DEPOSITO_PENDIENTE.uid_gesto, nro_deposito: nro,
         firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
       if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
@@ -594,7 +606,7 @@ async function pantalla9() {
   var ultimo = recalc();
   document.getElementById('contado').addEventListener('input', function(){ ultimo = recalc(); });
   unTocoUnHecho(document.getElementById('salir'), async function(){
-    var depositoUid = uidGesto('dep');
+    var depositoUid = uidGestoEstable('deps|' + DIA_HOY + '|' + ultimo.c + '|' + ultimo.reserva + '|' + ultimo.aDep, 'dep');
     var cuerpoSalida = { verbo:'deposito', uid_gesto: depositoUid, evento:'salida',
       contado: ultimo.c, reserva: ultimo.reserva, a_depositar: ultimo.aDep,
       firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' };

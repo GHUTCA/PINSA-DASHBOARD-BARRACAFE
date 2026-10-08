@@ -16,10 +16,11 @@ function mundo(respuestas, init) {
     renderError: (tt, e) => { ctx.app.innerHTML = '[error ' + tt + ' ' + e + ']'; },
     getCaja: async (p) => { llamadas.push(p); return respuestas[p] || respuestas[p.split('?')[0]] || { ok: false, error: 'sin_respuesta' }; },
     pantalla8: () => llamadas.push('→pantalla8'), pantalla7: () => llamadas.push('→pantalla7'),
-    unTocoUnHecho: (b, f) => { b._f = f; }, uidGesto: (p) => p + '-uid', postCaja: async (b) => { posts.push(b); return { ok: true, sobre_nro: 'R-1' }; }, Number, Math, String, Object, Array, Date,
+    unTocoUnHecho: (b, f) => { b._f = f; }, uidGesto: (p) => p + '-' + Math.random().toString(36).slice(2, 8), postCaja: async (b) => { posts.push(b); return { ok: true, sobre_nro: 'R-1' }; }, Number, Math, String, Object, Array, Date,
     document: { getElementById: (id) => { const e = el(id); if (id === 'contado' && !e._set) { const m = /id="contado"[^>]*value="([^"]*)"/.exec(ctx.app.innerHTML); if (m) e.value = m[1]; } return e; },
       querySelector: () => el('q'), querySelectorAll: () => [] } }, init || {});
   vm.createContext(ctx);
+  vm.runInContext(SRC.slice(SRC.indexOf('var UIDS_GESTO'), SRC.indexOf('function toast(')), ctx);   // el helper REAL del uid estable
   vm.runInContext(['pantalla6', 'pantalla7', 'pantalla9', 'pantallaReservaSobre'].map((n) => fn(n, n !== 'pantalla7' && n !== 'pantallaReservaSobre')).join('\n') + '\n;this.API = { pantalla6, pantalla7, pantalla9, pantallaReservaSobre };', ctx);
   return { ctx, el, llamadas, posts };
 }
@@ -35,7 +36,7 @@ console.log('── ① la lista junta TODAS las noches');
   t('pide la lectura pendientes (con el día de HOY, para el PIN)', m.llamadas[0] === 'pendientes?dia=2026-10-08', m.llamadas);
   t('MULTI queda encendido y NOCHES = las dos noches', m.ctx.MULTI === true && m.ctx.NOCHES.length === 2);
   t('el título dice «2 noches» y «acumulado sin depositar»', /2 noches/.test(h) && /acumulado sin depositar/.test(h), h.slice(0, 260));
-  t('cuenta 3 sobres, cada fila con su noche', /class="big acc">3</.test(h) && /f:2026-10-06/.test(h) && /f:2026-10-07/.test(h), h.slice(0, 400));
+  t('cuenta cuántos FALTAN (2 de 3; semántica de BKP `EMERG TUTTE CONTATE`), cada fila con su noche', /class="big acc">2</.test(h) && /sobres que tienes que contar/.test(h) && /f:2026-10-06/.test(h) && /f:2026-10-07/.test(h), h.slice(0, 400));
   t('CONTEO CIEGO: ningún monto declarado en pantalla (ni 16.808, ni 90.000, ni 405.470, ni el total)', !/16\.808|16808|90\.000|405\.470|512\.278/.test(h), h.slice(0, 500));
   t('el que ya estaba contado dice «Contado», los otros «Por contar»', /Contado/.test(h) && (h.match(/Por contar/g) || []).length === 2);
   m.el('abrir').onclick(); t('«Abrir y contar» empieza por el primero SIN contar (el 1003)', m.ctx.SOBRE_IDX === 1 && /Sobre 1003/.test(m.ctx.app.innerHTML) && /2 de 3/.test(m.ctx.app.innerHTML), m.ctx.SOBRE_IDX); }
@@ -66,6 +67,18 @@ console.log('── ③ cada conteo va a la noche DEL SOBRE');
   m.ctx.MANANA.sobres[0].conteo = null; m.ctx.API.pantalla7();
   m.el('contado').value = '16808'; m.el('contado')._set = true; m.el('selloSi').onclick(); await m.el('revisar')._f(); await m.el('confirmar')._f();
   t('el conteo del 1002 se escribe en la noche 2026-10-06 (distinta de la del 1003)', m.posts[0].sobre_dia_op === '2026-10-06', m.posts[0]); }
+
+{ // dos sobres con el MISMO numero en noches distintas (06/1 y 07/1): el uid estable NO los confunde (si no, el bordo se tragaria el 2º como `ya`)
+  const dos = [S('1', '2026-10-06', 5000), S('1', '2026-10-07', 6000)];
+  const m = mundo(R({ pendientes: { ok: true, sobres: dos, noches: ['2026-10-06', '2026-10-07'], n_noches: 2 } }), { MULTI: true, NOCHES: ['2026-10-06', '2026-10-07'], MANANA: { ok: true, sobres: JSON.parse(JSON.stringify(dos)) }, SOBRE_IDX: 0 });
+  for (const idx of [0, 1]) { m.ctx.SOBRE_IDX = idx; m.ctx.API.pantalla7(); m.el('contado').value = '5000'; m.el('contado')._set = true; m.el('selloSi').onclick(); await m.el('revisar')._f(); await m.el('confirmar')._f(); }
+  t('06/1 y 07/1 tienen uid DISTINTO y cada una su noche', m.posts.length === 2 && m.posts[0].uid_gesto !== m.posts[1].uid_gesto && m.posts[0].sobre_dia_op === '2026-10-06' && m.posts[1].sobre_dia_op === '2026-10-07', m.posts); }
+{ // TODAS contadas en modo MULTI: «Seguir» va a los cortes, no vuelve a la primera
+  const todas = SOBRES.map((x) => Object.assign({}, x, { conteo: { contado: x.declarado } }));
+  const m = mundo(R({ pendientes: { ok: true, sobres: todas, noches: PEND.noches, n_noches: 2 } })); await m.ctx.API.pantalla6();
+  t('todas contadas (varias noches): el botón dice «Seguir»', />Seguir</.test(m.ctx.app.innerHTML), m.ctx.app.innerHTML.slice(0, 300));
+  m.el('abrir').onclick();
+  t('… y tocarlo va a pantalla8, no a la primera', m.llamadas.includes('→pantalla8') && !m.llamadas.includes('→pantalla7'), m.llamadas); }
 
 console.log('── ④ el depósito junta las noches y DICE qué sobres lleva');
 const contados = SOBRES.map((s, i) => Object.assign({}, s, { conteo: { contado: [16808, 90000, 405470][i] } }));
