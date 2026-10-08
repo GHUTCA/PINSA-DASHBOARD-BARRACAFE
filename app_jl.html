@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.35.5</span>
+<span class="ver" id="ver">app_jl v1.35.6</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -569,6 +569,7 @@ function cajaNuevoUid(pre) {
    invece che in ogni punto che li mostra — e se ne arriva uno nuovo non
    ancora tradotto, si vede il motivo grezzo: mai un «error» muto. */
 const CJ_MOTIVI = {
+  sopra_esperado: 'Es más de lo que tiene en la mano — confírmalo',   // [08-ott · AUT-0607] lo dice il bordo
   uid_gesto_mancante: 'Falta la clave del gesto (recarga la página)',
   local_mancante: 'Falta el local',
   mesero_mancante: 'Falta el nombre del mesero',
@@ -799,14 +800,22 @@ async function cjRetEnviar(btn) {
   const ret = CJ1.ret;
   try {
     const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, monto: monto,
-      esperado_ora: ret.att.en_mano, uid_gesto: ret.uid });
+      esperado_ora: ret.att.en_mano, uid_gesto: ret.uid,
+      ...(ret.confOk === monto ? { confirmo_sobre_esperado: 1 } : {}) });   // [08-ott · AUT-0607] il «Sí, retiro $X» viaggia fino al bordo
     if (r && r.ok && r.accodato) {
       if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero];
       if (r.ya) toast('ok', '✓ Este retiro ya estaba registrado — no se cuenta dos veces. Revisa la lista.');
       else toast('ok', '✓ Retiro de ' + fmt(monto) + ' a ' + ret.mesero + ' · ahora confirma él en su teléfono');
       const e = $('cj1Monto'); if (e) e.value = '';
       CJ1.ret = null; cjAtto1Giro();
-    } else if (r && r.error === 'rifiutato') { if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero]; toast('err', cjMotivoTxt(r.motivo)); }
+    } else if (r && r.error === 'rifiutato' && r.motivo === 'sopra_esperado' && CJ1.ret === ret) {
+      /* [08-ott · AUT-0607] il BORDO ha visto che è sopra l'en_mano (anche se questo telefono pensava di no): la stessa
+         domanda del vetro, con la cifra del bordo. Il ritiro NON è registrato: lo stesso uid vale per il «Sí». */
+      if (r.en_mano != null && ret.att) ret.att.en_mano = +r.en_mano || 0;
+      ret.conf = monto; ret.confOk = 0;
+      try { const ae = document.activeElement; if (ae && ae.blur) ae.blur(); } catch (e2) {}
+    }
+    else if (r && r.error === 'rifiutato') { if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero]; toast('err', cjMotivoTxt(r.motivo)); }
     else toast('err', '✋ No se registró: ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
   } catch (e) {
     /* la clave NO muere: el reintento con el MISMO uid_gesto es el MISMO retiro */
