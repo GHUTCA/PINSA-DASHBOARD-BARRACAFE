@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.35.6</span>
+<span class="ver" id="ver">app_jl v1.36.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -703,6 +703,9 @@ function cjAtto1On() { try { return /"caja_atto1_on"\s*:\s*"1"/.test(JSON.string
    «Cerrar reparto») è dell'ATTO III: a leva spenta non esiste. Stessa lettura di cjAtto1On, sul /salud del bordo.
    Senza /salud ⇒ spenta: mai una scheda vuota né un bottone morto. */
 function cjAtto3On() { try { return /"caja_atto3_on"\s*:\s*"1"/.test(JSON.stringify(STATE.salud || {})); } catch (e) { return false; } }
+/* [08-ott · v1.36.0 · AUT-0613 · EL JL A CERO GESTOS] ciò che il JL puo dimenticare lo fa il sistema, o il sistema lo mette davanti e non lo lascia passare. Tre leve del bordo,
+   lette dal /salud come le altre: senza /salud o a "0" ⇒ il vetro e quello di ieri (v1.35.6), byte per byte nel comportamento. */
+function cjFlag(n) { try { return new RegExp('"' + n + '"\\s*:\\s*"1"').test(JSON.stringify(STATE.salud || {})); } catch (e) { return false; } }
 async function cajaPost1(payload) {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 10000);
@@ -771,6 +774,78 @@ function cjRetAbrir(nombre) {
   pintaTab();
 }
 function cjRetCerrar() { CJ1.ret = null; const e = $('cj1Monto'); if (e) e.value = ''; pintaTab(); }
+/* [v1.36.0 · AUT-0613 ①] «Recibí $X»: UN tocco. La cifra NO la manda questo telefono: la calcola il bordo (l'en_mano che il vetro ha davanti e il bordo conosce). La garanzia non e il campo
+   vuoto: e la firma del mesero sulla stessa cifra. «Recibí otra cifra» apre il campo di sempre, con la guardia di sempre (AUT-0607). */
+function cjRetOtra() { if (!CJ1.ret) return; CJ1.ret.otra = true; CJ1.ret.conf = 0; pintaTab(); const e = $('cj1Monto'); if (e) e.focus(); }
+async function cjRetTodo(btn) {
+  if (CJ1.enviando || !CJ1.ret) return;
+  if (btn) btn.disabled = true;   // un tocco = un fatto
+  CJ1.enviando = true;
+  const ret = CJ1.ret;
+  try {
+    const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, recibi: 'todo', uid_gesto: ret.uid });
+    if (r && r.ok && r.accodato) {
+      if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero];
+      if (r.ya) toast('ok', '✓ Este retiro ya estaba registrado — no se cuenta dos veces.');
+      else toast('ok', '✓ Recibiste ' + fmt(r.monto) + ' de ' + ret.mesero + ' · ahora confirma él en su teléfono');
+      CJ1.ret = null; cjAtto1Giro();
+    } else if (r && r.error === 'rifiutato' && r.motivo === 'nada_que_recibir') {
+      if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero];
+      toast('warn', ret.mesero + ' ya no tiene dinero en la mano — se actualiza la lista'); CJ1.ret = null; cjAtto1Giro();
+    } else if (r && r.error === 'rifiutato') { toast('err', cjMotivoTxt(r.motivo)); }
+    else toast('err', '✋ No se registró: ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) {
+    CJ1.retDubbio = CJ1.retDubbio || {}; CJ1.retDubbio[ret.mesero] = ret.uid;   // la clave NO muere: reintentar es el MISMO retiro
+    toast('err', '⏳ ' + (e && e.message === 'timeout' ? 'El sistema tardó: puede que SÍ se haya registrado. Reintenta: no se duplica.' : 'Sin conexión: reintenta, no se duplica.'));
+  } finally { CJ1.enviando = false; pintaTab(); }
+}
+/* [v1.36.0 · AUT-0613 ②] «Hacer el sobre ahora»: el sistema suma los retiros sin sobre y crea el sobre. El JL no cuenta: copia el NÚMERO. `dia` = la noche de los retiros
+   (si quedaron de anoche, despues de las 06:00, la noche vieja se sigue pudiendo cerrar). */
+async function cjSobAuto(btn, dia) {
+  if (CJ1.enviando) return;
+  if (btn) btn.disabled = true;
+  CJ1.enviando = true;
+  try {
+    const r = await cajaPost1(Object.assign({ verbo: 'sobre_auto', pin_jl: STATE.pin }, dia ? { dia_op: dia } : {}));
+    if (r && r.ok && r.sobre_nro) { CJ1.sob = { nro: r.sobre_nro, suma: r.suma, auto: true, dia: r.dia }; }
+    else if (r && r.error === 'sin_retiros_por_ensobrar') { toast('ok', 'No quedan retiros sin sobre'); cjAtto1Giro(); }
+    else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
+    else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) { toast('err', '⏳ No sé si llegó: toca de nuevo, no se duplica.'); }
+  finally { CJ1.enviando = false; pintaTab(); }
+}
+/* [v1.36.0 · AUT-0613 ③] «Cerrar igual — diré por qué»: SOLO existe con pendientes (nunca un cierre limpio con un toque de mas), pide el PIN otra vez y el MOTIVO escrito. Alberto lo lee la noche misma. */
+function cjCieIgualAbrir() { CJ1.cie = { abierto: true, motivo: '', pin: '', uid: cajaNuevoUid('CJ-CIE') }; pintaTab(); }
+function cjCieIgualCerrar() { CJ1.cie = null; pintaTab(); }
+function cjCieSet(campo, val) { if (CJ1.cie) CJ1.cie[campo] = val; }
+async function cjCieIgualEnviar(btn) {
+  if (CJ1.enviando || !CJ1.cie) return;
+  const motivo = String(CJ1.cie.motivo || '').trim();
+  const pin = String(CJ1.cie.pin || '').trim();
+  if (motivo.length < 3) { toast('warn', 'Escribe por qué cierras así'); return; }
+  if (!pin) { toast('warn', 'Escribe tu PIN'); return; }
+  if (btn) btn.disabled = true;
+  CJ1.enviando = true;
+  const turno = (($('cj1CieTurno') || {}).value) || 'PM';
+  const st = CJ1.st || {};
+  let monto = 0; (st.sobres || []).forEach(function (x) { monto += (+x.suma_ritiros || +x.suma_ritiri || 0); });
+  try {
+    const r = await cajaPost1({ verbo: 'cierre_turno', pin_jl: pin, turno: turno, monto_declarado: monto, mesas_abiertas: [],
+      warnings: [], cerrar_igual: true, motivo: motivo, uid_gesto: CJ1.cie.uid });
+    if (r && r.ok && r.accodato) { toast('ok', '✓ Turno cerrado — Alberto lo ve esta noche'); CJ1.cie = null; cjAtto1Giro(); }
+    else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
+    else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) { toast('err', '⏳ No sé si llegó: toca de nuevo, no se duplica.'); }
+  finally { CJ1.enviando = false; pintaTab(); }
+}
+function _cjPendientes() {
+  /* los pendientes que el JL ve: lo mismo que el bordo mira al cerrar (ritiros sin sobre + garzones con dinero en la mano) */
+  const st = CJ1.st || {};
+  const di = st.da_imbustare || { n: 0 };
+  const prev = st.da_imbustare_prev || null;
+  const ms = (st.meseros || []).filter(function (m) { return m.en_mano > 0; });
+  return { sinSobre: (di.n || 0) + (prev ? prev.n : 0), enMano: ms, prev: prev, di: di };
+}
 function cjRetDif(inp) {
   const d = $('cj1Dif'); if (!d || !CJ1.ret) return;
   const v = parseInt((inp.value || '').replace(/[^0-9]/g, ''), 10);
@@ -890,6 +965,17 @@ function cjAtto1Html() {
   if (CJ1.ret) {
     const a = CJ1.ret.att;
     // [v1.35.0] il nome GRANDE in cima: si ritira a chi si ha davanti, e si vede a chi
+    if (cjFlag('caja_recibi_todo_on') && !CJ1.ret.otra) {
+      /* [v1.36.0 · AUT-0613 ①] «ENTREGA $X» grande y un tocco: «Recibí $X». La cifra la fija el bordo; «Recibí otra cifra» abre la casilla de siempre. */
+      h += '<div class="card"><h4>El retiro de</h4><p style="font-size:28px;font-weight:900;margin:2px 0 8px;line-height:1.1">' + esc(a.mesero) + '</p>' +
+        _cjRiga('Ventas en efectivo', fmt(a.ventas_efectivo)) + _cjRiga('Propinas en efectivo', fmt(a.propina_efectivo)) +
+        (a.residuo ? _cjRiga('De ayer', fmt(a.residuo)) : '') + (a.entregado ? _cjRiga('Ya entregó hoy', '−' + fmt(a.entregado)) : '') +
+        _cjRiga('<b>ENTREGA</b>', '<b style="font-size:26px">' + fmt(a.en_mano) + '</b>', ';padding:8px 0') +
+        '<button class="btn acc" onclick="cjRetTodo(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Recibí ' + fmt(a.en_mano)) + '</button>' +
+        '<button class="btn gh" onclick="cjRetOtra()">Recibí otra cifra</button>' +
+        '<button class="btn gh" onclick="cjRetCerrar()">Volver</button></div>';
+      return h;
+    }
     h += '<div class="card"><h4>El retiro de</h4><p style="font-size:28px;font-weight:900;margin:2px 0 8px;line-height:1.1">' + esc(a.mesero) + '</p>' +
       _cjRiga('Ventas en efectivo', fmt(a.ventas_efectivo)) + _cjRiga('Propinas en efectivo', fmt(a.propina_efectivo)) +
       (a.residuo ? _cjRiga('De ayer', fmt(a.residuo)) : '') + (a.entregado ? _cjRiga('Ya entregó hoy', '−' + fmt(a.entregado)) : '') +
@@ -924,17 +1010,33 @@ function cjAtto1Html() {
   /* ③ EL SOBRE — conteo ciego: una casilla; si cuadra, el sistema da el número */
   const di = st.da_imbustare || { n: 0 };
   const sob = CJ1.sob || null;
-  if (sob && sob.nro) {
+  const sobAuto = cjFlag('caja_sobre_auto_on');
+  if (sob && sob.nro && sob.auto) {
+    /* [v1.36.0 · AUT-0613 ②] el número es la COSA MAS GRANDE de la pantalla: es lo único que tiene que pasar de la pantalla a la carta (el resto queda en el sistema). */
+    h += '<div class="card"><h4>Sobre</h4>' +
+      '<p style="font-size:44px;font-weight:900;text-align:center;letter-spacing:4px;margin:6px 0;color:#3ddc84">' + esc(sob.nro) + '</p>' +
+      '<p style="font-size:22px;font-weight:800;text-align:center;margin:0 0 6px">' + fmt(sob.suma) + '</p>' +
+      '<p class="mini" style="text-align:center;font-size:15px"><b>escribe este número en el sobre</b></p>' +
+      '<button class="btn acc" onclick="cjSobListo()">Listo, lo escribí</button></div>';
+  } else if (sob && sob.nro) {
     h += '<div class="card' + (sob.dif ? ' ambra' : '') + '"><h4>Detalle retiro efectivo</h4>' +
       '<p style="font-size:34px;font-weight:900;text-align:center;letter-spacing:4px;margin:6px 0;color:' + (sob.dif ? '#FFB547' : '#3ddc84') + '">' + esc(sob.nro) + '</p>' +
       '<p class="mini" style="text-align:center">número del sobre' + (sob.dif ? ' · con diferencia' : '') + '</p>' +
       '<button class="btn acc" onclick="cjSobListo()">A la caja fuerte</button></div>';
+  } else if (di.n && sobAuto) {
+    h += '<div class="card"><h4>Retiros sin sobre</h4>' + _cjRiga(di.n + ' retiro' + (di.n === 1 ? '' : 's') + ' del turno', '<b>' + fmt(di.suma_riferimento || 0) + '</b>') +
+      '<button class="btn acc" onclick="cjSobAuto(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Hacer el sobre ahora') + '</button></div>';
   } else if (di.n) {
     h += '<div class="card"><h4>Detalle retiro efectivo</h4>' + _cjRiga(di.n + ' retiro' + (di.n === 1 ? '' : 's') + ' del turno', '') +
       '<input class="busca" id="cj1SobContado" type="text" inputmode="numeric" placeholder="$" autocomplete="off" style="font-size:22px;font-weight:800;text-align:center">' +
       '<p style="font-size:26px;font-weight:900;text-align:center;letter-spacing:6px;margin:6px 0;color:#6b6676">— — — —</p>' +
       '<p class="mini" style="text-align:center">número del sobre' + (sob && sob.intento ? ' · conteo ' + (sob.intento + 1) + ' de ' + (sob.de || 3) : '') + '</p>' +
       '<button class="btn acc" onclick="cjSobEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Confirmar') + '</button></div>';
+  }
+  if (sobAuto && !(sob && sob.nro) && st.da_imbustare_prev && st.da_imbustare_prev.n) {
+    const pv = st.da_imbustare_prev;
+    h += '<div class="card ambra"><h4>Anoche quedó sin sobre</h4>' + _cjRiga(pv.n + ' retiro' + (pv.n === 1 ? '' : 's') + ' · ' + esc(pv.dia), '<b>' + fmt(pv.suma_riferimento || 0) + '</b>') +
+      '<button class="btn acc" onclick="cjSobAuto(this,\'' + esc(pv.dia) + '\')"' + (CJ1.enviando ? ' disabled' : '') + '>Hacer el sobre ahora</button></div>';
   }
   /* ④ EL CIERRE — ninguna mesa queda abierta; sin el total de la caja fuerte a la vista */
   const mesas = _cjMesasDetalle();
@@ -949,8 +1051,26 @@ function cjAtto1Html() {
        turno avrà un problema.»] il bottone «Cerrar el turno» (e la scelta AM/PM) NON c'è più: la chiusura la scrive il bordo
        quando si apre il turno successivo (disegno 🎛 BKP + 🖐 QUARTA, prima dell'ATTO III). `cjCieEnviar` resta nel file,
        senza nessun bottone che la chiami. Qui resta solo il conteggio, che è un'informazione e non un gesto. */
-    h += '<div class="card"><h4>Cierre del turno</h4>' + _cjRiga('Garzones cerrados', nCer + ' de ' + nGar) +
-      '<p class="mini">El turno se cierra solo cuando se abre el siguiente. No hay nada que tocar aquí.</p></div>';
+    const pdx = cjFlag('caja_cierre_pendientes_on') ? _cjPendientes() : null;
+    if (pdx && (pdx.sinSobre > 0 || pdx.enMano.length)) {
+      /* [v1.36.0 · AUT-0613 ③] El sistema no se calla: dice el NOMBRE y lleva a donde se resuelve. Un aviso que no lleva a donde se resuelve es una tarea de mas, y a las 2:55 se posterga. */
+      h += '<div class="card rossa"><h4>Cierre del turno</h4>' + _cjRiga('Garzones cerrados', nCer + ' de ' + nGar) +
+        pdx.enMano.map(function (m) { return '<p style="font-size:17px;font-weight:800;margin:8px 0 2px">' + esc(m.mesero) + ' tiene ' + fmt(m.en_mano) + ' en la mano</p><p class="mini" style="margin:0 0 4px">nadie se lo retiró</p>' +
+          '<button class="btn acc" onclick="cjRetAbrir(\'' + _cjArg(m.mesero) + '\')">Retirarle a ' + esc(m.mesero) + '</button>'; }).join('') +
+        (pdx.sinSobre > 0 && sobAuto ? '<p style="font-size:17px;font-weight:800;margin:8px 0 2px">' + pdx.sinSobre + ' retiro' + (pdx.sinSobre === 1 ? '' : 's') + ' sin sobre</p>' +
+          '<button class="btn acc" onclick="cjSobAuto(this)">Hacer el sobre ahora</button>' : '') +
+        (CJ1.cie && CJ1.cie.abierto
+          ? '<div class="card" style="margin-top:10px"><p style="font-weight:800;margin:0 0 6px">Cerrar igual — di por qué</p>' +
+            '<input class="busca" type="text" placeholder="¿Por qué cierras así?" autocomplete="off" value="' + esc(CJ1.cie.motivo) + '" oninput="cjCieSet(\'motivo\', this.value)">' +
+            '<input class="busca" type="password" inputmode="numeric" placeholder="Tu PIN" autocomplete="off" value="' + esc(CJ1.cie.pin) + '" oninput="cjCieSet(\'pin\', this.value)">' +
+            '<button class="btn acc" onclick="cjCieIgualEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Cerrar igual') + '</button>' +
+            '<button class="btn gh" onclick="cjCieIgualCerrar()">Volver</button></div>'
+          : '<button class="btn gh" style="margin-top:8px" onclick="cjCieIgualAbrir()">Cerrar igual — diré por qué</button>') +
+        '</div>';
+    } else {
+      h += '<div class="card"><h4>Cierre del turno</h4>' + _cjRiga('Garzones cerrados', nCer + ' de ' + nGar) +
+        '<p class="mini">El turno se cierra solo cuando se abre el siguiente. No hay nada que tocar aquí.</p></div>';
+    }
   }
   return h;
 }
