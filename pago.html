@@ -109,13 +109,19 @@ h1{font-size:24px;font-weight:700;line-height:1.15;margin:0}
 <script>
 /* la targhetta di versione: SOLO «nome vX.Y», niente altro. Serve a sapere se
    quello che si sta guardando è quello che abbiamo appena mandato. */
-var VER = 'pago v0.1';
+var VER = 'pago v0.2';
 
 var QS = new URLSearchParams(location.search);
 var LOC = (QS.get('l') || '').trim().toUpperCase();
 var MESA = (QS.get('m') || '').trim();
 var TOK = (QS.get('t') || '').trim();
 var DEMO = QS.get('demo') === '1';
+/* [2.10 · 08-ott] la cuenta se abre con el FOLIO de la carta (pc), no con la mesa: el numero de mesa se adivina, el folio no.
+   El QR de la precuenta trae pago.html?l=<LOCAL>&pc=<folio> (1.13). 'm' y 't' sirven solo al demo. */
+var PC = (QS.get('pc') || '').trim().toUpperCase();
+var BORDE = 'https://pinsita-borde.alberto-agostini.workers.dev';
+var BORDE_TOKEN = '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ';   // token de LECTURA, publico por diseno (lo lleva tambien el menu)
+var CAMBIO = null;          // { carta, ora } si la cuenta cambio despues de imprimir la carta
 
 /* ═══ 🌐 LA LINGUA LA DETTA L'APPARECCHIO DEL CLIENTE ════════════════════════
    Il 44,9% dei telefoni che aprono la carta col QR sono brasiliani: un locale
@@ -150,6 +156,9 @@ var T = {
         faltaMesa:'Falta de la mesa', noCerrar:'La mesa sigue abierta',
         cerradoTit:'Esta cuenta no está disponible',
         cerradoTxt:'Pídele al mesero que te muestre la cuenta. Puedes pagar con él como siempre.',
+        cerradaTit:'Esta cuenta ya está cerrada', cerradaTxt:'Gracias por visitarnos. Si necesitas algo, pídeselo a tu mesero.',
+        reintentaTit:'No pudimos cargar tu cuenta', reintentaTxt:'Inténtalo de nuevo en un momento, o pídele la cuenta a tu mesero.',
+        cambioTxt:'Tu cuenta cambió desde que se imprimió', cargando:'Cargando tu cuenta…',
         vez2:'Gracias por visitarnos nuevamente' },
   pt: { cuenta:'Sua conta', quePagas:'O que você paga?', todo:'Pago tudo', lomio:'👆 Pago o meu',
         lomioSub:'escolho meus itens', iguales:'➗ Partes iguais', igualesSub:'dividimos entre vários',
@@ -169,6 +178,9 @@ var T = {
         faltaMesa:'Falta da mesa', noCerrar:'A mesa continua aberta',
         cerradoTit:'Esta conta não está disponível',
         cerradoTxt:'Peça ao garçom para mostrar a conta. Você pode pagar com ele como sempre.',
+        cerradaTit:'Esta conta já está fechada', cerradaTxt:'Obrigado pela visita. Se precisar de algo, peça ao seu garçom.',
+        reintentaTit:'Não conseguimos carregar sua conta', reintentaTxt:'Tente novamente em instantes, ou peça a conta ao seu garçom.',
+        cambioTxt:'Sua conta mudou desde que foi impressa', cargando:'Carregando sua conta…',
         vez2:'Obrigado por nos visitar novamente' },
   en: { cuenta:'Your bill', quePagas:'What are you paying?', todo:'I pay everything', lomio:'👆 Just mine',
         lomioSub:'I pick my items', iguales:'➗ Split evenly', igualesSub:'between several of us',
@@ -188,6 +200,9 @@ var T = {
         faltaMesa:'Left on the table', noCerrar:'The table stays open',
         cerradoTit:'This bill is not available',
         cerradoTxt:'Ask your server to show you the bill. You can pay with them as always.',
+        cerradaTit:'This bill is already closed', cerradaTxt:'Thanks for visiting. If you need anything, ask your server.',
+        reintentaTit:'We could not load your bill', reintentaTxt:'Try again in a moment, or ask your server for the bill.',
+        cambioTxt:'Your bill changed since it was printed', cargando:'Loading your bill…',
         vez2:'Thanks for coming back' }
 };
 function t() { return T[L] || T.es; }
@@ -263,6 +278,12 @@ function clp(n){ return '$'+Math.round(n||0).toLocaleString('es-CL'); }
 /* ─── los números ────────────────────────────────────────────────────────── */
 function items(){ return (CUENTA && CUENTA.items) || []; }
 function total(){ return (CUENTA && CUENTA.total) || 0; }
+/* [2.10] si la cuenta cambio despues de imprimir la carta, SE DICE (nunca en silencio): lo que ve el cliente es lo vigente */
+function avisoCambio() {
+  if (!CAMBIO || DEMO) return '';
+  return '<div class="res" style="background:rgba(224,169,74,.13);border-color:var(--am)"><div class="r"><span>' + t().cambioTxt +
+         '</span><b>' + clp(CAMBIO.carta) + ' → ' + clp(CAMBIO.ora) + '</b></div></div>';
+}
 function mio(){
   var s=0; items().forEach(function(it){ if (SEL[it.kk]) s += (it.pu||0)*(it.q||1); });
   return s;
@@ -300,9 +321,35 @@ function cargaCuenta(cb) {
     ]};
     return cb();
   }
-  if (!LOC || !MESA || !TOK) { CERRADO = 'falta'; return cb(); }
-  CERRADO = 'sinverbo';
-  cb();
+  if (!LOC || !PC) { CERRADO = 'falta'; return cb(); }
+  /* [2.10] GET /cuenta/<local>?pc=<folio> del bordo. «No se» no es una cuenta: si el bordo dice reintenta (Postgres no esta al paso),
+     se vuelve a pedir hasta 3 veces y despues se dice, sin inventar un total. Un error DEFINITIVO (folio desconocido o vencido) no se reintenta. */
+  var intentos = 0;
+  function reintenta() {
+    if (++intentos < 3) { setTimeout(pide, 2000); return; }
+    CERRADO = 'reintenta'; cb();
+  }
+  function pide() {
+    var ctrl = new AbortController();
+    var tid = setTimeout(function () { ctrl.abort(); }, 6000);
+    fetch(BORDE + '/cuenta/' + encodeURIComponent(LOC) + '?pc=' + encodeURIComponent(PC),
+          { headers: { 'X-Borde-Token': BORDE_TOKEN }, signal: ctrl.signal })
+      .then(function (r) { clearTimeout(tid); return r.json(); })
+      .then(function (j) {
+        if (j && j.ok === true && j.cerrada === true) { CERRADO = 'cerrada'; return cb(); }
+        if (j && j.ok === true && Array.isArray(j.items) && j.items.length) {
+          CUENTA = { total: Number(j.total) || 0,
+                     items: j.items.map(function (it, i) { return { kk: 'i' + i, n: String(it.n || '?'), q: parseInt(it.q, 10) || 1, pu: Number(it.pu) || 0 }; }) };
+          CAMBIO = j.cambio_dopo_carta || null;
+          CERRADO = '';
+          return cb();
+        }
+        if (j && j.definitivo === true) { CERRADO = 'sinverbo'; return cb(); }
+        reintenta();
+      })
+      .catch(function () { clearTimeout(tid); reintenta(); });
+  }
+  pide();
 }
 
 /* ─── el dibujo ──────────────────────────────────────────────────────────── */
@@ -312,9 +359,12 @@ function pinta() {
     : (MESA ? 'Mesa <b>' + esc(MESA) + '</b>' : 'Pinsita');
 
   if (CERRADO) {
+    var ct = CERRADO === 'cerrada' ? [ti.cerradaTit, ti.cerradaTxt]
+           : CERRADO === 'reintenta' ? [ti.reintentaTit, ti.reintentaTxt]
+           : [ti.cerradoTit, ti.cerradoTxt];
     b = '<div class="cerrado"><span class="ico">🙋</span>' +
-        '<b style="color:var(--ink);font-size:17px">' + ti.cerradoTit + '</b><br>' +
-        '<span style="font-size:14.5px">' + ti.cerradoTxt + '</span></div>';
+        '<b style="color:var(--ink);font-size:17px">' + ct[0] + '</b><br>' +
+        '<span style="font-size:14.5px">' + ct[1] + '</span></div>';
     $('body').innerHTML = b; $('foot').innerHTML = ''; pintaIdi(); return;
   }
 
@@ -348,6 +398,7 @@ function pinta() {
                 '<b><button class="mini" onclick="editTel()">' + ti.cambiar + '</button></b></div>') +
         '</div>';
     f = botonesPago();
+    b = avisoCambio() + b;
     $('body').innerHTML = b; $('foot').innerHTML = f; pintaIdi();
     if (EDIT_TEL) { var e0 = $('telIn'); if (e0) { e0.focus(); } }
     return;
@@ -482,6 +533,7 @@ function pinta() {
         '</div>';
   }
 
+  if (P === 0) b = avisoCambio() + b;
   $('body').innerHTML = b;
   $('foot').innerHTML = f;
   pintaIdi();
