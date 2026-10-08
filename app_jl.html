@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.35.3</span>
+<span class="ver" id="ver">app_jl v1.35.4</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -778,10 +778,22 @@ function cjRetDif(inp) {
   d.textContent = dif === 0 ? '✓ Cuadra exacto' : ('Diferencia ' + (dif > 0 ? '+' : '−') + fmt(Math.abs(dif)));
   d.style.color = dif === 0 ? '#3DC97E' : '#FFB547';
 }
+/* [08-ott · v1.35.4] il monto del ritiro sta nel ritiro: scriverlo toglie una conferma vecchia (vale per UN monto) */
+function cjRetMonto(v) { if (!CJ1.ret) return; CJ1.ret.monto = String(v || ''); CJ1.ret.conf = 0; }   // il riquadro vecchio resta a vista fino al ridisegno, ma il suo «Sí» vale per l'ALTRO monto: richiede
+function cjRetCorrige() { if (!CJ1.ret) return; CJ1.ret.conf = 0; CJ1.ret.monto = ''; pintaTab(); const e = $('cj1Monto'); if (e) e.focus(); }
+function cjRetConfirma(btn) { if (!CJ1.ret || !CJ1.ret.conf) return; CJ1.ret.confOk = CJ1.ret.conf; cjRetEnviar(btn); }
 async function cjRetEnviar(btn) {
   if (CJ1.enviando || !CJ1.ret) return;
-  const monto = parseInt((($('cj1Monto') || {}).value || '').replace(/[^0-9]/g, ''), 10);
+  const monto = parseInt(String(CJ1.ret.monto || (($('cj1Monto') || {}).value) || '').replace(/[^0-9]/g, ''), 10);
   if (!Number.isFinite(monto) || monto <= 0) { toast('warn', 'Escribe lo que contaste'); return; }
+  /* [08-ott · v1.35.4 · PRIMA NOTTE ATTO I] Ruth e Gabriel, notte del 07: il secondo ritiro portava il TOTALE al posto del
+     RESTO (+$192.293) e il vetro l'ha preso senza chiedere. Sopra l'esperado si ferma e chiede, per QUEL monto. */
+  const att = +(CJ1.ret.att && CJ1.ret.att.en_mano) || 0;
+  if (monto > att && CJ1.ret.confOk !== monto) {
+    CJ1.ret.conf = monto;
+    try { const ae = document.activeElement; if (ae && ae.blur) ae.blur(); } catch (e) {}   // su iOS il tocco del bottone non toglie il fuoco: senza, pintaTab aspetterebbe e la domanda non comparirebbe
+    pintaTab(); return;
+  }
   if (btn) btn.disabled = true;   // un tocco = un fatto
   CJ1.enviando = true;
   const ret = CJ1.ret;
@@ -873,8 +885,15 @@ function cjAtto1Html() {
       _cjRiga('Ventas en efectivo', fmt(a.ventas_efectivo)) + _cjRiga('Propinas en efectivo', fmt(a.propina_efectivo)) +
       (a.residuo ? _cjRiga('De ayer', fmt(a.residuo)) : '') + (a.entregado ? _cjRiga('Ya entregó hoy', '−' + fmt(a.entregado)) : '') +
       _cjRiga('<b>Total efectivo</b>', '<b style="font-size:20px">' + fmt(a.en_mano) + '</b>', ';padding:8px 0') +
-      '<input class="busca" id="cj1Monto" type="text" inputmode="numeric" placeholder="$" autocomplete="off" style="font-size:22px;font-weight:800;text-align:center">' +
-      '<button class="btn acc" onclick="cjRetEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Confirmar') + '</button>' +
+      /* [08-ott · v1.35.4 · PRIMA NOTTE ATTO I DUE RITIRI DOPPI SENZA BUSTA] il valore vive nel RITIRO (CJ1.ret.monto), non nel
+         DOM: un ritiro nuovo nasce vuoto e nessun ridisegno può riportargli la cifra di un altro (cj1Monto è uscito da _CAMPI_TENUTI). */
+      '<input class="busca" id="cj1Monto" type="text" inputmode="numeric" placeholder="$" autocomplete="off" style="font-size:22px;font-weight:800;text-align:center"' +
+        ' value="' + esc(CJ1.ret.monto || '') + '" oninput="cjRetMonto(this.value)">' +
+      (CJ1.ret.conf ? '<div class="card rossa" style="margin:8px 0"><p style="font-size:17px;font-weight:800;margin:0 0 6px">¿Retiras ' + fmt(CJ1.ret.conf) +
+        '? Faltaban ' + fmt(a.en_mano) + '</p><p class="mini">Es ' + fmt(CJ1.ret.conf - a.en_mano) + ' más de lo que tiene en la mano.</p>' +
+        '<button class="btn acc" onclick="cjRetConfirma(this)">Sí, retiro ' + fmt(CJ1.ret.conf) + '</button>' +
+        '<button class="btn gh" onclick="cjRetCorrige()">Corregir el monto</button></div>'
+      : '<button class="btn acc" onclick="cjRetEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Confirmar') + '</button>') +
       '<button class="btn gh" onclick="cjRetCerrar()">Volver</button></div>';
     return h;
   }
@@ -2235,7 +2254,9 @@ function _repintaDopo() {
 /* e i due campi del «Mover» sopravvivono a un ridisegno periodico (il battito
    ogni 20 s): si ricopiano se il nuovo campo nasce vuoto. Dopo uno spostamento
    riuscito li svuota `mvLimpiar`, e il ridisegno non li rimette. */
-const _CAMPI_TENUTI = ['mvDe', 'mvA', 'asMesero', 'asPlaza', 'asFranja', 'cj1Monto', 'cj1SobNro', 'cj1SobSuma', 'cj1CieMonto', 'cj1CieTurno'];
+/* [08-ott · v1.35.4] 'cj1Monto' è USCITO dalla lista: il suo valore vive in CJ1.ret.monto (un ritiro, una cifra). Lasciato
+   qui, un ridisegno poteva rimettere in un ritiro NUOVO la cifra di quello di prima — la forma dei due ritiri doppi del 07. */
+const _CAMPI_TENUTI = ['mvDe', 'mvA', 'asMesero', 'asPlaza', 'asFranja', 'cj1SobNro', 'cj1SobSuma', 'cj1CieMonto', 'cj1CieTurno'];
 let _ASIG_ON = false;   // [v1.32.0] la scheda «Asignar / cambiar» è aperta: il battito la ridisegna, non la chiude
 function pintaTab() {
   if (TAB < 0) return;
