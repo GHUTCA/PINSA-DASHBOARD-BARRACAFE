@@ -53,6 +53,13 @@ console.log('── ② el bordo todavía no tiene la lectura: la app sigue como
 for (const [nombre, resp] of [['404 lettura_sconosciuta', { ok: false, error: 'lettura_sconosciuta' }], ['502 la vista no existe', { ok: false, error: 'pg_no_responde' }], ['sin red', { ok: false, error: 'sin_red' }]]) {
   const m = mundo(R({ pendientes: resp, manana: { ok: true, sobres: [S('1001', undefined, 5000)], aviso_sin_respuesta: null } })); await m.ctx.API.pantalla6();
   t(nombre + ': MULTI apagado, usa manana de AYER (una noche) y la pantalla de siempre', m.ctx.MULTI === false && m.llamadas.includes('manana?dia=2026-10-07') && /f:2026-10-07/.test(m.ctx.app.innerHTML) && /turno noche/.test(m.ctx.app.innerHTML), m.ctx.app.innerHTML.slice(0, 200)); }
+for (const resp of [{ ok: false, error: 'lettura_sconosciuta' }, { ok: false, error: 'sin_red' }]) {
+  const m = mundo(R({ pendientes: resp, manana: { ok: true, sobres: [S('1001', undefined, 5000)], aviso_sin_respuesta: null } })); await m.ctx.API.pantalla6();
+  t('el ripiego a una noche NO es mudo: dice «Solo estás viendo la noche de ayer» (' + resp.error + ')', /Solo estás viendo la noche de ayer/.test(m.ctx.app.innerHTML), m.ctx.app.innerHTML.slice(0, 200)); }
+{ const m = mundo(R({ pendientes: { ok: false, error: 'lettura_sconosciuta' }, manana: { ok: true, sobres: [], aviso_sin_respuesta: null } })); await m.ctx.API.pantalla6();
+  t('… ni siquiera con la caja «vacía»: no dice «Todo lo que hubo ya se depositó» sin avisar que es solo una noche', /Solo estás viendo la noche de ayer/.test(m.ctx.app.innerHTML)); }
+{ const m = mundo(R()); await m.ctx.API.pantalla6();
+  t('con la lectura multi-noche presente, la nota NO aparece', !/Solo estás viendo/.test(m.ctx.app.innerHTML)); }
 { const m = mundo(R({ pendientes: { ok: false, error: 'pin_caja_invalido', pin: true } })); await m.ctx.API.pantalla6();
   t('un error de PIN NO cae al flujo viejo: pide el PIN de nuevo', /\[error/.test(m.ctx.app.innerHTML) && m.ctx.MULTI === false && !m.llamadas.includes('manana?dia=2026-10-07')); }
 
