@@ -27,6 +27,13 @@ const ST = (x) => Object.assign({ meseros: [{ mesero: 'Ruth', en_mano: 12300, ve
   da_imbustare: { n: 0 }, sobres: [], totale_en_mano: 12300 }, x || {});
 const RET = () => ({ mesero: 'Ruth', att: { mesero: 'Ruth', en_mano: 12300, ventas_efectivo: 10000, propina_efectivo: 2300, residuo: 0, entregado: 0 }, uid: 'CJ-RIT-1' });
 
+/* CONTRATTO COL BORDO (BKP `BKP 0613 CAMBIATO CAMBIADO CONTRATTO`): la parola del rifiuto la prendo dal SORGENTE del bordo, non da un letterale mio — due banchi che si danno ragione da soli non provano il contratto. */
+const BORDO_SRC = process.env.BORDO_SRC || new URL('../_wt_0613/src/index.js', import.meta.url);
+const SRC_BORDO = fs.readFileSync(BORDO_SRC, 'utf8');
+const mP = /error: 'rifiutato', motivo: '(en_mano_cambia\w+)'/.exec(SRC_BORDO);
+const PAROLA_BORDO = mP ? mP[1] : '(non trovata nel bordo)';
+vero('la parola del bordo si trova nel sorgente del bordo', !!mP, BORDO_SRC);
+vero('il vetro controlla ESATTAMENTE la parola del bordo (' + PAROLA_BORDO + ')', H.includes("r.motivo === '" + PAROLA_BORDO + "'"));
 console.log('── ① sin las leves: el vetro de ayer');
 { const CJ1 = { st: ST(), ret: RET() }; const { F } = mundo({ flags: { caja_atto1_on: '1' } }, CJ1); const h = F.cjAtto1Html();
   vero('con el ritiro abierto y SIN la leva: la casilla de siempre y «Confirmar» (no «Recibí»)', /id="cj1Monto"/.test(h) && />Confirmar</.test(h) && !/Recibí/.test(h), h.slice(0, 200));
@@ -48,9 +55,10 @@ console.log('── ② Recibí $X: UN toque, sin cifra');
   W.risposta = () => ({ ok: false, error: 'rifiutato', motivo: 'nada_que_recibir' }); await F.cjRetTodo();
   vero('«nada_que_recibir» (ya lo recibió otro teléfono): lo dice, cierra el panel, no deja un botón muerto', CJ1.ret === null && W.toasts.some((t) => /ya no tiene dinero/.test(t)), W.toasts); }
 { const CJ1 = { st: ST(), ret: RET() }; const { F, W } = mundo(SALUD_ON, CJ1);
-  W.risposta = () => ({ ok: false, error: 'rifiutato', motivo: 'en_mano_cambiado', en_mano: 15300, visto: 12300 }); await F.cjRetTodo();
+  const pintaPrima = W.pinta; W.risposta = () => ({ ok: false, error: 'rifiutato', motivo: PAROLA_BORDO, en_mano: 15300, visto: 12300 }); await F.cjRetTodo();
   const h = F.cjAtto1Html();
-  vero('«en_mano_cambiado»: el panel NO se cierra, el boton se redibuja con la cifra NUEVA y avisa; un solo post', CJ1.ret !== null && CJ1.ret.att.en_mano === 15300 && /Recibí \$15\.300/.test(h) && W.toasts.some((t) => /cambió/.test(t) && /15\.300/.test(t)) && W.posts.length === 1, [CJ1.ret && CJ1.ret.att.en_mano, W.toasts]);
+  vero('la pantalla se REDIBUJA despues de actualizar la cifra (pintaTab corrio)', W.pinta > pintaPrima, [W.pinta, pintaPrima]);
+  vero('«en_mano_cambiato»: el panel NO se cierra, el boton se redibuja con la cifra NUEVA y avisa; un solo post', CJ1.ret !== null && CJ1.ret.att.en_mano === 15300 && /Recibí \$15\.300/.test(h) && W.toasts.some((t) => /cambió/.test(t) && /15\.300/.test(t)) && W.posts.length === 1, [CJ1.ret && CJ1.ret.att.en_mano, W.toasts]);
   W.risposta = null; await F.cjRetTodo();
   vero('al tocar de nuevo manda visto = la cifra nueva y la MISMA clave (nada habia nacido)', W.posts.length === 2 && W.posts[1].visto === 15300 && W.posts[1].uid_gesto === 'CJ-RIT-1', W.posts); }
 { const CJ1 = { st: ST(), ret: RET() }; const { F, W } = mundo(SALUD_ON, CJ1);
