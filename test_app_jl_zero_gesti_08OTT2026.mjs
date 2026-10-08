@@ -41,11 +41,18 @@ console.log('── ② Recibí $X: UN toque, sin cifra');
   vero('el panel dice ENTREGA $12.300 grande y el botón «Recibí $12.300»', /ENTREGA/.test(h) && /\$12\.300/.test(h) && /Recibí \$12\.300/.test(h), h.slice(0, 300));
   vero('«Recibí otra cifra» está, y la casilla NO (todavía)', /Recibí otra cifra/.test(h) && !/id="cj1Monto"/.test(h));
   await F.cjRetTodo();
-  vero('el toque manda UN verbo ritiro con recibi:"todo" y SIN monto (la cifra la pone el bordo) ni esperado', W.posts.length === 1 && W.posts[0].verbo === 'ritiro' && W.posts[0].recibi === 'todo' && W.posts[0].mesero === 'Ruth' && !('monto' in W.posts[0]) && !('esperado_ora' in W.posts[0]) && W.posts[0].uid_gesto === 'CJ-RIT-1', W.posts);
+  vero('el toque manda UN verbo ritiro con recibi:"todo" y SIN monto (la cifra la pone el bordo) ni esperado', W.posts.length === 1 && W.posts[0].verbo === 'ritiro' && W.posts[0].recibi === 'todo' && W.posts[0].mesero === 'Ruth' && !('monto' in W.posts[0]) && !('esperado_ora' in W.posts[0]) && W.posts[0].uid_gesto === 'CJ-RIT-1' && W.posts[0].visto === 12300, W.posts);
+  vero('el toque lleva `visto`: la cifra que el JL VIO en el boton (revision de BKP)', W.posts[0].visto === 12300);
   vero('al aceptar, el ritiro se cierra y se pide el estado de nuevo', CJ1.ret === null); }
 { const CJ1 = { st: ST(), ret: RET() }; const { F, W } = mundo(SALUD_ON, CJ1);
   W.risposta = () => ({ ok: false, error: 'rifiutato', motivo: 'nada_que_recibir' }); await F.cjRetTodo();
   vero('«nada_que_recibir» (ya lo recibió otro teléfono): lo dice, cierra el panel, no deja un botón muerto', CJ1.ret === null && W.toasts.some((t) => /ya no tiene dinero/.test(t)), W.toasts); }
+{ const CJ1 = { st: ST(), ret: RET() }; const { F, W } = mundo(SALUD_ON, CJ1);
+  W.risposta = () => ({ ok: false, error: 'rifiutato', motivo: 'en_mano_cambiado', en_mano: 15300, visto: 12300 }); await F.cjRetTodo();
+  const h = F.cjAtto1Html();
+  vero('«en_mano_cambiado»: el panel NO se cierra, el boton se redibuja con la cifra NUEVA y avisa; un solo post', CJ1.ret !== null && CJ1.ret.att.en_mano === 15300 && /Recibí \$15\.300/.test(h) && W.toasts.some((t) => /cambió/.test(t) && /15\.300/.test(t)) && W.posts.length === 1, [CJ1.ret && CJ1.ret.att.en_mano, W.toasts]);
+  W.risposta = null; await F.cjRetTodo();
+  vero('al tocar de nuevo manda visto = la cifra nueva y la MISMA clave (nada habia nacido)', W.posts.length === 2 && W.posts[1].visto === 15300 && W.posts[1].uid_gesto === 'CJ-RIT-1', W.posts); }
 { const CJ1 = { st: ST(), ret: RET() }; const { F, W } = mundo(SALUD_ON, CJ1);
   W.risposta = () => { throw new Error('timeout'); }; await F.cjRetTodo();
   vero('un timeout NO mata la clave: el reintento es el MISMO ritiro', CJ1.retDubbio && CJ1.retDubbio.Ruth === 'CJ-RIT-1' && W.toasts.some((t) => /no se duplica/.test(t)), CJ1.retDubbio); }
