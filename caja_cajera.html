@@ -125,9 +125,17 @@ var LOCAL = (qp.get('loc') || '').toLowerCase().trim();
    no es el que sala.html usa de verdad (BORDE_SALA.URL, verificado). */
 var BORDE = {
   rsc: 'https://pinsita-borde.alberto-agostini.workers.dev',
-  cdl: 'https://pinsita-borde.alberto-agostini.workers.dev'
+  cdl: 'https://pinsita-borde.alberto-agostini.workers.dev',
+  bks: 'https://pinsita-borde.alberto-agostini.workers.dev'
 };
-var TOKEN = qp.get('t') || localStorage.getItem('pinsita_borde_t') || '';
+/* [08-ott · BKP `BKP MAYRA LOC RIPIEGO RSC` + V28 `MAYRA LOC BKS LINK DATO`] los locales que TIENEN caja configurada (PIN en el bordo: hoy solo `PIN_CAJA_MAP_BKS`).
+   Sin `?loc=` y sin un local de sesion que sea uno de estos, la caja PREGUNTA — antes caia en silencio a `rsc`, que no tiene PIN (Mayra veia «pin_caja_no_configurado» con todo lo demas en regla).
+   Un local nuevo con caja se agrega aqui (y su PIN en el bordo). */
+var LOCALES_CAJA = { bks: 'Backstage' };
+/* [08-ott · AUT-EMERG · Mayra ferma] il portale porta qui con ?loc= e SENZA ?t=, e su un telefono nuovo il localStorage e vuoto: ⇒ token_invalid. Ripiego = lo STESSO gate di lettura che `app_jl.html`
+   porta nel suo CFG (e un token PUBBLICO, non un'autenticazione: lo dice il codice stesso, M4). La sicurezza vera della caja e il PIN della cajera, che il DO verifica a ogni lettura. La radice (token per persona) e la 10.1/10.2 di RRHH. */
+var TOKEN_PORTALE = '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ';
+var TOKEN = qp.get('t') || localStorage.getItem('pinsita_borde_t') || TOKEN_PORTALE;
 if (qp.get('t')) { try { localStorage.setItem('pinsita_borde_t', qp.get('t')); } catch(e){} }
 
 /* ✏️ 03-ott · el PIN de la cajera — NUNCA en localStorage (misma disciplina
@@ -218,7 +226,8 @@ async function esRespuestaPin(j) {
   return false;
 }
 async function postCaja(body) {
-  var base = BORDE[LOCAL] || BORDE.rsc;
+  var base = BORDE[LOCAL];   // sin ripiego a rsc: arrancar() garantiza un LOCAL, y un local sin URL falla fuerte abajo
+  if (!base) return { ok:false, error:'local_sin_bordo' };
   var url = base + '/caja/' + encodeURIComponent(LOCAL) + '?t=' + encodeURIComponent(TOKEN);
   var conPin = Object.assign({ pin_caja: PIN_CAJA }, body, PROVA ? { dia_prueba: DIA_HOY } : {});   // [05-ott] en modo prueba el «hoy» es de prueba, y lo dice el vetro
   try {
@@ -250,7 +259,8 @@ async function flushCola() {
   if (resto.length < c.length) toast((c.length-resto.length) + ' envíos pendientes se enviaron', 'ok');
 }
 async function getCaja(path) {
-  var base = BORDE[LOCAL] || BORDE.rsc;
+  var base = BORDE[LOCAL];   // sin ripiego a rsc: arrancar() garantiza un LOCAL, y un local sin URL falla fuerte abajo
+  if (!base) return { ok:false, error:'local_sin_bordo' };
   var url = base + '/caja/' + encodeURIComponent(LOCAL) + '/' + path +
     (path.indexOf('?') >= 0 ? '&' : '?') + 't=' + encodeURIComponent(TOKEN);
   try {
@@ -664,10 +674,27 @@ function pedirPinCaja() {
   });
 }
 
+/* ¿En qué local estás? — solo los que tienen caja. Nunca elige por ti. */
+function preguntarLocal() {
+  return new Promise(function (resolve) {
+    var ids = Object.keys(LOCALES_CAJA);
+    app.innerHTML = barra(false) +
+      '<div class="kick">Tu local</div><h1>¿En qué local estás?</h1><p class="sd">Elige el local de esta caja</p>' +
+      ids.map(function (id) { return '<button class="btn acc" data-loc="' + id + '">' + esc(LOCALES_CAJA[id]) + '</button>'; }).join('');
+    ids.forEach(function (id) {
+      var b = app.querySelector('[data-loc="' + id + '"]');
+      if (b) b.onclick = function () { resolve(id); };
+    });
+  });
+}
+
 /* ═══ 4 · ARRANQUE ══════════════════════════════════════════════════════ */
 async function arrancar() {
   SES = (window.PinsitaAuth && PinsitaAuth.sesion && PinsitaAuth.sesion()) || { user:'?', role:'CAJA' };
-  if (!LOCAL) LOCAL = (SES.local && SES.local !== '*') ? SES.local : 'rsc';
+  if (!LOCAL) {
+    var delUsuario = String(SES.local || '').toLowerCase().trim();
+    LOCAL = LOCALES_CAJA[delUsuario] ? delUsuario : await preguntarLocal();
+  }
   await pedirPinCaja();
   flushCola();
   pantalla6();
