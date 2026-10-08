@@ -558,7 +558,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v94 · ingreso directo a sección · 06oct</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v95 · movimientos · 08oct</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -570,6 +570,7 @@
     </div>
     <button class="invbtn" id="invBtn" title="Ver inventario">🔍 Ver inventario</button>
     <button class="invbtn" id="repoBtn" title="Reposición sugerida">📦 Reposición</button>
+    <button class="invbtn" id="movBtn" title="Movimientos por fecha y producto">🔎 Movimientos</button>
     <span class="syncbadge" id="syncBadge" style="display:none"></span>
     <span class="syncbadge wait" id="pendBadge" style="display:none;cursor:pointer"></span>
   </div>
@@ -6171,5 +6172,138 @@ async function _relevoCheck(){
 setInterval(_relevoCheck, 10*60*1000);
 document.addEventListener('visibilitychange', function(){ if(!document.hidden) setTimeout(_relevoCheck, 1500); });
 </script>
+<!-- ═══════ MOVIMIENTOS · v95 · 08-oct ═══════════════════════════════════════
+     Alberto, 08-oct: «quella tabella io dovrei poterla vedere nella app con un tab MOVIMIENTOS, scegliere data e/o prodotto, per fare i check».
+     SOLO LECTURA: GET /inventario/<LOC>/movimientos del borde (vista inventario_traccia de Postgres). Cada movimiento con el SALDO DESPUÉS de
+     cada lugar (bodega y secciones), una columna por lugar, como la tabla de la mechada. Los AVISOS los calcula el borde (el vetro no
+     interpreta, N7): códigos distintos para el mismo producto · lugares bajo cero · días sin conteo. Sin red o con la palanca apagada: lo dice. -->
+<style>
+  #movModal{align-items:stretch}
+  #movModal .cmsheet{max-width:760px;max-height:none;height:100dvh;border-radius:0;display:flex;flex-direction:column}
+  @supports not (height:100dvh){ #movModal .cmsheet{height:100vh} }
+  #movModal .mov-body{flex:1 1 auto;min-height:0;overflow:auto;padding-bottom:24px}
+  .mov-f{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 8px}
+  .mov-f label{display:flex;flex-direction:column;font-size:10px;font-weight:700;color:var(--t2);letter-spacing:.04em;text-transform:uppercase;gap:3px}
+  .mov-f input{padding:8px 9px;border-radius:9px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05);color:inherit;font-size:14px}
+  .mov-f .mov-q{flex:1 1 180px}
+  .mov-f .mov-q input{width:100%;box-sizing:border-box}
+  .mov-go{align-self:flex-end;padding:9px 16px;border-radius:10px;border:0;background:var(--acc,#4a90d9);color:#fff;font-weight:800;font-size:14px}
+  .mov-av{padding:9px 11px;border-radius:10px;background:rgba(245,166,35,.12);border:1px solid #f5a623;color:#f5a623;font-size:12.5px;line-height:1.4;margin:6px 0}
+  .mov-h{font-size:13px;font-weight:800;margin:14px 2px 4px}
+  .mov-h small{font-weight:600;color:var(--t3)}
+  table.mov-t{border-collapse:collapse;width:100%;font-size:12px}
+  .mov-t th{position:sticky;top:0;background:var(--bg2,#1d1915);text-align:left;font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:.04em;padding:5px 4px;border-bottom:1px solid rgba(255,255,255,.15)}
+  .mov-t td{padding:5px 4px;border-bottom:1px solid rgba(255,255,255,.07);vertical-align:top}
+  .mov-t td.n{text-align:right;white-space:nowrap}
+  .mov-t td.cambia{font-weight:800}
+  .mov-t td.neg{color:#e05252;font-weight:800}
+  .mov-t tr.neg td{background:rgba(224,82,82,.08)}
+  .mov-t tr.conteo td{background:rgba(74,144,217,.07)}
+  .mov-t small{display:block;color:var(--t3);font-size:10.5px}
+  .mov-vacio{color:var(--t3);font-size:13px;padding:14px 2px}
+</style>
+<div class="cmodal" id="movModal">
+  <div class="cmsheet">
+    <div class="top-row" style="margin-bottom:6px">
+      <div class="cm-v" style="margin:0">🔎 Movimientos · <span id="movLocal">—</span></div>
+      <button class="inv-close-btn" id="movClose">✕ Cerrar</button>
+    </div>
+    <div class="mov-f">
+      <label>Desde<input type="date" id="movDesde"></label>
+      <label>Hasta<input type="date" id="movHasta"></label>
+      <label class="mov-q">Producto (nombre o SKU)<input type="text" id="movQ" placeholder="ej. mechada · 1169" autocomplete="off"></label>
+      <button class="mov-go" id="movGo">Ver</button>
+    </div>
+    <div class="mov-body" id="movBody"><div class="mov-vacio">Elige las fechas y un producto, y toca «Ver».</div></div>
+  </div>
+</div>
+<script>
+(function(){
+  function gid(x){ return document.getElementById(x); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fq(n){ if(n==null||n==='') return '—'; n=Number(n); return (Math.round(n)===n)?String(n):String(Math.round(n*10)/10); }
+  function hoy(){ var d=new Date(Date.now()-6*3600000); return d.toISOString().slice(0,10); }   // el día operativo corta a las 06:00
+  function menos(d,n){ return new Date(Date.parse(d+'T12:00:00Z')-n*86400000).toISOString().slice(0,10); }
+  function fd(d){ var p=String(d||'').split('-'); return p.length===3 ? p[2]+'-'+p[1] : d; }
+  var VERBO={ 'Ingreso BLoc':'Ingreso', 'Ingreso Directo Secc':'Ingreso directo', 'Entrega Secc':'Entrega', 'Inventario Secc':'Conteo sección',
+              'Conteo Fisico':'Conteo bodega', 'Ajuste - menos':'Ajuste −', 'Ajuste + mas':'Ajuste +', 'Consumo Secc':'Consumo' };
+
+  function abrir(){
+    gid('movLocal').textContent = (typeof LOCAL_ACTUAL!=='undefined' ? LOCAL_ACTUAL : '—');
+    if(!gid('movHasta').value) gid('movHasta').value = hoy();
+    if(!gid('movDesde').value) gid('movDesde').value = menos(gid('movHasta').value, 6);
+    gid('movModal').classList.add('on');
+    setTimeout(function(){ try{ gid('movQ').focus(); }catch(e){} }, 60);
+  }
+
+  async function ver(){
+    var q = gid('movQ').value.trim(), desde = gid('movDesde').value, hasta = gid('movHasta').value;
+    if(!q){ gid('movBody').innerHTML='<div class="mov-vacio">Escribe un producto (nombre o SKU).</div>'; return; }
+    var code = (typeof _invCodigoDe==='function') ? _invCodigoDe() : null;
+    if(!code || typeof BORDE_REG==='undefined'){ gid('movBody').innerHTML='<div class="mov-vacio">⚠ Este local no tiene el libro nuevo.</div>'; return; }
+    var par = /^\d+$/.test(q) ? 'sku='+encodeURIComponent(q) : 'q='+encodeURIComponent(q);
+    gid('movBody').innerHTML='<div class="inv-load">Buscando movimientos…</div>';
+    var ctl = (typeof AbortController!=='undefined') ? new AbortController() : null;
+    var tid = ctl ? setTimeout(function(){ try{ctl.abort();}catch(e){} }, 15000) : null;
+    try{
+      var r = await fetch(BORDE_REG.URL+'/inventario/'+encodeURIComponent(code)+'/movimientos?'+par+'&desde='+desde+'&hasta='+hasta,
+                          { headers:{ 'X-Borde-Token': BORDE_REG.T }, cache:'no-store', signal: ctl?ctl.signal:undefined });
+      var j=null; try{ j=await r.json(); }catch(e){}
+      if(!j) throw new Error('respuesta ilegible ('+r.status+')');
+      if(j.error==='leva_spenta') throw new Error('el libro nuevo está apagado para este local');
+      if(!j.ok) throw new Error(MSJ[j.error] || j.error || 'sin respuesta');
+      render(j);
+    }catch(e){
+      gid('movBody').innerHTML='<div class="mov-vacio">⚠ '+esc(e.name==='AbortError'?'sin señal: reintenta':e.message)+'</div>';
+    }finally{ if(tid) clearTimeout(tid); }
+  }
+  var MSJ={ sku_o_q_richiesto:'escribe al menos 3 letras del producto, o su SKU', periodo_max_62_dias:'el período máximo es de 62 días',
+            desde_dopo_hasta:'«desde» es después de «hasta»' };
+
+  function render(j){
+    var h='';
+    var av=j.avisos||{};
+    if((av.codigos||[]).length>1) h+='<div class="mov-av">⚠ Este producto aparece con <b>'+av.codigos.length+' códigos</b>: '+
+      av.codigos.map(function(c){ return '<b>'+esc(c.sku)+'</b> '+esc(c.desc); }).join(' · ')+'. Revisa con qué código se registra cada movimiento.</div>';
+    if((av.negativos||[]).length) h+='<div class="mov-av">⚠ <b>'+av.negativos.length+'</b> movimiento(s) dejan un lugar <b>bajo cero</b> (en rojo): salió algo que, para el sistema, no había entrado.</div>';
+    (av.dias_sin_conteo||[]).forEach(function(d){
+      h+='<div class="mov-av">⚠ <b>'+esc(d.seccion)+'</b> · SKU '+esc(d.sku)+': <b>sin conteo</b> el '+d.dias.map(fd).join(', ')+'.</div>';
+    });
+    if(!j.filas.length){ gid('movBody').innerHTML=h+'<div class="mov-vacio">Sin movimientos entre el '+fd(j.desde)+' y el '+fd(j.hasta)+'.</div>'; return; }
+    var porSku={}, orden=[];
+    j.filas.forEach(function(f){ if(!porSku[f.sku]){ porSku[f.sku]=[]; orden.push(f.sku); } porSku[f.sku].push(f); });
+    var neg={}; (av.negativos||[]).forEach(function(id){ neg[id]=1; });
+    orden.forEach(function(sku){
+      var F=porSku[sku], lug=[];
+      F.forEach(function(f){ if(f.saldo_origen!=null && lug.indexOf(f.origen)<0) lug.push(f.origen); if(f.saldo_destino!=null && lug.indexOf(f.destino)<0) lug.push(f.destino); });
+      lug.sort(function(a,b){ return (/^Bodega/.test(a)?-1:/^Bodega/.test(b)?1:a.localeCompare(b)); });
+      h+='<div class="mov-h">'+esc(sku)+' · '+esc(F[0].desc)+' <small>('+esc(F[0].utm||'')+' · saldo del lugar después de cada movimiento)</small></div>';
+      h+='<table class="mov-t"><thead><tr><th>Cuándo</th><th>Movimiento</th><th>Quién</th>'+lug.map(function(l){ return '<th class="n">'+esc(l)+'</th>'; }).join('')+'</tr></thead><tbody>';
+      var st={};
+      F.forEach(function(f){
+        var cambia={};
+        if(f.saldo_origen!=null){ st[f.origen]=f.saldo_origen; cambia[f.origen]=1; }
+        if(f.saldo_destino!=null){ st[f.destino]=f.saldo_destino; cambia[f.destino]=1; }
+        var conteo = f.contado!=null;
+        /* un conteo: lo que se ve es lo CONTADO; la diferencia con el teórico es el movimiento que el libro escribe (consumo o ajuste) */
+        var mov = conteo
+          ? esc(VERBO[f.verbo]||f.verbo)+': contado '+fq(f.contado)+'<small>teórico '+fq(f.teorico)+' · diferencia '+fq(f.q_utm)+' → '+esc(f.destino)+(f.anula?' · ANULACIÓN':'')+'</small>'
+          : esc(VERBO[f.verbo]||f.verbo)+' '+fq(f.q_utm)+'<small>'+esc(f.origen)+' → '+esc(f.destino)+(f.anula?' · ANULACIÓN':'')+'</small>';
+        h+='<tr class="'+(neg[f.id]?'neg':'')+(conteo?' conteo':'')+'"><td>'+esc(String(f.hora||'').slice(5).replace(/^(\d\d)-(\d\d)/,'$2-$1'))+'</td><td>'+mov+'</td><td>'+esc(f.responsable)+'</td>'+
+          lug.map(function(l){ var v=st[l]; return '<td class="n'+(cambia[l]?' cambia':'')+(v!=null&&v<-0.0001?' neg':'')+'">'+(v==null?'':fq(v))+'</td>'; }).join('')+'</tr>';
+      });
+      h+='</tbody></table>';
+    });
+    if(j.troncato) h+='<div class="mov-av">Se muestran los primeros 1000 movimientos: acorta el período.</div>';
+    gid('movBody').innerHTML=h;
+  }
+
+  gid('movBtn').addEventListener('click', abrir);
+  gid('movClose').addEventListener('click', function(){ gid('movModal').classList.remove('on'); });
+  gid('movGo').addEventListener('click', ver);
+  gid('movQ').addEventListener('keydown', function(e){ if(e.key==='Enter') ver(); });
+})();
+</script>
+
 </body>
 </html>
