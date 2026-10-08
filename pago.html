@@ -109,7 +109,7 @@ h1{font-size:24px;font-weight:700;line-height:1.15;margin:0}
 <script>
 /* la targhetta di versione: SOLO «nome vX.Y», niente altro. Serve a sapere se
    quello che si sta guardando è quello che abbiamo appena mandato. */
-var VER = 'pago v0.2';
+var VER = 'pago v0.3';
 
 var QS = new URLSearchParams(location.search);
 var LOC = (QS.get('l') || '').trim().toUpperCase();
@@ -121,6 +121,8 @@ var DEMO = QS.get('demo') === '1';
 var PC = (QS.get('pc') || '').trim().toUpperCase();
 var BORDE = 'https://pinsita-borde.alberto-agostini.workers.dev';
 var BORDE_TOKEN = '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ';   // token de LECTURA, publico por diseno (lo lleva tambien el menu)
+var PAY = 'https://pinsita-pay.alberto-agostini.workers.dev';
+var PAGANDO = false;        // un solo checkout a la vez: un doble toque no abre dos sesiones
 var CAMBIO = null;          // { carta, ora } si la cuenta cambio despues de imprimir la carta
 
 /* ═══ 🌐 LA LINGUA LA DETTA L'APPARECCHIO DEL CLIENTE ════════════════════════
@@ -159,6 +161,7 @@ var T = {
         cerradaTit:'Esta cuenta ya está cerrada', cerradaTxt:'Gracias por visitarnos. Si necesitas algo, pídeselo a tu mesero.',
         reintentaTit:'No pudimos cargar tu cuenta', reintentaTxt:'Inténtalo de nuevo en un momento, o pídele la cuenta a tu mesero.',
         cambioTxt:'Tu cuenta cambió desde que se imprimió', cargando:'Cargando tu cuenta…',
+        abriendo:'Abriendo el pago…', pagoNo:'No pudimos abrir el pago. Pídele al mesero que te ayude: puedes pagar con él como siempre.', pagoVuelve:'Estamos terminando de cargar tu cuenta. Inténtalo de nuevo en un momento.',
         vez2:'Gracias por visitarnos nuevamente' },
   pt: { cuenta:'Sua conta', quePagas:'O que você paga?', todo:'Pago tudo', lomio:'👆 Pago o meu',
         lomioSub:'escolho meus itens', iguales:'➗ Partes iguais', igualesSub:'dividimos entre vários',
@@ -181,6 +184,7 @@ var T = {
         cerradaTit:'Esta conta já está fechada', cerradaTxt:'Obrigado pela visita. Se precisar de algo, peça ao seu garçom.',
         reintentaTit:'Não conseguimos carregar sua conta', reintentaTxt:'Tente novamente em instantes, ou peça a conta ao seu garçom.',
         cambioTxt:'Sua conta mudou desde que foi impressa', cargando:'Carregando sua conta…',
+        abriendo:'Abrindo o pagamento…', pagoNo:'Não conseguimos abrir o pagamento. Peça ajuda ao garçom: você pode pagar com ele como sempre.', pagoVuelve:'Estamos terminando de carregar sua conta. Tente novamente em instantes.',
         vez2:'Obrigado por nos visitar novamente' },
   en: { cuenta:'Your bill', quePagas:'What are you paying?', todo:'I pay everything', lomio:'👆 Just mine',
         lomioSub:'I pick my items', iguales:'➗ Split evenly', igualesSub:'between several of us',
@@ -203,6 +207,7 @@ var T = {
         cerradaTit:'This bill is already closed', cerradaTxt:'Thanks for visiting. If you need anything, ask your server.',
         reintentaTit:'We could not load your bill', reintentaTxt:'Try again in a moment, or ask your server for the bill.',
         cambioTxt:'Your bill changed since it was printed', cargando:'Loading your bill…',
+        abriendo:'Opening payment…', pagoNo:'We could not open the payment. Ask your server for help: you can pay with them as always.', pagoVuelve:'We are still loading your bill. Try again in a moment.',
         vez2:'Thanks for coming back' }
 };
 function t() { return T[L] || T.es; }
@@ -414,10 +419,10 @@ function pinta() {
         '<div class="lab">' + ti.quePagas + '</div><div class="chips">' +
         '<button class="chip" onclick="ponModo(\'todo\')">' + ti.todo +
           '<small>' + clp(total()) + '</small></button>' +
-        '<button class="chip" onclick="ponModo(\'lomio\')">' + ti.lomio +
+        (DEMO ? '<button class="chip" onclick="ponModo(\'lomio\')">' + ti.lomio +
           '<small>' + ti.lomioSub + '</small></button>' +
         '<button class="chip" onclick="ponModo(\'iguales\')">' + ti.iguales +
-          '<small>' + ti.igualesSub + '</small></button></div>';
+          '<small>' + ti.igualesSub + '</small></button>' : '') + '</div>';   // [2.10] el pago parcial aun no existe: solo «pago todo»
   }
 
   else if (P === 1) {
@@ -629,7 +634,35 @@ function paga() {
     guardaYo({ tel: TEL || (YO && YO.tel) || '', nom: NOM || (YO && YO.nom) || '' });
     P = 6; pinta(); return;
   }
-  alert(t().cerradoTxt);
+  if (PAGANDO) return;
+  /* [2.10] POST /checkout-cuenta de pinsita-pay (contrato de 🖐 TERZA). Lo que decide el SERVIDOR: el consumo (lo lee del bordo) y la
+     cifra de la propina; el telefono manda solo el PORCENTAJE (0-25). Un 'otro' en pesos se convierte a % entero (la cifra la fija
+     el servidor: el total que ve el cliente en Fintoc es el vigente). Solo «pago todo». */
+  var pct = (PROP === 0) ? 0
+          : (PROP === 'otro') ? Math.min(25, Math.max(0, Math.round((PROP_OTRO || 0) * 100 / Math.max(1, total()))))
+          : 10;
+  PAGANDO = true;
+  var ti = t(), intentos = 0;
+  $('foot').innerHTML = '<div class="sub" style="text-align:center;padding:14px">' + ti.abriendo + '</div>';
+  function falla(msg) { PAGANDO = false; pinta(); alert(msg); }
+  function envia() {
+    var ctrl = new AbortController();
+    var tid = setTimeout(function () { ctrl.abort(); }, 15000);
+    fetch(PAY + '/checkout-cuenta', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
+      body: JSON.stringify({ l: LOC, pc: PC, propina_pct: pct })
+    }).then(function (r) { clearTimeout(tid); return r.json().then(function (j) { return { st: r.status, j: j || {} }; }); })
+      .then(function (x) {
+        var j = x.j;
+        if (j.ok === true && typeof j.redirect_url === 'string' && /^https:\/\//.test(j.redirect_url)) { location.href = j.redirect_url; return; }
+        if (j.error === 'reintenta' && ++intentos < 3) { setTimeout(envia, 3000); return; }
+        if (j.error === 'reintenta') return falla(ti.pagoVuelve);
+        if (j.error === 'cuenta_cerrada' || j.error === 'monto_cero') { PAGANDO = false; CERRADO = 'cerrada'; pinta(); return; }
+        falla(ti.pagoNo);
+      })
+      .catch(function () { clearTimeout(tid); falla(ti.pagoNo); });
+  }
+  envia();
 }
 
 /* ─── arranque ───────────────────────────────────────────────────────────── */

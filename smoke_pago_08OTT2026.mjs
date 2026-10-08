@@ -15,6 +15,7 @@ async function apri(query, rispondi, opz) {
   const els = {};
   const el = (id) => (els[id] = els[id] || { id, innerHTML: '', style: {}, value: '', focus() {}, classList: { add() {}, remove() {} } });
   const chiamate = [];
+  const alerts = [];
   const store = {};
   const ctx = {
     document: { getElementById: el, querySelectorAll: () => [], body: el('__body'), addEventListener() {} },
@@ -24,14 +25,14 @@ async function apri(query, rispondi, opz) {
     URLSearchParams, AbortController, console, encodeURIComponent, JSON, Math, Date, Number, String, Array, parseInt, parseFloat, isNaN, Object,
     setTimeout: (f) => { Promise.resolve().then(f); return 1; },   // 2 s di attesa → subito
     clearTimeout() {},
-    alert() {},
+    alert(m) { alerts.push(String(m)); },
     fetch: async (url, init) => { chiamate.push({ url: String(url), init }); const r = await rispondi(String(url), chiamate.length); if (r instanceof Error) throw r; return { ok: true, json: async () => r }; },
   };
   ctx.window = ctx;
   vm.createContext(ctx);
   vm.runInContext(script, ctx);
   await new Promise((r) => setTimeout(r, 30));   // lascia girare le promise
-  return { body: (els.body && els.body.innerHTML) || '', foot: (els.foot && els.foot.innerHTML) || '', chiamate, ctx };
+  return { body: (els.body && els.body.innerHTML) || '', foot: (els.foot && els.foot.innerHTML) || '', chiamate, ctx, alerts, els };
 }
 const OK = { ok: true, mesa: '12', folio: 'PC-B-261008-ABC123', total: 20000, pedidos: 1,
   items: [{ n: 'Pinsa Diavola', q: 1, pu: 13200 }, { n: 'Negroni', q: 1, pu: 6800 }], cambio_dopo_carta: null };
@@ -88,11 +89,54 @@ console.log('\n④ lingue e demo');
   ok(demo.chiamate.length === 0 && /Trilog/.test(demo.body), 'il demo funziona ancora, senza rete');
 }
 
-console.log('\n⑤ il pago non finge (resta com\'è: lo porta 2.5b)');
+console.log('\n⑤ il pago: POST /checkout-cuenta di pinsita-pay (contratto di 🖐 TERZA)');
+const PAYOK = { ok: true, redirect_url: 'https://pay.fintoc.test/s/abc', checkout_session_id: 'cs_1', monto: 22000, consumo: 20000, propina: 2000 };
+const rispondiPay = (pay) => async (u, k) => (u.includes('/checkout-cuenta') ? pay(u, k) : OK);
+const post = (r) => r.chiamate.find((c) => c.url.includes('/checkout-cuenta'));
 {
-  const src = html.replace(/\r\n/g, '\n');
-  ok(/function paga\(\) \{\n  if \(DEMO\) \{[\s\S]*?\n  alert\(t\(\)\.cerradoTxt\);/.test(src), 'paga() fuori dal demo dice ancora «pídele al mesero» (nessun finto pagamento)');
-  ok(/var VER = 'pago v0\.2';/.test(src), 'la targhetta è pago v0.2');
+  const r = await apri(Q, rispondiPay(async () => PAYOK));
+  r.ctx.paga(); await new Promise((x) => setTimeout(x, 30));
+  const p = post(r);
+  ok(p && p.url === 'https://pinsita-pay.alberto-agostini.workers.dev/checkout-cuenta' && p.init.method === 'POST', 'paga() fa POST a /checkout-cuenta di pinsita-pay');
+  const body = p && JSON.parse(p.init.body);
+  ok(body && body.l === 'BKS' && body.pc === 'PC-B-261008-ABC123' && body.propina_pct === 10, 'corpo: l, pc (maiuscoli) e propina_pct 10', JSON.stringify(body));
+  ok(body && Object.keys(body).sort().join() === 'l,pc,propina_pct', 'il telefono NON manda importi: solo l, pc e il PORCENTAJE (il consumo e la cifra li fa il server)');
+  ok(r.ctx.location.href === 'https://pay.fintoc.test/s/abc', 'va alla redirect_url di Fintoc');
+  const b2 = await apri(Q, rispondiPay(async () => ({ ok: true, redirect_url: 'http://evil.test/x' })));
+  b2.ctx.paga(); await new Promise((x) => setTimeout(x, 30));
+  ok(!/evil/.test(b2.ctx.location.href) && b2.alerts.length === 1, 'una redirect_url NON https non si segue: avviso e basta');
+  const dbl = await apri(Q, rispondiPay(async () => PAYOK));
+  dbl.ctx.paga(); dbl.ctx.paga(); dbl.ctx.paga(); await new Promise((x) => setTimeout(x, 30));
+  ok(dbl.chiamate.filter((c) => c.url.includes('/checkout-cuenta')).length === 1, 'tre tocchi veloci → UN solo checkout');
+}
+{
+  const s0 = await apri(Q, rispondiPay(async () => PAYOK)); s0.ctx.PROP = 0; s0.ctx.paga(); await new Promise((x) => setTimeout(x, 30));
+  ok(JSON.parse(post(s0).init.body).propina_pct === 0, 'senza propina → propina_pct 0');
+  const s1 = await apri(Q, rispondiPay(async () => PAYOK)); s1.ctx.PROP = 'otro'; s1.ctx.PROP_OTRO = 3000; s1.ctx.paga(); await new Promise((x) => setTimeout(x, 30));
+  ok(JSON.parse(post(s1).init.body).propina_pct === 15, 'propina «otro» $3.000 su $20.000 → 15% (la cifra la fissa il server)');
+  const s2 = await apri(Q, rispondiPay(async () => PAYOK)); s2.ctx.PROP = 'otro'; s2.ctx.PROP_OTRO = 99999; s2.ctx.paga(); await new Promise((x) => setTimeout(x, 30));
+  ok(JSON.parse(post(s2).init.body).propina_pct === 25, 'una propina enorme si ferma a 25%');
+}
+{
+  const e1 = await apri(Q, rispondiPay(async () => ({ ok: false, error: 'reintenta' })));
+  e1.ctx.paga(); await new Promise((x) => setTimeout(x, 60));
+  ok(e1.chiamate.filter((c) => c.url.includes('/checkout-cuenta')).length === 3 && e1.alerts.length === 1 && /cargar tu cuenta/.test(e1.alerts[0]), 'reintenta → 3 tentativi poi avviso onesto, nessun redirect', e1.alerts.join('|'));
+  const e2 = await apri(Q, rispondiPay(async () => ({ ok: false, error: 'cuenta_cerrada' })));
+  e2.ctx.paga(); await new Promise((x) => setTimeout(x, 30));
+  ok(/ya est/.test(e2.els.body.innerHTML) && e2.alerts.length === 0, 'cuenta_cerrada → la pagina passa a «ya está cerrada»');
+  const e3 = await apri(Q, rispondiPay(async () => ({ ok: false, error: 'fintoc_checkout_off' })));
+  e3.ctx.paga(); await new Promise((x) => setTimeout(x, 30));
+  ok(e3.alerts.length === 1 && /mesero/.test(e3.alerts[0]) && !/fintoc/.test(e3.alerts[0]), 'pago spento/errore → «pídele al mesero», senza nomi tecnici');
+  const e4 = await apri(Q, rispondiPay(async () => new Error('rete')));
+  e4.ctx.paga(); await new Promise((x) => setTimeout(x, 30));
+  ok(e4.alerts.length === 1 && e4.ctx.PAGANDO === false, 'rete caduta → avviso, e si può riprovare (PAGANDO torna false)');
+}
+{
+  const cl = await apri(Q, async () => OK);
+  ok(!/ponModo\('lomio'\)|ponModo\('iguales'\)/.test(cl.body) && /ponModo\('todo'\)/.test(cl.body), 'fuori dal demo la pagina offre SOLO «pago todo» (il parcial non esiste)');
+  const dm = await apri('?demo=1', async () => OK);
+  ok(/ponModo\('lomio'\)/.test(dm.body), 'nel demo le tre opzioni ci sono ancora');
+  ok(/var VER = 'pago v0\.3';/.test(html.replace(/\r\n/g, '\n')), 'la targhetta è pago v0.3');
 }
 
 console.log('\n' + (rossi ? '🔴 ' + rossi + ' rossi su ' + n : '🟢 ' + n + ' controlli, tutti verdi'));
