@@ -1108,7 +1108,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.221.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.221.1 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3977,6 +3977,32 @@ async function _cajaGiroMesero(que) {
 }
 setInterval(function () { _cajaGiroMesero('ritiro'); }, 10000);    // [06-ott · D8 ②] antes 30 s
 setInterval(function () { _cajaGiroMesero('propina'); }, 30000);   // la propina no tiene prisa: como antes
+/* ═══ [08-ott · AUT-0600 · 🎛 BKP V29] LA SPINTA: il campanello del ritiro arriva per WebSocket, non al giro ═══
+   Disegno in bacheca `AUT-0600 DISEGNO SPINTA WEBSOCKET`. Il socket porta UN campanello senza contenuto ({t:'ritiro'}): la
+   scheda «Confirma tu retiro» la apre la lettura di SEMPRE (`_cajaGiroMesero('ritiro')`), con le sue porte. Il token e il codice
+   viaggiano nel PRIMO messaggio, mai nell'URL. Il giro di 10 s qui sopra RESTA: col socket caduto si comporta come ieri.
+   Riconnette con attesa crescente (2 s → 64 s), e quando la sala torna visibile. Un 4403 (codice o token rifiutati) non
+   insiste: riprova al giro lento, quando il codice del turno potrebbe essere cambiato. */
+var _ws = null, _wsRit = 0, _wsTimer = null;
+function _wsApri() {
+  try {
+    if (!SALA_WS_ON || !CAJA_ATTO1_ON || JL || !STATE.codigo || !STATE.nombre || typeof WebSocket === 'undefined') return;
+    if (_ws && (_ws.readyState === 0 || _ws.readyState === 1)) return;
+    if (document.visibilityState && document.visibilityState !== 'visible') return;
+    const ws = new WebSocket(BORDE_SALA.URL.replace(/^http/, 'ws') + '/ws/' + encodeURIComponent(CFG.LOCAL || 'BKS'));
+    _ws = ws;
+    ws.onopen = function () { _wsRit = 0; try { ws.send(JSON.stringify({ t: 'hola', token: BORDE_SALA.T, codigo: STATE.codigo, nombre: STATE.nombre })); } catch (e) {} };
+    ws.onmessage = function (e) { let m = null; try { m = JSON.parse(e.data); } catch (x) {} if (m && m.t === 'ritiro') _cajaGiroMesero('ritiro'); };
+    ws.onclose = function (e) {
+      if (_ws === ws) _ws = null;
+      if (e && e.code === 4403) return;   // no autorizado: lo riprova il giro lento
+      _wsRit = Math.min(_wsRit + 1, 6); clearTimeout(_wsTimer); _wsTimer = setTimeout(_wsApri, 1000 * Math.pow(2, _wsRit));
+    };
+    ws.onerror = function () {};
+  } catch (e) { /* la spinta non rompe mai la sala: resta il giro */ }
+}
+document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') _wsApri(); });
+setInterval(_wsApri, 30000);   // il giro lento: riapre un socket caduto o rifiutato
 
 /* «vacío» y «cero» no son lo mismo: el botón se habilita cuando hay ALGO
    escrito, aunque sea 0 — un turno sin un solo pago en efectivo es una
@@ -8997,6 +9023,7 @@ var SCONTOMOT_ON = false;
 /* [02-ott · ATTO I] la caja della notte al bordo: conferma dei ritiri e «Mi corte» senza conteggio. Nasce spenta. */
 var CAJA_ATTO1_ON = false;
 var CORTE_BORDE_ON = false;   // [08-ott · 1.6] il corte del mesero calcolato dal bordo (vale con CAJA_ATTO1_ON)
+var SALA_WS_ON = false;       // [08-ott · AUT-0600] la spinta del ritiro: un WebSocket verso il DO del locale
 var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propina
 /* [29-set · Alberto: «il tetto del 30% fallo subito»] il tetto NON e' piu' una
    copia del vetro: si legge dal bordo (/salud → desc_max_pct), che e' la fonte
@@ -9025,6 +9052,8 @@ var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propi
       CAJA_ATTO1_ON = String(cercaK(j, 'caja_atto1_on')) === '1';           // [02-ott · ATTO I]
       CORTE_BORDE_ON = String(cercaK(j, 'corte_borde_on')) === '1';         // [08-ott · 1.6]
       CAJA_ATTO3_ON = String(cercaK(j, 'caja_atto3_on')) === '1';           // [03-ott · ATTO III]
+      SALA_WS_ON = String(cercaK(j, 'sala_ws_on')) === '1';                 // [08-ott · AUT-0600]
+      if (SALA_WS_ON) { try { _wsApri(); } catch (eW) {} }
     }).catch(function () {});
   } catch (e) { /* senza il bordo resta 30 */ }
 })();
