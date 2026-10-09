@@ -6,7 +6,7 @@ let ok = 0, ko = 0; const t = (n, c, i) => { c ? (ok++, console.log('✓', n)) :
 const i = SRC.indexOf('async function pantalla6() {'); const j = SRC.indexOf('\n}\n', i) + 3; const fn = SRC.slice(i, j);
 async function corre(sobres) {
   const btn = { onclick: null }; const app = { innerHTML: '' }; const llamadas = [];
-  const ctx = { app, MANANA: null, PROVA: false, DIA_NOCHE: '2026-10-07', SOBRE_IDX: null, PASO: null,
+  const ctx = { app, MANANA: null, PROVA: false, DIA_NOCHE: '2026-10-07', DIA_HOY: '2026-10-08', MULTI: false, NOCHES: [], SOBRE_IDX: null, PASO: null,
     barra: () => '', fechaCorta: (d) => d, esc: (s) => String(s), renderError: () => llamadas.push('error'),
     getCaja: async () => ({ ok: true, sobres: sobres }),
     pantalla7: () => llamadas.push('p7'), pantalla8: () => llamadas.push('p8'),
