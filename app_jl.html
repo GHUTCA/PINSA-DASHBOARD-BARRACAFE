@@ -916,7 +916,7 @@ async function cjSobEnviar(btn) {
   try {
     const r = await cajaPost1({ verbo: 'sobre', pin_jl: STATE.pin, contado: contado, uid_gesto: CJ1.sobUid });
     if (r && r.ok && r.sobre_nro) { CJ1.sob = { nro: r.sobre_nro, dif: !!r.con_diferencia }; CJ1.sobUid = null; }
-    else if (r && r.ok && r.cuadra === false) { CJ1.sob = { intento: r.intento, de: r.de }; const e = $('cj1SobContado'); if (e) e.value = ''; }
+    else if (r && r.ok && r.cuadra === false) { CJ1.sob = { intento: r.intento, de: r.de }; CJ1.sobUid = null; /* [08-ott · EMERG BUSTA CONTEO RIPETUTO] un conteo UMANO nuevo es un gesto nuevo: con el uid viejo el bordo lo toma por un retry de red y no avanza al 3º intento */ const e = $('cj1SobContado'); if (e) e.value = ''; }
     else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
     else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
   } catch (e) { toast('err', '⏳ No sé si llegó: toca de nuevo, no se duplica.'); }
@@ -2029,13 +2029,36 @@ async function cerrarT() {
      nelle assegnazioni di oggi — così il menu non è mai vuoto mentre la lista
      arriva (N1: la schermata non aspetta la rete). La riga della plaza mostra
      l'assegnazione IN CORSO al posto della vecchia, e l'esito si dice in chiaro. */
-let _STAFF_JL = null, _STAFF_JL_TS = 0;
+/* ═══ [08-ott · 👥 RRHH · 6.3 fetta A] LA LISTA DEI MESEROS DA POSTGRES (via bordo), il GAS solo come ripiego ═══════════
+   Alberto, 06-ott: «la sezione turno non carica i meseros». Il vecchio giro era UNA chiamata GAS (`getStaffSala`, ~1 s di pavimento, cache 10 min) con il fallimento MUTO:
+   un `pin_invalid`, un timeout o un GAS saturo lasciavano il menu con i soli nomi già assegnati oggi — e nessuno lo vedeva.
+   ORA: `GET /turno/estado/<local>` (bordo → `staff_locale_vigente`: persone con asignación attiva al locale, col NOME COME LO CHIAMA LA SALA). Se il bordo è spento (503), vuoto o rotto,
+   si torna al GAS di sempre. E se NESSUNO risponde, l'errore SI VEDE (`_STAFF_JL_ERR`) invece di restare muto. Il segreto di lettura viaggia in HEADER, mai in `?t=`.
+   Il locale del bordo è RSC/CDL (non RIESCO/CANDELARIA): `LOC_PG`. La SCRITTURA (Guardar) NON cambia: è la fetta B, col freno del PIN che vive nel Durable Object. */
+let _STAFF_JL = null, _STAFF_JL_TS = 0, _STAFF_JL_ERR = '', _STAFF_JL_FONTE = '';
+const LOC_PG = { BKS: 'BKS', RIESCO: 'RSC', CANDELARIA: 'CDL' };
 function _staffJLCarga() {
   if (!STATE.pin || (_STAFF_JL && Date.now() - _STAFF_JL_TS < 10 * 60000)) return;
   _STAFF_JL_TS = Date.now();
-  gasPost('getStaffSala', { pin: STATE.pin }).then(function (r) {
-    if (r && r.ok && Array.isArray(r.staff)) { _STAFF_JL = r.staff; if (TAB === 1) pintaTab(); }
-  }).catch(function () { _STAFF_JL_TS = 0; });
+  const dalGas = function () {
+    return gasPost('getStaffSala', { pin: STATE.pin }).then(function (r) {
+      if (r && r.ok && Array.isArray(r.staff)) { _STAFF_JL = r.staff; _STAFF_JL_ERR = ''; _STAFF_JL_FONTE = 'gas'; }
+      else { _STAFF_JL_TS = 0; _STAFF_JL_ERR = (r && (r.error || r.exige)) || 'sin_respuesta'; }
+    }).catch(function (e) { _STAFF_JL_TS = 0; _STAFF_JL_ERR = (e && e.message === 'timeout') ? 'timeout' : 'sin_red'; });
+  };
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
+  fetch(CFG.BORDE + '/turno/estado/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, cache: 'no-store', signal: ctrl.signal })
+    .then(function (r) { return r.json(); })
+    .then(function (r) {
+      clearTimeout(to);
+      if (r && r.ok && Array.isArray(r.staff) && r.staff.length) {
+        _STAFF_JL = r.staff.filter(function (s) { return s.en_plaza; }).map(function (s) { return { nombre: s.nombre, activo: true, persona_id: s.persona_id, cargo: s.cargo }; });
+        _STAFF_JL_ERR = ''; _STAFF_JL_FONTE = 'bordo'; return null;
+      }
+      return dalGas();   // bordo spento (503) o senza persone: il GAS di sempre
+    })
+    .catch(function () { clearTimeout(to); return dalGas(); })
+    .then(function () { if (TAB === 1) pintaTab(); });
 }
 function _meserosJL() {
   const vist = {}, out = [];
@@ -2078,12 +2101,13 @@ function tabAsig(ridisegno) {
   let h = '<div class="card"><h4>＋ Asignar / cambiar</h4>' +
     '<select class="busca" id="asMesero"><option value="">— mesero —</option>' +
       mes.map(function (n) { return opt(n, n); }).join('') + '</select>' +
-    (_STAFF_JL ? '' : '<p class="mini">Cargando el personal… (ya están los del turno de hoy)</p>') +
+    (_STAFF_JL ? '' : (_STAFF_JL_ERR ? '<p class="mini" style="color:#E8B23A">⚠️ No pude traer la lista de meseros (' + esc(_STAFF_JL_ERR) + ') · reintento solo — por ahora salen solo los del turno de hoy.</p>' : '<p class="mini">Cargando el personal… (ya están los del turno de hoy)</p>')) +
     '<select class="busca" id="asPlaza"><option value="">— plaza —</option>' +
       pls.map(function (p) { return opt(p.plaza, p.plaza + (p.mesas ? ' · ' + p.mesas : '')); }).join('') + '</select>' +
     '<select class="busca" id="asFranja">' + (function () { const fs = _franjasJL(), ora = _franjaAdesso(fs);
       return fs.length ? fs.map(function (f) { return '<option value="' + esc(f) + '"' + (f === ora ? ' selected' : '') + '>' + esc(f) + (f === ora ? ' · ahora' : '') + '</option>'; }).join('')
         : '<option value="">— sin franjas hoy —</option>'; })() + '</select>' +
+    (_STAFF_JL_FONTE === 'bordo' ? '<label class="mini" style="display:block;margin:6px 0"><input type="checkbox" id="asAgregar"> ＋ agregar a la plaza (no reemplazar) — para dos meseros juntos</label>' : '') +
     '<button class="btn acc" onclick="asignar()">Guardar</button>' +
     '<p class="mini">Queda firmado a tu nombre en el fósil.</p></div>';
   pls.forEach(p => {
@@ -2105,6 +2129,46 @@ function tabAsig(ridisegno) {
   });
   $('body').innerHTML = h + _salidaHtml(); if (!ridisegno) $('body').scrollTop = 0;   // via d'uscita anche qui · il battito non riporta in cima
 }
+/* ═══ [08-ott · 👥 RRHH · 6.3 fetta B] «GUARDAR» PASSA PRIMA DAL BORDO (Postgres), il GAS resta il ripiego ═══════════════════════════════════════════════════
+   `POST /turno/gesto/<local>`: la persona si manda per `persona_id` (quello della lista della fetta A), il PIN del JL passa dal FRENO della casa, e `uid_gesto` lo conia il TELEFONO
+   (se il giro si ripete, è lo stesso gesto: il bordo non lo scrive due volte). Risposta «gate_spento» / 404 / 403 / 5xx = la leva è spenta o il bordo non c'è: si va al GAS come sempre.
+   🔴 Su TIMEOUT o rete caduta NON si ripiega sul GAS (il bordo potrebbe aver scritto): si dice «puede que sí se guardó» e si verifica. Una sostituzione/«cambiar» manda UNA `asignar` con
+   `sustituye_persona_id` (e un `quitar` per ogni altra persona già in quella plaza); «＋ agregar» aggiunge una persona SENZA togliere nessuno — più persone per plaza (decisione di Alberto, 07-ott). */
+function _uidGesto() { try { return 'g' + Date.now().toString(36) + '-' + crypto.randomUUID().replace(/-/g, '').slice(0, 16); } catch (e) { return 'g' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 18); } }
+const _ERR_TURNO = { pin_jl_invalido: 'PIN incorrecto', pin_jl_requerido: 'Falta el PIN', persona_fuera_del_locale: 'Esa persona no está asignada a este local', sustituida_fuera_del_locale: 'La persona que sale no está asignada a este local',
+  motivo_requerido: 'Falta el motivo del cambio', franja_invalida: 'La franja no tiene el formato HH:MM-HH:MM', plaza_missing: 'Falta la plaza', persona_id_invalido: 'Persona no válida' };
+async function _asignarPorBordo(m, p, f, agregar) {
+  if (_STAFF_JL_FONTE !== 'bordo') return { usado: false };                                    // la lista no viene de Postgres: no hay persona_id
+  if (!/^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]|24):[0-5][0-9]$/.test(f)) return { usado: false };   // franjas «viejas» («19–cierre»): las gestiona el GAS
+  const porNombre = function (n) { const k = (n || '').toString().trim().toLowerCase(); return (_STAFF_JL || []).find(function (s) { return s && s.persona_id && (s.nombre || '').toString().trim().toLowerCase() === k; }); };
+  const nuevo = porNombre(m);
+  if (!nuevo) return { usado: false };
+  const previos = [];
+  ((STATE.turno && STATE.turno.asignaciones) || []).forEach(function (a) {
+    if (a && !a._pendiente && a.plaza === p && (a.franja || '') === f && a.mesero) a.mesero.toString().split(',').forEach(function (n) { n = n.trim(); if (n) previos.push(n); });
+  });
+  const aQuitar = [];
+  if (!agregar) { for (const n of previos) { const pp = porNombre(n); if (!pp) return { usado: false }; if (pp.persona_id !== nuevo.persona_id) aQuitar.push(pp); } }   // un nombre que no sé resolver: lo reemplaza el GAS
+  const gestos = [];
+  if (aQuitar.length) {
+    gestos.push({ accion: 'asignar', persona_id: nuevo.persona_id, sustituye_persona_id: aQuitar[0].persona_id, motivo: 'cambio de plaza (JL)' });
+    aQuitar.slice(1).forEach(function (pp) { gestos.push({ accion: 'quitar', persona_id: pp.persona_id }); });
+  } else if (!previos.some(function (n) { const pp = porNombre(n); return pp && pp.persona_id === nuevo.persona_id; })) gestos.push({ accion: 'asignar', persona_id: nuevo.persona_id });
+  else return { usado: true, ok: true, ya: true };                                               // ya estaba: nada que hacer
+  for (let i = 0; i < gestos.length; i++) {
+    const g = Object.assign({ plaza: p, franja: f, uid_gesto: _uidGesto(), pin_jl: STATE.pin }, gestos[i]);
+    const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 8000);
+    let r, j;
+    try {
+      r = await fetch(CFG.BORDE + '/turno/gesto/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T }, body: JSON.stringify(g), signal: ctrl.signal, cache: 'no-store' });
+      clearTimeout(to);
+      j = await r.json().catch(function () { return null; });
+    } catch (e) { clearTimeout(to); return { usado: true, ok: false, timeout: true, hechos: i }; }   // NO se sabe si escribió: no se ripiega
+    if (!r.ok || !j || (j.ok === true && j.scritto === false && j.motivo === 'gate_spento')) { if (i === 0) return { usado: false }; return { usado: true, ok: false, err: 'se cortó a la mitad (' + i + ' de ' + gestos.length + ')', hechos: i }; }
+    if (j.ok === false) return { usado: true, ok: false, err: _ERR_TURNO[j.error] || j.error || 'no', bloqueado: j.error === 'pin_jl_bloqueado' ? (j.faltan_s || 0) : 0, hechos: i };
+  }
+  return { usado: true, ok: true };
+}
 async function asignar() {
   const m = ($('asMesero').value || '').trim(), p = ($('asPlaza').value || '').trim(), f = (($('asFranja') || {}).value || '').trim();
   if (!m || !p || !f) { toast('warn', 'Elige el mesero, la plaza y la franja'); return; }
@@ -2116,6 +2180,13 @@ async function asignar() {
   if (STATE.turno) { STATE.turno.asignaciones = (STATE.turno.asignaciones || []).concat([ott]); pintaTab(); }
   const togli = () => { if (STATE.turno) STATE.turno.asignaciones = (STATE.turno.asignaciones || []).filter(a => a !== ott); pintaTab(); };
   try {
+    /* [6.3 B] prima il bordo: se la leva è spenta o la lista non viene da Postgres, `usado:false` y sigue el GAS de siempre */
+    const bd = await _asignarPorBordo(m, p, f, !!(($('asAgregar') || {}).checked));
+    if (bd.usado) {
+      if (bd.ok) { ['asMesero', 'asPlaza'].forEach(function (id) { const e = $(id); if (e) e.value = ''; }); const ag = $('asAgregar'); if (ag) ag.checked = false; toast('ok', bd.ya ? '✓ ' + m + ' ya estaba en ' + p : '✓ ' + p + ': ' + m); giroTurno(); tab(1); return; }
+      if (bd.timeout) { ott._verificando = true; pintaTab(); toast('warn', '⏳ El sistema está lento: puede que SÍ se haya guardado. Reviso en 30 s — no lo repitas todavía.'); setTimeout(function () { togli(); giroTurno(); }, 30000); return; }
+      togli(); toast('err', '✋ No se guardó: ' + (bd.bloqueado ? 'demasiados intentos con el PIN, espera ' + Math.ceil(bd.bloqueado / 60) + ' min' : bd.err) + (_prima ? ' · ' + p + ' sigue con ' + _prima : '')); return;
+    }
     const r = await gasPost('asignarPlaza', { pin: STATE.pin, mesero: m, plaza: p, franja: f });
     if (r && r.ok) { ['asMesero', 'asPlaza'].forEach(function (id) { const e = $(id); if (e) e.value = ''; }); toast('ok', '✓ ' + p + ' ahora es de ' + m); giroTurno(); tab(1); }
     else { togli(); toast('err', '✋ No se guardó: ' + ((r && (r.mensaje || r.error)) || 'el sistema dijo que no') + (_prima ? ' · ' + p + ' sigue con ' + _prima : '')); }
@@ -2337,13 +2408,43 @@ function ochentaLista() {
    vendita di TUTTO il locale: non può succedere per un dito storto.
    Il ritorno («volvió») NON chiede: rimettere una cosa in vendita è il verso
    sicuro, e chiedere lì insegnerebbe a schiacciare senza leggere. */
+/* ═══ [5.7 · 08-ott · 📖 MENU] L'86 PASSA DAL BORDO (POST /admin86), CON RIPIEGO SUL GAS ═══════════════════════════
+   Il bordo giudica il PIN e tiene l'86 come fatto (Postgres); con la sua leva spenta risponde 404 ruta_apagada e QUI si ripiega sul
+   GAS come sempre: questo file si puo' spedire PRIMA della leva senza cambiare niente (salvo ~150 ms di un tentativo al bordo).
+   · risposta ok del bordo → fatto, il GAS NON si chiama · errore DEFINITIVO (PIN, raffica, id) → si mostra, NON si ripiega
+     (ripiegare aggirerebbe il limite del bordo) · bordo che non risponde (404, need:gas, 5xx, rete, 3 s) → GAS.
+   · una chiave per GESTO (uid): un retry o un ripiego dopo un timeout riusa la stessa, il bordo non applica due volte.
+   · dichiarato: se il bordo e' giu' e si ripiega sul GAS, l'86 va al foglio e il bordo (se autorevole) non lo sa finche' non torna.
+   · ?borde=0 salta il bordo. */
+const BORDE_86 = 'https://pinsita-borde.alberto-agostini.workers.dev';
+const BORDE_TOKEN_86 = '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ';
+function uid86() { return 'a86-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+async function adminToggle86Via(pin, prodId, value, uid) {
+  let salta = false;
+  try { salta = new URLSearchParams(location.search).get('borde') === '0'; } catch (e) {}
+  if (!salta) {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 3000);
+    try {
+      const r = await fetch(BORDE_86 + '/admin86/' + encodeURIComponent(CFG.LOCAL), {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8', 'X-Borde-Token': BORDE_TOKEN_86 },
+        body: JSON.stringify({ action: 'adminToggle86', pin: pin, prod_id: prodId, value: value, uid: uid }), signal: ctrl.signal,
+      });
+      clearTimeout(tid);
+      const j = await r.json();
+      if (j && j.ok === true) return j;
+      if (j && j.definitivo === true) return j;
+    } catch (e) { clearTimeout(tid); }
+  }
+  return gasPost('adminToggle86', { pin: pin, prod_id: prodId, value: value });
+}
 async function toggle86(id, value) {
   if (value) {
     const p = (STATE.prods || []).find(x => x.id === id);
     if (!confirm('¿Sacar «' + ((p && p.nombre) || id) + '» del menú?\n\nDeja de verse en el QR al instante.')) return;
   }
   try {
-    const r = await gasPost('adminToggle86', { pin: STATE.pin, prod_id: id, value: value });
+    const r = await adminToggle86Via(STATE.pin, id, value, uid86());   // [5.7 · 08-ott] dal bordo, ripiego sul GAS
     if (r && r.ok) {
       toast('ok', value ? '🚫 fuera del menú' : '✓ volvió');
       (STATE.prods || []).forEach(p => { if (p.id === id) p.agotado = value; });

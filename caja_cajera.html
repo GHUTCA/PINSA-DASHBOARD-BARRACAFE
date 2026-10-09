@@ -125,9 +125,17 @@ var LOCAL = (qp.get('loc') || '').toLowerCase().trim();
    no es el que sala.html usa de verdad (BORDE_SALA.URL, verificado). */
 var BORDE = {
   rsc: 'https://pinsita-borde.alberto-agostini.workers.dev',
-  cdl: 'https://pinsita-borde.alberto-agostini.workers.dev'
+  cdl: 'https://pinsita-borde.alberto-agostini.workers.dev',
+  bks: 'https://pinsita-borde.alberto-agostini.workers.dev'
 };
-var TOKEN = qp.get('t') || localStorage.getItem('pinsita_borde_t') || '';
+/* [08-ott · BKP `BKP MAYRA LOC RIPIEGO RSC` + V28 `MAYRA LOC BKS LINK DATO`] los locales que TIENEN caja configurada (PIN en el bordo: hoy solo `PIN_CAJA_MAP_BKS`).
+   Sin `?loc=` y sin un local de sesion que sea uno de estos, la caja PREGUNTA — antes caia en silencio a `rsc`, que no tiene PIN (Mayra veia «pin_caja_no_configurado» con todo lo demas en regla).
+   Un local nuevo con caja se agrega aqui (y su PIN en el bordo). */
+var LOCALES_CAJA = { bks: 'Backstage' };
+/* [08-ott · AUT-EMERG · Mayra ferma] il portale porta qui con ?loc= e SENZA ?t=, e su un telefono nuovo il localStorage e vuoto: ⇒ token_invalid. Ripiego = lo STESSO gate di lettura che `app_jl.html`
+   porta nel suo CFG (e un token PUBBLICO, non un'autenticazione: lo dice il codice stesso, M4). La sicurezza vera della caja e il PIN della cajera, che il DO verifica a ogni lettura. La radice (token per persona) e la 10.1/10.2 di RRHH. */
+var TOKEN_PORTALE = '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ';
+var TOKEN = qp.get('t') || localStorage.getItem('pinsita_borde_t') || TOKEN_PORTALE;
 if (qp.get('t')) { try { localStorage.setItem('pinsita_borde_t', qp.get('t')); } catch(e){} }
 
 /* ✏️ 03-ott · el PIN de la cajera — NUNCA en localStorage (misma disciplina
@@ -160,6 +168,14 @@ function fechaCorta(iso) {
 }
 function uidGesto(prefijo) {
   return prefijo + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
+}
+/* [08-ott · EMERG CAJERA ACCODATO LETTO COME ERRORE 5 CONTEOS] el uid nace con el GESTO, no con el tocco: «el retry crea una fila nueva» fue lo que paso (5 conteos de la 1002 en 32 s, cada uno con su uid).
+   La clave describe el contenido del gesto (que fila, que cifra): el mismo gesto repetido (retry, segundo tocco, red incierta) recibe el MISMO uid y el bordo lo reconoce (`ya`);
+   un gesto CON OTRO CONTENIDO (otra cifra) es un hecho nuevo y recibe uno nuevo. */
+var UIDS_GESTO = {};
+function uidGestoEstable(clave, prefijo) {
+  if (!UIDS_GESTO[clave]) UIDS_GESTO[clave] = uidGesto(prefijo);
+  return UIDS_GESTO[clave];
 }
 function toast(msg, clase) {
   var t = document.getElementById('toast');
@@ -218,7 +234,8 @@ async function esRespuestaPin(j) {
   return false;
 }
 async function postCaja(body) {
-  var base = BORDE[LOCAL] || BORDE.rsc;
+  var base = BORDE[LOCAL];   // sin ripiego a rsc: arrancar() garantiza un LOCAL, y un local sin URL falla fuerte abajo
+  if (!base) return { ok:false, error:'local_sin_bordo' };
   var url = base + '/caja/' + encodeURIComponent(LOCAL) + '?t=' + encodeURIComponent(TOKEN);
   var conPin = Object.assign({ pin_caja: PIN_CAJA }, body, PROVA ? { dia_prueba: DIA_HOY } : {});   // [05-ott] en modo prueba el «hoy» es de prueba, y lo dice el vetro
   try {
@@ -226,7 +243,8 @@ async function postCaja(body) {
     var j = await r.json();
     if (await esRespuestaPin(j)) return { ok:false, motivo: j.error, pin:true };
     if (!r.ok || j.ok === false) return { ok:false, motivo: j.motivo || j.error || ('http_' + r.status) };
-    if (j.scritto === false) return { ok:false, motivo: j.motivo || 'no_escrito' };
+    /* `accodato:true` = en cola de Postgres, que es el exito de este verbo (el bordo lo dice con dos palabras distintas a proposito: «accodato NO es scritto»). Leerlo como fallo hizo repetir el toque. */
+    if (j.scritto === false && !j.accodato && !j.ya) return { ok:false, motivo: j.motivo || 'no_escrito' };
     /* el cuerpo puede traer más que ok/scritto — p.ej. reserva_sobre
        responde {sobre_nro} en la MISMA escritura (verbo síncrono, no
        encolado: ver cajaAtto2FilaReservaSobre en el bordo). */
@@ -250,7 +268,8 @@ async function flushCola() {
   if (resto.length < c.length) toast((c.length-resto.length) + ' envíos pendientes se enviaron', 'ok');
 }
 async function getCaja(path) {
-  var base = BORDE[LOCAL] || BORDE.rsc;
+  var base = BORDE[LOCAL];   // sin ripiego a rsc: arrancar() garantiza un LOCAL, y un local sin URL falla fuerte abajo
+  if (!base) return { ok:false, error:'local_sin_bordo' };
   var url = base + '/caja/' + encodeURIComponent(LOCAL) + '/' + path +
     (path.indexOf('?') >= 0 ? '&' : '?') + 't=' + encodeURIComponent(TOKEN);
   try {
@@ -274,7 +293,12 @@ var DIA_NOCHE = diaAnterior(DIA_HOY);
 var PROVA = (function () { try { return new URLSearchParams(location.search).get('prova') === '1'; } catch (e) { return false; } })();
 if (PROVA) { DIA_HOY = '2099-12-31'; DIA_NOCHE = '2099-12-30'; }
 var PASO = 1;            // 1 caja fuerte · 2 conteo · 3 cortes pos · 4 deposito
-var MANANA = null;        // respuesta de /manana
+var MANANA = null;        // respuesta de /manana (o, en modo MULTI, la de /pendientes con la misma forma)
+/* [08-ott · AUT-0613 · el depósito en VARIOS días] los depósitos se hacen en días elegidos al azar, nunca fijos (orden de Alberto): los sobres se acumulan
+   en varias noches y el depósito dice qué días contiene. MULTI = la lectura `pendientes` (todas las noches sin depósito). Si el bordo todavía no la tiene
+   (404 / 502 / sin la vista), la app sigue como antes: UNA noche, la de ayer — sin romperse. La app NO sugiere ningún día: muestra cuánto se acumuló. */
+var MULTI = false;
+var NOCHES = [];          // las noches (YYYY-MM-DD) de los sobres pendientes, en MULTI
 var SOBRE_IDX = 0;        // qué sobre se está contando
 var CORTES = null;        // respuesta de /cortes_pos
 var DEPOSITO_PENDIENTE = null;
@@ -284,7 +308,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + '</span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.1.1</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -300,15 +324,29 @@ async function plantarBustaPrueba() {
 }
 async function pantalla6() {
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando la caja fuerte…</p>';
-  MANANA = await getCaja('manana?dia=' + DIA_NOCHE);
-  if (!MANANA.ok) { renderError('La caja fuerte', MANANA.error); return; }
+  var NOTA_UNA_NOCHE = '';
+  var PEND = await getCaja('pendientes?dia=' + DIA_HOY);
+  if (PEND.pin) { renderError('La caja fuerte', PEND.error); return; }
+  if (PEND.ok && Array.isArray(PEND.sobres)) {
+    MULTI = true; NOCHES = PEND.noches || [];
+    /* el aviso sin respuesta es de ANOCHE: se pide aparte y, si falla, no importa (no es el motivo de esta pantalla) */
+    var mAnoche = await getCaja('manana?dia=' + DIA_NOCHE);
+    MANANA = { ok: true, sobres: PEND.sobres, aviso_sin_respuesta: (mAnoche.ok ? mAnoche.aviso_sin_respuesta : null) || null };
+  } else {
+    MULTI = false; NOCHES = [];
+    /* [08-ott · EL GIRO `DEPOSITO MULTIGIORNO IL VETRO DA SOLO NON BASTA`] el ripiego a una noche es voluto, pero NO puede ser mudo: si el bordo no entrega la lista de todas las noches, ella lo ve. */
+    NOTA_UNA_NOCHE = '<div class="note bad"><b>Solo estás viendo la noche de ayer</b><br>El sistema no entregó la lista de todas las noches. Si falta algún sobre de otra noche, avisa a Alberto antes de depositar.</div>';
+    MANANA = await getCaja('manana?dia=' + DIA_NOCHE);
+    if (!MANANA.ok) { renderError('La caja fuerte', MANANA.error); return; }
+  }
   var sobres = MANANA.sobres || [];
+  var faltan = sobres.filter(function(s){ return !s.conteo; }).length;   // [08-ott · AUT-EMERG] cuántos quedan por contar
   if (!sobres.length) {
     app.innerHTML = barra(false) +
       '<div class="kick ok">Sobres en Caja Verde</div><h1>Nada que contar</h1>' +
-      '<p class="sd">' + fechaCorta(DIA_NOCHE) + ' · no hubo sobres</p>' +
+      '<p class="sd">' + (MULTI ? 'no hay sobres sin depositar' : fechaCorta(DIA_NOCHE) + ' · no hubo sobres') + '</p>' +
       '<div class="vuoto"><div class="ic">🗄</div><b>La caja fuerte está vacía</b>' +
-      '<span style="font-size:12.5px;max-width:26ch">Anoche el local estuvo cerrado, o nadie retiró.<br>Nada que abrir, nada que contar.</span></div>' +
+      '<span style="font-size:12.5px;max-width:26ch">' + (MULTI ? 'Todo lo que hubo ya se depositó.' : 'Anoche el local estuvo cerrado, o nadie retiró.') + '<br>Nada que abrir, nada que contar.</span></div>' + NOTA_UNA_NOCHE +
       '<div class="note ok"><b>Lo que sí tienes hoy:</b><br>los cortes POS de ayer, que no dependen del efectivo.</div>' +
       (PROVA ? '<div class="note"><b>Preparar una busta de prueba</b><br>' +
         '<input id="psNro" inputmode="numeric" placeholder="Número de busta (ej. 9001)" style="width:100%;margin:6px 0;padding:10px;font-size:16px">' +
@@ -326,6 +364,7 @@ async function pantalla6() {
      ni el de cada sobre. Solo el número de sobres y si ya fueron contados. */
   var filas = sobres.map(function(s){
     return '<div class="r"><span class="n">' + esc(s.sobre_nro) + '<small>' +
+      (MULTI && s.dia ? fechaCorta(s.dia) + ' · ' : '') +
       (s.ts_hecho ? new Date(s.ts_hecho).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) + ' · ' : '') +
       esc(s.firma_jl||'') + '</small></span><span class="v' + (s.conteo ? ' ok' : '') + '">' +
       (s.conteo ? '✓ Contado' : 'Por contar') + '</span></div>';
@@ -337,12 +376,14 @@ async function pantalla6() {
       new Date(MANANA.aviso_sin_respuesta.ts).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) + ' · no hubo retiro.</div>'
     : '';
   app.innerHTML = barra(true) +
-    '<div class="kick">Sobres en Caja Verde</div><h1>' + fechaCorta(DIA_NOCHE) + '</h1><p class="sd">turno noche</p>' +
-    '<p class="big acc">' + sobres.length + '</p><p class="blab">sobres que tienes que contar</p>' +
+    '<div class="kick">Sobres en Caja Verde</div><h1>' + (MULTI ? (NOCHES.length > 1 ? NOCHES.length + ' noches' : fechaCorta(NOCHES[0] || DIA_NOCHE)) : fechaCorta(DIA_NOCHE)) + '</h1><p class="sd">' + (MULTI && NOCHES.length > 1 ? 'acumulado sin depositar' : 'turno noche') + '</p>' +
+    /* [08-ott · AUT-EMERG · `EMERG CAJERA TUTTE CONTATE RIPARTE DA CAPO` · 🎛 BKP V29] con todos contados NO se vuelve al primero:
+       el número dice cuántos FALTAN, y si no falta ninguno se sigue a los cortes (paso 3). */
+    '<p class="big acc">' + (faltan ? faltan : sobres.length) + '</p><p class="blab">' + (faltan ? (faltan === 1 ? 'sobre que tienes que contar' : 'sobres que tienes que contar') : (sobres.length === 1 ? 'ya contaste el sobre' : 'ya contaste los ' + sobres.length + ' sobres')) + '</p>' +
     '<div class="rows"><div class="r hd"><span>sobre</span><span>estado</span></div>' + filas + '</div>' +
-    avisoHtml +
-    '<button class="btn acc" id="abrir">Abrir y contar</button>';
-  document.getElementById('abrir').onclick = function(){ SOBRE_IDX = sobres.findIndex(function(s){return !s.conteo;}); if (SOBRE_IDX<0) SOBRE_IDX = 0; PASO = 2; pantalla7(); };
+    avisoHtml + NOTA_UNA_NOCHE +
+    '<button class="btn acc" id="abrir">' + (faltan ? 'Abrir y contar' : 'Seguir') + '</button>';
+  document.getElementById('abrir').onclick = function(){ SOBRE_IDX = sobres.findIndex(function(s){return !s.conteo;}); if (SOBRE_IDX < 0) { PASO = 3; pantalla8(); return; } PASO = 2; pantalla7(); };
 }
 
 function pantalla7() {
@@ -408,8 +449,8 @@ function pantalla7() {
   async function confirmar() {
     var nota = document.getElementById('nota');
     var body = {
-      verbo: 'conteo', uid_gesto: uidGesto('cnt'),
-      sobre_dia_op: DIA_NOCHE, sobre_nro: s.sobre_nro,
+      verbo: 'conteo', uid_gesto: uidGestoEstable('cnt|' + (s.dia || DIA_NOCHE) + '|' + s.sobre_nro + '|' + contadoRevisado + '|' + selloIntacto, 'cnt'),
+      sobre_dia_op: (s.dia || DIA_NOCHE), sobre_nro: s.sobre_nro,
       contado: contadoRevisado, sello_intacto: selloIntacto, nota: nota ? nota.value : null,
       firma_caja: SES.user, firma_caja_tipo: 'pin', fuente: 'app_caja',
     };
@@ -421,55 +462,76 @@ function pantalla7() {
   }
 }
 
-/* ✏️ 03-ott · Alberto, a DESIGN: la máquina se ELIGE, no viene fija del
-   backend — una tendina por fila, MPago preseleccionado. */
-var MAQUINAS_CONOCIDAS = ['MPago', 'Getnet', 'Transbank', 'SumUp'];
+/* ✏️ 09-ott · V28 (`CORTES SEI POINT GIORNO DEL SERVIZIO SOMMA`, `CORTES SN IN POSTGRES TOLLERANZA ZERO`): SEI Point, «Caja 1 … Caja 6» (el S/N vive en Postgres: tabla `caja_point`),
+   el corte lleva el DIA QUE CIERRA (por defecto ayer, con la eleccion visible) y la comparacion es la JORNADA contra la SUMA de las maquinas: `pagos` no sabe que Point cobro.
+   Tolerancia CERO, mostrada: toda diferencia ≠ 0 sale en ambar con la cifra y NO bloquea. Una fila vacia = esa maquina no se escribe (0 es un corte declarado). */
+var DIA_CORTE = null;   // el dia que cierra el corte (null = ayer, DIA_NOCHE)
+function diasDeCorte() { return [DIA_NOCHE, diaAnterior(DIA_NOCHE), DIA_HOY]; }
 async function pantalla8() {
+  if (!DIA_CORTE) DIA_CORTE = DIA_NOCHE;
+  var dia = DIA_CORTE;
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando cortes POS…</p>';
-  CORTES = await getCaja('cortes_pos?dia=' + DIA_HOY);
+  CORTES = await getCaja('cortes_pos?dia=' + dia);
   if (!CORTES.ok) { renderError('Los cortes POS', CORTES.error); return; }
-  var maquinas = (CORTES.maquinas && CORTES.maquinas.length) ? CORTES.maquinas : ['MPago'];
-  var filas = maquinas.map(function(m, i){
-    var prev = (CORTES.guardado||[]).find(function(g){return g.maquina===m;});
-    var conocida = MAQUINAS_CONOCIDAS.filter(function(k){ return k.toLowerCase() === String(m||'').trim().toLowerCase(); })[0];
-    var esOtra = !conocida;
-    var opciones = MAQUINAS_CONOCIDAS.map(function(k){
-      return '<option value="' + esc(k) + '"' + (k === conocida ? ' selected' : '') + '>' + esc(k) + '</option>';
-    }).join('') + '<option value="__otra__"' + (esOtra ? ' selected' : '') + '>Otra</option>';
-    return '<p class="lb">Máquina ' + (i+1) + '</p>' +
-      '<select class="inp" data-maq-select="' + i + '">' + opciones + '</select>' +
-      '<input class="inp" data-maq-otra="' + i + '" placeholder="Nombre de la máquina" value="' + (esOtra ? esc(m) : '') + '" style="' + (esOtra ? '' : 'display:none') + '">' +
-      '<input class="inp" data-maq-corte="' + i + '" placeholder="$" inputmode="numeric" value="' + (prev?prev.corte:'') + '">';
+  /* el bordo viejo no entiende `dia_op` y escribiria el corte con el dia de HOY: la marca `puntos_fonte` dice que es el nuevo. Sin ella, no se guarda (se avisa). */
+  var bordoNuevo = CORTES.puntos_fonte != null;
+  var puntos = (CORTES.puntos && CORTES.puntos.length) ? CORTES.puntos : [1,2,3,4,5,6].map(function(n){ return { caja_n: n, nombre: 'Caja ' + n, sn: null }; });
+  var filas = puntos.map(function(pt, i){
+    var prev = (CORTES.guardado||[]).find(function(g){ return g.maquina === pt.nombre; });
+    return '<p class="lb">' + esc(pt.nombre) + (pt.sn ? ' <small>S/N ' + esc(pt.sn) + '</small>' : '') + '</p>' +
+      '<input class="inp" data-maq-corte="' + i + '" placeholder="$ (déjalo vacío si no se usó)" inputmode="numeric" value="' + (prev ? prev.corte : '') + '">';
+  }).join('');
+  var opcionesDia = diasDeCorte().filter(function(d, k, a){ return a.indexOf(d) === k; }).map(function(d){
+    return '<option value="' + esc(d) + '"' + (d === dia ? ' selected' : '') + '>' + (d === DIA_NOCHE ? 'Ayer · ' : d === DIA_HOY ? 'Hoy · ' : '') + esc(fechaCorta(d)) + '</option>';
   }).join('');
   app.innerHTML = barra(true) +
-    '<div class="kick">Los cortes POS</div><h1>Las máquinas</h1><p class="sd">Un número por máquina, una vez al día</p>' +
+    '<div class="kick">Los cortes POS</div><h1>Las máquinas</h1><p class="sd">Un número por máquina, para el día que cierra</p>' +
+    '<p class="lb">Día del corte</p><select class="inp" id="diaCorte">' + opcionesDia + '</select>' +
+    (bordoNuevo ? '' : '<div class="note bad"><b>El sistema todavía no acepta el día del corte</b><br>No se puede guardar hasta que se actualice. Avisa a Alberto.</div>') +
     filas +
-    (CORTES.libro != null ? '<div class="rows"><div class="r"><span class="n">Dice nuestro libro</span><span class="v">' + fmt(CORTES.libro) + '</span></div></div>' : '') +
+    '<div id="comparacion"></div>' +
     '<div class="note ok">El corte de la máquina es <b>el único testigo que no somos nosotros.</b></div>' +
-    '<button class="btn acc" id="guardar">Guardar</button>' +
+    '<button class="btn acc" id="guardar"' + (bordoNuevo ? '' : ' disabled') + '>Guardar</button>' +
     '<button class="btn gh" id="siguiente">Ir al depósito</button>';
-  maquinas.forEach(function(m, i){
-    var sel = document.querySelector('[data-maq-select="' + i + '"]');
-    sel.addEventListener('change', function(){
-      document.querySelector('[data-maq-otra="' + i + '"]').style.display = (sel.value === '__otra__') ? '' : 'none';
+  function valores() {
+    return puntos.map(function(pt, i){
+      var raw = String(document.querySelector('[data-maq-corte="' + i + '"]').value || '').trim();
+      /* [09-ott · BKP (e) `un «-» o un «.» se volvia corte 0`] vacio = no se escribe; algo ESCRITO que no es una cifra (solo «-», solo «.», con letras o con signo menos) es INVALIDO (NaN): ya no se
+         convierte en un 0 declarado. Aceptado: digitos con $ . , y espacios (separadores de miles). */
+      var valida = raw !== '' && /^[\s$]*\d[\d.,\s]*$/.test(raw);
+      return { pt: pt, raw: raw, v: raw === '' ? null : (valida ? Number(raw.replace(/[^0-9]/g, '')) : NaN) };
     });
-  });
-  function nombreMaquina(i) {
-    var sel = document.querySelector('[data-maq-select="' + i + '"]');
-    if (sel.value === '__otra__') return document.querySelector('[data-maq-otra="' + i + '"]').value.trim();
-    return sel.value;
   }
+  /* la JORNADA contra la SUMA de las maquinas — tolerancia cero, ambar y sin bloquear */
+  function comparar() {
+    var vals = valores(), suma = 0, alguna = false;
+    vals.forEach(function(x){ if (x.v !== null && Number.isFinite(x.v)) { suma += x.v; alguna = true; } });
+    var box = document.getElementById('comparacion');
+    if (CORTES.libro == null) { box.innerHTML = ''; return; }
+    var dif = suma - CORTES.libro;
+    box.innerHTML = '<div class="rows"><div class="r"><span class="n">Suma de las máquinas</span><span class="v">' + fmt(suma) + '</span></div>' +
+      '<div class="r"><span class="n">Dice nuestro libro</span><span class="v">' + fmt(CORTES.libro) + '</span></div></div>' +
+      (alguna && dif !== 0 ? '<div class="note ambar"><b>Diferencia ' + (dif > 0 ? '+' : '−') + fmt(Math.abs(dif)) + '</b><br>La suma de las máquinas no es igual al libro. Se guarda igual; queda para mirar.</div>' : '');
+  }
+  puntos.forEach(function(pt, i){ document.querySelector('[data-maq-corte="' + i + '"]').addEventListener('input', comparar); });
+  comparar();
+  document.getElementById('diaCorte').addEventListener('change', function(){ DIA_CORTE = document.getElementById('diaCorte').value; pantalla8(); });
   unTocoUnHecho(document.getElementById('guardar'), async function(){
-    for (var i=0;i<maquinas.length;i++) {
-      var nombre = nombreMaquina(i);
-      if (!nombre) { toast('Falta el nombre de la máquina ' + (i+1), 'bad'); return; }
-      var v = Number(document.querySelector('[data-maq-corte="' + i + '"]').value || '');
-      if (!Number.isFinite(v) || v < 0) { toast('Falta el corte de ' + nombre, 'bad'); return; }
-      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGesto('pos'), maquina: nombre,
-        corte: v, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
-      if (!r.ok) { toast('No se guardó ' + nombre + ': ' + r.motivo, 'bad'); return; }
+    var vals = valores().filter(function(x){ return x.v !== null; });
+    if (!vals.length) { toast('Escribe al menos un corte', 'bad'); return; }
+    /* se validan TODAS antes de escribir la primera: una fila invalida no deja a medias a las demas */
+    var mala = vals.filter(function(x){ return !Number.isFinite(x.v) || x.v < 0; })[0];
+    if (mala) { toast('El corte de ' + mala.pt.nombre + ' no es un número', 'bad'); return; }
+    for (var k = 0; k < vals.length; k++) {
+      var x = vals[k];
+      if (!Number.isFinite(x.v) || x.v < 0) { toast('Falta el corte de ' + x.pt.nombre, 'bad'); return; }
+      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGestoEstable('pos|' + dia + '|' + x.pt.nombre + '|' + x.v, 'pos'), maquina: x.pt.nombre, dia_op: dia,
+        corte: x.v, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+      if (!r.ok) { toast('No se guardó ' + x.pt.nombre + ': ' + r.motivo, 'bad'); return; }
     }
+    /* [08-ott · V28 `CORTES GUARDAR NON AVANZA`] un guardado que no cambia de pantalla parece no haber funcionado: tras guardar todo, sigue sola al deposito. */
     toast('Cortes guardados', 'ok');
+    PASO = 4; pantalla9();
   });
   document.getElementById('siguiente').onclick = function(){ PASO = 4; pantalla9(); };
 }
@@ -494,7 +556,7 @@ async function pantalla9() {
     unTocoUnHecho(document.getElementById('cerrar'), async function(){
       var nro = document.getElementById('nro').value.trim();
       if (!nro) { toast('Escribe el número de depósito', 'bad'); return; }
-      var r = await postCaja({ verbo:'deposito', uid_gesto: uidGesto('dep'), evento:'vuelta',
+      var r = await postCaja({ verbo:'deposito', uid_gesto: uidGestoEstable('depv|' + DEPOSITO_PENDIENTE.uid_gesto + '|' + nro, 'dep'), evento:'vuelta',
         referencia_uid: DEPOSITO_PENDIENTE.uid_gesto, nro_deposito: nro,
         firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
       if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
@@ -512,7 +574,18 @@ async function pantalla9() {
      decenas de miles ($17.190 contra $41.290 en el ejemplo real).
      El "depósito al 100%" del 02-ott sigue siendo cierto para los gastos
      de propinas (se retiran del banco aparte): las dos órdenes conviven. */
-  var RESERVA = await getCaja('reserva?dia=' + DIA_NOCHE);
+  var RESERVA;
+  if (MULTI && NOCHES.length) {
+    /* la retención de cada noche se calcula como siempre (la propina NO efectivo de ESA noche, base única); el depósito junta las noches que contiene */
+    RESERVA = { ok: true, reserva: 0, reserva_pct: null };
+    for (var iN = 0; iN < NOCHES.length; iN++) {
+      var rN = await getCaja('reserva?dia=' + NOCHES[iN]);
+      if (!rN.ok || rN.reserva == null) { RESERVA = rN.ok ? { ok: true, reserva: null } : rN; break; }
+      RESERVA.reserva += rN.reserva; RESERVA.reserva_pct = rN.reserva_pct;
+    }
+  } else {
+    RESERVA = await getCaja('reserva?dia=' + DIA_NOCHE);
+  }
   if (!RESERVA.ok || RESERVA.reserva == null) {
     app.innerHTML = barra(true) + '<div class="kick bad">El depósito</div><h1>Falta un parámetro</h1>' +
       '<div class="note bad">caja sin parámetro <b>propina_desc_no_efectivo_pct</b> — no se puede calcular la retención sin inventarlo. Avisa a MIGRACIÓN.</div>';
@@ -543,7 +616,8 @@ async function pantalla9() {
     var reserva = RESERVA.reserva;
     var aDep = c - reserva;
     document.getElementById('calc').innerHTML =
-      '<div class="rows"><div class="r"><span class="n">A la reserva (' + RESERVA.reserva_pct + '% de la propina no efectivo)</span><span class="v">' + fmt(reserva) + '</span></div>' +
+      '<div class="rows">' + (MULTI ? '<div class="r"><span class="n">Sobres que lleva</span><span class="v">' + (MANANA.sobres || []).length + ' · ' + NOCHES.length + (NOCHES.length === 1 ? ' noche' : ' noches') + '</span></div>' : '') +
+      '<div class="r"><span class="n">A la reserva (' + RESERVA.reserva_pct + '% de la propina no efectivo' + (MULTI && NOCHES.length > 1 ? ' de esas noches' : '') + ')</span><span class="v">' + fmt(reserva) + '</span></div>' +
       '<div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>';
     /* [06-ott · pregunta de EL GIRO `ATTO II A MERCOLEDÌ 06:00`] un depósito NEGATIVO no existe: si el contado no cubre la
        reserva, el botón se apaga y la pantalla lo dice (el bordo lo rechazaría igual, `a_depositar_negativo`, pero DESPUÉS de que
@@ -556,10 +630,13 @@ async function pantalla9() {
   var ultimo = recalc();
   document.getElementById('contado').addEventListener('input', function(){ ultimo = recalc(); });
   unTocoUnHecho(document.getElementById('salir'), async function(){
-    var depositoUid = uidGesto('dep');
-    var r = await postCaja({ verbo:'deposito', uid_gesto: depositoUid, evento:'salida',
+    var depositoUid = uidGestoEstable('deps|' + DIA_HOY + '|' + ultimo.c + '|' + ultimo.reserva + '|' + ultimo.aDep, 'dep');
+    var cuerpoSalida = { verbo:'deposito', uid_gesto: depositoUid, evento:'salida',
       contado: ultimo.c, reserva: ultimo.reserva, a_depositar: ultimo.aDep,
-      firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+      firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' };
+    /* en MULTI el depósito DICE qué sobres lleva (el bordo rechaza uno que ya está en otro depósito) */
+    if (MULTI) cuerpoSalida.sobres = (MANANA.sobres || []).map(function (x) { return { nro: x.sobre_nro, dia: x.dia }; });
+    var r = await postCaja(cuerpoSalida);
     if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
     /* ✏️ 03-ott · bacheca SPECIFICA BUSTA R-nnnn CAJA ROJA (DESIGN, orden de
        Alberto): si reserva === 0 la pantalla NO aparece — una busta vacía
@@ -591,7 +668,7 @@ function pantallaReservaSobre(depositoUid, monto) {
        un rechazo confuso sobre una busta que ya existe. Derivado de
        depositoUid: el mismo depósito siempre pide la MISMA busta. */
     var r = await postCaja({ verbo:'reserva_sobre', uid_gesto: 'res-' + depositoUid,
-      dia_op: DIA_NOCHE, monto: monto, referencia_uid: depositoUid,
+      dia_op: (MULTI && NOCHES.length ? NOCHES[NOCHES.length - 1] : DIA_NOCHE), monto: monto, referencia_uid: depositoUid,
       firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
     if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
     app.innerHTML = barra(true) +
@@ -633,16 +710,33 @@ function pedirPinCaja() {
   });
 }
 
+/* ¿En qué local estás? — solo los que tienen caja. Nunca elige por ti. */
+function preguntarLocal() {
+  return new Promise(function (resolve) {
+    var ids = Object.keys(LOCALES_CAJA);
+    app.innerHTML = barra(false) +
+      '<div class="kick">Tu local</div><h1>¿En qué local estás?</h1><p class="sd">Elige el local de esta caja</p>' +
+      ids.map(function (id) { return '<button class="btn acc" data-loc="' + id + '">' + esc(LOCALES_CAJA[id]) + '</button>'; }).join('');
+    ids.forEach(function (id) {
+      var b = app.querySelector('[data-loc="' + id + '"]');
+      if (b) b.onclick = function () { resolve(id); };
+    });
+  });
+}
+
 /* ═══ 4 · ARRANQUE ══════════════════════════════════════════════════════ */
 async function arrancar() {
   SES = (window.PinsitaAuth && PinsitaAuth.sesion && PinsitaAuth.sesion()) || { user:'?', role:'CAJA' };
-  if (!LOCAL) LOCAL = (SES.local && SES.local !== '*') ? SES.local : 'rsc';
+  if (!LOCAL) {
+    var delUsuario = String(SES.local || '').toLowerCase().trim();
+    LOCAL = LOCALES_CAJA[delUsuario] ? delUsuario : await preguntarLocal();
+  }
   await pedirPinCaja();
   flushCola();
   pantalla6();
 }
 if (window.PinsitaAuth) {
-  PinsitaAuth.init({ local: '*', accent: '#8c6a20' });
+  PinsitaAuth.init({ local: 'todos', accent: '#8c6a20' });   // [08-ott · CAJERA LINK DIRETTO LOGIN SENZA MAYRA] con '*' la lista era solo la corporate (AAG, DC, KELE...): Mayra non c'era. 'todos' = la lista intera, ogni utente col suo local (come il portale); il PIN vero della caja e quello del bordo
   // init() de-rendering el overlay de login cuando hay sesión; arrancamos
   // igual: si no hay sesión, init() ya muestra el login y bloquea la UI.
   setTimeout(arrancar, 50);

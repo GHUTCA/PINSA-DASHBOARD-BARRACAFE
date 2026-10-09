@@ -9,7 +9,7 @@ const fn = (nome, asinc) => { const i = SRC.indexOf((asinc ? 'async function ' :
 function mundo(manana, respuestas) {
   const els = {}; const llamadas = [];
   const el = (id) => els[id] || (els[id] = { id, innerHTML: '', value: '', disabled: false, onclick: null, addEventListener() {}, style: {} });
-  const ctx = { MANANA: manana, PROVA: false, plantarBustaPrueba: () => {}, PASO: 3, DIA_NOCHE: '2026-10-06', DIA_HOY: '2026-10-07', DEPOSITO_PENDIENTE: null, SES: { user: 'Mayra' },
+  const ctx = { MANANA: manana, MULTI: false, NOCHES: [], PROVA: false, plantarBustaPrueba: () => {}, PASO: 3, DIA_NOCHE: '2026-10-06', DIA_HOY: '2026-10-07', DEPOSITO_PENDIENTE: null, SES: { user: 'Mayra' },
     app: { innerHTML: '' }, barra: () => '[bar]', esc: String, fmt: (n) => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('es-CL'),
     fechaCorta: (d) => d, toast: () => {}, llamadas,
     getCaja: async (p) => { llamadas.push(p); return respuestas[p.split('?')[0]] || { ok: false, error: 'sin_respuesta' }; },
