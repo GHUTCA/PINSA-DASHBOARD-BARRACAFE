@@ -61,4 +61,12 @@ const tipea = (m, n) => m.el('q:[data-maq-corte="' + (n - 1) + '"]').listeners.i
 // ⑥ el bordo VIEJO (sin la marca) no guarda con el dia equivocado
 { const m = mundo(C({ puntos_fonte: undefined })); await m.ctx.p8();
   t('bordo viejo: avisa, el boton Guardar nace deshabilitado', /todavía no acepta el día del corte/.test(m.ctx.app.innerHTML) && /id="guardar" disabled/.test(m.ctx.app.innerHTML)); }
+// ⑦ (e) de BKP: un «-» o un «.» ya NO se vuelve un corte 0
+for (const raro of ['-', '.', ',', '$', 'abc', '-5', '12abc', ' ']) {
+  const m = mundo(C()); await m.ctx.p8(); corte(m, 1, 100); corte(m, 2, raro); await m.el('id:guardar')._hecho();
+  if (raro === ' ') { t('una casilla de solo espacios = vacia: se guarda solo la otra', m.posts.length === 1 && m.posts[0].maquina === 'Caja 1', m.posts); continue; }
+  t('«' + raro + '» NO es un corte: no guarda NADA (ni la fila buena), no avanza y lo dice', m.posts.length === 0 && !m.log.includes('→pantalla9') && m.log.some((x) => /no es un número/.test(x)), [m.posts, m.log]); }
+for (const bueno of [['1.234', 1234], ['$ 1.234', 1234], ['500', 500], ['1,234', 1234]]) {
+  const m = mundo(C()); await m.ctx.p8(); corte(m, 1, bueno[0]); await m.el('id:guardar')._hecho();
+  t('«' + bueno[0] + '» sí es una cifra (' + bueno[1] + ')', m.posts.length === 1 && m.posts[0].corte === bueno[1], m.posts); }
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
