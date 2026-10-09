@@ -462,64 +462,66 @@ function pantalla7() {
   }
 }
 
-/* ✏️ 03-ott · Alberto, a DESIGN: la máquina se ELIGE, no viene fija del
-   backend — una tendina por fila, MPago preseleccionado. */
-var MAQUINAS_CONOCIDAS = ['MPago', 'Getnet', 'Transbank', 'SumUp'];
+/* ✏️ 09-ott · V28 (`CORTES SEI POINT GIORNO DEL SERVIZIO SOMMA`, `CORTES SN IN POSTGRES TOLLERANZA ZERO`): SEI Point, «Caja 1 … Caja 6» (el S/N vive en Postgres: tabla `caja_point`),
+   el corte lleva el DIA QUE CIERRA (por defecto ayer, con la eleccion visible) y la comparacion es la JORNADA contra la SUMA de las maquinas: `pagos` no sabe que Point cobro.
+   Tolerancia CERO, mostrada: toda diferencia ≠ 0 sale en ambar con la cifra y NO bloquea. Una fila vacia = esa maquina no se escribe (0 es un corte declarado). */
+var DIA_CORTE = null;   // el dia que cierra el corte (null = ayer, DIA_NOCHE)
+function diasDeCorte() { return [DIA_NOCHE, diaAnterior(DIA_NOCHE), DIA_HOY]; }
 async function pantalla8() {
+  if (!DIA_CORTE) DIA_CORTE = DIA_NOCHE;
+  var dia = DIA_CORTE;
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando cortes POS…</p>';
-  CORTES = await getCaja('cortes_pos?dia=' + DIA_HOY);
+  CORTES = await getCaja('cortes_pos?dia=' + dia);
   if (!CORTES.ok) { renderError('Los cortes POS', CORTES.error); return; }
-  var maquinas = (CORTES.maquinas && CORTES.maquinas.length) ? CORTES.maquinas.slice() : ['MPago'];   // copia: «+ Otra máquina» agrega y no debe ensuciar la lectura
-  function filaHtml(m, i){
-    var prev = (CORTES.guardado||[]).find(function(g){return g.maquina===m;});
-    var conocida = MAQUINAS_CONOCIDAS.filter(function(k){ return k.toLowerCase() === String(m||'').trim().toLowerCase(); })[0];
-    var esOtra = !conocida;
-    var opciones = MAQUINAS_CONOCIDAS.map(function(k){
-      return '<option value="' + esc(k) + '"' + (k === conocida ? ' selected' : '') + '>' + esc(k) + '</option>';
-    }).join('') + '<option value="__otra__"' + (esOtra ? ' selected' : '') + '>Otra</option>';
-    return '<p class="lb">Máquina ' + (i+1) + '</p>' +
-      '<select class="inp" data-maq-select="' + i + '">' + opciones + '</select>' +
-      '<input class="inp" data-maq-otra="' + i + '" placeholder="Nombre de la máquina" value="' + (esOtra ? esc(m) : '') + '" style="' + (esOtra ? '' : 'display:none') + '">' +
-      '<input class="inp" data-maq-corte="' + i + '" placeholder="$" inputmode="numeric" value="' + (prev?prev.corte:'') + '">';
-  }
-  var filas = maquinas.map(filaHtml).join('');
+  /* el bordo viejo no entiende `dia_op` y escribiria el corte con el dia de HOY: la marca `puntos_fonte` dice que es el nuevo. Sin ella, no se guarda (se avisa). */
+  var bordoNuevo = CORTES.puntos_fonte != null;
+  var puntos = (CORTES.puntos && CORTES.puntos.length) ? CORTES.puntos : [1,2,3,4,5,6].map(function(n){ return { caja_n: n, nombre: 'Caja ' + n, sn: null }; });
+  var filas = puntos.map(function(pt, i){
+    var prev = (CORTES.guardado||[]).find(function(g){ return g.maquina === pt.nombre; });
+    return '<p class="lb">' + esc(pt.nombre) + (pt.sn ? ' <small>S/N ' + esc(pt.sn) + '</small>' : '') + '</p>' +
+      '<input class="inp" data-maq-corte="' + i + '" placeholder="$ (déjalo vacío si no se usó)" inputmode="numeric" value="' + (prev ? prev.corte : '') + '">';
+  }).join('');
+  var opcionesDia = diasDeCorte().filter(function(d, k, a){ return a.indexOf(d) === k; }).map(function(d){
+    return '<option value="' + esc(d) + '"' + (d === dia ? ' selected' : '') + '>' + (d === DIA_NOCHE ? 'Ayer · ' : d === DIA_HOY ? 'Hoy · ' : '') + esc(fechaCorta(d)) + '</option>';
+  }).join('');
   app.innerHTML = barra(true) +
-    '<div class="kick">Los cortes POS</div><h1>Las máquinas</h1><p class="sd">Un número por máquina, una vez al día</p>' +
-    '<div id="filasMaq">' + filas + '</div>' +
-    '<button class="btn gh" id="otraMaq">+ Otra máquina</button>' +
-    (CORTES.libro != null ? '<div class="rows"><div class="r"><span class="n">Dice nuestro libro</span><span class="v">' + fmt(CORTES.libro) + '</span></div></div>' : '') +
+    '<div class="kick">Los cortes POS</div><h1>Las máquinas</h1><p class="sd">Un número por máquina, para el día que cierra</p>' +
+    '<p class="lb">Día del corte</p><select class="inp" id="diaCorte">' + opcionesDia + '</select>' +
+    (bordoNuevo ? '' : '<div class="note bad"><b>El sistema todavía no acepta el día del corte</b><br>No se puede guardar hasta que se actualice. Avisa a Alberto.</div>') +
+    filas +
+    '<div id="comparacion"></div>' +
     '<div class="note ok">El corte de la máquina es <b>el único testigo que no somos nosotros.</b></div>' +
-    '<button class="btn acc" id="guardar">Guardar</button>' +
+    '<button class="btn acc" id="guardar"' + (bordoNuevo ? '' : ' disabled') + '>Guardar</button>' +
     '<button class="btn gh" id="siguiente">Ir al depósito</button>';
-  function ligarFila(i) {
-    var sel = document.querySelector('[data-maq-select="' + i + '"]');
-    sel.addEventListener('change', function(){
-      document.querySelector('[data-maq-otra="' + i + '"]').style.display = (sel.value === '__otra__') ? '' : 'none';
+  function valores() {
+    return puntos.map(function(pt, i){
+      var raw = String(document.querySelector('[data-maq-corte="' + i + '"]').value || '').trim();
+      return { pt: pt, raw: raw, v: raw === '' ? null : Number(raw.replace(/[^0-9]/g, '')) };
     });
   }
-  maquinas.forEach(function(m, i){ ligarFila(i); });
-  /* [08-ott · V28 `CORTES POS MANCA SECONDA MACCHINA`] el primer dia hay UNA maquina conocida y no habia como escribir la segunda: «+ Otra máquina» agrega una fila (la primera conocida que aun no esta usada, o «Otra» para escribir el nombre). */
-  document.getElementById('otraMaq').onclick = function(){
-    var usadas = []; for (var k = 0; k < maquinas.length; k++) usadas.push(String(nombreMaquina(k) || maquinas[k] || '').toLowerCase());
-    var libre = MAQUINAS_CONOCIDAS.filter(function(c){ return usadas.indexOf(c.toLowerCase()) < 0; })[0] || '';
-    var idx = maquinas.length; maquinas.push(libre);
-    document.getElementById('filasMaq').insertAdjacentHTML('beforeend', filaHtml(libre, idx));
-    ligarFila(idx);
-  };
-  function nombreMaquina(i) {
-    var sel = document.querySelector('[data-maq-select="' + i + '"]');
-    if (sel.value === '__otra__') return document.querySelector('[data-maq-otra="' + i + '"]').value.trim();
-    return sel.value;
+  /* la JORNADA contra la SUMA de las maquinas — tolerancia cero, ambar y sin bloquear */
+  function comparar() {
+    var vals = valores(), suma = 0, alguna = false;
+    vals.forEach(function(x){ if (x.v !== null && Number.isFinite(x.v)) { suma += x.v; alguna = true; } });
+    var box = document.getElementById('comparacion');
+    if (CORTES.libro == null) { box.innerHTML = ''; return; }
+    var dif = suma - CORTES.libro;
+    box.innerHTML = '<div class="rows"><div class="r"><span class="n">Suma de las máquinas</span><span class="v">' + fmt(suma) + '</span></div>' +
+      '<div class="r"><span class="n">Dice nuestro libro</span><span class="v">' + fmt(CORTES.libro) + '</span></div></div>' +
+      (alguna && dif !== 0 ? '<div class="note ambar"><b>Diferencia ' + (dif > 0 ? '+' : '−') + fmt(Math.abs(dif)) + '</b><br>La suma de las máquinas no es igual al libro. Se guarda igual; queda para mirar.</div>' : '');
   }
+  puntos.forEach(function(pt, i){ document.querySelector('[data-maq-corte="' + i + '"]').addEventListener('input', comparar); });
+  comparar();
+  document.getElementById('diaCorte').addEventListener('change', function(){ DIA_CORTE = document.getElementById('diaCorte').value; pantalla8(); });
   unTocoUnHecho(document.getElementById('guardar'), async function(){
-    for (var i=0;i<maquinas.length;i++) {
-      var nombre = nombreMaquina(i);
-      if (!nombre) { toast('Falta el nombre de la máquina ' + (i+1), 'bad'); return; }
-      var v = Number(document.querySelector('[data-maq-corte="' + i + '"]').value || '');
-      if (!Number.isFinite(v) || v < 0) { toast('Falta el corte de ' + nombre, 'bad'); return; }
-      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGestoEstable('pos|' + DIA_HOY + '|' + nombre + '|' + v, 'pos'), maquina: nombre,
-        corte: v, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
-      if (!r.ok) { toast('No se guardó ' + nombre + ': ' + r.motivo, 'bad'); return; }
+    var vals = valores().filter(function(x){ return x.v !== null; });
+    if (!vals.length) { toast('Escribe al menos un corte', 'bad'); return; }
+    for (var k = 0; k < vals.length; k++) {
+      var x = vals[k];
+      if (!Number.isFinite(x.v) || x.v < 0) { toast('Falta el corte de ' + x.pt.nombre, 'bad'); return; }
+      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGestoEstable('pos|' + dia + '|' + x.pt.nombre + '|' + x.v, 'pos'), maquina: x.pt.nombre, dia_op: dia,
+        corte: x.v, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+      if (!r.ok) { toast('No se guardó ' + x.pt.nombre + ': ' + r.motivo, 'bad'); return; }
     }
     /* [08-ott · V28 `CORTES GUARDAR NON AVANZA`] un guardado que no cambia de pantalla parece no haber funcionado: tras guardar todo, sigue sola al deposito. */
     toast('Cortes guardados', 'ok');
