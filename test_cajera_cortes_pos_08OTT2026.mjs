@@ -29,13 +29,13 @@ const tipea = (m, n) => m.el('q:[data-maq-corte="' + (n - 1) + '"]').listeners.i
   t('seis filas «Caja 1 … Caja 6», cada una con su S/N', [1, 2, 3, 4, 5, 6].every((n) => h.includes('Caja ' + n) && h.includes('S/N SN' + n)), h.slice(0, 200));
   t('NO hay «MPago/Getnet/Transbank/SumUp» ni «+ Otra máquina»', !/MPago|Getnet|Transbank|SumUp|otraMaq/.test(h));
   t('lee los cortes del dia de AYER por defecto (el dia que cierra)', m.ctx.lecturas[0] === 'cortes_pos?dia=2026-10-08' && m.ctx.getDia() === '2026-10-08', m.ctx.lecturas);
-  t('la eleccion del dia es VISIBLE: ayer · anteayer · hoy', /id="diaCorte"/.test(h) && />Ayer · f08</.test(h) && />Hoy · f09</.test(h) && /f07/.test(h), h.slice(0, 500)); }
+  t('la eleccion del dia es VISIBLE y es la del bordo: ayer u hoy (no anteayer)', /id="diaCorte"/.test(h) && />Ayer · f08</.test(h) && />Hoy · f09</.test(h) && !/f07/.test(h), h.slice(0, 500)); }
 // ② ripiego sin tabla: sigue habiendo seis filas
 { const m = mundo(C({ puntos: undefined })); await m.ctx.p8();
   t('sin `puntos` en la lectura: igual seis filas Caja 1..6 (sin S/N)', [1, 2, 3, 4, 5, 6].every((n) => m.ctx.app.innerHTML.includes('Caja ' + n)) && !/S\/N/.test(m.ctx.app.innerHTML)); }
 // ③ guardar: solo las filas escritas, con el dia, y avanza
 { const m = mundo(C()); await m.ctx.p8(); corte(m, 1, 100); corte(m, 3, 200); await m.el('id:guardar')._hecho();
-  t('guarda SOLO las filas escritas (Caja 1 y Caja 3), con maquina «Caja n», corte y dia_op = ayer', m.posts.length === 2 && m.posts[0].maquina === 'Caja 1' && m.posts[0].corte === 100 && m.posts[1].maquina === 'Caja 3' && m.posts[1].corte === 200 && m.posts.every((p) => p.dia_op === '2026-10-08'), m.posts);
+  t('guarda SOLO las filas escritas (Caja 1 y Caja 3), con maquina «Caja n», corte y dia_corte = ayer', m.posts.length === 2 && m.posts[0].maquina === 'Caja 1' && m.posts[0].corte === 100 && m.posts[1].maquina === 'Caja 3' && m.posts[1].corte === 200 && m.posts.every((p) => p.dia_corte === '2026-10-08'), m.posts);
   t('y pasa SOLA al deposito', m.log.includes('→pantalla9') && m.ctx.PASO === 4, m.log); }
 { const m = mundo(C()); await m.ctx.p8(); corte(m, 2, 0); await m.el('id:guardar')._hecho();
   t('un 0 escrito es un corte DECLARADO (se guarda); una fila vacia no', m.posts.length === 1 && m.posts[0].maquina === 'Caja 2' && m.posts[0].corte === 0, m.posts); }
@@ -44,9 +44,9 @@ const tipea = (m, n) => m.el('q:[data-maq-corte="' + (n - 1) + '"]').listeners.i
 { const m = mundo(C(), () => ({ ok: false, motivo: 'x' })); await m.ctx.p8(); corte(m, 1, 5); await m.el('id:guardar')._hecho();
   t('un guardado que falla NO avanza y lo dice', !m.log.includes('→pantalla9') && m.log.some((x) => /No se guard/.test(x)), m.log); }
 // ④ cambiar el dia vuelve a leer ESE dia
-{ const m = mundo(C()); await m.ctx.p8(); m.el('id:diaCorte').value = '2026-10-07'; await m.el('id:diaCorte').listeners.change(); await new Promise((r) => setTimeout(r, 0));
-  t('elegir «anteayer» vuelve a leer cortes_pos de ESE dia', m.ctx.lecturas.includes('cortes_pos?dia=2026-10-07') && m.ctx.getDia() === '2026-10-07', [m.ctx.lecturas, m.ctx.getDia()]);
-  corte(m, 1, 9); await m.el('id:guardar')._hecho(); t('dia_op del guardado = el elegido', m.posts[0] && m.posts[0].dia_op === '2026-10-07', m.posts); }
+{ const m = mundo(C()); await m.ctx.p8(); m.el('id:diaCorte').value = '2026-10-09'; await m.el('id:diaCorte').listeners.change(); await new Promise((r) => setTimeout(r, 0));
+  t('elegir «hoy» vuelve a leer cortes_pos de ESE dia', m.ctx.lecturas.includes('cortes_pos?dia=2026-10-09') && m.ctx.getDia() === '2026-10-09', [m.ctx.lecturas, m.ctx.getDia()]);
+  corte(m, 1, 9); await m.el('id:guardar')._hecho(); t('dia_corte del guardado = el elegido', m.posts[0] && m.posts[0].dia_corte === '2026-10-09', m.posts); }
 // ⑤ la JORNADA contra la SUMA — tolerancia cero, ambar, sin bloquear
 { const m = mundo(C({ libro: 300 })); await m.ctx.p8(); corte(m, 1, 100); corte(m, 2, 150); tipea(m, 1);
   const h = m.el('id:comparacion').innerHTML;
