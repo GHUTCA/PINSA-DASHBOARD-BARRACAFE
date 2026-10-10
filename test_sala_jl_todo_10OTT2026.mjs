@@ -50,6 +50,17 @@ function banco(SRC) {
   t('② bis fuori da JL il filtro non esiste: i verbi sono tutti, con o senza leva', E(SRC, null, false) === 'pedir,precuenta,cobrar,pedidos,mover,separar,tiempos,descontar' && E(SRC, null, true) === E(SRC, null, false));
   t('③ JL_TODO_ON nasce false e si accende SOLO da /salud → jl_todo_on === "1"', /var JL_TODO_ON = false;/.test(SRC) && /JL_TODO_ON = String\(cercaK\(j, 'jl_todo_on'\)\) === '1'/.test(SRC));
   t('③ ter CONTO_APERTURA_ON nasce false e si accende SOLO da /salud → conto_apertura_on === "1"', /var CONTO_APERTURA_ON = false;/.test(SRC) && SRC.includes("CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1'"));
+  // ⓒ DI ALBERTO: il QR con auto-dueño (o due meseros) su una plaza condivisa NON lo cobra il JL: niente scelta, niente divisione, un messaggio solo
+  { const am = (a) => { const toasts = [], hechos = []; const ctx = { toast: (k, m) => toasts.push([k, m]), bordeHecho: (g, d) => hechos.push([g, d]) }; vm.createContext(ctx);
+      const ini = SRC.indexOf('const _INTEST_MSG = {'), fin = SRC.indexOf('\n};', ini) + 3;
+      vm.runInContext(SRC.slice(ini, fin) + '\n' + fnDe(SRC, '_intestatarioAnomalia') + '\nthis.A = _intestatarioAnomalia;', ctx); ctx.A(a, 'pagoConfirmar'); return { toasts, hechos }; };
+    const q1 = am({ ok: false, motivo: 'conto_sin_mesero', detalle: 'primo_sin_mesero', mesa: '60', plaza: 'TERRAZA' });
+    const q2 = am({ ok: false, motivo: 'conto_sin_mesero', detalle: 'primo_con_varios_meseros', mesa: '60', plaza: 'TERRAZA' });
+    const q3 = am({ ok: false, motivo: 'conto_sin_mesero', detalle: 'sin_pedidos_abiertos', mesa: '60', plaza: 'TERRAZA' });
+    t('ⓒ QR sin mesero en plaza condivisa: el JL lee «Cobra uno de los meseros de la plaza.»', q1.toasts.length === 1 && q1.toasts[0][0] === 'err' && q1.toasts[0][1] === 'Cobra uno de los meseros de la plaza.', q1);
+    t('ⓒ bis auto-dueño (el primer pedido con DOS meseros): el mismo mensaje', q2.toasts[0][1] === 'Cobra uno de los meseros de la plaza.', q2);
+    t('ⓒ ter el hecho se registra con el motivo y el detalle (para forense)', q1.hechos.length === 1 && q1.hechos[0][0] === 'pago_sin_intestatario' && q1.hechos[0][1].motivo === 'conto_sin_mesero' && q1.hechos[0][1].detalle === 'primo_sin_mesero', q1.hechos);
+    t('ⓒ quater «sin pedidos abiertos» es OTRA cosa: otro mensaje, no el de la regla de Alberto', q3.toasts[0][1] !== 'Cobra uno de los meseros de la plaza.' && /pedidos abiertos/.test(q3.toasts[0][1]), q3); }
 
   // ④ ⑤ l'intestatario, preso ADESSO dalla sala
   return Promise.all([
@@ -124,7 +135,7 @@ function banco(SRC) {
     t('⑥ l intestatario si risolve PRIMA di `const body` (altrimenti il body non puo portarlo)', ancora > 0 && cob > ancora, [ancora, cob]);
     const fi = SRC.slice(SRC.indexOf('let intF = null;') - 10, SRC.indexOf("medio: 'fintoc'") + 40);
     t('⑥ anche il pago Fintoc dalla sala: stesso intestatario, stessa anomalia', /intF = await _jlIntestatario\(\[mesa\]\)/.test(fi) && /!intF\.ok\) \{ _intestatarioAnomalia\(intF, 'fintoc'\); return; \}/.test(fi) && /registrado_por: STATE\.nombre/.test(fi) && /intestatario: intF \? intF\.nombre : undefined/.test(fi), fi.slice(0, 400));
-    t('⑥ l anomalia si REGISTRA (bordeHecho pago_sin_intestatario) e si MOSTRA al JL', /bordeHecho\('pago_sin_intestatario'/.test(SRC) && /toast\('err', _INTEST_MSG\[a\.motivo\]/.test(SRC));
+    t('⑥ l anomalia si REGISTRA (bordeHecho pago_sin_intestatario) e si MOSTRA al JL', /bordeHecho\('pago_sin_intestatario'/.test(SRC) && /toast\('err', _INTEST_MSG\[kM\]/.test(SRC));
     t('⑥ la porta FAM/colacion/ELIMINAR non cambia (registrado_por: STATE.nombre, due siti)', (SRC.match(/registrado_por: STATE\.nombre, mesa: mesa, medio: 'fam'/g) || []).length === 1 && (SRC.match(/registrado_por: STATE\.nombre,\n      mesa: pg\.mesa, medio: 'fam'|registrado_por: STATE\.nombre,\n      mesa: pg\.mesa/g) || []).length >= 0);
     t('nessun resto del vecchio disegno (`_registradoPor` / `cobrado_por`)', !/_registradoPor|_cobradoPor|cobrado_por/.test(SRC));
     return ko - k0;
@@ -162,6 +173,9 @@ await mut('il body non porta l intestatario', 'body.intestatario = intest.nombre
 await mut('plaza senza mesero => intestato al JL', "return { ok: false, motivo: 'plaza_sin_mesero', mesa: mesa, plaza: pl };", "return { ok: true, nombre: STATE.nombre, plaza: pl };");
 await mut('plaza condivisa: ne sceglie uno', "if (duenos.length > 1) {", "if (false) {");
 await mut('junta mista accettata', "if (nombre && dueno !== nombre) return { ok: false, motivo: 'junta_con_varios_meseros', mesa: mesa, plaza: pl };", "");
+await mut('il mensaje de Alberto cambia', "'conto_sin_mesero:primo_sin_mesero': 'Cobra uno de los meseros de la plaza.'", "'conto_sin_mesero:primo_sin_mesero': 'Asigna la cuenta.'");
+await mut('el auto-dueño no tiene el mensaje de Alberto', "'conto_sin_mesero:primo_con_varios_meseros': 'Cobra uno de los meseros de la plaza.',", "");
+await mut('el detalle no elige el mensaje', "const kM = (a.detalle && _INTEST_MSG[a.motivo + ':' + a.detalle]) ? a.motivo + ':' + a.detalle : a.motivo;", "const kM = a.motivo;");
 await mut('chi ha aperto non e dueño: passa', "if (!hit) return { ok: false, motivo: 'conto_fuera_duenos', mesa: mesa, plaza: pl, detalle: a.mesero };", "if (!hit) { nombre = a.mesero; }");
 await mut('conto senza mesero: passa col primo dueño', "if (!a.mesero) return { ok: false, motivo: 'conto_sin_mesero', mesa: mesa, plaza: pl, detalle: a.motivo || '' };", "");
 await mut('il bordo muto: ripiega sul primo dueño', "r = ap ? _intestatarioPuro(mesas, dam, todos, ap) : { ok: false, motivo: 'conto_no_leido', mesa: r.mesa, plaza: r.plaza };", "r = _intestatarioPuro(mesas, dam, todos, ap || { [r.mesa]: { mesero: r.duenos[0] } });");
