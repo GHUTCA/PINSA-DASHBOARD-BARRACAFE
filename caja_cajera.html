@@ -308,7 +308,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.1.1</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.2.0</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -322,6 +322,68 @@ async function plantarBustaPrueba() {
   if (r.ok) { toast('Busta de prueba ' + nro + ' creada', 'ok'); pantalla6(); }
   else if (!r.pin) toast('No se pudo: ' + (r.motivo || '?'), 'bad');
 }
+/* ═══ [10-ott · V28 · collaudo con Mayra] LA BUSTA «NO ENCONTRADA» ══════════════════════════════════════════════════════
+   Una busta que no existe fisicamente NO se cuenta 0: eso obligaba a declarar un sello — un hecho falso. Ahora hay un estado suyo: «no encontrado · motivo», sin sello y sin contado, y
+   «la encontré» para deshacerlo. El bordo lo escribe por una puerta de la base de datos y RESPONDE el resultado: aquí se lee y se DICE (nunca un «creada» que despues no llego).
+   Solo se ofrece si el bordo lo dice (/salud → caja_no_encontrada_on): con la palanca apagada la pantalla es la de ayer. */
+var NOENC_ON = null, NOENC_TS = 0;
+async function noEncOn() {
+  if (NOENC_ON !== null && Date.now() - NOENC_TS < 60000) return NOENC_ON;
+  NOENC_TS = Date.now();
+  try {
+    var base = BORDE[LOCAL];
+    var r = await fetch(base + '/salud', { cache: 'no-store' });
+    var j = await r.json();
+    NOENC_ON = !!(j && j.flags && String(j.flags.caja_no_encontrada_on) === '1');
+  } catch (e) { NOENC_ON = false; }   // /salud mudo = apagado: ningún botón sin que el bordo lo diga
+  return NOENC_ON;
+}
+var NOENC_TXT = {
+  gia_contata: 'Ese sobre ya tiene un conteo — no se puede marcar como no encontrado.',
+  busta_assente: 'Ese sobre no existe en el sistema.',
+  non_no_encontrada: 'Ese sobre no estaba marcado como no encontrado.',
+  no_encontrada_spento: 'Esto todavía no está activado. Avisa a Alberto.',
+  porta_non_installata: 'Falta instalar una pieza en la base de datos. Avisa a Alberto.',
+  porta_ha_rifiutato: 'La base de datos rechazó el gesto. Avisa a Alberto.',
+  motivo_troppo_corto: 'Escribe el motivo con un poco más de detalle (mínimo 8 letras).',
+  pg_no_responde: 'La base de datos no responde. Reintenta en un minuto.'
+};
+async function marcarNoEncontrada(sobre, evento, motivo) {
+  var dia = sobre.dia || DIA_NOCHE;
+  return postCaja({ verbo: 'sobre_no_encontrada', uid_gesto: uidGestoEstable('ne|' + evento + '|' + dia + '|' + sobre.sobre_nro + '|' + motivo, 'ne'),
+    sobre_dia_op: dia, sobre_nro: sobre.sobre_nro, evento: evento, motivo: motivo, fuente: 'app_caja' });
+}
+function noEncHtml() {
+  var lista = (MANANA && MANANA.noEnc) || [];
+  if (!lista.length) return '';
+  return '<div class="note bad"><b>' + (lista.length === 1 ? 'Un sobre no encontrado' : lista.length + ' sobres no encontrados') + '</b><br>No se cuentan ni van al banco. Siguen anotados hasta que aparezcan.</div>' +
+    '<div class="rows">' + lista.map(function(x, i){
+      return '<div class="r"><span class="n">' + esc(x.sobre_nro) + '<small>' + (x.dia ? fechaCorta(x.dia) + ' · ' : '') + esc((x.no_encontrada && x.no_encontrada.motivo) || '') + '</small></span>' +
+        '<span class="v"><button class="btn gh" data-ne="' + i + '" style="padding:6px 10px;font-size:.8em">La encontré</button></span></div>' +
+        '<div id="neForm' + i + '"></div>';
+    }).join('') + '</div>';
+}
+function noEncBind() {
+  var lista = (MANANA && MANANA.noEnc) || [];
+  document.querySelectorAll('[data-ne]').forEach(function(b){
+    b.onclick = function(){
+      var i = Number(b.dataset.ne), x = lista[i], box = document.getElementById('neForm' + i);
+      if (!x || !box) return;
+      box.innerHTML = '<p class="lb">¿Dónde la encontraste?</p><input class="inp" id="neMot' + i + '" placeholder="En tus palabras (mínimo 3 letras)">' +
+        '<button class="btn acc" id="neOk' + i + '">Confirmar · la encontré</button>';
+      unTocoUnHecho(document.getElementById('neOk' + i), async function(){
+        var motivo = (document.getElementById('neMot' + i).value || '').trim();
+        if (motivo.length < 3) { toast('Escribe dónde la encontraste', 'bad'); return; }
+        var r = await marcarNoEncontrada(x, 'ritrovata', motivo);
+        if (!r.ok) { toast('No se guardó: ' + (NOENC_TXT[r.motivo] || r.motivo), 'bad'); return; }
+        if (r.encolado) { toast('Sin señal — se enviará solo. No la cuentes hasta que se confirme.', 'bad'); return; }
+        toast('Anotado: el sobre apareció — ya se puede contar', 'ok');
+        pantalla6();
+      });
+    };
+  });
+}
+
 async function pantalla6() {
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando la caja fuerte…</p>';
   var NOTA_UNA_NOCHE = '';
@@ -339,8 +401,19 @@ async function pantalla6() {
     MANANA = await getCaja('manana?dia=' + DIA_NOCHE);
     if (!MANANA.ok) { renderError('La caja fuerte', MANANA.error); return; }
   }
-  var sobres = MANANA.sobres || [];
+  /* [10-ott] las «no encontradas» salen del conteo Y del depósito (MANANA.sobres es lo que cuenta y lo que viaja al banco), pero NO desaparecen: se listan aparte, con su motivo */
+  var todosLosSobres = MANANA.sobres || [];
+  MANANA.noEnc = todosLosSobres.filter(function(s){ return s.no_encontrada; });
+  MANANA.sobres = todosLosSobres.filter(function(s){ return !s.no_encontrada; });
+  var sobres = MANANA.sobres;
   var faltan = sobres.filter(function(s){ return !s.conteo; }).length;   // [08-ott · AUT-EMERG] cuántos quedan por contar
+  if (!sobres.length && MANANA.noEnc.length) {
+    app.innerHTML = barra(true) + '<div class="kick">Sobres en Caja Verde</div><h1>Nada que contar</h1><p class="sd">Los sobres de abajo no se encontraron</p>' + noEncHtml() +
+      '<button class="btn acc" id="irPos">Ir a los cortes POS</button>';
+    noEncBind();
+    document.getElementById('irPos').onclick = function(){ PASO = 3; pantalla8(); };
+    return;
+  }
   if (!sobres.length) {
     app.innerHTML = barra(false) +
       '<div class="kick ok">Sobres en Caja Verde</div><h1>Nada que contar</h1>' +
@@ -381,8 +454,9 @@ async function pantalla6() {
        el número dice cuántos FALTAN, y si no falta ninguno se sigue a los cortes (paso 3). */
     '<p class="big acc">' + (faltan ? faltan : sobres.length) + '</p><p class="blab">' + (faltan ? (faltan === 1 ? 'sobre que tienes que contar' : 'sobres que tienes que contar') : (sobres.length === 1 ? 'ya contaste el sobre' : 'ya contaste los ' + sobres.length + ' sobres')) + '</p>' +
     '<div class="rows"><div class="r hd"><span>sobre</span><span>estado</span></div>' + filas + '</div>' +
-    avisoHtml + NOTA_UNA_NOCHE +
+    noEncHtml() + avisoHtml + NOTA_UNA_NOCHE +
     '<button class="btn acc" id="abrir">' + (faltan ? 'Abrir y contar' : 'Seguir') + '</button>';
+  noEncBind();
   document.getElementById('abrir').onclick = function(){ SOBRE_IDX = sobres.findIndex(function(s){return !s.conteo;}); if (SOBRE_IDX < 0) { PASO = 3; pantalla8(); return; } PASO = 2; pantalla7(); };
 }
 
@@ -404,7 +478,32 @@ function pantalla7() {
     '<p class="lb" style="margin-top:12px">Cuánto contaste · <b>cuéntalo entero</b></p>' +
     '<input class="inp" id="contado" placeholder="$" inputmode="numeric">' +
     '<button class="btn acc" id="revisar" disabled>Revisar conteo</button>' +
-    '<div id="extra" style="margin-top:10px"></div>';
+    '<div id="extra" style="margin-top:10px"></div>' +
+    '<div id="noEncBox" style="margin-top:22px"></div>';
+
+  /* [10-ott] «No encuentro este sobre»: solo si el bordo lo ofrece. Pide el MOTIVO, nunca un sello. */
+  var contadoRevisado = null;
+  noEncOn().then(function(on){
+    var box = document.getElementById('noEncBox');
+    if (!on || !box || contadoRevisado !== null) return;
+    box.innerHTML = '<button class="btn gh" id="neAbrir">No encuentro este sobre</button>';
+    document.getElementById('neAbrir').onclick = function(){
+      box.innerHTML = '<p class="lb">¿Por qué no está? <b>Escríbelo tal como es</b></p><input class="inp" id="neMotivo" placeholder="Ej.: no está en la caja fuerte (mínimo 8 letras)">' +
+        '<button class="btn acc" id="neGuardar">Dejar anotado: no encontrado</button><button class="btn gh" id="neCancelar" style="margin-top:8px">Cancelar</button>';
+      document.getElementById('neCancelar').onclick = function(){ pantalla7(); };
+      unTocoUnHecho(document.getElementById('neGuardar'), async function(){
+        var motivo = (document.getElementById('neMotivo').value || '').trim();
+        if (motivo.length < 8) { toast(NOENC_TXT.motivo_troppo_corto, 'bad'); return; }
+        var r = await marcarNoEncontrada(s, 'no_encontrada', motivo);
+        if (!r.ok) { toast('No se guardó: ' + (NOENC_TXT[r.motivo] || NOENC_TXT[r.error] || r.motivo || r.error), 'bad'); return; }
+        if (r.encolado) { toast('Sin señal — se enviará solo. No sigas hasta que se confirme.', 'bad'); return; }
+        s.no_encontrada = { motivo: motivo };
+        MANANA.sobres.splice(SOBRE_IDX, 1); (MANANA.noEnc = MANANA.noEnc || []).push(s);
+        toast(r.ya ? 'Ese sobre ya estaba anotado como no encontrado' : 'Anotado: no encontrado — no se cuenta ni va al banco', 'ok');
+        pantalla7();
+      });
+    };
+  });
 
   var selloIntacto = null;
   function actualizarBoton() {
@@ -420,7 +519,6 @@ function pantalla7() {
     btn.style.outline = '2px solid var(--acc)';
   }
 
-  var contadoRevisado = null;
   unTocoUnHecho(document.getElementById('revisar'), async function(){
     var contado = Number(document.getElementById('contado').value || '');
     if (!Number.isFinite(contado) || contado < 0) { toast('Escribe cuánto contaste', 'bad'); return; }
