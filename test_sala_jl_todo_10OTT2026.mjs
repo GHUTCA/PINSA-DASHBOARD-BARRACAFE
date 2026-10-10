@@ -10,6 +10,11 @@ const AQUI = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z
 const SALA = process.argv[2] || path.join(AQUI, 'sala.html');
 const BORDO = process.argv[3] || path.join(AQUI, '..', '_wt_0613');
 const SRC0 = fs.readFileSync(SALA, 'utf8').replace(/\r\n/g, '\n');
+// il banco dichiara QUALE bordo ha letto (hash + file tracciati sporchi): un banco verde su un albero che si muove non e una prova (richiesta di EL GIRO, 10-ott)
+import { execFileSync } from 'node:child_process';
+const gitB = (...a) => { try { return execFileSync('git', ['-C', BORDO, ...a], { encoding: 'utf8' }).trim(); } catch (e) { return '?'; } };
+const BORDO_HASH = gitB('rev-parse', '--short', 'HEAD'), BORDO_SPORCHI = gitB('status', '--porcelain', '-uno').split('\n').filter(Boolean).length;
+console.log('BORDO LETTO : ' + BORDO + ' @ ' + BORDO_HASH + (BORDO_SPORCHI ? ' · ' + BORDO_SPORCHI + ' file tracciati SPORCHI (non e un hash pulito)' : ' (pulito)') + '  · uso: node test_sala_jl_todo_10OTT2026.mjs <sala.html> <radice del bordo>');
 let ok = 0, ko = 0, muto = false; const t = (n, c, i) => { c ? ok++ : (ko++, muto || console.log('✗', n, i === undefined ? '' : JSON.stringify(i).slice(0, 300))); };
 const fnDe = (SRC, nome, asinc) => { const i = SRC.indexOf((asinc ? 'async function ' : 'function ') + nome + '('); if (i < 0) throw new Error('manca ' + nome); return SRC.slice(i, SRC.indexOf('\n}\n', i) + 3); };
 
