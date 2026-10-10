@@ -35,7 +35,7 @@ function mondo(SRC, o) {
       return { ok: false, error: 'lettura_sconosciuta' }; },
     document: { getElementById: mk, querySelector: mk } };
   vm.createContext(ctx);
-  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'legamiHtml', 'rojaPendLeer', 'rojaPendGuardar', 'rojaPendLimpiar', 'rojaSiguiente', 'pantallaRojaNotte', 'pantalla9', 'uidGestoEstable'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "caja_roja_pend_v1";\nthis.F = { pantalla9, pantallaRojaNotte, desgloseDeposito };', ctx);
+  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'legamiHtml', 'pantallaRojaError', 'rojaPendLeer', 'rojaPendGuardar', 'rojaPendLimpiar', 'rojaSiguiente', 'pantallaRojaNotte', 'pantalla9', 'uidGestoEstable'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "caja_roja_pend_v1";\nthis.F = { pantalla9, pantallaRojaNotte, desgloseDeposito };', ctx);
   return { ctx, mk, handlers, toasts, posts, app, ls };
 }
 const calc = (m) => m.mk('calc').innerHTML;
@@ -93,9 +93,11 @@ async function banco(SRC) {
     t('⑥ leva spenta (404 lettura_sconosciuta): la busta UNICA di sempre — contado netto, reserva = somma delle notti, nessuna «roja ya sellada»', s.contado === 1632000 && s.reserva === 133150 && s.a_depositar === 1498850 && !/Roja ya sellada/.test(calc(m)), s);
     t('⑥ bis e una sola schermata di busta (pantallaReservaSobre) col totale, non la secuenza', m.ctx.rendered.some((r) => r[0] === 'unica' && r[2] === 133150) && BUSTE(m).length === 0, m.ctx.rendered); }
   // ⑦ un errore che non e «sin roja»
-  for (const err of ['pg_no_responde', 'porta_non_installata', 'sin_red']) {
+  for (const [err, frase, conRetry] of [['pg_no_responde', /la base no contesta/, true], ['porta_non_installata', /todavía no está instalada/, false], ['sin_red', /sin conexión/, true], ['x_strano', /No pude leer la roja \(x_strano\)/, true]]) {
     const m = mondo(SRC, { roja: { ok: false, error: err } }); await m.ctx.F.pantalla9();
-    t('⑦ errore «' + err + '»: la schermata di errore, NIENTE «Salir al banco» (non si esce a ciegas), nessun post', m.ctx.rendered.some((r) => r[0] === 'error' && r[2] === err) && m.posts.length === 0 && !m.mk('salir').onclick, m.ctx.rendered); }
+    t('⑦ errore «' + err + '»: la CAUSA vera (non «contrato pendiente»), NIENTE «Salir al banco», nessun post', frase.test(m.app.innerHTML) && !/contrato pendiente/.test(m.app.innerHTML) && m.posts.length === 0 && !m.mk('salir').onclick, m.app.innerHTML);
+    t('⑦ bis «' + err + '»: «Reintentar» ' + (conRetry ? 'SI (ripetere puo servire)' : 'NO (ripetere lo stesso blocco non serve)'), conRetry === /retryRoja/.test(m.app.innerHTML), m.app.innerHTML);
+    if (conRetry) { m.ctx.rojaPath = ''; await m.mk('retryRoja').onclick(); t('⑦ ter «Reintentar» rilegge la roja', /^roja_estado/.test(m.ctx.rojaPath), m.ctx.rojaPath); } }
   // ⑧ sin_cuota
   { const r = ROJA({ noches: ROJA().noches.map((n) => (n.dia === '2026-10-12' ? { dia: n.dia, estado: 'sin_cuota', importo: 1000, quota: null, coperto: 0, debito: null } : n)) });
     const m = mondo(SRC, { roja: r }); await m.ctx.F.pantalla9(); const c = calc(m);
@@ -111,7 +113,7 @@ async function banco(SRC) {
     t('⑨ tutte coperte: nessuna busta nuova, la salida porta solo la roja ya sellada (reserva 99.500, a banca = lo contato)', BUSTE(m).length === 0 && s.reserva === 99500 && s.a_depositar === 1632000 && m.toasts.some((x) => /Registrado/.test(x[0])), [BUSTE(m).length, s]); }
   // ⑬ (EL GIRO 🟡) piu buste sin deposito di quante la salida puo portare: si ferma e lo dice, senza uscire al banco
   { const m = mondo(SRC, { roja: ROJA({ sueltas_exceso: true }) }); await m.ctx.F.pantalla9();
-    t('⑬ `sueltas_exceso`: schermata di errore `demasiadas_buste_sin_deposito`, NIENTE «Salir al banco», nessun post', m.ctx.rendered.some((r) => r[0] === 'error' && r[2] === 'demasiadas_buste_sin_deposito') && m.posts.length === 0 && !m.mk('salir').onclick, m.ctx.rendered); }
+    t('⑬ `sueltas_exceso`: «Hay más buste R sin depósito…», niente Reintentar (non serve), niente «Salir al banco», nessun post, e mai «contrato pendiente»', /Hay más buste R sin depósito/.test(m.app.innerHTML) && !/retryRoja/.test(m.app.innerHTML) && !/contrato pendiente/.test(m.app.innerHTML) && m.posts.length === 0 && !m.mk('salir').onclick, m.app.innerHTML); }
   // ⑭ (EL GIRO 🟡) los legames que esperan o fueron rechazados se VEN en «Antes de salir»
   { const m = mondo(SRC, { roja: ROJA({ legami: [{ deposito: 'dep-0', numero: 'R-0001', importo: 99500, estado: 'pendiente', intentos: 2, edad_min: 190, err: 'pg_http_409' }, { deposito: 'dep-9', numero: 'R-0003', importo: 5000, estado: 'rifiutata', intentos: 1, edad_min: 20, err: 'pg_http_400' }] }) }); await m.ctx.F.pantalla9();
     t('⑭ la nota «legame de la roja sin concluir» con numero, importo, esperando/RECHAZADO y la edad', /Hay un legame de la roja sin concluir/.test(m.app.innerHTML) && /R-0001 \(\$99500\) — esperando · hace 3 h/.test(m.app.innerHTML) && /R-0003 \(\$5000\) — RECHAZADO · hace 20 min/.test(m.app.innerHTML) && /avisa a MIGRACIÓN/.test(m.app.innerHTML), m.app.innerHTML.slice(0, 700));
@@ -133,11 +135,14 @@ const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log
   const k0 = ko, o0 = ok; muto = true; const k1 = ko; try { await banco(SRC0.replace(da, () => a)); } catch (e) { ko++; } muto = false; const rossi = ko - k1; ko = k0; ok = o0;
   t('mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
 await mut('la salida non porta le rojas', "if (ROJA && ROJA.sueltas && ROJA.sueltas.length) cuerpoSalida.rojas =", "if (false) cuerpoSalida.rojas =");
-await mut('l eccesso di sueltas non ferma', "if (rjR.sueltas_exceso) { renderError('La roja', 'demasiadas_buste_sin_deposito'); return; }", "");
+await mut('l eccesso di sueltas non ferma', "if (rjR.sueltas_exceso) { pantallaRojaError('demasiadas_buste_sin_deposito'); return; }", "");
 await mut('i legami non si mostrano', "'<div id=\"calc\"></div>' + legamiHtml(ROJA) +", "'<div id=\"calc\"></div>' +");
 await mut('rifiutato come esperando', "(x.estado === 'rifiutata' ? 'RECHAZADO' : 'esperando')", "'esperando'");
+await mut('un blocco permanente offre Reintentar', "'Avisa a MIGRACIÓN. No salgas al banco hasta que esté.', false]", "'Avisa a MIGRACIÓN. No salgas al banco hasta que esté.', true]");
+await mut('l eccesso dice la causa falsa', "if (rjR.sueltas_exceso) { pantallaRojaError('demasiadas_buste_sin_deposito'); return; }", "if (rjR.sueltas_exceso) { renderError('La roja', 'demasiadas_buste_sin_deposito'); return; }");
+await mut('Reintentar non rilegge', "b.onclick = function(){ return pantalla9(); };", "b.onclick = function(){};");
 await mut('la roja non si legge', "var rjR = await getCaja('roja_estado?dia=' + DIA_HOY + '&noches=' + NOCHES.join(','));", "var rjR = { ok: false, error: 'lettura_sconosciuta' };");
-await mut('un errore diventa «sin roja»', "else if (!rjR.ok && rjR.error !== 'lettura_sconosciuta') { renderError('La roja', rjR.error); return; }", "");
+await mut('un errore diventa «sin roja»', "else if (!rjR.ok && rjR.error !== 'lettura_sconosciuta') { pantallaRojaError(rjR.error); return; }", "");
 await mut('il contado non e lordo', "var c = (Number(document.getElementById('contado').value || '') || 0) + S;", "var c = (Number(document.getElementById('contado').value || '') || 0);");
 await mut('la reserva senza la roja ya sellada', "if (RESERVA.reserva !== null) RESERVA.reserva = RESERVA.nuevas + ROJA.sueltas_total;", "if (RESERVA.reserva !== null) RESERVA.reserva = RESERVA.nuevas;");
 await mut('la coperta si sigilla', "if ((nR.estado === 'da_sigillare' || nR.estado === 'sin_cuota') && nR.importo > 0) {", "if (true) {");
