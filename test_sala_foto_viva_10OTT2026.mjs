@@ -18,8 +18,9 @@ function mondo(SRC, o) {
   const ls = {}; if (o.foto) ls.sala_foto_v1 = JSON.stringify({ ts: now - o.foto.edad, nombre: o.foto.nombre || 'Ary', local: 'BKS', r: { mios: [{ uuid: 'pm-x', mesa: '100', estado: 'atendido', total: 135780 }] } });
   const ctx = { JSON, Math, Date, String, Number, Object, Array, Set, console, PINTA_ON: true, CFG: { LOCAL: 'BKS' }, QS: new URLSearchParams(o.qs || ''),
     STATE: { nombre: 'Ary', sala: o.sala || null, salaTs: o.salaTs || 0, mesasModel: [{ mesa: '100' }], pollProxOk: 5 }, localStorage: { getItem: (k) => (k in ls ? ls[k] : null) },
-    $: el, document: { querySelector: () => (o.hayTessere ? {} : null) }, render: (r) => { rendered.push(r); }, refrescar() {}, _of: el('offline'), FOTO_VIVA_ON: !!o.leva };
-  el('secMesas').innerHTML = o.tessere ? '<div class="mtile">100</div>' : ''; ['secPend', 'secSinDueno', 'secMios', 'secLimpiar'].forEach((id) => { el(id).innerHTML = o.tessere ? '<button>COBRAR</button><button>ELIMINAR</button>' : ''; });
+    $: el, document: { querySelector: () => (o.hayTessere ? {} : null) }, render: (r) => { rendered.push(r); }, refrescar() {}, _of: el('offline'), FOTO_VIVA_ON: !!o.leva, FOTO_VIVA_LEIDA: o.leida !== false, cerrada: 0, cerrarMesa() { ctx.cerrada++; } };
+  el('secMesas').innerHTML = o.tessere ? '<div class="mtile">100</div>' : '';
+  if (o.tessere) { el('kpis').innerHTML = 'Venta turno $135.780'; el('csHero').innerHTML = 'Por cobrar ahora $135.780'; el('tick').innerHTML = '<span>mesa 100</span>'; el('vpanel').innerHTML = '<button>COBRAR</button>'; el('mesaSheetContent').innerHTML = 'mesa 100'; ctx.STATE.selMesas = ['100']; } ['secPend', 'secSinDueno', 'secMios', 'secLimpiar'].forEach((id) => { el(id).innerHTML = o.tessere ? '<button>COBRAR</button><button>ELIMINAR</button>' : ''; });
   vm.createContext(ctx);
   vm.runInContext(['_fotoVivaOn', '_fotoMuerta', '_salaEdadMs', '_edadTxtMs', '_salaMuertaPinta'].map((n) => fnDe(SRC, n)).join('\n') + '\n' + SRC.match(/var FOTO_TETTO_MS = [^;]+;/)[0] + '\nthis.run = function () { ' + blocco(SRC).replace(/^if \(PINTA_ON\) try \{/, 'if (PINTA_ON) try {') + ' };', ctx);
   return { ctx, els, rendered, run: () => ctx.run(), leva: (v) => { ctx.FOTO_VIVA_ON = v; } };
@@ -38,6 +39,22 @@ async function banco(SRC) {
     t('① settimo e ricorda l eta vera della foto', Math.abs((Date.now() - m.ctx.STATE.salaFotoTs) - 6 * H) < 5000, m.ctx.STATE.salaFotoTs); }
   { const m = mondo(SRC, { leva: true, foto: FOTO(6 * H) }); m.run(); m.run();
     t('① ottavo il catch successivo (il poll continua a fallire) resta morto e non resuscita', m.rendered.length === 0 && m.ctx.STATE.sala._muerta === true); }
+  // ① (EL GIRO) l'intestazione tiene i soldi: kpis, csHero, ticker, pannello dei verbi, scheda della mesa
+  { const m = mondo(SRC, { leva: true, sala: { _foto_local: 5, mios: [{ uuid: 'pm-x', mesa: '100', estado: 'atendido' }] }, salaTs: Date.now() - 6 * H, tessere: true }); m.run();
+    t('① EL GIRO: «Venta turno $135.780» (kpis) e «Por cobrar ahora» (csHero) NON restano sopra il «sin datos»', m.els.kpis.innerHTML === '' && m.els.csHero.innerHTML === '' && m.els.csHero.classList.contains('hide'), [m.els.kpis.innerHTML, m.els.csHero.innerHTML]);
+    t('① EL GIRO bis il ticker, il pannello dei verbi e la scheda della mesa sono vuoti, nessuna mesa selezionata, la scheda si chiude', m.els.tick.innerHTML === '' && m.els.vpanel.innerHTML === '' && m.els.mesaSheetContent.innerHTML === '' && m.ctx.STATE.selMesas.length === 0 && m.ctx.cerrada === 1, [m.els.tick.innerHTML, m.els.vpanel.innerHTML, m.ctx.cerrada]);
+    t('① EL GIRO ter in tutto il DOM della sala non resta il numero 135.780', !Object.values(m.els).some((e) => /135\.780/.test(e.innerHTML + e.textContent)), Object.values(m.els).filter((e) => /135\.780/.test(e.innerHTML)).map((e) => e.id)); }
+  // ⑥ ⑦ (EL GIRO) la leva non ancora letta, o che non arriva mai: il verso sicuro e «sin datos»
+  { const m = mondo(SRC, { leva: false, leida: false, foto: FOTO(6 * H) }); m.run();
+    t('⑥ EL GIRO: il poll muore PRIMA del /salud (leva non ancora letta): la foto di 6 h NON si disegna', m.rendered.length === 0 && m.ctx.STATE.sala._muerta === true, [m.rendered.length]); }
+  { const m = mondo(SRC, { leva: false, leida: false, sala: { mios: [] }, salaTs: Date.now() - 6 * H, tessere: true }); m.run();
+    t('⑥ bis stessa cosa con STATE.sala gia in mano (prima strada del catch)', m.rendered.length === 0 && m.els.kpis.innerHTML === '');
+    const v = mondo(SRC, { leva: false, leida: false, foto: FOTO(10 * MIN) }); v.run();
+    t('⑥ ter non letta + foto di 10 min: si disegna (il tetto vale per le foto VECCHIE, non per ogni foto)', v.rendered.length === 1); }
+  { const m = mondo(SRC, { leva: true, leida: false, qs: 'fotoviva=0', foto: FOTO(6 * H) }); m.run();
+    t('⑥ quater non letta + `?fotoviva=0`: il ritorno sul telefono vince, si disegna come ieri', m.rendered.length === 1); }
+  { const m = mondo(SRC, { leva: false, leida: true, foto: FOTO(6 * H) }); m.run();
+    t('⑦ letta e SPENTA dal bordo: come ieri (la guardia non e imposta dove il bordo ha detto no)', m.rendered.length === 1); }
   // ② entro il tetto: come ieri
   { const m = mondo(SRC, { leva: true, foto: FOTO(10 * MIN), hayTessere: true }); m.run();
     t('② foto di 10 min: si disegna (render) col banner giallo «Sala de hace 10 min»', m.rendered.length === 1 && /Sala de hace 10 min/.test(m.els.offline.textContent) && m.els.offline.classList.contains('vieja') && m.ctx.STATE.sala._foto_local > 0 && !m.ctx.STATE.sala._muerta, [m.rendered.length, m.els.offline.textContent]); }
@@ -65,7 +82,8 @@ async function banco(SRC) {
   // ⑥⑦ il sorgente
   t('⑥ il boot ricorda l eta vera (salaFotoTs = f.ts) accanto a `_foto_local`', /f\.r\._foto_local = Math\.max\(1, Math\.round\(\(Date\.now\(\) - f\.ts\) \/ 1000\)\);\n\s+STATE\.salaFotoTs = f\.ts;/.test(SRC));
   t('⑦ la leva si legge da /salud (`foto_viva_on`) e nasce spenta', /FOTO_VIVA_ON = String\(cercaK\(j, 'foto_viva_on'\)\) === '1'/.test(SRC) && /var FOTO_VIVA_ON = false;/.test(SRC));
-  t('versione >= 3.226.0', /sala v3\.(22[6-9]|2[3-9]\d|[3-9]\d\d)\.\d/.test(SRC));
+  t('⑦ il /salud segna la leva «letta» e la variabile nasce non letta', /FOTO_VIVA_LEIDA = true;/.test(SRC) && /var FOTO_VIVA_LEIDA = false;/.test(SRC));
+  t('versione >= 3.226.1', /sala v3\.(226\.[1-9]|22[7-9]\.\d|2[3-9]\d\.\d|[3-9]\d\d\.\d)/.test(SRC));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }
@@ -78,10 +96,20 @@ await mut('il tetto raddoppiato', "var FOTO_TETTO_MS = 30 * 60000;", "var FOTO_T
 await mut('?fotoviva=0 ignorato', "if (q === '1') return true; if (q === '0') return false;", "if (q === '1') return true;");
 await mut('?fotoviva=1 ignorato', "const q = QS.get('fotoviva'); if (q === '1') return true;", "const q = QS.get('fotoviva');");
 await mut('lo scheletro non e marcato _foto_local', "_foto_local: 1, _muerta: true,", "_muerta: true,");
-await mut('le sezioni dei pedidos non si svuotano', "['secPend', 'secSinDueno', 'secMios', 'secLimpiar'].forEach(function (id) { const e = $(id); if (e) e.innerHTML = ''; });", "");
-await mut('il mesasModel resta', "  STATE.mesasModel = [];\n  ['secPend'", "  ['secPend'");
+await mut('le sezioni dei pedidos non si svuotano', "['secPend', 'secSinDueno', 'secMios', 'secLimpiar', 'kpis'", "['kpis'");
+await mut('il mesasModel resta', "STATE.mesasModel = []; STATE.selMesas = [];", "STATE.selMesas = [];");
 await mut('l eta non si dice', "hace <b>' + txt + '</b>", "hace <b>' + '</b>");
 await mut('il banner resta giallo (vieja)', "of.classList.remove('vieja'); of.classList.add('show');", "of.classList.add('show', 'vieja');");
+await mut('la leva non letta vale come spenta', "return FOTO_VIVA_LEIDA ? FOTO_VIVA_ON === true : true; }", "return FOTO_VIVA_ON === true; }");
+await mut('kpis non si svuota', "'secLimpiar', 'kpis', 'csHero'", "'secLimpiar', 'csHero'");
+await mut('csHero non si svuota', "'kpis', 'csHero', 'tick'", "'kpis', 'tick'");
+await mut('il ticker resta', "'csHero', 'tick', 'vpanel'", "'csHero', 'vpanel'");
+await mut('il pannello dei verbi resta', "'tick', 'vpanel', 'mesaSheetContent'", "'tick', 'mesaSheetContent'");
+await mut('la scheda della mesa resta', "'vpanel', 'mesaSheetContent', 'salaSub'", "'vpanel', 'salaSub'");
+await mut('csHero non si nasconde', "hh.classList.add('hide');", "");
+await mut('la scheda non si chiude', "if (typeof cerrarMesa === 'function') cerrarMesa();", "");
+await mut('la selezione resta', "STATE.mesasModel = []; STATE.selMesas = [];", "STATE.mesasModel = [];");
+await mut('il /salud non segna letta', "FOTO_VIVA_LEIDA = true;  ", "  ");
 await mut('il boot non ricorda l eta', "STATE.salaFotoTs = f.ts;   // [AUT-0663] l'eta' vera: il catch decide col tetto", "");
 await mut('/salud non porta la leva', "FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';", "");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
