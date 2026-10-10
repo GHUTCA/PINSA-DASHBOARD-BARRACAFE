@@ -3,6 +3,7 @@
 // el depósito sin contado dice «Nada que depositar» (antes: «Vas a depositar −$800») · un depósito negativo apaga el botón.
 import fs from 'node:fs'; import vm from 'node:vm';
 const SRC = fs.readFileSync(new URL('./caja_cajera.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const PRE_NUEVAS = "var DEJADAS = {}, SENZA_ESITO = []; async function noEncOn(){return false;} function legamiHtml(){return '';} function senzaEsitoHtml(){return '';} function rojaPendLeer(){return null;} function rojaSiguiente(){return -1;} async function ventanaOn(){return false;} function claveSobre(x){return (x.dia || DIA_NOCHE) + ':' + x.sobre_nro;} function dejadasHtml(){return '';} function dejadasBind(){} function noEncHtml(){return '';} function noEncBind(){}\n";   // [10-ott] las funciones nuevas de caja_cajera que las pantallas viejas ya referencian (apagadas = la pantalla de siempre)
 let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : (ko++, console.log('✗', n, i === undefined ? '' : JSON.stringify(i).slice(0, 260))); };
 const fn = (nome, asinc) => { const i = SRC.indexOf((asinc ? 'async function ' : 'function ') + nome + '('); if (i < 0) throw new Error(nome); const j = SRC.indexOf('\n}\n', i) + 3; return SRC.slice(i, j); };
 
@@ -19,7 +20,7 @@ function mundo(manana, respuestas) {
     document: { getElementById: (id) => { const e = el(id); if (id === 'contado') { const m = /id="contado"[^>]*value="([^"]*)"/.exec(ctx.app.innerHTML); if (m) e.value = m[1]; } return e; },
       querySelector: () => el('q'), querySelectorAll: () => [] } };
   vm.createContext(ctx);
-  vm.runInContext(['pantalla6', 'pantalla9'].map((n) => fn(n, true)).join('\n') + '\n;this.API = { pantalla6, pantalla9 };', ctx);
+  vm.runInContext(PRE_NUEVAS + ['pantalla6', 'pantalla9'].map((n) => fn(n, true)).join('\n') + '\n;this.API = { pantalla6, pantalla9 };', ctx);
   return { ctx, el, llamadas };
 }
 const sinSobres = { ok: true, sobres: [] };

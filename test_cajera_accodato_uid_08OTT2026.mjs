@@ -2,6 +2,7 @@
 // ① postCaja: `{ok:true, scritto:false, accodato:true}` e un SUCCESSO (prima: «No se guardó: no_escrito» e la cajera ritoccava). ② l'uid del conteo nasce col GESTO: tre tocchi sullo stesso conteo = UN uid.
 import fs from 'node:fs'; import vm from 'node:vm';
 const SRC = fs.readFileSync(new URL('./caja_cajera.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const PRE_NUEVAS = "var DEJADAS = {}, SENZA_ESITO = []; async function noEncOn(){return false;} function legamiHtml(){return '';} function senzaEsitoHtml(){return '';} function rojaPendLeer(){return null;} function rojaSiguiente(){return -1;} async function ventanaOn(){return false;} function claveSobre(x){return (x.dia || DIA_NOCHE) + ':' + x.sobre_nro;} function dejadasHtml(){return '';} function dejadasBind(){} function noEncHtml(){return '';} function noEncBind(){}\n";   // [10-ott] las funciones nuevas de caja_cajera que las pantallas viejas ya referencian (apagadas = la pantalla de siempre)
 let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : (ko++, console.log('✗', n, i === undefined ? '' : JSON.stringify(i).slice(0, 260))); };
 const fn = (nome, asinc) => { const i = SRC.indexOf((asinc ? 'async function ' : 'function ') + nome + '('); if (i < 0) throw new Error(nome); return SRC.slice(i, SRC.indexOf('\n}\n', i) + 3); };
 
@@ -40,7 +41,7 @@ function mundoConteo() {
     unTocoUnHecho: (b, f) => { clic[b.id + ':hecho'] = f; },
     postCaja: async (b) => { posts.push(b); return ctx.respuesta ? ctx.respuesta(b) : { ok: true, accodato: true, scritto: false }; } };
   vm.createContext(ctx);
-  vm.runInContext(fn('uidGesto') + '\n' + SRC.slice(SRC.indexOf('var UIDS_GESTO'), SRC.indexOf('function toast(')) + '\n' + fn('pantalla7') + '\n;this.pantalla7 = pantalla7;', ctx);
+  vm.runInContext(PRE_NUEVAS + fn('uidGesto') + '\n' + SRC.slice(SRC.indexOf('var UIDS_GESTO'), SRC.indexOf('function toast(')) + '\n' + fn('pantalla7') + '\n;this.pantalla7 = pantalla7;', ctx);
   return { ctx, el, clic, posts, toasts };
 }
 { const m = mundoConteo(); m.ctx.pantalla7();

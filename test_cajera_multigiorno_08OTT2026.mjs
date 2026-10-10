@@ -4,6 +4,7 @@
 // el depósito DICE qué sobres lleva · si el bordo todavía no tiene la lectura `pendientes`, la app sigue como ayer (una noche) · la app no sugiere ningún día.
 import fs from 'node:fs'; import vm from 'node:vm';
 const SRC = fs.readFileSync(new URL('./caja_cajera.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const PRE_NUEVAS = "var DEJADAS = {}, SENZA_ESITO = []; async function noEncOn(){return false;} function legamiHtml(){return '';} function senzaEsitoHtml(){return '';} function rojaPendLeer(){return null;} function rojaSiguiente(){return -1;} async function ventanaOn(){return false;} function claveSobre(x){return (x.dia || DIA_NOCHE) + ':' + x.sobre_nro;} function dejadasHtml(){return '';} function dejadasBind(){} function noEncHtml(){return '';} function noEncBind(){}\n";   // [10-ott] las funciones nuevas de caja_cajera que las pantallas viejas ya referencian (apagadas = la pantalla de siempre)
 let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : (ko++, console.log('✗', n, i === undefined ? '' : JSON.stringify(i).slice(0, 300))); };
 const fn = (nome, asinc) => { const i = SRC.indexOf((asinc ? 'async function ' : 'function ') + nome + '('); if (i < 0) throw new Error(nome); const j = SRC.indexOf('\n}\n', i) + 3; return SRC.slice(i, j); };
 
@@ -14,14 +15,14 @@ function mundo(respuestas, init) {
     DEPOSITO_PENDIENTE: null, SES: { user: 'Mayra' }, app: { innerHTML: '' }, barra: () => '[bar]', esc: String,
     fmt: (n) => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('es-CL'), fechaCorta: (d) => 'f:' + d, toast: () => {}, llamadas, posts,
     renderError: (tt, e) => { ctx.app.innerHTML = '[error ' + tt + ' ' + e + ']'; },
-    getCaja: async (p) => { llamadas.push(p); return respuestas[p] || respuestas[p.split('?')[0]] || { ok: false, error: 'sin_respuesta' }; },
+    getCaja: async (p) => { if (/^roja_estado/.test(p)) return { ok: false, error: 'lettura_sconosciuta' }; llamadas.push(p); return respuestas[p] || respuestas[p.split('?')[0]] || { ok: false, error: 'sin_respuesta' }; },
     pantalla8: () => llamadas.push('→pantalla8'), pantalla7: () => llamadas.push('→pantalla7'),
     unTocoUnHecho: (b, f) => { b._f = f; }, uidGesto: (p) => p + '-' + Math.random().toString(36).slice(2, 8), postCaja: async (b) => { posts.push(b); return { ok: true, sobre_nro: 'R-1' }; }, Number, Math, String, Object, Array, Date,
     document: { getElementById: (id) => { const e = el(id); if (id === 'contado' && !e._set) { const m = /id="contado"[^>]*value="([^"]*)"/.exec(ctx.app.innerHTML); if (m) e.value = m[1]; } return e; },
       querySelector: () => el('q'), querySelectorAll: () => [] } }, init || {});
   vm.createContext(ctx);
-  vm.runInContext(SRC.slice(SRC.indexOf('var UIDS_GESTO'), SRC.indexOf('function toast(')), ctx);   // el helper REAL del uid estable
-  vm.runInContext(['pantalla6', 'pantalla7', 'pantalla9', 'pantallaReservaSobre'].map((n) => fn(n, n !== 'pantalla7' && n !== 'pantallaReservaSobre')).join('\n') + '\n;this.API = { pantalla6, pantalla7, pantalla9, pantallaReservaSobre };', ctx);
+  vm.runInContext(PRE_NUEVAS + SRC.slice(SRC.indexOf('var UIDS_GESTO'), SRC.indexOf('function toast(')), ctx);   // el helper REAL del uid estable
+  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'pantalla6', 'pantalla7', 'pantalla9', 'pantallaReservaSobre'].map((n) => fn(n, n !== 'pantalla7' && n !== 'pantallaReservaSobre' && n !== 'desgloseDeposito' && n !== 'desgloseHtml')).join('\n') + '\n;this.API = { pantalla6, pantalla7, pantalla9, pantallaReservaSobre };', ctx);
   return { ctx, el, llamadas, posts };
 }
 const S = (nro, dia, decl, conteo) => ({ sobre_nro: nro, dia, declarado: decl, firma_jl: 'Pedro', origen: 'jl', ts_hecho: '2026-10-08T05:00:00Z', conteo: conteo || null });

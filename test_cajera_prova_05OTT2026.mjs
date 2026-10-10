@@ -55,7 +55,7 @@ async function planta(nro, monto) {
 { const o = await planta('9003', '0'); t('planta: un monto 0 es una declaración válida', o.posts.length === 1 && o.posts[0].suma_ritiri === 0, o); }
 
 // ── cableado visible
-t('el banner MODO PRUEBA está en la barra de todas las pantallas', /function barra\(titulo\) \{\n\s+return \(PROVA \? '<div class="note bad"[^']*<b>🧪 MODO PRUEBA<\/b>/.test(SRC));
-t('el formulario de la busta de prueba solo aparece en modo prueba', /\(PROVA \? '<div class="note"><b>Preparar una busta de prueba<\/b>/.test(SRC) && /if \(PROVA\) document\.getElementById\('psPlantar'\)/.test(SRC));
+t('el banner MODO PRUEBA está en la barra de todas las pantallas', /function barra\(titulo\) \{\n\s+return (?:senzaEsitoHtml\(\) \+ )?\(PROVA \? '<div class="note bad"[^']*<b>🧪 MODO PRUEBA<\/b>/.test(SRC));
+t('el formulario del sobre de prueba solo aparece en modo prueba', /\(PROVA \? '<div class="note"><b>Preparar un sobre de prueba<\/b>/.test(SRC) && /if \(PROVA\) document\.getElementById\('psPlantar'\)/.test(SRC));
 t('no hay ninguna lectura/escritura que ignore los días (todas usan DIA_HOY/DIA_NOCHE)', !/getCaja\('[a-z_]+\?dia=20\d\d/.test(SRC));
 console.log(ko === 0 ? `✅ ${ok}/${ok + ko} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko === 0 ? 0 : 1);

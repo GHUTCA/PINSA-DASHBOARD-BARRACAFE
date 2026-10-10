@@ -2,6 +2,7 @@
 // Corre la pantalla6() VERDADERA con un DOM de mentira. Uso: node test_cajera_tutte_contate_08OTT2026.mjs  (junto a caja_cajera.html)
 import fs from 'node:fs'; import vm from 'node:vm';
 const SRC = fs.readFileSync(new URL('./caja_cajera.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const PRE_NUEVAS = "var DEJADAS = {}, SENZA_ESITO = []; async function noEncOn(){return false;} function legamiHtml(){return '';} function senzaEsitoHtml(){return '';} function rojaPendLeer(){return null;} function rojaSiguiente(){return -1;} async function ventanaOn(){return false;} function claveSobre(x){return (x.dia || DIA_NOCHE) + ':' + x.sobre_nro;} function dejadasHtml(){return '';} function dejadasBind(){} function noEncHtml(){return '';} function noEncBind(){}\n";   // [10-ott] las funciones nuevas de caja_cajera que las pantallas viejas ya referencian (apagadas = la pantalla de siempre)
 let ok = 0, ko = 0; const t = (n, c, i) => { c ? (ok++, console.log('✓', n)) : (ko++, console.log('✗', n, i === undefined ? '' : JSON.stringify(i).slice(0, 220))); };
 const i = SRC.indexOf('async function pantalla6() {'); const j = SRC.indexOf('\n}\n', i) + 3; const fn = SRC.slice(i, j);
 async function corre(sobres) {
@@ -11,7 +12,7 @@ async function corre(sobres) {
     getCaja: async () => ({ ok: true, sobres: sobres }),
     pantalla7: () => llamadas.push('p7'), pantalla8: () => llamadas.push('p8'),
     document: { getElementById: () => btn } };
-  vm.createContext(ctx); vm.runInContext(fn + '\n;globalThis.__p6 = pantalla6;', ctx);
+  vm.createContext(ctx); vm.runInContext(PRE_NUEVAS + fn + '\n;globalThis.__p6 = pantalla6;', ctx);
   await ctx.__p6(); const html = app.innerHTML;
   if (btn.onclick) btn.onclick();
   return { html, llamadas, idx: ctx.SOBRE_IDX, paso: ctx.PASO };
