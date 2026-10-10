@@ -42,7 +42,7 @@ async function banco(SRC) {
     const b = m.posts[0];
     t('② el cuerpo: verbo, dia del sobre, nro, evento, motivo, fuente — y NADA de sello ni contado', b.verbo === 'sobre_no_encontrada' && b.sobre_dia_op === '2026-10-08' && b.sobre_nro === '1003' && b.evento === 'no_encontrada' && /existe fisicamente/.test(b.motivo) && b.fuente === 'app_caja' && !('sello_intacto' in b) && !('contado' in b), b);
     await m.ctx.F.marcarNoEncontrada(S('1003'), 'no_encontrada', 'No existe fisicamente en la caja');
-    t('② el uid es ESTABLE para el mismo gesto (un reintento es el mismo hecho)', m.posts[0].uid_gesto === m.posts[1].uid_gesto);
+    t('② con una respuesta DEFINITIVA el gesto se cierra: el siguiente es nuevo (uid nuevo) — el uid estable vale solo mientras la respuesta es incierta (ver ⑪)', m.posts[0].uid_gesto !== m.posts[1].uid_gesto);
     await m.ctx.F.marcarNoEncontrada(S('1004'), 'no_encontrada', 'No existe fisicamente en la caja');
     t('② … y distinto para otro sobre', m.posts[2].uid_gesto !== m.posts[0].uid_gesto);
     await m.ctx.F.marcarNoEncontrada({ sobre_nro: '1009' }, 'ritrovata', 'la vi');
@@ -99,6 +99,19 @@ async function banco(SRC) {
     t('③ bis «ya estaba anotado» (gia_no_encontrada): ok, se dice, y sale del conteo', m.ctx.MANANA.sobres.length === 1 && m.toasts.some((x) => /ya estaba anotado/.test(x[0])), m.toasts); }
   { const m = mondo(SRC, { saludOn: '1' }); m.ctx.MANANA = { ok: true, sobres: [S('1003')], noEnc: [] }; m.ctx.SOBRE_IDX = 0; m.ctx.F.pantalla7(); await tick(); m.el('neAbrir').onclick(); m.el('neMotivo').value = 'No esta en la caja fuerte'; await m.el('neGuardar').onclick(); await tick();
     t('③ ter la ULTIMA busta marcada: se sigue a los cortes POS (paso 3), no queda una pantalla vacia', m.ctx.MANANA.sobres.length === 0 && m.calls.includes('pantalla8'), m.calls); }
+  // ═══ EL GIRO «UNA RIGA»: persa → ritrovata → persa di nuovo, stessa pagina, stesso motivo
+  { const m = mondo(SRC, {}); const sb = S('1003'); const MOT = 'No existe fisicamente en la caja';
+    await m.ctx.F.marcarNoEncontrada(sb, 'no_encontrada', MOT); await m.ctx.F.marcarNoEncontrada(sb, 'ritrovata', 'la encontre en el cajon'); await m.ctx.F.marcarNoEncontrada(sb, 'no_encontrada', MOT);
+    t('⑪ persa → ritrovata → persa di nuovo (stesso motivo, stessa pagina): TRE uid distinti — la terza non e un «gia» muto', new Set(m.posts.map((p) => p.uid_gesto)).size === 3, m.posts.map((p) => p.uid_gesto)); }
+  { const m = mondo(SRC, { postRisp: { ok: true, encolado: true } }); const sb = S('1003'); const MOT = 'No existe fisicamente en la caja';
+    await m.ctx.F.marcarNoEncontrada(sb, 'no_encontrada', MOT); await m.ctx.F.marcarNoEncontrada(sb, 'no_encontrada', MOT);
+    t('⑪ bis risposta INCERTA (sin señal): il reintento porta lo STESSO uid (e lo stesso fatto, mai due)', m.posts.length === 2 && m.posts[0].uid_gesto === m.posts[1].uid_gesto, m.posts.map((p) => p.uid_gesto)); }
+  { const m = mondo(SRC, { postRisp: { ok: false, motivo: 'pg_no_responde' } }); const sb = S('1003'); const MOT = 'No existe fisicamente en la caja';
+    await m.ctx.F.marcarNoEncontrada(sb, 'no_encontrada', MOT); await m.ctx.F.marcarNoEncontrada(sb, 'no_encontrada', MOT);
+    t('⑪ ter base que no responde (incerta): stesso uid al reintento', m.posts[0].uid_gesto === m.posts[1].uid_gesto, m.posts.map((p) => p.uid_gesto)); }
+  { const m = mondo(SRC, { postRisp: { ok: false, motivo: 'gia_contata' } }); const sb = S('1003'); const MOT = 'No existe fisicamente en la caja';
+    await m.ctx.F.marcarNoEncontrada(sb, 'no_encontrada', MOT); await m.ctx.F.marcarNoEncontrada(sb, 'no_encontrada', MOT);
+    t('⑪ quater rifiuto DEFINITIVO (gia_contata): il prossimo tentativo e un gesto nuovo (uid nuovo)', m.posts[0].uid_gesto !== m.posts[1].uid_gesto, m.posts.map((p) => p.uid_gesto)); }
   // ═══ ELEGIR y DEJAR PARA DESPUES (Mayra ferma: «Abrir y contar» apre sempre la 1003) ═══
   { const m = mondo(SRC, { pend: { ok: true, sobres: [S('1003'), S('1004'), S('1005')], noches: ['2026-10-08'] } }); await m.ctx.F.pantalla6();
     const filasEl = (m.app.innerHTML.match(/data-el="\d+"/g) || []);
@@ -117,7 +130,7 @@ async function banco(SRC) {
   { const m = mondo(SRC, { pend: { ok: true, sobres: [S('1003'), S('1004')], noches: ['2026-10-08'] } }); m.ctx.DEJADAS = { '2026-10-08:1003': 1, '2026-10-08:1004': 1 }; await m.ctx.F.pantalla6();
     t('⑩ sexto TODAS dejadas: «Nada que contar» con la lista y paso a los cortes, no «la caja fuerte esta vacia»', /Nada que contar/.test(m.app.innerHTML) && /2 sobres para después/.test(m.app.innerHTML) && !/la caja fuerte está vacía/i.test(m.app.innerHTML) && /irPos/.test(m.app.innerHTML), m.app.innerHTML.slice(0, 220)); }
   { const src = SRC; t('⑩ séptimo el deposito AVISA cuantos sobres no viajan (no encontrados o dejados)', /NO van en este depósito/.test(src) && /MANANA\.noEnc \|\| \[\]\)\.length \+ \(MANANA\.dejadas \|\| \[\]\)\.length/.test(src)); }
-  t('⑧ versión: caja 1.3.0', /caja 1\.3\.0<\/small>/.test(SRC));
+  t('⑧ versión: caja 1.3.1', /caja 1\.3\.1<\/small>/.test(SRC));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }
@@ -132,7 +145,9 @@ await mut('el motivo corto pasa', "if (motivo.length < 8) { toast(NOENC_TXT.moti
 await mut('un error mueve la busta igual', "if (!r.ok) { toast('No se guardó: ' + (NOENC_TXT[r.motivo] || NOENC_TXT[r.error] || r.motivo || r.error), 'bad'); return; }\n        if (r.encolado) { toast('Sin señal — se enviará solo. No sigas hasta que se confirme.', 'bad'); return; }\n        s.no_encontrada", "s.no_encontrada");
 await mut('sin señal se finge', "if (r.encolado) { toast('Sin señal — se enviará solo. No sigas hasta que se confirme.', 'bad'); return; }\n        s.no_encontrada", "s.no_encontrada");
 await mut('solo perdidas = caja vacia', "if (!sobres.length && (MANANA.noEnc.length || MANANA.dejadas.length)) {", "if (false) {");
-await mut('el uid cambia a cada toque', "uidGestoEstable('ne|' + evento + '|' + dia + '|' + sobre.sobre_nro + '|' + motivo, 'ne')", "uidGesto('ne')");
+await mut('il uid non si libera mai (il difetto di EL GIRO)', "  if (!incerta) delete UIDS_GESTO[clave];", "");
+await mut('si libera anche se la risposta e incerta', "var incerta = r.encolado || r.error === 'pg_no_responde' || r.motivo === 'pg_no_responde' || r.motivo === 'sin_red' || r.error === 'sin_red';", "var incerta = false;");
+await mut('el uid cambia a cada toque (un reintento incierto seria un segundo hecho)', "uid_gesto: uidGestoEstable(clave, 'ne'),", "uid_gesto: uidGesto('ne'),");
 await mut('el sello viaja', "sobre_dia_op: dia, sobre_nro: sobre.sobre_nro, evento: evento, motivo: motivo, fuente: 'app_caja' });", "sobre_dia_op: dia, sobre_nro: sobre.sobre_nro, evento: evento, motivo: motivo, sello_intacto: false, fuente: 'app_caja' });");
 await mut('la ritrovata no recarga', "toast('Anotado: el sobre apareció — ya se puede contar', 'ok');\n        pantalla6();", "toast('Anotado: el sobre apareció — ya se puede contar', 'ok');");
 await mut('la fila no es tocable (elegir)', "(s.conteo ? '' : ' data-el=\"' + idx + '\" style=\"cursor:pointer\"')", "''");
