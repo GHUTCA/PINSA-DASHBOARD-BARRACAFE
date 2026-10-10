@@ -40,6 +40,9 @@ async function banco(SRC) {
     t('② quinto 5xx al primo gesto: stesso, MAI il GAS', m.gas.length === 0 && /no respondió/.test(m.toasts[0][1]), [m.toasts, m.gas.length]); }
   { const m = mondo(SRC, { salud: SAL('BKS') }); m.ctx.STATE.turno.asignaciones = [{ plaza: 'P1', franja: '19–cierre', mesero: 'Leo' }]; m.ctx.$('asFranja').value = '19–cierre'; await m.ctx.F.asignar();
     t('② sesto il messaggio dice chi RESTA nella plaza (come prima)', /P1 sigue con Leo/.test(m.toasts[0][1]), m.toasts); }
+  for (const [nome, atteso] of [['pin_jl_bloqueado', /espera 5 min/], ['pin_jl_bloqueado_apparecchio', /espera 5 min/]]) {
+    const m = mondo(SRC, { salud: SAL('BKS'), fetch: { body: { ok: false, error: nome, faltan_s: 300 } } }); await m.ctx.F.asignar();
+    t('② settimo il freno del PIN sul gesto (' + nome + '): i minuti, MAI il GAS, mai il nome crudo', m.gas.length === 0 && m.toasts[0][0] === 'err' && atteso.test(m.toasts[0][1]) && !/pin_jl/.test(m.toasts[0][1]), m.toasts); }
   // ③ il percorso felice
   { const m = mondo(SRC, { salud: SAL('BKS') }); await m.ctx.F.asignar();
     t('③ percorso felice: un fetch a /turno/gesto, nessun GAS, «✓ P1: Isa», giroTurno', m.fetches.length === 1 && /\/turno\/gesto\/BKS$/.test(m.fetches[0][0]) && m.gas.length === 0 && m.toasts.some((x) => x[0] === 'ok' && /P1: Isa/.test(x[1])) && m.giro() === 1, [m.fetches.length, m.toasts]); }
@@ -68,6 +71,7 @@ await mut('il locale non si mappa a PG', "String(LOC_PG[CFG.LOCAL] || CFG.LOCAL 
 await mut('franja vecchia senza motivo', "[0-5][0-9]$/.test(f)) return { usado: false, por: 'franja_vieja' };", "[0-5][0-9]$/.test(f)) return { usado: false };");
 await mut('il bordo che non risponde senza motivo', "if (i === 0) return { usado: false, por: 'bordo_no_responde' };", "if (i === 0) return { usado: false };");
 await mut('lista_gas detto come «no encuentro»', "if (por === 'lista_gas') return", "if (false) return");
+await mut('il freno a due piani senza minuti', "/^pin_jl_bloqueado/.test(String(j.error))", "j.error === 'pin_jl_bloqueado'");
 await mut('la riga guardando non si toglie', "if (turnoEscribeOn()) { togli();", "if (turnoEscribeOn()) { ");
 await mut('il messaggio perde «no se escribió»', "Reintenta en un minuto. No se escribió nada", "Reintenta en un minuto");
 await mut('chi resta nella plaza non si dice', "(_prima ? ' · ' + p + ' sigue con ' + _prima : '')); return; }   // [P4]", "''); return; }   // [P4]");
