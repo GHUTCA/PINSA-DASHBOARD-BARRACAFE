@@ -310,7 +310,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return senzaEsitoHtml() + (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.9.5</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.9.6</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -922,6 +922,8 @@ function pantallaRojaError(codigo) {
   var msg = {
     demasiadas_buste_sin_deposito: ['Hay más sobres R sin depósito de los que una salida puede llevar', 'No sigas: avisa a MIGRACIÓN. Reintentar no lo arregla.', false],
     porta_non_installata: ['La caja roja por noche todavía no está instalada en la base', 'Avisa a MIGRACIÓN. No salgas al banco hasta que esté.', false],
+    pin_caja_bloqueado: ['Demasiados intentos con el PIN', 'Espera unos minutos y vuelve a intentar.', true],
+    pin_caja_no_configurado: ['La caja todavía no tiene PIN configurado', 'Avisa a Alberto.', false],
     pg_no_responde: ['No pude leer la roja: la base no contesta', 'Reintenta en un minuto. No salgas al banco sin leerla.', true],
     sin_red: ['No pude leer la roja: sin conexión', 'Vuelve la señal y reintenta. No salgas al banco sin leerla.', true]
   }[codigo] || ['No pude leer la roja (' + esc(codigo || '?') + ')', 'Avisa a MIGRACIÓN. No salgas al banco sin leerla.', true];
@@ -1018,7 +1020,11 @@ async function pantalla9() {
       if (rjR.sueltas_exceso) { pantallaRojaError('demasiadas_buste_sin_deposito'); return; }
       ROJA = rjR;
     }
-    else if (!rjR.ok && rjR.error !== 'lettura_sconosciuta') { pantallaRojaError(rjR.error); return; }
+    else if (!rjR.ok && rjR.error !== 'lettura_sconosciuta') {
+      /* [EL GIRO ✏️] un error de PIN NO es un fallo de la roja: getCaja ya mostro el aviso y volvio a pedir el PIN (esRespuestaPin) — con el PIN fresco se vuelve a leer, sin decir «avisa a MIGRACIÓN» */
+      if (rjR.pin && (rjR.error === 'pin_caja_invalido' || rjR.error === 'pin_caja_requerido')) { return pantalla9(); }
+      pantallaRojaError(rjR.error); return;
+    }
   }
   if (ROJA) {
     RESERVA = { ok: true, reserva: 0, reserva_pct: ROJA.reserva_pct, porNoche: {}, aSellar: [], sinCuota: [], nuevas: 0 };

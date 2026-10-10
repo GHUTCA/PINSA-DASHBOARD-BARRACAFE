@@ -111,6 +111,15 @@ async function banco(SRC) {
   { const r = ROJA({ noches: ROJA().noches.map((n) => ({ dia: n.dia, estado: 'coperta', importo: 0, quota: 1, coperto: 1, debito: 0 })) });
     const m = mondo(SRC, { roja: r }); await m.ctx.F.pantalla9(); await click(m, 'salir'); const s = SALIDA(m);
     t('⑨ tutte coperte: nessuna busta nuova, la salida porta solo la roja ya sellada (reserva 99.500, a banca = lo contato)', BUSTE(m).length === 0 && s.reserva === 99500 && s.a_depositar === 1632000 && m.toasts.some((x) => /Registrado/.test(x[0])), [BUSTE(m).length, s]); }
+  // ⑮ (EL GIRO ✏️) un errore di PIN non e un guasto della roja: con il PIN fresco si rilegge, MAI «avisa a MIGRACIÓN»
+  for (const errPin of ['pin_caja_invalido', 'pin_caja_requerido']) {
+    let n = 0; const m = mondo(SRC, { roja: undefined }); const orig = m.ctx.getCaja;
+    m.ctx.getCaja = async (p) => { if (/^roja_estado/.test(p) && n++ === 0) return { ok: false, error: errPin, pin: true }; return orig(p); };
+    await m.ctx.F.pantalla9();
+    t('⑮ ' + errPin + ': si rilegge la roja con il PIN fresco (2a lettura) e si arriva a «Antes de salir», senza «MIGRACIÓN»', n === 2 && /Antes de salir/.test(m.app.innerHTML) && !/MIGRACIÓN/.test(m.app.innerHTML), [n, m.app.innerHTML.slice(0, 200)]); }
+  for (const [errPin, frase, conRetry] of [['pin_caja_bloqueado', /Demasiados intentos con el PIN/, true], ['pin_caja_no_configurado', /no tiene PIN configurado/, false]]) {
+    const m = mondo(SRC, { roja: { ok: false, error: errPin, pin: true } }); await m.ctx.F.pantalla9();
+    t('⑮ bis ' + errPin + ': il testo giusto (non «base»/«MIGRACIÓN»), niente «Salir al banco»', frase.test(m.app.innerHTML) && !/MIGRACIÓN/.test(m.app.innerHTML) && !m.mk('salir').onclick && conRetry === /retryRoja/.test(m.app.innerHTML), m.app.innerHTML); }
   // ⑬ (EL GIRO 🟡) piu buste sin deposito di quante la salida puo portare: si ferma e lo dice, senza uscire al banco
   { const m = mondo(SRC, { roja: ROJA({ sueltas_exceso: true }) }); await m.ctx.F.pantalla9();
     t('⑬ `sueltas_exceso`: «Hay más sobres R sin depósito…», niente Reintentar (non serve), niente «Salir al banco», nessun post, e mai «contrato pendiente»', /Hay más sobres R sin depósito/.test(m.app.innerHTML) && !/retryRoja/.test(m.app.innerHTML) && !/contrato pendiente/.test(m.app.innerHTML) && m.posts.length === 0 && !m.mk('salir').onclick, m.app.innerHTML); }
@@ -141,8 +150,9 @@ await mut('rifiutato come esperando', "(x.estado === 'rifiutata' ? 'RECHAZADO' :
 await mut('un blocco permanente offre Reintentar', "'Avisa a MIGRACIÓN. No salgas al banco hasta que esté.', false]", "'Avisa a MIGRACIÓN. No salgas al banco hasta que esté.', true]");
 await mut('l eccesso dice la causa falsa', "if (rjR.sueltas_exceso) { pantallaRojaError('demasiadas_buste_sin_deposito'); return; }", "if (rjR.sueltas_exceso) { renderError('La roja', 'demasiadas_buste_sin_deposito'); return; }");
 await mut('Reintentar non rilegge', "b.onclick = function(){ return pantalla9(); };", "b.onclick = function(){};");
+await mut('un errore di PIN si legge come guasto della roja', "if (rjR.pin && (rjR.error === 'pin_caja_invalido' || rjR.error === 'pin_caja_requerido')) { return pantalla9(); }", "");
 await mut('la roja non si legge', "var rjR = await getCaja('roja_estado?dia=' + DIA_HOY + '&noches=' + NOCHES.join(','));", "var rjR = { ok: false, error: 'lettura_sconosciuta' };");
-await mut('un errore diventa «sin roja»', "else if (!rjR.ok && rjR.error !== 'lettura_sconosciuta') { pantallaRojaError(rjR.error); return; }", "");
+await mut('un errore diventa «sin roja»', "      pantallaRojaError(rjR.error); return;", "");
 await mut('il contado non e lordo', "var c = (Number(document.getElementById('contado').value || '') || 0) + S;", "var c = (Number(document.getElementById('contado').value || '') || 0);");
 await mut('la reserva senza la roja ya sellada', "if (RESERVA.reserva !== null) RESERVA.reserva = RESERVA.nuevas + ROJA.sueltas_total;", "if (RESERVA.reserva !== null) RESERVA.reserva = RESERVA.nuevas;");
 await mut('la coperta si sigilla', "if ((nR.estado === 'da_sigillare' || nR.estado === 'sin_cuota') && nR.importo > 0) {", "if (true) {");
