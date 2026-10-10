@@ -1108,7 +1108,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.223.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.224.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1609,11 +1609,59 @@ const JL = (function () {
 /* la fetta che si legge: in modalità JL è quella del mesero PADRONE, mai la
    firma. Ovunque il poll chiedeva `STATE.nombre` per SAPERE, ora chiede qui. */
 function _vistaNombre() { return (JL && STATE.vista) ? STATE.vista : STATE.nombre; }
-/* [10-ott · decisione ⓐ · 🖐 QUARTA] CHI INCASSA per la propina: il pozo e `pgo:` leggono `registrado_por` (bordo `p.registrado_por || p.nombre`, GAS idem).
-   Se il JL incassa il tavolo di un mesero, la propina individual e' del MESERO del tavolo (la fetta `vista`), non del JL che ha toccato il telefono.
-   `nombre`/`codigo` restano del JL (chi firma e autentica); `cobrado_por` porta il JL, additivo, per la traccia. */
-function _registradoPor() { return (JL && STATE.vista) ? STATE.vista : STATE.nombre; }
-function _cobradoPor() { return JL ? { cobrado_por: JL.user } : {}; }
+/* ═══ [10-ott · decisione ⓐ · AUT-0646 · 🎛 V28 `COBRO JL DUE NOMI INTESTATARIO E MANO`] DUE NOMI, NON UNO ═══
+   `registrado_por` RESTA chi incassa (il JL: ha i biglietti in mano — la guardia ②-ter e la colonna «+ efe» di QUARTA lo leggono).
+   `intestatario` e' un campo NUOVO: il mesero A CUI VA il denaro (propina, cobro, contante) = il mesero della PLAZA del tavolo,
+   preso AL MOMENTO dell'incasso, da una sala letta ADESSO (stessa lezione di Ray, 01-ott: la memoria del telefono puo' essere di
+   quaranta minuti fa). L'invariante di Alberto: ogni tavolo ha una plaza e ogni plaza un mesero ⇒ se manca e' un'ANOMALIA: il vetro lo
+   dice al JL, il fatto si registra (`bordeHecho`), e il cobro NON parte e NON si intesta al JL. Una junta si risolve solo se tutte le sue
+   mesas hanno lo STESSO intestatario. PURA: (mesas, plazaDe(mesa), todos) -> { ok, nombre, plaza } | { ok:false, motivo, mesa, plaza }. */
+function _intestatarioPuro(mesas, plazaDe, todos) {
+  let nombre = '', plaza = '';
+  const lista = (mesas && mesas.length) ? mesas : [];
+  if (!lista.length) return { ok: false, motivo: 'mesa_sin_plaza', mesa: '', plaza: '' };
+  for (let i = 0; i < lista.length; i++) {
+    const mesa = String(lista[i]); const pl = String(plazaDe(mesa) || '').trim();
+    if (!pl) return { ok: false, motivo: 'mesa_sin_plaza', mesa: mesa, plaza: '' };
+    const duenos = [];
+    for (const sl in (todos || {})) {
+      const v = todos[sl]; if (!v || !v.ok) continue;
+      if ((v.plazas || []).indexOf(pl) >= 0) duenos.push(v.nombre || sl);
+    }
+    if (!duenos.length) return { ok: false, motivo: 'plaza_sin_mesero', mesa: mesa, plaza: pl };
+    if (duenos.length > 1) return { ok: false, motivo: 'plaza_con_varios_meseros', mesa: mesa, plaza: pl };
+    if (nombre && duenos[0] !== nombre) return { ok: false, motivo: 'junta_con_varios_meseros', mesa: mesa, plaza: pl };
+    nombre = duenos[0]; if (!plaza) plaza = pl;
+  }
+  return { ok: true, nombre: nombre, plaza: plaza };
+}
+async function _jlIntestatario(mesas) {
+  const dam = function (m) { const x = ((STATE.sala || {}).mesas || []).find(function (y) { return String(y.mesa) === String(m); }); return x && x.plaza; };
+  let todos = null;
+  try {
+    if (BORDE_SALA && BORDE_SALA.ON && STATE.codigo) {
+      const u = BORDE_SALA.URL + '/estado/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?t=' + encodeURIComponent(BORDE_SALA.T)
+        + '&seccion=sala_vista&codigo=' + encodeURIComponent(STATE.codigo);
+      const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, CIE_FRESCO_TIMEOUT_MS);
+      const r = await fetch(u, { signal: ctrl.signal, cache: 'no-store' }); clearTimeout(to);
+      const j = await r.json(); const d = j && j.datos && j.datos.datos; const tsD = d ? Number(d.ts_datos || 0) : 0;
+      if (r.ok && j && j.ok && d && d.ok && d.meseros && tsD > 0 && Date.now() - tsD <= CIE_FRESCO_MAX_MS && tsD - Date.now() <= 120000) todos = d.meseros;
+    }
+  } catch (e) { todos = null; }
+  if (!todos) return { ok: false, motivo: 'sala_no_leida', mesa: String((mesas || [])[0] || ''), plaza: '' };
+  return _intestatarioPuro(mesas, dam, todos);
+}
+const _INTEST_MSG = {
+  sala_no_leida: 'No pude leer la sala ahora mismo — reintenta en unos segundos.',
+  mesa_sin_plaza: 'Esta mesa no tiene plaza — avisa al administrador; el cobro no se hace a tu nombre.',
+  plaza_sin_mesero: 'La plaza de esta mesa no tiene a nadie asignado — asígnala y vuelve a cobrar; el cobro no se hace a tu nombre.',
+  plaza_con_varios_meseros: 'La plaza de esta mesa tiene más de un mesero — deja uno solo y vuelve a cobrar.',
+  junta_con_varios_meseros: 'Las mesas de esta junta son de meseros distintos — no se puede cobrar junto.'
+};
+function _intestatarioAnomalia(a, accion) {
+  try { bordeHecho('pago_sin_intestatario', { mesa: a.mesa || '', plaza: a.plaza || '', motivo: a.motivo, accion: accion }); } catch (e) {}
+  toast('err', _INTEST_MSG[a.motivo] || 'No se pudo saber el mesero de esta mesa.', 7000);
+}
 function _jlBackUrl() {
   const loc = ({ BKS: 'bks', RIESCO: 'rsc', CANDELARIA: 'cdl' })[CFG.LOCAL] || 'bks';
   return 'app_jl.html?loc=' + loc;
@@ -10943,8 +10991,8 @@ function renderPanel() {
      Alberto: NON compaiono. 🔴 Il filtro è QUI, sulla lista che disegna i
      bottoni, non su un CSS: un bottone che non esiste non si preme per sbaglio
      e non si «scopre» ispezionando il DOM. */
-  /* [10-ott · decisione ⓐ] a `JL_TODO_ON` accesa il JL ha anche PEDIR · COBRAR · MOVER (PRECUENTA e SEPARAR/TIEMPOS no: non nominati). */
-  const VJ = JL ? V.filter(function (b) { return b.k === 'pedidos' || b.k === 'descontar' || (JL_TODO_ON && (b.k === 'pedir' || b.k === 'cobrar' || b.k === 'mover')); }) : V;
+  /* [10-ott · decisione ⓐ] a `JL_TODO_ON` accesa il JL ha anche PEDIR · COBRAR · MOVER (+ PRECUENTA, 10-ott 11:xx V28: «da lì deve fare tutto»; SEPARAR/TIEMPOS no). */
+  const VJ = JL ? V.filter(function (b) { return b.k === 'pedidos' || b.k === 'descontar' || (JL_TODO_ON && (b.k === 'pedir' || b.k === 'precuenta' || b.k === 'cobrar' || b.k === 'mover')); }) : V;
   el.innerHTML =
     '<div class="vp-h">' + (j ? '<span style="color:' + _juntaCol(j.n) + '">👥</span>' : '') +
       '<span class="tt">Mesa ' + esc(mesa) + '</span>' +
@@ -12034,10 +12082,13 @@ async function fintocRegistrar__in(mesa) {
   const md = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
   const tot = md ? md.pend.concat(md.mios).concat(md.limpiar)
     .reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0) : 0;
+  let intF = null;
+  if (JL) { intF = await _jlIntestatario([mesa]); if (!intF.ok) { _intestatarioAnomalia(intF, 'fintoc'); return; } }   // [10-ott · AUT-0646]
   STATE.fintocEnviando = true;
   try {
     const r = await gasPost('registrarPago', {
-      codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: _registradoPor(), cobrado_por: JL ? JL.user : undefined,   // [10-ott · ⓐ]
+      codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: STATE.nombre,
+      intestatario: intF ? intF.nombre : undefined, intestatario_plaza: intF ? intF.plaza : undefined,   // [10-ott · AUT-0646] solo in `?jl=1`
       mesa: mesa, medio: 'fintoc', ref: pagFin.pi || '',
       propina: Math.max(0, Math.round(pagFin.monto - tot)), boleta: 1 });
     if (r && r.ok) {
@@ -14757,13 +14808,18 @@ async function pagoConfirmar(btn) {
   if (CERRAR_ASK_ON && !(await _cerrarAsk(pg))) return;
   pg.enviando = true; renderPago();
   const propina = _pagoPropina();
+  let intest = null;
+  if (JL) {   // [10-ott · AUT-0646] il JL incassa: il mesero del tavolo si prende dalla plaza ADESSO; se manca il cobro non parte
+    intest = await _jlIntestatario((pg.mesas && pg.mesas.length) ? pg.mesas : [pg.mesa]);
+    if (!intest.ok) { pg.enviando = false; renderPago(); _intestatarioAnomalia(intest, 'pagoConfirmar'); return; }
+  }
   const esCort = pg.medio === 'cortesia';
   /* v1.1 · il fossile porta il monto VERO: cortesía = $0 (e niente boleta —
      una invitación non è una vendita) · sconto manuale di cassa = il cobrado.
      Gli sconti di SISTEMA (2x1, menú, fasce) sono già dentro pg.tot: i prezzi
      si fossilizzano scontati alla presa del pedido. */
   const body = {
-    codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: _registradoPor(),   // [10-ott · ⓐ] in `?jl=1` la propina e' del mesero del tavolo
+    codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: STATE.nombre,
     mesa: pg.mesa, medio: pg.medio, propina: propina, pago_uid: pg.uid,   // v1.16
     correo: (pg.correo || '').trim(), celular: (pg.celular || '').trim(),
     nombre_cliente: (pg.nombre || '').trim(),   // v3.4.3 · additivo: il GAS lo ignora finché non lo legge
@@ -14781,7 +14837,7 @@ async function pagoConfirmar(btn) {
      `abrirPago` l'ha popolato (pago di junta vero): un `gid` a caso su una
      mesa singola non aiuterebbe e sporcherebbe l'audit
      (`mesas_payload_rechazado`) senza motivo. */
-  Object.assign(body, _cobradoPor());   // [10-ott · ⓐ] chi ha toccato il telefono (solo `?jl=1`), additivo
+  if (intest) { body.intestatario = intest.nombre; body.intestatario_plaza = intest.plaza; }   // [10-ott · AUT-0646] il mesero A CUI VA il denaro; `registrado_por` resta chi incassa
   if (pg.gid) body.gid = pg.gid;
   if (pg.uuids && pg.uuids.length) body.uuids = pg.uuids;   // [AUT-0462] le righe del pannello, congelate all apertura
   /* v1.4 · le mosse del JL viaggiano DICHIARATE + col PIN (GAS v3.75.0):
