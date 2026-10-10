@@ -83,6 +83,12 @@ async function banco(SRC) {
   { const m = mondo(SRC, { leva: true, seleccion: ['200', '199'], staffRisp: { ok: true, grupo_id: 'G-2026-10-10-3' } }); m.ctx.crea(); await tick();
     const j = m.juntas()[0] || {};
     t('1.4b sexies la risposta del GAS (senza borde:true) NON fissa gidPg: e la chiave del GAS, non quella della riga del bordo', !j.gidPg && j.gidSrv === 'G-2026-10-10-3', j); }
+  { const m = mondoSep(SRC, { n: 1, principal: '200', ts: 1, gid: 'un-vetro', gidPg: 'un-vetro', mesas: ['199', '200'] }); m.ctx.sep(1); await tick();
+    const b = (m.chiamate[0] || [])[1] || {};
+    t('1.4b octies il separar manda `mesas` (le mesas della junta): senza, il guardiano del bordo conta zero => conflicto => ripiega sul GAS ogni volta', b.mesas === '199,200' && b.principal === '200', b); }
+  { const m = mondoSep(SRC, { n: 1, principal: '200', ts: 1, gid: 'G-X', mesas: ['199', '200'] }); m.ctx.sep(1); await tick();
+    const b = (m.chiamate[0] || [])[1] || {};
+    t('1.4b nonies `mesas` viaggia ANCHE senza gid_rotti (la junta nata sul GAS): il guardiano ha bisogno delle mesas comunque', b.mesas === '199,200' && !('gid_rotti' in b), b); }
   { // il sync del poll riscrive la junta dal server (gid del GAS) e NON deve perdere gidPg
     const salvate = []; const ctx = { JFIX_ON: false, STATE: {}, _juntasLoad: () => [{ n: 1, principal: '200', ts: 1, gid: 'un-vetro', gidSrv: 'un-vetro', gidPg: 'un-vetro', mesas: ['199', '200'] }], _juntasSave: (l) => salvate.push(l),
       _mesasIguales: (x, y) => JSON.stringify([...x].sort()) === JSON.stringify([...y].sort()), Date, Math, JSON, Array, Object };
@@ -105,6 +111,7 @@ await mut('gid_rotti nomina tutte le junte', "const gidRotti = prima.filter(func
 await mut('il testimone non parte', "bordeHecho('unir', { principal: principal, mesas: _mesasOrden });", "");
 await mut('la junta si conferma anche senza grupo_id', "if (r && r.ok && r.grupo_id) {", "if (r && r.ok) {");
 await mut('il separar manda la chiave del GAS (gidSrv)', "const _chiavePg = j.gidPg || '';", "const _chiavePg = j.gidSrv || j.gid || '';");
+await mut('il separar non manda mesas', "principal: j.principal, mesas: (j.mesas || []).join(','), gid: _gid('sp') }", "principal: j.principal, gid: _gid('sp') }");
 await mut('il separar non manda niente', "const _chiavePg = j.gidPg || '';", "const _chiavePg = '';");
 await mut('il separar inventa una chiave', "const _chiavePg = j.gidPg || '';", "const _chiavePg = j.gidPg || 'x';");
 await mut('l unir nomina il gid del GAS', "return j.gidPg; }).filter(Boolean);", "return j.gidSrv || j.gid; }).filter(Boolean);");
