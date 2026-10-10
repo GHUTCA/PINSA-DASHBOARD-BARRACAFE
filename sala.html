@@ -1108,7 +1108,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.225.2 · vetro</span>
+      <span class="ver" id="ver">sala v3.225.3 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -11187,7 +11187,9 @@ function _juntasSync(r) {
     let n = (viejo && !usati[viejo.n]) ? viejo.n : 0;
     if (!n) { n = 1; while (usati[n]) n++; }
     usati[n] = true;
-    out.push({ n: n, principal: principal, mesas: mesas, gid: g.gid || '', gidSrv: g.gid || '', srv: true });
+    /* [1.4b] `gidPg` sopravvive al rifacimento dal server: la junta locale che corrisponde (stesso principal o stesse mesas) lo porta avanti */
+    const _conPg = prev.find(function (x) { return x.gidPg && (x.principal === principal || _mesasIguales(x.mesas, mesas)); });
+    out.push(Object.assign({ n: n, principal: principal, mesas: mesas, gid: g.gid || '', gidSrv: g.gid || '', srv: true }, _conPg ? { gidPg: _conPg.gidPg } : {}));
   });
   /* ═══ [AUT-0212] · 06-set · LA FOTO VECCHIA NON SCIOGLIE LA JUNTA NUOVA ════
      IL FATTO, riprodotto in diretta con Alberto alle 08:5x: junta fatta e
@@ -11291,7 +11293,7 @@ function juntaCrear() {
   /* [10-ott · 1.4] le junte che QUESTO gesto scioglie: il bordo chiude la loro riga in `grupos_mesa` solo se il vetro le NOMINA (`gid_rotti`: «chi scioglie, dice»).
      Senza, una junta rifatta resterebbe aperta in Postgres per sempre. */
   const gidRotti = prima.filter(function (j) { return j.mesas.some(function (m) { return sel.indexOf(m) >= 0; }); })
-    .map(function (j) { return j.gidSrv || j.gid; }).filter(Boolean);   // [1.4b] la chiave che il LIBRO conosce (gidSrv), `gid` di ripiego
+    .map(function (j) { return j.gidPg; }).filter(Boolean);   // [1.4b] SOLO la chiave con cui il BORDO ha scritto la riga (gidPg)
   const n = list.reduce(function (mx, j) { return Math.max(mx, j.n); }, 0) + 1;
   const principal = (_mapStart && sel.indexOf(_mapStart) >= 0) ? _mapStart : sel[0];
   /* [26-set · collaudo junta 998+999, decisione `LA JUNTA NASCE AL BORDO
@@ -11352,7 +11354,10 @@ function juntaCrear() {
                grupo». `gid` da solo (r.10159 ca.) è coniato dal vetro e
                vive anche se il libro non ha mai risposto — vedi la riga
                sotto per il perché questa distinzione esiste. */
-            if (x) { x.gid = r.grupo_id; x.gidSrv = r.grupo_id; _juntasSave(l2); }
+            /* [10-ott · 1.4b · `gidPg`] la chiave con cui il BORDO ha scritto la riga di `grupos_mesa`: e' il `grupo_id` di una risposta TIMBRATA dal bordo (`borde:true`, che il bordo
+               rende solo se la riga e' in coda). Il GAS conia un id SUO (`G-<fop>-<n>`, MENU_GAS ~4960: NON adotta `payload.gid`) e il poll (`_juntasSync`) riscrive `gid`/`gidSrv`
+               con quello: da quel momento `gidSrv` NON e' piu' la chiave della riga di Postgres. Per chiudere la riga giusta serve `gidPg`, che il sync non deve perdere. */
+            if (x) { x.gid = r.grupo_id; x.gidSrv = r.grupo_id; if (r.borde === true) x.gidPg = r.grupo_id; _juntasSave(l2); }
           }
         }).catch(function () {});
     } catch (e) {}
@@ -11402,9 +11407,9 @@ function juntaSeparar(nJ) {
       /* [10-ott · 1.4b · QUARTA `df3944f`] il bordo chiude la riga di `grupos_mesa` per OGNI gid di `gid_rotti`: la chiave e' quella CHE IL LIBRO CONOSCE (`gidSrv`, il gid con cui il libro ha
          confermato la junta; `gid` solo di ripiego), NON il `gid` del gesto (`_gid('sp')`, che e' la chiave del separar). `pgGrupoFilaCierre` non verifica che la junta esista: un gid
          sbagliato scrive una riga fantasma «chiusa». Senza chiave nota la chiave non nasce (come oggi). */
-      const _chiaveLibro = j.gidSrv || j.gid || '';
+      const _chiavePg = j.gidPg || '';   // [1.4b] SOLO la chiave con cui il bordo ha scritto la riga: una chiave sbagliata scrive una junta fantasma «chiusa»
       staffPost('separarMesas', Object.assign({ codigo: STATE.codigo, nombre: STATE.nombre,
-        principal: j.principal, gid: _gid('sp') }, _chiaveLibro ? { gid_rotti: [_chiaveLibro] } : {})).catch(function () {});
+        principal: j.principal, gid: _gid('sp') }, _chiavePg ? { gid_rotti: [_chiavePg] } : {})).catch(function () {});
     } catch (e) {}
   }
   cerrarMesa(); refrescarMapa();
