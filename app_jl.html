@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.37.1</span>
+<span class="ver" id="ver">app_jl v1.37.2</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1227,8 +1227,56 @@ function _cierresTodos() {
   });
   return out;
 }
+/* ═══ [10-ott · v1.37.2 · V28 «El servicio dell'app_jl deve leggere dal bordo»] ═══════════════════════════════════════════════
+   La card «El servicio» (e i 5 riquadri della testata) leggevano chi ha incassato quanto da `getCaja` = GOOGLE: dopo un cobro la card diceva «2 cuentas abiertas ·
+   sin cobrar todavía» per ore (la coda bordo→Google arrivava a 85-96 min di ritardo) — un vetro che legge Google, esattamente il piano del 23-ott.
+   Con la leva del bordo accesa (/salud → caja_servicio_on) il denaro INCASSATO viene dal verbo caja `servicio` (pagos di Postgres + coda del bordo, chiave = il mesero
+   a cui va il denaro) e i tavoli APERTI dalla fetta del bordo che l'app ha gia' (STATE.vista, nessun poll nuovo per questi). Google resta il ripiego: leva spenta, bordo
+   in errore o dato piu' vecchio di 3 minuti => la card e' quella di ieri, e la riga «📷 caja» dice DA DOVE e quanto e' vecchio.
+   🪦 DEBITO DICHIARATO (N2): `giroServicio` e' una lettura in piu' (stessa cadenza di giroCaja, 60 s). Muore con `getCaja` quando la caja intera esce da Google (cantiere 23-ott). */
+function _servOn() { return cjFlag('caja_servicio_on') && cjAtto1On(); }
+function _servFresco() { return !!(_servOn() && STATE.serv && STATE.serv.ok && STATE.ts.serv && (Date.now() - STATE.ts.serv) < 180000); }
+async function giroServicio() {
+  if (DEMO || !STATE.pin || !_servOn() || STATE.servInVolo) return;
+  STATE.servInVolo = true;
+  try {
+    const r = await cajaPost1({ verbo: 'servicio', pin_jl: STATE.pin });
+    if (r && r.ok) { STATE.serv = r; STATE.ts.serv = Date.now(); STATE.servErr = ''; pintaTesta(); pintaTab(); }
+    else STATE.servErr = (r && r.error) || 'no_ok';   // spento o errore: silenzio, resta Google — e la riga «📷 caja» dice quanto e' vecchio
+  } catch (e) { STATE.servErr = e && e.message === 'timeout' ? 'timeout' : 'sin_conexion'; }
+  STATE.servInVolo = false;
+}
+/* la caja come la VEDE il JL: Google + (se il bordo la serve fresca) il denaro incassato e i tavoli aperti del bordo. NON muta STATE.caja. */
+function _cajaVista() {
+  const c = STATE.caja;
+  if (!_servFresco()) return c;
+  const sv = STATE.serv, base = Object.assign({}, c || { ok: true }), g = (c && c.por_mesero) || {}, pm = {}, porSlug = {};
+  Object.keys(g).forEach(function (n) {
+    pm[n] = Object.assign({}, g[n]);
+    if (String(n).trim()) { pm[n].cobrado = 0; pm[n].n_cobros = 0; porSlug[_slugSalaJS(n)] = n; }   // l'incassato di Google non si mescola con quello del bordo
+  });
+  const chiave = function (nome) { const k = _slugSalaJS(nome); if (porSlug[k] == null) { porSlug[k] = nome; if (!pm[nome]) pm[nome] = {}; } return porSlug[k]; };
+  Object.keys(sv.por_mesero || {}).forEach(function (n) {
+    const m = pm[chiave(n)]; m.cobrado = +sv.por_mesero[n].cobrado || 0; m.n_cobros = +sv.por_mesero[n].n_cobros || 0;
+  });
+  const ms = STATE.vista && STATE.vista.meseros;
+  const buoni = ms ? Object.keys(ms).filter(function (k) { return ms[k] && ms[k].ok; }) : [];
+  if (buoni.length) {   // la fetta del bordo c'e': i tavoli APERTI vengono da li', non dall'abierto di Google
+    Object.keys(pm).forEach(function (n) { if (String(n).trim()) { pm[n].abierto = 0; pm[n].n_abierto = 0; } });
+    buoni.forEach(function (k) {
+      let tot = 0, n = 0;
+      ((ms[k] && ms[k].mesas) || []).forEach(function (x) { const mio = +(x && x.mio) || 0; if (mio > 0) { tot += mio; n++; } });
+      if (!tot) return;
+      const m = pm[chiave(ms[k].nombre || k)]; m.abierto = Math.round(tot); m.n_abierto = n;
+    });
+    base.abiertas_bordo = _cjMesasAbiertas().length;
+  }
+  base.por_mesero = pm; base.venta = +sv.venta || 0; base.cuentas = +sv.cuentas || 0; base.fuente_bordo = true;
+  return base;
+}
 async function giroCaja() {
   if (DEMO || !STATE.pin) return;
+  giroServicio();   // [v1.37.2] in parallelo, senza aspettare Google; a leva spenta esce subito
   try {
     /* [06-set · Alberto: «i 4 numeri non si vedono ancora»] getCaja legge
        `payload.pin_jl`, NON `payload.pin` (r.20192 del GAS): col nome
@@ -1310,9 +1358,9 @@ function pintaTesta() {
   /* [06-set · Alberto] «i 4 numeri non hanno nessun valore, solo un trattino»:
      il «—» non distingueva «sto caricando» da «è zero». Ora: puntini mentre
      la caja è in volo, numeri veri appena atterra. Un dato che manca lo dice. */
-  const c = STATE.caja;
-  const vuoto = STATE.ts.caja ? '0' : '···';
-  const abiertas = c && c.mesas_abiertas ? c.mesas_abiertas.length : null;
+  const c = _cajaVista();
+  const vuoto = (STATE.ts.caja || _servFresco()) ? '0' : '···';
+  const abiertas = c && c.abiertas_bordo != null ? c.abiertas_bordo : (c && c.mesas_abiertas ? c.mesas_abiertas.length : null);
   /* v1.27.0 · [PASSAGGIO CONTROLLER, AUT-0227-bis, 10-set] Alberto, in sala:
      «dovrei vedere DUE numeros: quanto ho en sala ahora y quanto pagato».
      I quattro riquadri di sempre vengono tutti dal PAGATO (`venta`) — a metà
@@ -1370,7 +1418,7 @@ function _enSalaDaVista() {
 
 /* ═════ SCHEDA SALA ═════ */
 function _porMesero() {
-  const c = STATE.caja;
+  const c = _cajaVista();
   const out = [];
   /* 🔴 [06-set · reperti di Alberto: «Eduardo $0», «(sin mesero)», «0 cuentas»]
      Il GAS tiene DUE fatti diversi nello stesso oggetto (v3.93.0, VB di
@@ -1640,7 +1688,7 @@ function vSala() {
        err ? '⚠️ La caja no responde: <b>' + esc(err) + '</b>' :
         (STATE.ts.caja ? 'Sin ventas todavía.' : 'Cargando la caja detrás… la pantalla no espera.')) + '</p>' +
       (err ? '<button class="btn" onclick="giroCaja()">Reintentar</button>' : '') +
-      '<p class="mini">📷 caja ' + edadTxt('caja') + '</p></div>';
+      '<p class="mini">📷 caja ' + (_servFresco() ? 'del bordo ' + edadTxt('serv') : edadTxt('caja')) + '</p></div>';
   } else {
     /* la legenda dei colori: la prima volta si legge, poi l'occhio la sa */
     h += '<p class="mini" style="margin:2px 2px 8px">' +
@@ -1947,7 +1995,7 @@ function vTurno() {
        nessun bottone che la chiami. */
     h += '<p class="mini">El turno se cierra solo cuando se abre el siguiente: el código de hoy deja de valer en ese momento.</p></div>';
   }
-  h += '<p class="mini" style="margin:4px 2px">📷 turno ' + edadTxt('turno') + ' · caja ' + edadTxt('caja') + '</p>';
+  h += '<p class="mini" style="margin:4px 2px">📷 turno ' + edadTxt('turno') + ' · caja ' + (_servFresco() ? 'del bordo ' + edadTxt('serv') : edadTxt('caja')) + '</p>';
   return h;
 }
 /* ── la leva parla due lingue: il vetro dice esca|estandar|off, il server
