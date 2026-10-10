@@ -9108,6 +9108,7 @@ var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propi
 /* [10-ott · decisione ⓐ di Alberto · 🎛 V28 `JL FA TUTTO DALLA SUA APP COBRAR`] il JL fa tutto dalla sua app: PEDIR · COBRAR · MOVER tornano nel `?jl=1`.
    Leva del bordo (/salud → jl_todo_on). NASCE SPENTA: spenta, `VJ` filtra come ieri (solo PEDIDOS ed ELIMINAR). */
 var JL_TODO_ON = false;
+var UNIR_VIA_BORDE_ON = false;   // [10-ott · 1.4 · BKP `BKP 1 4 UNIR VA DIRITTO AL GAS`] /salud → unir_via_borde_on: l'UNIR passa dal bordo come mover e separar. Nasce spenta = il gasPost di ieri.
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
 /* [29-set · Alberto: «il tetto del 30% fallo subito»] il tetto NON e' piu' una
    copia del vetro: si legge dal bordo (/salud → desc_max_pct), che e' la fonte
@@ -9137,6 +9138,7 @@ var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertu
       CORTE_BORDE_ON = String(cercaK(j, 'corte_borde_on')) === '1';         // [08-ott · 1.6]
       CAJA_ATTO3_ON = String(cercaK(j, 'caja_atto3_on')) === '1';           // [03-ott · ATTO III]
       JL_TODO_ON = String(cercaK(j, 'jl_todo_on')) === '1';                 // [10-ott · decisione ⓐ]
+      UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';   // [10-ott · 1.4]
       CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
     }).catch(function () {});
   } catch (e) { /* senza il bordo resta 30 */ }
@@ -11286,6 +11288,10 @@ function juntaCrear() {
   // INTERA — e lo si dice, non lo si fa in silenzio (reperto del collaudo)
   const rotte = prima.length - list.length;
   if (rotte) toast('warn', '✂ ' + rotte + ' junta' + (rotte === 1 ? '' : 's') + ' anterior' + (rotte === 1 ? '' : 'es') + ' se deshizo — estas mesas cambian de grupo');
+  /* [10-ott · 1.4] le junte che QUESTO gesto scioglie: il bordo chiude la loro riga in `grupos_mesa` solo se il vetro le NOMINA (`gid_rotti`: «chi scioglie, dice»).
+     Senza, una junta rifatta resterebbe aperta in Postgres per sempre. */
+  const gidRotti = prima.filter(function (j) { return j.mesas.some(function (m) { return sel.indexOf(m) >= 0; }); })
+    .map(function (j) { return j.gid; }).filter(Boolean);
   const n = list.reduce(function (mx, j) { return Math.max(mx, j.n); }, 0) + 1;
   const principal = (_mapStart && sel.indexOf(_mapStart) >= 0) ? _mapStart : sel[0];
   /* [26-set · collaudo junta 998+999, decisione `LA JUNTA NASCE AL BORDO
@@ -11324,7 +11330,14 @@ function juntaCrear() {
      resta locale come ieri: il servizio non dipende dall'esito. */
   (function (jj) {
     try {
-      gasPost('unirMesas', { codigo: STATE.codigo, nombre: STATE.nombre, mesas: _mesasOrden, gid: gid })
+      /* [10-ott · 1.4 · BKP `BKP 1 4 UNIR VA DIRITTO AL GAS`] l'UNIR partiva SEMPRE col `gasPost`: il bordo ne riceveva solo l'eco (`bordeHecho('unir')`), e la riga di
+         `grupos_mesa` nasce DENTRO il verbo `unirMesas` del bordo, che dalla consola non veniva mai chiamato — irraggiungibile, non rotto. Anche la `separar` successiva
+         cadeva su Google (`conflicto`: il bordo non conosceva il `mesa_grupo`, contava zero). Con la leva `unir_via_borde_on` l'unir va come mover e separar: `staffPost`
+         (prima il bordo, che ACCETTA e conferma `grupo_id` solo se la riga e' in coda; il libro segue; se il bordo non risponde, ricade da solo su Google con lo STESSO corpo).
+         Leva spenta = il `gasPost` di ieri, riga per riga. */
+      const _corpoUnir = { codigo: STATE.codigo, nombre: STATE.nombre, mesas: _mesasOrden, gid: gid };
+      if (gidRotti.length) _corpoUnir.gid_rotti = gidRotti;
+      (UNIR_VIA_BORDE_ON ? staffPost('unirMesas', _corpoUnir) : gasPost('unirMesas', _corpoUnir))
         .then(function (r) {
           /* [26-set] se il libro adotta `payload.gid` (② del piano, non
              ancora fatta), `r.grupo_id` sarà il NOSTRO gid — riscriverlo è
