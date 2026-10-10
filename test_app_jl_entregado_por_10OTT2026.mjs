@@ -10,16 +10,16 @@ const BORDO = process.argv[3] || path.join(AQUI, '..', '_wt_0613');
 const SRC0 = fs.readFileSync(APP, 'utf8').replace(/\r\n/g, '\n');
 let ok = 0, ko = 0, muto = false; const t = (n, c, i) => { c ? ok++ : (ko++, muto || console.log('✗', n, i === undefined ? '' : JSON.stringify(i).slice(0, 300))); };
 const fn = (SRC, nome) => { const i = SRC.indexOf('function ' + nome + '('); if (i < 0) throw new Error('manca ' + nome); let d = 0, j = SRC.indexOf('{', i); for (; j < SRC.length; j++) { if (SRC[j] === '{') d++; else if (SRC[j] === '}' && --d === 0) break; } return SRC.slice(i, j + 1) + '\n'; };
-const FN = ['cjFlag', '_cjEntregaOn', '_cjEntrega', '_cjEnManoDe', 'cjRetEntrega'];
+const FN = ['cjFlag', '_cjEntregaOn', '_cjEntrega', '_cjEnManoDe', 'cjRetEntrega', '_cjPartesTxt'];
 
 function mondo(SRC, { flag, user = 'Ale JL', meseros = ['Marcela', 'Ray', 'Ale JL'] }) {
-  const ctx = { JSON, RegExp, String, Object, esc: (x) => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;'),
+  const ctx = { JSON, RegExp, String, Object, fmt: (n) => '$' + Number(n).toLocaleString('es-CL'), _cjRiga: (a, b) => '<r>' + a + '|' + b + '</r>', esc: (x) => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;'),
     STATE: { user, salud: flag ? { caja: { caja_entregado_por_on: '1' } } : { caja: { caja_entregado_por_on: '0' } } },
     pintaTab: () => { ctx.REDIBUJADO = (ctx.REDIBUJADO || 0) + 1; },
     CJ1: { ret: null, st: { meseros: meseros.map((m, i) => ({ mesero: m, en_mano: 1000 * (i + 1) })) } } };
   vm.createContext(ctx);
-  vm.runInContext(FN.map((n) => fn(SRC, n)).join('') + '\n' + fn(SRC, '_cjEntregaSel')
-    + '\nthis.API = { _cjEntregaOn, _cjEntrega, _cjEnManoDe, cjRetEntrega, _cjEntregaSel };', ctx); return ctx;
+  vm.runInContext(FN.map((n) => fn(SRC, n)).join('') + '\n' + fn(SRC, '_cjEntregaSel') + fn(SRC, '_cjReparto')
+    + '\nthis.API = { _cjEntregaOn, _cjEntrega, _cjEnManoDe, cjRetEntrega, _cjEntregaSel, _cjReparto, _cjPartesTxt };', ctx); return ctx;
 }
 function banco(SRC) {
   const k0 = ko;
@@ -44,6 +44,16 @@ function banco(SRC) {
     ret.entrega = 'Ale JL'; ret.conf = 5; m.API.cjRetEntrega('Ray'); t('③ ter cambiare chi consegna ridisegna e azzera la conferma vecchia (vale per UN monto)', m.REDIBUJADO === 1 && ret.conf === 0 && ret.entrega === 'Ray', [m.REDIBUJADO, ret]);
     const mm = mondo(SRC, { flag: false }); const r2 = { mesero: 'Marcela', att: { en_mano: 1000 }, entrega: 'Ale JL' }; mm.CJ1.ret = r2;
     t('③ ter leva SPENTA: anche con un nome nel campo la cifra resta quella del mesero', mm.API._cjEnManoDe(r2) === 1000, mm.API._cjEnManoDe(r2)); }
+  // ③ quater DA DOVE viene la cifra: il bordo divide da solo e lo dice in `reparto`
+  { const REP = { mesero: 'Pedro JL', en_mano: 52000, reparto: [{ mesero: 'Jurley', monto: 40000 }, { mesero: 'Marcela', monto: 7000 }, { mesero: 'Pedro JL', monto: 5000, propio: true }] };
+    const on = mondo(SRC, { flag: true }), off = mondo(SRC, { flag: false });
+    const h = on.API._cjReparto(REP);
+    t('③ quater con la leva: una riga per persona, la sua parte marcata «lo tuyo»', h.includes('Jurley|$40.000') && h.includes('Marcela|$7.000') && h.includes('Pedro JL (lo tuyo)|$5.000'), h);
+    t('③ quater leva SPENTA: nessun reparto (il vetro di ieri)', off.API._cjReparto(REP) === '', off.API._cjReparto(REP));
+    t('③ quater senza reparto (nessun pago altrui): niente', on.API._cjReparto({ mesero: 'Ray', en_mano: 5 }) === '' && on.API._cjReparto(null) === '');
+    t('③ quater il testo delle parti dopo il Recibí', on.API._cjPartesTxt([{ mesero: 'Jurley', monto: 40000 }, { mesero: 'Pedro JL', monto: 5000 }]) === 'Jurley $40.000 · Pedro JL $5.000', on.API._cjPartesTxt([{ mesero: 'Jurley', monto: 40000 }])); }
+  t('③ quater il reparto compare nella scheda «Recibí $X» e si nasconde se il JL ha scelto chi consegna a mano', SRC.includes("(CJ1.ret.entrega ? '' : _cjReparto(a))"));
+  t('③ quater dopo un Recibí diviso il JL legge le parti (r.diviso)', SRC.includes("else if (r.diviso) toast('ok', '✓ Recibiste '") && SRC.includes('_cjPartesTxt(r.partes)'));
   // ④ i due ritiri vivi
   t('④ «Recibí $X» firma l en_mano di CHI CONSEGNA (`visto: _cjEnManoDe(ret)`)', /visto: _cjEnManoDe\(ret\), uid_gesto: ret\.uid/.test(SRC));
   t('④ la cifra digitata: `esperado_ora`, il tetto e il «Faltaban» sono di chi consegna', /esperado_ora: _cjEnManoDe\(ret\)/.test(SRC) && /const att = _cjEnManoDe\(CJ1\.ret\);/.test(SRC) && /'\? Faltaban ' \+ fmt\(_cjEnManoDe\(CJ1\.ret\)\)/.test(SRC));
@@ -81,6 +91,11 @@ mut('il tetto resta del mesero', 'const att = _cjEnManoDe(CJ1.ret);', 'const att
 mut('esperado_ora resta del mesero', 'esperado_ora: _cjEnManoDe(ret)', 'esperado_ora: ret.att.en_mano');
 mut('_cjEnManoDe ignora chi consegna', "if (!e) return +(ret && ret.att && ret.att.en_mano) || 0;", "return +(ret && ret.att && ret.att.en_mano) || 0;");
 mut('cambiare chi consegna non azzera la conferma', "CJ1.ret.entrega = String(v || ''); CJ1.ret.conf = 0; pintaTab();", "CJ1.ret.entrega = String(v || '');");
+mut('il reparto compare anche a leva spenta', "if (!_cjEntregaOn() || !a || !a.reparto", "if (!a || !a.reparto");
+mut('il reparto non si nasconde con la scelta manuale', "(CJ1.ret.entrega ? '' : _cjReparto(a))", "_cjReparto(a)");
+mut('il reparto non e nella scheda', "(CJ1.ret.entrega ? '' : _cjReparto(a)) + ", "");
+mut('il Recibí diviso non racconta le parti', "else if (r.diviso) toast(", "else if (false) toast(");
+mut('la sua parte non e marcata', "(x.propio ? ' (lo tuyo)' : '')", "''");
 mut('Recibí $X non lo spedisce', "uid_gesto: ret.uid, ..._cjEntrega(ret) });", "uid_gesto: ret.uid });");
 mut('la cifra digitata non lo spedisce', "} : {}), ..._cjEntrega(ret) });", "} : {}) });");
 mut('il menu offre il mesero stesso', "k.toLowerCase() === String(ret.mesero || '').trim().toLowerCase() || vi[k.toLowerCase()]", "vi[k.toLowerCase()]");
