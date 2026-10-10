@@ -1636,7 +1636,6 @@ function _intestatarioPuro(mesas, plazaDe, todos) {
   return { ok: true, nombre: nombre, plaza: plaza };
 }
 async function _jlIntestatario(mesas) {
-  const dam = function (m) { const x = ((STATE.sala || {}).mesas || []).find(function (y) { return String(y.mesa) === String(m); }); return x && x.plaza; };
   let todos = null;
   try {
     if (BORDE_SALA && BORDE_SALA.ON && STATE.codigo) {
@@ -1649,7 +1648,24 @@ async function _jlIntestatario(mesas) {
     }
   } catch (e) { todos = null; }
   if (!todos) return { ok: false, motivo: 'sala_no_leida', mesa: String((mesas || [])[0] || ''), plaza: '' };
-  return _intestatarioPuro(mesas, dam, todos);
+  /* [10-ott · 🟡② di EL GIRO] la plaza del tavolo si cerca PRIMA nella sala letta adesso (le mesas/pendientes/mios di OGNI mesero, dove il bordo la scrive),
+     e solo se il tavolo non c'e' (nessun consumo visibile) si ripiega sulla memoria del telefono. Il ripiego e' dichiarato: `fonte_plaza` torna con l'esito. */
+  let fonte = 'sala';
+  const dam = function (m) {
+    for (const sl in todos) {
+      const v = todos[sl]; if (!v || !v.ok) continue;
+      for (const k of ['mesas', 'mios', 'pendientes', 'por_limpiar']) {
+        const x = (v[k] || []).find(function (y) { return y && String(y.mesa) === String(m) && y.plaza; });
+        if (x) return x.plaza;
+      }
+    }
+    const mem = ((STATE.sala || {}).mesas || []).find(function (y) { return String(y.mesa) === String(m) && y.plaza; });
+    if (mem) { fonte = 'memoria'; return mem.plaza; }
+    return '';
+  };
+  const r = _intestatarioPuro(mesas, dam, todos);
+  r.fonte_plaza = fonte;
+  return r;
 }
 const _INTEST_MSG = {
   sala_no_leida: 'No pude leer la sala ahora mismo — reintenta en unos segundos.',

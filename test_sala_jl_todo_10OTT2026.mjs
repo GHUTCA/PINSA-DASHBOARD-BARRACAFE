@@ -53,7 +53,13 @@ function banco(SRC) {
     mundoIntest(SRC, { salud: SALA_OK }).I(['70']), mundoIntest(SRC, { salud: SALA_OK }).I(['99']), mundoIntest(SRC, { salud: SALA_OK, fetchFalla: true }).I(['12']),
     mundoIntest(SRC, { salud: SALA_OK, edadMs: 20 * 60000 }).I(['12']), mundoIntest(SRC, { salud: SALA_OK, edadMs: -5 * 60000 }).I(['12']),
     mundoIntest(SRC, { salud: { marcela: { ok: false, nombre: 'Marcela', plazas: ['AURORA A'] } } }).I(['12']),
-  ]).then(([a, b, junta, mista, huerfana, doble, sinPl, desconocida, sinRed, vieja, futura, caida]) => {
+    // la plaza si cerca nella sala letta ADESSO (🟡② di EL GIRO): la memoria del telefono dice AURORA A, la sala fresca dice che il tavolo 12 e ora di Ray (VIP A)
+    mundoIntest(SRC, { salud: { ...SALA_OK, ray: { ...SALA_OK.ray, mios: [{ mesa: '12', plaza: 'VIP A' }] } } }).I(['12']),
+    // tavolo che la sala fresca non mostra: ripiega sulla memoria e lo DICHIARA
+    mundoIntest(SRC, { salud: SALA_OK }).I(['13']),
+  ]).then(([a, b, junta, mista, huerfana, doble, sinPl, desconocida, sinRed, vieja, futura, caida, fresca, memoria]) => {
+    t('④ la plaza viene dalla sala FRESCA, non dalla memoria: il tavolo 12 passato a Ray => intestatario RAY, fonte sala', fresca.ok && fresca.nombre === 'Ray' && fresca.plaza === 'VIP A' && fresca.fonte_plaza === 'sala', fresca);
+    t('④ se la sala fresca non mostra il tavolo si ripiega sulla memoria e lo si DICHIARA (fonte_plaza: memoria)', memoria.ok && memoria.nombre === 'Marcela' && memoria.fonte_plaza === 'memoria', memoria);
     t('④ tavolo di Marcela: intestatario = MARCELA (la plaza AURORA A), con la plaza', a.ok && a.nombre === 'Marcela' && a.plaza === 'AURORA A', a);
     t('④ bis tavolo di Ray: intestatario = RAY', b.ok && b.nombre === 'Ray' && b.plaza === 'VIP A', b);
     t('④ ter junta 12+13 della STESSA plaza: un intestatario solo', junta.ok && junta.nombre === 'Marcela', junta);
@@ -107,6 +113,7 @@ await mut('COBRAR dimenticato', " || b.k === 'cobrar' ||", " ||");
 await mut('PRECUENTA dimenticata', " || b.k === 'precuenta' ||", " ||");
 await mut('la leva nasce accesa', 'var JL_TODO_ON = false;', 'var JL_TODO_ON = true;');
 await mut('il nome della leva di /salud cambia', "cercaK(j, 'jl_todo_on')", "cercaK(j, 'jl_tutto_on')");
+await mut('la plaza torna a leggere solo la memoria', "for (const k of ['mesas', 'mios', 'pendientes', 'por_limpiar'])", "for (const k of [])");
 await mut('registrado_por torna al mesero (cancella chi ha i biglietti)', 'nombre: STATE.nombre, registrado_por: STATE.nombre,\n    mesa: pg.mesa', 'nombre: STATE.nombre, registrado_por: (intest ? intest.nombre : STATE.nombre),\n    mesa: pg.mesa');
 await mut('l anomalia non ferma il cobro', "if (!intest.ok) { pg.enviando = false; renderPago(); _intestatarioAnomalia(intest, 'pagoConfirmar'); return; }", "if (!intest.ok) { _intestatarioAnomalia(intest, 'pagoConfirmar'); }");
 await mut('il body non porta l intestatario', 'body.intestatario = intest.nombre;', 'body.xx = intest.nombre;');
