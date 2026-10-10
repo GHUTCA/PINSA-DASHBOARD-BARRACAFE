@@ -18,16 +18,16 @@ function mondo(SRC, o) {
   const ctx = { JSON, Math, Date, String, Number, Object, Array, Promise, setTimeout, clearTimeout, encodeURIComponent, console,
     app, LOCAL: 'bks', BORDE: { bks: 'https://borde.test' }, DIA_HOY: '2026-10-10', DIA_NOCHE: '2026-10-09', PROVA: false, MULTI: true, NOCHES: [], PASO: 1, SOBRE_IDX: 0, MANANA: null, UIDS_GESTO: {}, SES: { user: 'Mayra' },
     barra: () => '', esc: (x) => String(x == null ? '' : x), fechaCorta: (d) => d, fmt: (n) => '$' + n, uidGesto: (p) => p + '-' + (++ctx._u), _u: 0,
-    toast: (m, c) => toasts.push([m, c]), plantarBustaPrueba() {}, pantalla8() { calls.push('pantalla8'); }, document: { getElementById: el, querySelectorAll: (sel) => (sel === '[data-ne]' ? (o.neBtns || []) : []) },
+    toast: (m, c) => toasts.push([m, c]), plantarBustaPrueba() {}, pantalla8() { calls.push('pantalla8'); }, document: { getElementById: el, querySelectorAll: (sel) => (ctx._qs ? ctx._qs(sel) : (sel === '[data-ne]' ? (o.neBtns || []) : [])) },
     fetch: async (u) => { calls.push('fetch ' + u); if (o.saludErr) throw new Error('rete'); return { json: async () => ({ flags: { caja_no_encontrada_on: o.saludOn === undefined ? '1' : o.saludOn } }) }; },
     getCaja: async (p) => { calls.push('get ' + p); if (/^pendientes/.test(p)) return o.pend || { ok: false, error: 'x' }; if (/^manana/.test(p)) return o.mananaRisp || { ok: true, sobres: [], aviso_sin_respuesta: null }; return { ok: false }; },
     postCaja: async (b) => { posts.push(b); return o.postRisp ? (typeof o.postRisp === 'function' ? o.postRisp(b) : o.postRisp) : { ok: true, esito: 'scritto' }; },
     unTocoUnHecho: (btn, fn) => { btn.onclick = fn; },
   };
   vm.createContext(ctx);
-  vm.runInContext(['noEncOn', 'marcarNoEncontrada', 'noEncHtml', 'noEncBind', 'pantalla6', 'pantalla7', 'uidGestoEstable'].map((n) => fnDe(SRC, n)).join('\n') + '\n' +
-    SRC.slice(SRC.indexOf('var NOENC_ON'), SRC.indexOf('async function noEncOn')) + SRC.slice(SRC.indexOf('var NOENC_TXT'), SRC.indexOf('async function marcarNoEncontrada')) +
-    '\nthis.F = { noEncOn, marcarNoEncontrada, noEncHtml, noEncBind, pantalla6, pantalla7, NOENC_TXT };', ctx);
+  vm.runInContext(['noEncOn', 'marcarNoEncontrada', 'noEncHtml', 'noEncBind', 'dejadasHtml', 'dejadasBind', 'claveSobre', 'pantalla6', 'pantalla7', 'uidGestoEstable'].map((n) => fnDe(SRC, n)).join('\n') + '\n' +
+    SRC.slice(SRC.indexOf('var DEJADAS'), SRC.indexOf('function claveSobre')) + SRC.slice(SRC.indexOf('var NOENC_ON'), SRC.indexOf('async function noEncOn')) + SRC.slice(SRC.indexOf('var NOENC_TXT'), SRC.indexOf('async function marcarNoEncontrada')) +
+    '\nthis.F = { noEncOn, marcarNoEncontrada, noEncHtml, noEncBind, dejadasHtml, dejadasBind, pantalla6, pantalla7, NOENC_TXT };', ctx);
   return { ctx, posts, toasts, els, app, calls, el };
 }
 const S = (nro, extra) => Object.assign({ sobre_nro: nro, dia: '2026-10-08', declarado: 40000, firma_jl: 'JL2', ts_hecho: '2026-10-08T22:00:00Z', conteo: null }, extra || {});
@@ -99,7 +99,25 @@ async function banco(SRC) {
     t('③ bis «ya estaba anotado» (gia_no_encontrada): ok, se dice, y sale del conteo', m.ctx.MANANA.sobres.length === 1 && m.toasts.some((x) => /ya estaba anotado/.test(x[0])), m.toasts); }
   { const m = mondo(SRC, { saludOn: '1' }); m.ctx.MANANA = { ok: true, sobres: [S('1003')], noEnc: [] }; m.ctx.SOBRE_IDX = 0; m.ctx.F.pantalla7(); await tick(); m.el('neAbrir').onclick(); m.el('neMotivo').value = 'No esta en la caja fuerte'; await m.el('neGuardar').onclick(); await tick();
     t('③ ter la ULTIMA busta marcada: se sigue a los cortes POS (paso 3), no queda una pantalla vacia', m.ctx.MANANA.sobres.length === 0 && m.calls.includes('pantalla8'), m.calls); }
-  t('⑧ versión: caja 1.2.0', /caja 1\.2\.0<\/small>/.test(SRC));
+  // ═══ ELEGIR y DEJAR PARA DESPUES (Mayra ferma: «Abrir y contar» apre sempre la 1003) ═══
+  { const m = mondo(SRC, { pend: { ok: true, sobres: [S('1003'), S('1004'), S('1005')], noches: ['2026-10-08'] } }); await m.ctx.F.pantalla6();
+    const filasEl = (m.app.innerHTML.match(/data-el="\d+"/g) || []);
+    t('⑨ ELEGIR: cada fila «Por contar» es tocable (3 filas, con data-el)', filasEl.length === 3 && /Por contar ›/.test(m.app.innerHTML), filasEl);
+    const filas = [{ dataset: { el: '2' } }]; m.ctx._qs = (sel) => (sel === '[data-el]' ? filas : []); m.ctx.F.dejadasBind(); filas[0].onclick();
+    t('⑨ bis tocar la 3a fila (1005) abre ESA: SOBRE_IDX 2, paso 2, pantalla del conteo de la 1005', m.ctx.SOBRE_IDX === 2 && m.ctx.PASO === 2 && /Sobre 1005/.test(m.app.innerHTML), [m.ctx.SOBRE_IDX, m.app.innerHTML.slice(0, 120)]); }
+  { const m = mondo(SRC, {}); m.ctx.MANANA = { ok: true, sobres: [S('1003'), S('1004'), S('1005')], noEnc: [], dejadas: [] }; m.ctx.SOBRE_IDX = 0; m.ctx.F.pantalla7(); await tick();
+    m.el('dejar').onclick();
+    t('⑩ DEJAR: la 1003 sale de MANANA.sobres (no se cuenta NI viaja al banco) y pasa a dejadas; se sigue con la 1004', m.ctx.MANANA.sobres.map((x) => x.sobre_nro).join() === '1004,1005' && m.ctx.MANANA.dejadas.length === 1 && /Sobre 1004/.test(m.app.innerHTML), [m.ctx.MANANA.sobres.map((x) => x.sobre_nro), m.app.innerHTML.slice(0, 100)]);
+    t('⑩ bis NO escribe nada (cero posts): es de esta sesion, no un hecho', m.posts.length === 0, m.posts);
+    t('⑩ ter queda anotada en DEJADAS por dia:nro (vuelve a la lista al recargar pantalla6, sin repetirse)', m.ctx.DEJADAS['2026-10-08:1003'] === 1, m.ctx.DEJADAS); }
+  { const m = mondo(SRC, { pend: { ok: true, sobres: [S('1003'), S('1004'), S('1005')], noches: ['2026-10-08'] } }); m.ctx.DEJADAS = { '2026-10-08:1003': 1, '2026-10-08:1004': 1 }; await m.ctx.F.pantalla6();
+    t('⑩ quater pantalla6 con 1003 y 1004 dejadas: se cuenta SOLO la 1005 («1 sobre que tienes que contar») y las otras 2 salen aparte con «Contar ahora»', m.ctx.MANANA.sobres.length === 1 && m.ctx.MANANA.sobres[0].sobre_nro === '1005' && /2 sobres para después/.test(m.app.innerHTML) && /Contar ahora/.test(m.app.innerHTML) && /<p class="big acc">1<\/p>/.test(m.app.innerHTML), m.app.innerHTML.slice(0, 260));
+    const bs = [{ dataset: { de: '0' } }]; m.ctx._qs = (sel) => (sel === '[data-de]' ? bs : []); m.ctx.F.dejadasBind(); bs[0].onclick(); await tick();
+    t('⑩ quinto «Contar ahora» la devuelve a la lista de por contar', !m.ctx.DEJADAS['2026-10-08:1003'] && m.ctx.MANANA.sobres.length === 2, [m.ctx.DEJADAS, m.ctx.MANANA.sobres.length]); }
+  { const m = mondo(SRC, { pend: { ok: true, sobres: [S('1003'), S('1004')], noches: ['2026-10-08'] } }); m.ctx.DEJADAS = { '2026-10-08:1003': 1, '2026-10-08:1004': 1 }; await m.ctx.F.pantalla6();
+    t('⑩ sexto TODAS dejadas: «Nada que contar» con la lista y paso a los cortes, no «la caja fuerte esta vacia»', /Nada que contar/.test(m.app.innerHTML) && /2 sobres para después/.test(m.app.innerHTML) && !/la caja fuerte está vacía/i.test(m.app.innerHTML) && /irPos/.test(m.app.innerHTML), m.app.innerHTML.slice(0, 220)); }
+  { const src = SRC; t('⑩ séptimo el deposito AVISA cuantos sobres no viajan (no encontrados o dejados)', /NO van en este depósito/.test(src) && /MANANA\.noEnc \|\| \[\]\)\.length \+ \(MANANA\.dejadas \|\| \[\]\)\.length/.test(src)); }
+  t('⑧ versión: caja 1.3.0', /caja 1\.3\.0<\/small>/.test(SRC));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }
@@ -113,8 +131,15 @@ await mut('el formulario pregunta por el sello', "'<p class=\"lb\">¿Por qué no
 await mut('el motivo corto pasa', "if (motivo.length < 8) { toast(NOENC_TXT.motivo_troppo_corto, 'bad'); return; }", "");
 await mut('un error mueve la busta igual', "if (!r.ok) { toast('No se guardó: ' + (NOENC_TXT[r.motivo] || NOENC_TXT[r.error] || r.motivo || r.error), 'bad'); return; }\n        if (r.encolado) { toast('Sin señal — se enviará solo. No sigas hasta que se confirme.', 'bad'); return; }\n        s.no_encontrada", "s.no_encontrada");
 await mut('sin señal se finge', "if (r.encolado) { toast('Sin señal — se enviará solo. No sigas hasta que se confirme.', 'bad'); return; }\n        s.no_encontrada", "s.no_encontrada");
-await mut('solo perdidas = caja vacia', "if (!sobres.length && MANANA.noEnc.length) {", "if (false) {");
+await mut('solo perdidas = caja vacia', "if (!sobres.length && (MANANA.noEnc.length || MANANA.dejadas.length)) {", "if (false) {");
 await mut('el uid cambia a cada toque', "uidGestoEstable('ne|' + evento + '|' + dia + '|' + sobre.sobre_nro + '|' + motivo, 'ne')", "uidGesto('ne')");
 await mut('el sello viaja', "sobre_dia_op: dia, sobre_nro: sobre.sobre_nro, evento: evento, motivo: motivo, fuente: 'app_caja' });", "sobre_dia_op: dia, sobre_nro: sobre.sobre_nro, evento: evento, motivo: motivo, sello_intacto: false, fuente: 'app_caja' });");
 await mut('la ritrovata no recarga', "toast('Anotado: el sobre apareció — ya se puede contar', 'ok');\n        pantalla6();", "toast('Anotado: el sobre apareció — ya se puede contar', 'ok');");
+await mut('la fila no es tocable (elegir)', "(s.conteo ? '' : ' data-el=\"' + idx + '\" style=\"cursor:pointer\"')", "''");
+await mut('elegir abre otro indice', "SOBRE_IDX = Number(r.dataset.el); PASO = 2; pantalla7();", "SOBRE_IDX = 0; PASO = 2; pantalla7();");
+await mut('dejar no la saca del deposito', "MANANA.sobres.splice(SOBRE_IDX, 1);\n    toast('Sobre ' + s.sobre_nro + ' para después", "toast('Sobre ' + s.sobre_nro + ' para después");
+await mut('dejar escribe un hecho', "DEJADAS[claveSobre(s)] = 1;\n    (MANANA.dejadas", "postCaja({ verbo: 'conteo', contado: 0 }); DEJADAS[claveSobre(s)] = 1;\n    (MANANA.dejadas");
+await mut('al recargar se pierden las dejadas', "MANANA.sobres = MANANA.sobres.filter(function(s){ return !DEJADAS[claveSobre(s)]; });", "");
+await mut('contar ahora no la devuelve', "delete DEJADAS[claveSobre(x)]; pantalla6();", "pantalla6();");
+await mut('el deposito no avisa', "NO van en este depósito", "van en este depósito");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
