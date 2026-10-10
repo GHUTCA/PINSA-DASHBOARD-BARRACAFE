@@ -1108,7 +1108,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.221.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.223.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1609,6 +1609,11 @@ const JL = (function () {
 /* la fetta che si legge: in modalità JL è quella del mesero PADRONE, mai la
    firma. Ovunque il poll chiedeva `STATE.nombre` per SAPERE, ora chiede qui. */
 function _vistaNombre() { return (JL && STATE.vista) ? STATE.vista : STATE.nombre; }
+/* [10-ott · decisione ⓐ · 🖐 QUARTA] CHI INCASSA per la propina: il pozo e `pgo:` leggono `registrado_por` (bordo `p.registrado_por || p.nombre`, GAS idem).
+   Se il JL incassa il tavolo di un mesero, la propina individual e' del MESERO del tavolo (la fetta `vista`), non del JL che ha toccato il telefono.
+   `nombre`/`codigo` restano del JL (chi firma e autentica); `cobrado_por` porta il JL, additivo, per la traccia. */
+function _registradoPor() { return (JL && STATE.vista) ? STATE.vista : STATE.nombre; }
+function _cobradoPor() { return JL ? { cobrado_por: JL.user } : {}; }
 function _jlBackUrl() {
   const loc = ({ BKS: 'bks', RIESCO: 'rsc', CANDELARIA: 'cdl' })[CFG.LOCAL] || 'bks';
   return 'app_jl.html?loc=' + loc;
@@ -8998,6 +9003,9 @@ var SCONTOMOT_ON = false;
 var CAJA_ATTO1_ON = false;
 var CORTE_BORDE_ON = false;   // [08-ott · 1.6] il corte del mesero calcolato dal bordo (vale con CAJA_ATTO1_ON)
 var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propina
+/* [10-ott · decisione ⓐ di Alberto · 🎛 V28 `JL FA TUTTO DALLA SUA APP COBRAR`] il JL fa tutto dalla sua app: PEDIR · COBRAR · MOVER tornano nel `?jl=1`.
+   Leva del bordo (/salud → jl_todo_on). NASCE SPENTA: spenta, `VJ` filtra come ieri (solo PEDIDOS ed ELIMINAR). */
+var JL_TODO_ON = false;
 /* [29-set · Alberto: «il tetto del 30% fallo subito»] il tetto NON e' piu' una
    copia del vetro: si legge dal bordo (/salud → desc_max_pct), che e' la fonte
    unica e lo applica. 30 resta solo finche' il bordo non ha risposto. */
@@ -9025,6 +9033,7 @@ var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propi
       CAJA_ATTO1_ON = String(cercaK(j, 'caja_atto1_on')) === '1';           // [02-ott · ATTO I]
       CORTE_BORDE_ON = String(cercaK(j, 'corte_borde_on')) === '1';         // [08-ott · 1.6]
       CAJA_ATTO3_ON = String(cercaK(j, 'caja_atto3_on')) === '1';           // [03-ott · ATTO III]
+      JL_TODO_ON = String(cercaK(j, 'jl_todo_on')) === '1';                 // [10-ott · decisione ⓐ]
     }).catch(function () {});
   } catch (e) { /* senza il bordo resta 30 */ }
 })();
@@ -10934,7 +10943,8 @@ function renderPanel() {
      Alberto: NON compaiono. 🔴 Il filtro è QUI, sulla lista che disegna i
      bottoni, non su un CSS: un bottone che non esiste non si preme per sbaglio
      e non si «scopre» ispezionando il DOM. */
-  const VJ = JL ? V.filter(function (b) { return b.k === 'pedidos' || b.k === 'descontar'; }) : V;
+  /* [10-ott · decisione ⓐ] a `JL_TODO_ON` accesa il JL ha anche PEDIR · COBRAR · MOVER (PRECUENTA e SEPARAR/TIEMPOS no: non nominati). */
+  const VJ = JL ? V.filter(function (b) { return b.k === 'pedidos' || b.k === 'descontar' || (JL_TODO_ON && (b.k === 'pedir' || b.k === 'cobrar' || b.k === 'mover')); }) : V;
   el.innerHTML =
     '<div class="vp-h">' + (j ? '<span style="color:' + _juntaCol(j.n) + '">👥</span>' : '') +
       '<span class="tt">Mesa ' + esc(mesa) + '</span>' +
@@ -12027,7 +12037,7 @@ async function fintocRegistrar__in(mesa) {
   STATE.fintocEnviando = true;
   try {
     const r = await gasPost('registrarPago', {
-      codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: STATE.nombre,
+      codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: _registradoPor(), cobrado_por: JL ? JL.user : undefined,   // [10-ott · ⓐ]
       mesa: mesa, medio: 'fintoc', ref: pagFin.pi || '',
       propina: Math.max(0, Math.round(pagFin.monto - tot)), boleta: 1 });
     if (r && r.ok) {
@@ -14753,7 +14763,7 @@ async function pagoConfirmar(btn) {
      Gli sconti di SISTEMA (2x1, menú, fasce) sono già dentro pg.tot: i prezzi
      si fossilizzano scontati alla presa del pedido. */
   const body = {
-    codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: STATE.nombre,
+    codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: _registradoPor(),   // [10-ott · ⓐ] in `?jl=1` la propina e' del mesero del tavolo
     mesa: pg.mesa, medio: pg.medio, propina: propina, pago_uid: pg.uid,   // v1.16
     correo: (pg.correo || '').trim(), celular: (pg.celular || '').trim(),
     nombre_cliente: (pg.nombre || '').trim(),   // v3.4.3 · additivo: il GAS lo ignora finché non lo legge
@@ -14771,6 +14781,7 @@ async function pagoConfirmar(btn) {
      `abrirPago` l'ha popolato (pago di junta vero): un `gid` a caso su una
      mesa singola non aiuterebbe e sporcherebbe l'audit
      (`mesas_payload_rechazado`) senza motivo. */
+  Object.assign(body, _cobradoPor());   // [10-ott · ⓐ] chi ha toccato il telefono (solo `?jl=1`), additivo
   if (pg.gid) body.gid = pg.gid;
   if (pg.uuids && pg.uuids.length) body.uuids = pg.uuids;   // [AUT-0462] le righe del pannello, congelate all apertura
   /* v1.4 · le mosse del JL viaggiano DICHIARATE + col PIN (GAS v3.75.0):
