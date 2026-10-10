@@ -55,6 +55,11 @@ async function banco(SRC) {
     t('⑥ quater non letta + `?fotoviva=0`: il ritorno sul telefono vince, si disegna come ieri', m.rendered.length === 1); }
   { const m = mondo(SRC, { leva: false, leida: true, foto: FOTO(6 * H) }); m.run();
     t('⑦ letta e SPENTA dal bordo: come ieri (la guardia non e imposta dove il bordo ha detto no)', m.rendered.length === 1); }
+  // ⑧ (EL GIRO 19:55) a leva "0" lo scheletro della sala morta non e una sala: se la guardia era accesa (leva non ancora letta) e poi il /salud dice «spenta», si torna alla foto salvata come ieri, mai a un telefono vuoto
+  { const m = mondo(SRC, { leva: false, leida: false, foto: FOTO(6 * H) }); m.run();
+    t('⑧ prima la guardia vale (non letta): sin datos', m.rendered.length === 0 && m.ctx.STATE.sala._muerta === true);
+    m.ctx.FOTO_VIVA_LEIDA = true; m.run();
+    t('⑧ bis poi il /salud dice «spenta»: il catch successivo NON ridisegna lo scheletro vuoto ma la foto salvata come ieri', m.rendered.length === 1 && m.rendered[0].mios && m.rendered[0].mios.length === 1 && !m.ctx.STATE.sala._muerta, [m.rendered.length, m.ctx.STATE.sala]); }
   // ② entro il tetto: come ieri
   { const m = mondo(SRC, { leva: true, foto: FOTO(10 * MIN), hayTessere: true }); m.run();
     t('② foto di 10 min: si disegna (render) col banner giallo «Sala de hace 10 min»', m.rendered.length === 1 && /Sala de hace 10 min/.test(m.els.offline.textContent) && m.els.offline.classList.contains('vieja') && m.ctx.STATE.sala._foto_local > 0 && !m.ctx.STATE.sala._muerta, [m.rendered.length, m.els.offline.textContent]); }
@@ -100,6 +105,7 @@ await mut('le sezioni dei pedidos non si svuotano', "['secPend', 'secSinDueno', 
 await mut('il mesasModel resta', "STATE.mesasModel = []; STATE.selMesas = [];", "STATE.selMesas = [];");
 await mut('l eta non si dice', "hace <b>' + txt + '</b>", "hace <b>' + '</b>");
 await mut('il banner resta giallo (vieja)', "of.classList.remove('vieja'); of.classList.add('show');", "of.classList.add('show', 'vieja');");
+await mut('lo scheletro si ridisegna a leva spenta', "} else if (STATE.sala && !STATE.sala._muerta) {", "} else if (STATE.sala) {");
 await mut('la leva non letta vale come spenta', "return FOTO_VIVA_LEIDA ? FOTO_VIVA_ON === true : true; }", "return FOTO_VIVA_ON === true; }");
 await mut('kpis non si svuota', "'secLimpiar', 'kpis', 'csHero'", "'secLimpiar', 'csHero'");
 await mut('csHero non si svuota', "'kpis', 'csHero', 'tick'", "'kpis', 'tick'");
