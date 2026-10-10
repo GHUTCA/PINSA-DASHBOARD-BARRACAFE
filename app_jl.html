@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.36.0</span>
+<span class="ver" id="ver">app_jl v1.37.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -773,6 +773,48 @@ function cjRetAbrir(nombre) {
   CJ1.ret = { mesero: m.mesero, att: m, uid: CJ1.retDubbio[m.mesero] || cajaNuevoUid('CJ-RIT') };
   pintaTab();
 }
+/* ═══ [10-ott · AUT-0646 · 🎛 V28 `COBRO JL DUE NOMI INTESTATARIO E MANO`] «¿QUIÉN ENTREGA?» ═══════════════════════════════════════
+   Il `mesero` del ritiro e' l'INTESTATARIO del denaro. Se i biglietti li ha in mano UN ALTRO (il JL che ha cobrado il tavolo del mesero,
+   un collega), il ritiro porta anche `entregado_por` = quel nome. VUOTO = il mesero consegna i suoi biglietti, come oggi (la chiave non viaggia).
+   Si offre SOLO se il bordo lo dice (/salud → caja_entregado_por_on): a leva spenta il vetro e' quello di ieri, nessun controllo morto. */
+function _cjEntregaOn() { return cjFlag('caja_entregado_por_on'); }
+function _cjEntrega(ret) {
+  const e = String((ret && ret.entrega) || '').trim();
+  return (_cjEntregaOn() && e && e.toLowerCase() !== String((ret && ret.mesero) || '').trim().toLowerCase()) ? { entregado_por: e } : {};
+}
+/* l'en_mano e' di CHI HA I BIGLIETTI (il bordo accoppia il ritiro con `entregado_por`, o col mesero se vuoto): con un'altra persona scelta, la cifra che il JL
+   VEDE, firma (`visto`) e confronta e' la SUA, non quella del mesero. Una persona senza contante in mano => 0 (il bordo rifiuta nada_que_recibir). */
+function _cjEnManoDe(ret) {
+  const e = _cjEntrega(ret).entregado_por;
+  if (!e) return +(ret && ret.att && ret.att.en_mano) || 0;
+  const n = function (x) { return String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase(); };
+  const m = ((CJ1.st && CJ1.st.meseros) || []).find(function (x) { return n(x.mesero) === n(e); });
+  return m ? (+m.en_mano || 0) : 0;
+}
+/* [10-ott · AUT-0646 · V28] DA DOVE viene la cifra: il bordo divide il ritiro da solo (una riga per intestatario + la parte del JL) e lo dice in `reparto`
+   (stessa funzione che scrive le righe: cio che si vede e cio che si scrive). Una riga per persona, la cifra SOLO se la leva del bordo e accesa. */
+function _cjReparto(a) {
+  if (!_cjEntregaOn() || !a || !a.reparto || !a.reparto.length) return '';
+  return '<p class="mini" style="margin:6px 0 2px">Incluye</p>' + a.reparto.map(function (x) {
+    return _cjRiga(esc(x.mesero) + (x.propio ? ' (lo tuyo)' : ''), fmt(x.monto));
+  }).join('');
+}
+function _cjPartesTxt(partes) {
+  return (partes || []).map(function (x) { return x.mesero + ' ' + fmt(x.monto); }).join(' · ');
+}
+function cjRetEntrega(v) { if (!CJ1.ret) return; CJ1.ret.entrega = String(v || ''); CJ1.ret.conf = 0; pintaTab(); }
+function _cjEntregaSel(ret) {
+  if (!_cjEntregaOn() || !ret) return '';
+  const otros = []; const vi = {};
+  [STATE.user].concat(((CJ1.st && CJ1.st.meseros) || []).map(function (m) { return m.mesero; })).forEach(function (n) {
+    const k = String(n || '').trim(); if (!k || k.toLowerCase() === String(ret.mesero || '').trim().toLowerCase() || vi[k.toLowerCase()]) return;
+    vi[k.toLowerCase()] = 1; otros.push(k);
+  });
+  return '<p class="mini" style="margin:8px 0 2px">¿Quién entrega los billetes?</p>' +
+    '<select id="cj1Entrega" class="busca" onchange="cjRetEntrega(this.value)" style="font-size:16px;margin-bottom:6px">' +
+    '<option value="">' + esc(ret.mesero) + ' (como siempre)</option>' +
+    otros.map(function (n) { return '<option value="' + esc(n) + '"' + (ret.entrega === n ? ' selected' : '') + '>' + (n === STATE.user ? 'Yo (' + esc(n) + ')' : esc(n)) + '</option>'; }).join('') + '</select>';
+}
 function cjRetCerrar() { CJ1.ret = null; const e = $('cj1Monto'); if (e) e.value = ''; pintaTab(); }
 /* [v1.36.0 · AUT-0613 ①] «Recibí $X»: UN tocco. La cifra NO la manda questo telefono: la calcola il bordo (l'en_mano che il vetro ha davanti e il bordo conosce). La garanzia non e il campo
    vuoto: e la firma del mesero sulla stessa cifra. «Recibí otra cifra» apre il campo di sempre, con la guardia di sempre (AUT-0607). */
@@ -783,10 +825,11 @@ async function cjRetTodo(btn) {
   CJ1.enviando = true;
   const ret = CJ1.ret;
   try {
-    const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, recibi: 'todo', visto: ret.att.en_mano, uid_gesto: ret.uid });   // la firma es sulla cifra che il JL HA VISTO sul bottone (revisione BKP): se il bordo ne sa un'altra, non scrive
+    const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, recibi: 'todo', visto: _cjEnManoDe(ret), uid_gesto: ret.uid, ..._cjEntrega(ret) });   // la firma es sulla cifra che il JL HA VISTO sul bottone (revisione BKP): se il bordo ne sa un'altra, non scrive
     if (r && r.ok && r.accodato) {
       if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero];
       if (r.ya) toast('ok', '✓ Este retiro ya estaba registrado — no se cuenta dos veces.');
+      else if (r.diviso) toast('ok', '✓ Recibiste ' + fmt(r.monto) + ' de ' + ret.mesero + ' · ' + _cjPartesTxt(r.partes));
       else toast('ok', '✓ Recibiste ' + fmt(r.monto) + ' de ' + ret.mesero + ' · ahora confirma él en su teléfono');
       CJ1.ret = null; cjAtto1Giro();
     } else if (r && r.error === 'rifiutato' && r.motivo === 'en_mano_cambiato') {
@@ -868,7 +911,7 @@ async function cjRetEnviar(btn) {
   if (!Number.isFinite(monto) || monto <= 0) { toast('warn', 'Escribe lo que contaste'); return; }
   /* [08-ott · v1.35.4 · PRIMA NOTTE ATTO I] Ruth e Gabriel, notte del 07: il secondo ritiro portava il TOTALE al posto del
      RESTO (+$192.293) e il vetro l'ha preso senza chiedere. Sopra l'esperado si ferma e chiede, per QUEL monto. */
-  const att = +(CJ1.ret.att && CJ1.ret.att.en_mano) || 0;
+  const att = _cjEnManoDe(CJ1.ret);
   if (monto > att && CJ1.ret.confOk !== monto) {
     CJ1.ret.conf = monto;
     try { const ae = document.activeElement; if (ae && ae.blur) ae.blur(); } catch (e) {}   // su iOS il tocco del bottone non toglie il fuoco: senza, pintaTab aspetterebbe e la domanda non comparirebbe
@@ -879,8 +922,8 @@ async function cjRetEnviar(btn) {
   const ret = CJ1.ret;
   try {
     const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, monto: monto,
-      esperado_ora: ret.att.en_mano, uid_gesto: ret.uid,
-      ...(ret.confOk === monto ? { confirmo_sobre_esperado: 1 } : {}) });   // [08-ott · AUT-0607] il «Sí, retiro $X» viaggia fino al bordo
+      esperado_ora: _cjEnManoDe(ret), uid_gesto: ret.uid,
+      ...(ret.confOk === monto ? { confirmo_sobre_esperado: 1 } : {}), ..._cjEntrega(ret) });   // [08-ott · AUT-0607] il «Sí, retiro $X» viaggia fino al bordo
     if (r && r.ok && r.accodato) {
       if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero];
       if (r.ya) toast('ok', '✓ Este retiro ya estaba registrado — no se cuenta dos veces. Revisa la lista.');
@@ -974,8 +1017,8 @@ function cjAtto1Html() {
       h += '<div class="card"><h4>El retiro de</h4><p style="font-size:28px;font-weight:900;margin:2px 0 8px;line-height:1.1">' + esc(a.mesero) + '</p>' +
         _cjRiga('Ventas en efectivo', fmt(a.ventas_efectivo)) + _cjRiga('Propinas en efectivo', fmt(a.propina_efectivo)) +
         (a.residuo ? _cjRiga('De ayer', fmt(a.residuo)) : '') + (a.entregado ? _cjRiga('Ya entregó hoy', '−' + fmt(a.entregado)) : '') +
-        _cjRiga('<b>ENTREGA</b>', '<b style="font-size:26px">' + fmt(a.en_mano) + '</b>', ';padding:8px 0') +
-        '<button class="btn acc" onclick="cjRetTodo(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Recibí ' + fmt(a.en_mano)) + '</button>' +
+        _cjRiga('<b>ENTREGA</b>', '<b style="font-size:26px">' + fmt(_cjEnManoDe(CJ1.ret)) + '</b>', ';padding:8px 0') + (CJ1.ret.entrega ? '' : _cjReparto(a)) + _cjEntregaSel(CJ1.ret) +
+        '<button class="btn acc" onclick="cjRetTodo(this)"' + (CJ1.enviando || !(_cjEnManoDe(CJ1.ret) > 0) ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Recibí ' + fmt(_cjEnManoDe(CJ1.ret))) + '</button>' +
         '<button class="btn gh" onclick="cjRetOtra()">Recibí otra cifra</button>' +
         '<button class="btn gh" onclick="cjRetCerrar()">Volver</button></div>';
       return h;
@@ -983,13 +1026,13 @@ function cjAtto1Html() {
     h += '<div class="card"><h4>El retiro de</h4><p style="font-size:28px;font-weight:900;margin:2px 0 8px;line-height:1.1">' + esc(a.mesero) + '</p>' +
       _cjRiga('Ventas en efectivo', fmt(a.ventas_efectivo)) + _cjRiga('Propinas en efectivo', fmt(a.propina_efectivo)) +
       (a.residuo ? _cjRiga('De ayer', fmt(a.residuo)) : '') + (a.entregado ? _cjRiga('Ya entregó hoy', '−' + fmt(a.entregado)) : '') +
-      _cjRiga('<b>Total efectivo</b>', '<b style="font-size:20px">' + fmt(a.en_mano) + '</b>', ';padding:8px 0') +
+      _cjRiga('<b>Total efectivo</b>', '<b style="font-size:20px">' + fmt(_cjEnManoDe(CJ1.ret)) + '</b>', ';padding:8px 0') + _cjEntregaSel(CJ1.ret) +
       /* [08-ott · v1.35.4 · PRIMA NOTTE ATTO I DUE RITIRI DOPPI SENZA BUSTA] il valore vive nel RITIRO (CJ1.ret.monto), non nel
          DOM: un ritiro nuovo nasce vuoto e nessun ridisegno può riportargli la cifra di un altro (cj1Monto è uscito da _CAMPI_TENUTI). */
       '<input class="busca" id="cj1Monto" type="text" inputmode="numeric" placeholder="$" autocomplete="off" style="font-size:22px;font-weight:800;text-align:center"' +
         ' value="' + esc(CJ1.ret.monto || '') + '" oninput="cjRetMonto(this.value)">' +
       (CJ1.ret.conf ? '<div class="card rossa" style="margin:8px 0"><p style="font-size:17px;font-weight:800;margin:0 0 6px">¿Retiras ' + fmt(CJ1.ret.conf) +
-        '? Faltaban ' + fmt(a.en_mano) + '</p><p class="mini">Es ' + fmt(CJ1.ret.conf - a.en_mano) + ' más de lo que tiene en la mano.</p>' +
+        '? Faltaban ' + fmt(_cjEnManoDe(CJ1.ret)) + '</p><p class="mini">Es ' + fmt(CJ1.ret.conf - _cjEnManoDe(CJ1.ret)) + ' más de lo que tiene en la mano.</p>' +
         '<button class="btn acc" onclick="cjRetConfirma(this)">Sí, retiro ' + fmt(CJ1.ret.conf) + '</button>' +
         '<button class="btn gh" onclick="cjRetCorrige()">Corregir el monto</button></div>'
       : '<button class="btn acc" onclick="cjRetEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Confirmar') + '</button>') +
