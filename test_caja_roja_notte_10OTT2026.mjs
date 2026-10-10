@@ -109,6 +109,9 @@ async function banco(SRC) {
   { const r = ROJA({ noches: ROJA().noches.map((n) => ({ dia: n.dia, estado: 'coperta', importo: 0, quota: 1, coperto: 1, debito: 0 })) });
     const m = mondo(SRC, { roja: r }); await m.ctx.F.pantalla9(); await click(m, 'salir'); const s = SALIDA(m);
     t('⑨ tutte coperte: nessuna busta nuova, la salida porta solo la roja ya sellada (reserva 99.500, a banca = lo contato)', BUSTE(m).length === 0 && s.reserva === 99500 && s.a_depositar === 1632000 && m.toasts.some((x) => /Registrado/.test(x[0])), [BUSTE(m).length, s]); }
+  // ⑬ (EL GIRO 🟡) piu buste sin deposito di quante la salida puo portare: si ferma e lo dice, senza uscire al banco
+  { const m = mondo(SRC, { roja: ROJA({ sueltas_exceso: true }) }); await m.ctx.F.pantalla9();
+    t('⑬ `sueltas_exceso`: schermata di errore `demasiadas_buste_sin_deposito`, NIENTE «Salir al banco», nessun post', m.ctx.rendered.some((r) => r[0] === 'error' && r[2] === 'demasiadas_buste_sin_deposito') && m.posts.length === 0 && !m.mk('salir').onclick, m.ctx.rendered); }
   // ⑪ una quota gia in parte coperta: la busta e il RESTO, mai la quota intera
   { const r = ROJA({ noches: ROJA().noches.map((n) => (n.dia === '2026-10-11' ? { dia: n.dia, estado: 'da_sigillare', importo: 21250, quota: 31250, coperto: 10000, debito: 21250 } : n)) });
     const m = mondo(SRC, { roja: r }); await m.ctx.F.pantalla9(); await click(m, 'salir'); await click(m, 'sellarRoja'); await click(m, 'sigRoja'); await click(m, 'sellarRoja');
@@ -126,6 +129,7 @@ const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log
   const k0 = ko, o0 = ok; muto = true; const k1 = ko; try { await banco(SRC0.replace(da, () => a)); } catch (e) { ko++; } muto = false; const rossi = ko - k1; ko = k0; ok = o0;
   t('mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
 await mut('la salida non porta le rojas', "if (ROJA && ROJA.sueltas && ROJA.sueltas.length) cuerpoSalida.rojas =", "if (false) cuerpoSalida.rojas =");
+await mut('l eccesso di sueltas non ferma', "if (rjR.sueltas_exceso) { renderError('La roja', 'demasiadas_buste_sin_deposito'); return; }", "");
 await mut('la roja non si legge', "var rjR = await getCaja('roja_estado?dia=' + DIA_HOY + '&noches=' + NOCHES.join(','));", "var rjR = { ok: false, error: 'lettura_sconosciuta' };");
 await mut('un errore diventa «sin roja»', "else if (!rjR.ok && rjR.error !== 'lettura_sconosciuta') { renderError('La roja', rjR.error); return; }", "");
 await mut('il contado non e lordo', "var c = (Number(document.getElementById('contado').value || '') || 0) + S;", "var c = (Number(document.getElementById('contado').value || '') || 0);");
