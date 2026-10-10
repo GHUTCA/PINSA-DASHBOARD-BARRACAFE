@@ -309,7 +309,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return senzaEsitoHtml() + (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.7.0</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.8.0</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -875,6 +875,30 @@ async function pantalla8() {
   document.getElementById('siguiente').onclick = function(){ PASO = 4; pantalla9(); };
 }
 
+/* ═══ [10-ott · Alberto/V28 «CAJA MARTEDI GIORNO PER GIORNO»] EL DEPOSITO, DESGLOSADO POR DIA ═══════════════════════════════════════════════════════
+   El martes la cajera cuenta las noches del 09, 10, 11 y 12 y en el banco va UN solo deposito. Pero el cuadre es dia por dia: «mai un totale che nasconde in quale giorno e lo scarto». Debajo del total del
+   deposito (que sigue siendo uno) una fila POR NOCHE: sobres · contado · el 5% de ESA noche · neto. Si ella edita el contado total, la diferencia sale como «Ajuste manual» y las filas siguen sumando al total.
+   PURA: no calcula nada nuevo (el contado de cada sobre y la retencion de cada noche ya se leian); solo los agrupa por dia. */
+function desgloseDeposito(sobres, porNoche, noches, contadoTotal) {
+  var dias = (noches || []).slice().sort();
+  var filas = dias.map(function(d){
+    var mios = (sobres || []).filter(function(x){ return (x.dia || '') === d; });
+    var contado = mios.reduce(function(a, x){ return a + (x.conteo ? (x.conteo.contado || 0) : (x.declarado || 0)); }, 0);
+    var reserva = (porNoche && porNoche[d]) || 0;
+    return { dia: d, n: mios.length, contado: contado, reserva: reserva, neto: contado - reserva };
+  });
+  var sumaContado = filas.reduce(function(a, x){ return a + x.contado; }, 0);
+  return { filas: filas, ajuste: (Number(contadoTotal) || 0) - sumaContado };
+}
+function desgloseHtml(d) {
+  if (!d || !d.filas || d.filas.length < 2) return '';
+  return '<p class="lb" style="margin-top:12px">Por día <small>(el banco recibe un solo depósito)</small></p><div class="rows">' +
+    d.filas.map(function(x){
+      return '<div class="r"><span class="n">' + esc(fechaCorta(x.dia)) + '<small>' + x.n + (x.n === 1 ? ' sobre' : ' sobres') + ' · contado ' + fmt(x.contado) + ' − reserva ' + fmt(x.reserva) + '</small></span><span class="v">' + fmt(x.neto) + '</span></div>';
+    }).join('') +
+    (d.ajuste !== 0 ? '<div class="r"><span class="n">Ajuste manual del contado</span><span class="v">' + (d.ajuste > 0 ? '+' : '−') + fmt(Math.abs(d.ajuste)) + '</span></div>' : '') +
+    '</div>';
+}
 async function pantalla9() {
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando el depósito…</p>';
   var pend = await getCaja('deposito_pendiente?dia=' + DIA_HOY);
@@ -921,6 +945,7 @@ async function pantalla9() {
       var rN = await getCaja('reserva?dia=' + NOCHES[iN]);
       if (!rN.ok || rN.reserva == null) { RESERVA = rN.ok ? { ok: true, reserva: null } : rN; break; }
       RESERVA.reserva += rN.reserva; RESERVA.reserva_pct = rN.reserva_pct;
+      (RESERVA.porNoche = RESERVA.porNoche || {})[NOCHES[iN]] = rN.reserva;   // [10-ott] para el desglose por dia
     }
   } else {
     RESERVA = await getCaja('reserva?dia=' + DIA_NOCHE);
@@ -958,7 +983,8 @@ async function pantalla9() {
     document.getElementById('calc').innerHTML =
       '<div class="rows">' + (MULTI ? '<div class="r"><span class="n">Sobres que lleva</span><span class="v">' + (MANANA.sobres || []).length + ' · ' + NOCHES.length + (NOCHES.length === 1 ? ' noche' : ' noches') + '</span></div>' : '') +
       '<div class="r"><span class="n">A la reserva (' + RESERVA.reserva_pct + '% de la propina no efectivo' + (MULTI && NOCHES.length > 1 ? ' de esas noches' : '') + ')</span><span class="v">' + fmt(reserva) + '</span></div>' +
-      '<div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>';
+      '<div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>' +
+      (MULTI && NOCHES.length > 1 ? desgloseHtml(desgloseDeposito(MANANA.sobres, RESERVA.porNoche, NOCHES, c)) : '');
     /* [06-ott · pregunta de EL GIRO `ATTO II A MERCOLEDÌ 06:00`] un depósito NEGATIVO no existe: si el contado no cubre la
        reserva, el botón se apaga y la pantalla lo dice (el bordo lo rechazaría igual, `a_depositar_negativo`, pero DESPUÉS de que
        ella haya salido al banco sin saber por qué). */
