@@ -8,7 +8,7 @@ let ok = 0, ko = 0; const vero = (n, c, i) => { c ? (ok++, console.log('  🟢 '
 const scripts = [...H.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
 let comp = 0; for (const s of scripts) { try { new Function(s); comp++; } catch (e) { vero('compila', false, String(e).slice(0, 200)); } }
 vero('los scripts inline compilan (' + comp + '/' + scripts.length + ')', comp === scripts.length);
-vero('la versión es 1.36.0 o posterior (la 1.37.0 añade «¿Quién entrega?», banco propio)', /id="ver">app_jl v1\.3[67]\.0</.test(H));
+vero('la versión es 1.36.0 o posterior (la 1.37.0 añade «¿Quién entrega?», banco propio)', /id="ver">app_jl v1\.3[67]\.\d</.test(H));
 const fx = (nome, async_) => { const m = H.match(new RegExp((async_ ? 'async ' : '') + 'function ' + nome + '\\([^)]*\\) \\{[\\s\\S]*?\\n\\}')); if (!m) throw new Error('falta ' + nome); return m[0]; };
 const one = (nome) => { const m = H.match(new RegExp('function ' + nome + '\\([^)]*\\) \\{[^\\n]*\\}')); if (!m) throw new Error('falta ' + nome); return m[0]; };
 const src = [one('cjFlag'), one('cjRetOtra'), fx('cjRetTodo', true), fx('cjSobAuto', true), one('cjCieIgualAbrir'), one('cjCieIgualCerrar'), one('cjCieSet'), fx('cjCieIgualEnviar', true),
