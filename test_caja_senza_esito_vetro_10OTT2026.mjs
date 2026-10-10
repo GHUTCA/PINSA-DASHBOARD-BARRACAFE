@@ -37,6 +37,8 @@ async function banco(SRC) {
   // ② se apaga sola
   { const m = mondo(SRC, { risp: { ok: true, senza_esito: [SE()] } }); await m.ctx.F.getCaja('x'); m.ctx.risp = { ok: true, sobres: [] }; await m.ctx.F.getCaja('x');
     t('② una lectura buena SIN el campo apaga la barra (el gesto ya llego o ya se barrio)', !/senzaEsito/.test(m.ctx.F.barra(true)) && !/⚠/.test(m.ctx.F.barra(true))); }
+  { const m = mondo(SRC, { risp: { ok: true, senza_esito: [SE()] } }); await m.ctx.F.getCaja('manana?dia=x'); m.ctx.risp = { ok: true, libro: null }; await m.ctx.F.getCaja('libro_ventana?dia=x&desde=a&hasta=b');
+    t('② bis libro_ventana (nunca lleva el campo) NO vacia la barra; una lectura de pantalla si', /senzaEsito|⚠/.test(m.ctx.F.barra(true))); m.ctx.risp = { ok: true, sobres: [] }; await m.ctx.F.getCaja('manana?dia=x'); t('② ter y la lectura de pantalla siguiente la apaga', !/⚠/.test(m.ctx.F.barra(true))); }
   // ③ Entendido
   { const m = mondo(SRC, { risp: { ok: true, senza_esito: [SE(), SE({ uid: 'otro-2', detalle: '1006' })] } }); await m.ctx.F.getCaja('x');
     m.ctx.F.cajaVistoSE('cnt-1005');
@@ -66,6 +68,7 @@ const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log
   const k0 = ko, o0 = ok; muto = true; const k1 = ko; try { await banco(SRC0.replace(da, () => a)); } catch (e) { ko++; } muto = false; const rossi = ko - k1; ko = k0; ok = o0;
   t('⑦ mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
 await mut('la barra no esta en barra()', "function barra(titulo) {\n  return senzaEsitoHtml() + (PROVA ?", "function barra(titulo) {\n  return (PROVA ?");
+await mut('libro_ventana vacia la barra', "if (path.indexOf('libro_ventana') !== 0) SENZA_ESITO", "if (true) SENZA_ESITO");
 await mut('getCaja no recoge la lista', "SENZA_ESITO = Array.isArray(j.senza_esito) ? j.senza_esito : [];", "");
 await mut('una lectura buena no apaga', "SENZA_ESITO = Array.isArray(j.senza_esito) ? j.senza_esito : [];", "if (Array.isArray(j.senza_esito)) SENZA_ESITO = j.senza_esito;");
 await mut('Entendido no oculta', "vistos.indexOf(seIdSeguro(x.uid)) < 0", "true");
