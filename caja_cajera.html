@@ -278,6 +278,7 @@ async function getCaja(path) {
     var j = await r.json();
     if (await esRespuestaPin(j)) return { ok:false, error: j.error, pin:true };
     if (!r.ok || j.ok === false) return { ok:false, error: j.error || ('http_' + r.status) };
+    SENZA_ESITO = Array.isArray(j.senza_esito) ? j.senza_esito : [];   // [10-ott] cada lectura buena REEMPLAZA la lista: si ya llego, la barra desaparece sola
     return Object.assign({ ok:true }, j);
   } catch (e) { return { ok:false, error:'sin_red' }; }
 }
@@ -306,12 +307,38 @@ var DEPOSITO_PENDIENTE = null;
 /* ═══ 3 · RENDER ══════════════════════════════════════════════════════════ */
 var app = document.getElementById('app');
 function barra(titulo) {
-  return (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
+  return senzaEsitoHtml() + (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.6.1</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.7.0</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+/* ═══ [10-ott · V28 «el bordo dice creada, la fila va a cuarentena, el vetro debe decirlo»] LOS GESTOS QUE NO LLEGARON ═════════════════════════════════════
+   El bordo responde «creada/guardado» cuando ACOLA el gesto; si despues la base lo rechaza (cuarentena) nadie lo veia — la busta de prueba de hoy. Ahora las lecturas de la caja traen
+   `senza_esito` (gestos no llegados o sin confirmar hace mas de 2 min, ultimas 24 h) y cada pantalla lo muestra en una barra ROJA que se queda hasta que ella la toca. Es solo un aviso:
+   nunca bloquea ni reintenta solo (reintentar un hecho rechazado no lo arregla). El detalle tecnico es solo un codigo corto — para Alberto, no para ella. */
+var SENZA_ESITO = [];
+var SE_VISTOS_KEY = 'caja_se_vistos';
+function seVistos() { try { return JSON.parse(localStorage.getItem(SE_VISTOS_KEY) || '[]'); } catch (e) { return []; } }
+function seIdSeguro(x) { return String(x == null ? '' : x).replace(/[^A-Za-z0-9_:.-]/g, '').slice(0, 60); }
+var SE_MOTIVO = { ingest_quarantena: 'la base de datos rechazó el registro', sin_confirmar: 'todavía no se confirma', pg_no_responde: 'la base de datos no respondió', sin_detalle: 'sin detalle' };
+function senzaEsitoHtml() {
+  var vistos = seVistos();
+  var lista = (SENZA_ESITO || []).filter(function(x){ return x && vistos.indexOf(seIdSeguro(x.uid)) < 0; });
+  if (!lista.length) return '';
+  return '<div class="note bad" id="senzaEsito" style="margin:0 0 8px"><b>⚠ ' + (lista.length === 1 ? 'Un gesto NO llegó a la base de datos' : lista.length + ' gestos NO llegaron a la base de datos') + '</b>' +
+    lista.map(function(x){
+      var hh = x.ts ? new Date(x.ts).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '';
+      return '<br>' + esc(x.que || 'un gesto') + (x.detalle ? ' · ' + esc(x.detalle) : '') + (hh ? ' · ' + hh : '') + ' — ' + esc(SE_MOTIVO[x.motivo] || x.motivo || '') +
+        ' <button class="btn gh" style="padding:2px 8px;font-size:.75em" onclick="cajaVistoSE(\'' + seIdSeguro(x.uid) + '\')">Entendido</button>';
+    }).join('') + '<br><small>Avisa a Alberto antes de seguir. No se repite solo.</small></div>';
+}
+function cajaVistoSE(uid) {
+  var v = seVistos(); if (v.indexOf(uid) < 0) v.push(uid);
+  try { localStorage.setItem(SE_VISTOS_KEY, JSON.stringify(v.slice(-50))); } catch (e) {}
+  var el = document.getElementById('senzaEsito'); if (el) el.remove();
+}
 
 /* [05-ott · modo prueba] planta una caja_sobre de PRUEBA (día 2099) para poder contar y depositar hoy */
 async function plantarBustaPrueba() {
