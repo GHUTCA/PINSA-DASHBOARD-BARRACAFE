@@ -14,10 +14,10 @@ function mondo(SRC, o) {
   const mk = (id) => (els[id] || (els[id] = { id, value: '', onclick: null, addEventListener() {} }));
   const ctx = { JSON, Math, Date, String, Number, Object, Array, Promise, console, app, MULTI: false, NOCHES: [], MANANA: { sobres: [] }, DEPOSITO_PENDIENTE: null, PASO: 4, DIA_HOY: 'd', DIA_NOCHE: 'n', UIDS_GESTO: {},
     barra: () => '', esc: (x) => String(x == null ? '' : x), fmt: (n) => '$' + n, toast: (m, k) => toasts.push([m, k]), renderError() {}, pantalla6() { ctx.fatto = true; }, pantallaReservaSobre() {}, uidGesto: (p) => p + '-1',
-    unTocoUnHecho: (b, fn) => { b.onclick = fn; }, SES: { user: 'Mayra' }, postCaja: async (b) => { posts.push(b); return o.risposta; },
+    unTocoUnHecho: (b, fn) => { b.onclick = fn; }, SES: { user: 'Mayra' }, localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, pantallaRojaNotte() {}, postCaja: async (b) => { posts.push(b); return o.risposta; },
     getCaja: async () => ({ ok: true, salida_pendiente: { uid_gesto: 'dep-1', a_depositar: 358532, en_cola: o.enCola ? true : undefined } }), document: { getElementById: mk, querySelector: mk } };
   vm.createContext(ctx);
-  vm.runInContext(['uidGestoEstable', 'pantalla9'].map((n) => fnDe(SRC, n)).join('\n') + '\nthis.F = { pantalla9 };', ctx);
+  vm.runInContext(['uidGestoEstable', 'pantalla9', 'rojaPendLeer', 'rojaSiguiente'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "k";\nthis.F = { pantalla9 };', ctx);
   return { ctx, mk, toasts, posts, app };
 }
 async function banco(SRC) {

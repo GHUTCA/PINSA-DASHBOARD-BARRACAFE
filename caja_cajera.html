@@ -310,7 +310,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return senzaEsitoHtml() + (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.8.2</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.9.0</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -880,14 +880,17 @@ async function pantalla8() {
    El martes la cajera cuenta las noches del 09, 10, 11 y 12 y en el banco va UN solo deposito. Pero el cuadre es dia por dia: «mai un totale che nasconde in quale giorno e lo scarto». Debajo del total del
    deposito (que sigue siendo uno) una fila POR NOCHE: sobres · contado · el 5% de ESA noche · neto. Si ella edita el contado total, la diferencia sale como «Ajuste manual» y las filas siguen sumando al total.
    PURA: no calcula nada nuevo (el contado de cada sobre y la retencion de cada noche ya se leian); solo los agrupa por dia. */
-function desgloseDeposito(sobres, porNoche, noches, contadoTotal) {
+function desgloseDeposito(sobres, porNoche, noches, contadoTotal, sueltas) {
   var dias = (noches || []).slice().sort();
+  /* [10-ott · AUT-0659] las buste R ya selladas (la R-0001) pertenecen a su noche: su monto es parte del contado BRUTO de esa noche y de su reserva — 09: 982.000 + 99.500 − 99.500 = 982.000 */
+  var sPorDia = {}, sFuera = [];
+  (sueltas || []).forEach(function(r){ if (dias.indexOf(r.dia) >= 0) sPorDia[r.dia] = (sPorDia[r.dia] || 0) + r.importo; else sFuera.push(r); });
   var filas = dias.map(function(d){
     var mios = (sobres || []).filter(function(x){ return (x.dia || '') === d; });
-    var contado = mios.reduce(function(a, x){ return a + (x.conteo ? (x.conteo.contado || 0) : (x.declarado || 0)); }, 0);
-    var reserva = (porNoche && porNoche[d]) || 0;
+    var contado = mios.reduce(function(a, x){ return a + (x.conteo ? (x.conteo.contado || 0) : (x.declarado || 0)); }, 0) + (sPorDia[d] || 0);
+    var reserva = ((porNoche && porNoche[d]) || 0) + (sPorDia[d] || 0);
     return { dia: d, n: mios.length, contado: contado, reserva: reserva, neto: contado - reserva };
-  });
+  }).concat(sFuera.map(function(r){ return { dia: r.dia, n: 0, contado: r.importo, reserva: r.importo, neto: 0, roja: r.numero }; }));
   var sumaContado = filas.reduce(function(a, x){ return a + x.contado; }, 0);
   return { filas: filas, ajuste: (Number(contadoTotal) || 0) - sumaContado };
 }
@@ -900,10 +903,51 @@ function desgloseHtml(d) {
     (d.ajuste !== 0 ? '<div class="r"><span class="n">Ajuste manual del contado</span><span class="v">' + (d.ajuste > 0 ? '+' : '−') + fmt(Math.abs(d.ajuste)) + '</span></div>' : '') +
     '</div>';
 }
+/* ═══ [10-ott · AUT-0659 · ordine di Alberto «giorno per giorno, non accumulato»] LA BUSTA R, UNA PER NOTTE ═══════════════════════════════════════════════════════
+   Con la leva del bordo (`roja_estado` existe) el depósito de varias noches sella UNA busta POR NOCHE: su 5% (el DEBITO de la roja, cuota de ADMIN menos lo ya cubierto) y su dia_operativo. Las noches ya cubiertas
+   por una busta (07-08-09 → R-0001) NO se rehacen; la R-0001 entra en la salida como «roja ya sellada»: contado BRUTO = lo contado + esa busta, reserva = esa busta + las nuevas, a banco = contado − reserva
+   (ADMIN: «a banca = contado − reserva, per ogni salida»). Cada busta es un verbo `reserva_sobre` idempotente con uid `res-<salida>-<noche>`: repetirlo devuelve el MISMO número. La secuencia se recuerda en este
+   teléfono (localStorage) para retomarla si ella cierra la app a la mitad. Sin la leva (404 lettura_sconosciuta): la busta única de siempre, byte por byte. */
+var ROJA_PEND_KEY = 'caja_roja_pend_v1';
+function rojaPendLeer() { try { return JSON.parse(localStorage.getItem(ROJA_PEND_KEY) || 'null'); } catch (e) { return null; } }
+function rojaPendGuardar(p) { try { localStorage.setItem(ROJA_PEND_KEY, JSON.stringify(p)); } catch (e) {} }
+function rojaPendLimpiar() { try { localStorage.removeItem(ROJA_PEND_KEY); } catch (e) {} }
+function rojaSiguiente(p) { for (var i = 0; i < p.lista.length; i++) { if (!p.hechas[p.lista[i].dia]) return i; } return -1; }
+function pantallaRojaNotte(depositoUid, lista, hechas) {
+  var p = { dep: depositoUid, lista: lista, hechas: hechas || {} };
+  rojaPendGuardar(p);
+  var i = rojaSiguiente(p);
+  if (i < 0) { rojaPendLimpiar(); toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok'); pantalla9(); return; }
+  var it = lista[i];
+  app.innerHTML = barra(true) +
+    '<div class="kick">La reserva · busta ' + (i + 1) + ' de ' + lista.length + '</div><h1>A la caja fuerte ROJA</h1>' +
+    '<p class="sd">Noche ' + esc(fechaCorta(it.dia)) + '</p><p class="big acc">' + fmt(it.importo) + '</p>' +
+    (it.sinCuota ? '<div class="note">Sin cuota de ADMIN para esta noche: se usa el cálculo del sistema.</div>' : '') +
+    '<button class="btn acc" id="sellarRoja">A la caja fuerte ROJA</button>';
+  unTocoUnHecho(document.getElementById('sellarRoja'), async function(){
+    var r = await postCaja({ verbo:'reserva_sobre', uid_gesto: 'res-' + depositoUid + '-' + it.dia, dia_op: it.dia, monto: it.importo, referencia_uid: depositoUid,
+      firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+    if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
+    p.hechas[it.dia] = r.sobre_nro || '—';
+    rojaPendGuardar(p);
+    var quedan = rojaSiguiente(p) >= 0;
+    app.innerHTML = barra(true) +
+      '<div class="kick">La reserva · busta ' + (i + 1) + ' de ' + lista.length + '</div><h1>A la caja fuerte ROJA</h1>' +
+      '<p class="sd">Noche ' + esc(fechaCorta(it.dia)) + '</p><p class="big acc">' + fmt(it.importo) + '</p>' +
+      '<div class="rows"><div class="r tot"><span class="n">Sobre</span><span class="v">' + esc(r.sobre_nro || '—') + '</span></div></div>' +
+      '<button class="btn acc" id="sigRoja">' + (quedan ? 'Siguiente busta' : 'Listo') + '</button>';
+    unTocoUnHecho(document.getElementById('sigRoja'), async function(){ pantallaRojaNotte(depositoUid, lista, p.hechas); });
+  });
+}
 async function pantalla9() {
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando el depósito…</p>';
   var pend = await getCaja('deposito_pendiente?dia=' + DIA_HOY);
   DEPOSITO_PENDIENTE = pend.ok ? pend.salida_pendiente : null;
+  /* [10-ott · AUT-0659] si ella cerró la app entre la salida y la ÚLTIMA busta R, la secuencia se retoma antes de «De vuelta del banco» (las ya selladas no se repiten: quedan marcadas) */
+  if (DEPOSITO_PENDIENTE) {
+    var rpR = rojaPendLeer();
+    if (rpR && rpR.dep === DEPOSITO_PENDIENTE.uid_gesto && rpR.lista && rojaSiguiente(rpR) >= 0) { pantallaRojaNotte(rpR.dep, rpR.lista, rpR.hechas); return; }
+  }
 
   /* 🔴 LIMITE DICHIARATO, non nascosto: si ella cierra la app entre la
      salida (ya escrita) y el sello de la reserva (reserva_sobre), al volver
@@ -943,7 +987,28 @@ async function pantalla9() {
      El "depósito al 100%" del 02-ott sigue siendo cierto para los gastos
      de propinas (se retiran del banco aparte): las dos órdenes conviven. */
   var RESERVA;
+  /* [10-ott · AUT-0659] ¿hay roja por noche? Si el bordo no tiene la lectura (404 lettura_sconosciuta) la busta es la única de siempre. Cualquier OTRO fallo NO es «sin roja»: no se sale al banco a ciegas. */
+  var ROJA = null;
   if (MULTI && NOCHES.length) {
+    var rjR = await getCaja('roja_estado?dia=' + DIA_HOY + '&noches=' + NOCHES.join(','));
+    if (rjR.ok && rjR.roja) ROJA = rjR;
+    else if (!rjR.ok && rjR.error !== 'lettura_sconosciuta') { renderError('La roja', rjR.error); return; }
+  }
+  if (ROJA) {
+    RESERVA = { ok: true, reserva: 0, reserva_pct: ROJA.reserva_pct, porNoche: {}, aSellar: [], sinCuota: [], nuevas: 0 };
+    for (var iR = 0; iR < ROJA.noches.length; iR++) {
+      var nR = ROJA.noches[iR];
+      if (nR.estado === 'sin_cuota') {
+        if (nR.importo == null) { RESERVA = { ok: true, reserva: null }; break; }
+        RESERVA.sinCuota.push(nR.dia);
+      }
+      if ((nR.estado === 'da_sigillare' || nR.estado === 'sin_cuota') && nR.importo > 0) {
+        RESERVA.aSellar.push({ dia: nR.dia, importo: nR.importo, sinCuota: nR.estado === 'sin_cuota' });
+        RESERVA.porNoche[nR.dia] = nR.importo; RESERVA.nuevas += nR.importo;
+      }
+    }
+    if (RESERVA.reserva !== null) RESERVA.reserva = RESERVA.nuevas + ROJA.sueltas_total;
+  } else if (MULTI && NOCHES.length) {
     /* la retención de cada noche se calcula como siempre (la propina NO efectivo de ESA noche, base única); el depósito junta las noches que contiene */
     RESERVA = { ok: true, reserva: 0, reserva_pct: null };
     for (var iN = 0; iN < NOCHES.length; iN++) {
@@ -973,13 +1038,14 @@ async function pantalla9() {
   }
   app.innerHTML = barra(true) +
     '<div class="kick">El depósito</div><h1>Antes de salir</h1><p class="sd">Los dos números se escriben ahora</p>' +
-    '<p class="lb">Contado (editable si hace falta)</p><input class="inp" id="contado" inputmode="numeric" value="' + contadoTotal + '">' +
+    '<p class="lb">' + (ROJA && ROJA.sueltas_total > 0 ? 'Contado de los sobres (editable si hace falta)' : 'Contado (editable si hace falta)') + '</p><input class="inp" id="contado" inputmode="numeric" value="' + contadoTotal + '">' +
     '<div id="calc"></div>' +
     ((((MANANA.noEnc || []).length + (MANANA.dejadas || []).length) > 0) ? '<div class="note bad"><b>' + ((MANANA.noEnc || []).length + (MANANA.dejadas || []).length) + ' sobre(s) NO van en este depósito</b><br>No encontrados o dejados para después. Si en realidad los llevas, vuelve y cuéntalos.</div>' : '') +
     '<div class="note">El camino al banco es el único tramo sin testigo. Por eso los números quedan escritos <b>antes</b> de que salgas.</div>' +
     '<button class="btn acc" id="salir">Salir al banco</button>';
   function recalc() {
-    var c = Number(document.getElementById('contado').value || '') || 0;
+    var S = ROJA ? ROJA.sueltas_total : 0;
+    var c = (Number(document.getElementById('contado').value || '') || 0) + S;   // [AUT-0659] BRUTO = lo contado + la roja ya sellada (que sale del mismo contante)
     /* la retención es un PESO FIJO (de la propina no efectivo de anoche), no
        un porcentaje del contado: si ella ajusta el contado, cambia cuánto
        deposita, nunca cuánto se retiene. */
@@ -987,9 +1053,11 @@ async function pantalla9() {
     var aDep = c - reserva;
     document.getElementById('calc').innerHTML =
       '<div class="rows">' + (MULTI ? '<div class="r"><span class="n">Sobres que lleva</span><span class="v">' + (MANANA.sobres || []).length + ' · ' + NOCHES.length + (NOCHES.length === 1 ? ' noche' : ' noches') + '</span></div>' : '') +
-      '<div class="r"><span class="n">A la reserva (' + RESERVA.reserva_pct + '% de la propina no efectivo' + (MULTI && NOCHES.length > 1 ? ' de esas noches' : '') + ')</span><span class="v">' + fmt(reserva) + '</span></div>' +
+      (S > 0 ? '<div class="r"><span class="n">Roja ya sellada (' + esc(ROJA.sueltas.map(function(x){ return x.numero; }).join(', ')) + ')</span><span class="v">+ ' + fmt(S) + '</span></div>' : '') +
+      '<div class="r"><span class="n">' + (ROJA ? 'Reserva: roja ya sellada + ' + RESERVA.aSellar.length + (RESERVA.aSellar.length === 1 ? ' busta nueva' : ' buste nuevas') : 'A la reserva (' + RESERVA.reserva_pct + '% de la propina no efectivo' + (MULTI && NOCHES.length > 1 ? ' de esas noches' : '') + ')') + '</span><span class="v">' + fmt(reserva) + '</span></div>' +
       '<div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>' +
-      (MULTI && NOCHES.length > 1 ? desgloseHtml(desgloseDeposito(MANANA.sobres, RESERVA.porNoche, NOCHES, c)) : '');
+      (ROJA && RESERVA.sinCuota.length ? '<div class="note">Sin cuota de ADMIN para ' + esc(RESERVA.sinCuota.map(fechaCorta).join(', ')) + ': se usa el cálculo del sistema.</div>' : '') +
+      (MULTI && NOCHES.length > 1 ? desgloseHtml(desgloseDeposito(MANANA.sobres, RESERVA.porNoche, NOCHES, c, ROJA ? ROJA.sueltas : null)) : '');
     /* [06-ott · pregunta de EL GIRO `ATTO II A MERCOLEDÌ 06:00`] un depósito NEGATIVO no existe: si el contado no cubre la
        reserva, el botón se apaga y la pantalla lo dice (el bordo lo rechazaría igual, `a_depositar_negativo`, pero DESPUÉS de que
        ella haya salido al banco sin saber por qué). */
@@ -1013,7 +1081,12 @@ async function pantalla9() {
        Alberto): si reserva === 0 la pantalla NO aparece — una busta vacía
        es peor que ninguna busta. Si hay reserva, se confirma AQUÍ, antes de
        salir, y pantalla9() se llama recién DESPUÉS de confirmada. */
-    if (ultimo.reserva > 0) pantallaReservaSobre(depositoUid, ultimo.reserva);
+    if (ROJA) {
+      /* [AUT-0659] una busta por noche con debito: las cubiertas (R-0001) no se rehacen; sin nada que sellar, directo a «De vuelta del banco» */
+      if (RESERVA.aSellar.length) pantallaRojaNotte(depositoUid, RESERVA.aSellar, {});
+      else { toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok'); pantalla9(); }
+    }
+    else if (ultimo.reserva > 0) pantallaReservaSobre(depositoUid, ultimo.reserva);
     else { toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok'); pantalla9(); }
   });
 }

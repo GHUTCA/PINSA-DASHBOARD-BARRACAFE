@@ -15,11 +15,11 @@ function mondo(SRC, o) {
   const els = {}, handlers = {}, app = { innerHTML: '' };
   const mk = (id) => (els[id] || (els[id] = { id, get value() { if (this._v !== undefined) return this._v; const q = app.innerHTML.match(/id="contado"[^>]*value="(\d+)"/); return q ? q[1] : ''; }, set value(x) { this._v = x; }, innerHTML: '', disabled: false, onclick: null, addEventListener(ev, fn) { (handlers[id] = handlers[id] || {})[ev] = fn; } }));
   const ctx = { JSON, Math, Date, String, Number, Object, Array, Promise, console, app, MULTI: o.multi !== false, NOCHES: o.noches, MANANA: { sobres: o.sobres, noEnc: [], dejadas: [] }, DEPOSITO_PENDIENTE: null, PASO: 4, DIA_HOY: '2026-10-13', DIA_NOCHE: '2026-10-12', UIDS_GESTO: {}, _u: 0,
-    barra: () => '', esc: (x) => String(x == null ? '' : x), fmt: (n) => '$' + n, fechaCorta: (d) => d, toast() {}, renderError() {}, pantalla6() {}, pantallaReservaSobre() {}, uidGesto: (p) => p + '-' + (++ctx._u), unTocoUnHecho: (b, fn) => { b.onclick = fn; }, postCaja: async () => ({ ok: true }), SES: { user: 'Mayra' },
-    getCaja: async (p) => { if (/^deposito_pendiente/.test(p)) return { ok: true, salida_pendiente: null }; const m = p.match(/^reserva\?dia=(.+)$/); if (m) return { ok: true, reserva: (o.reservas || {})[m[1]], reserva_pct: 5 }; return { ok: false }; },
+    barra: () => '', esc: (x) => String(x == null ? '' : x), fmt: (n) => '$' + n, fechaCorta: (d) => d, toast() {}, renderError() {}, pantalla6() {}, pantallaReservaSobre() {}, uidGesto: (p) => p + '-' + (++ctx._u), unTocoUnHecho: (b, fn) => { b.onclick = fn; }, postCaja: async () => ({ ok: true }), SES: { user: 'Mayra' }, localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, renderError() {}, pantallaRojaNotte() {},
+    getCaja: async (p) => { if (/^deposito_pendiente/.test(p)) return { ok: true, salida_pendiente: null }; const m = p.match(/^reserva\?dia=(.+)$/); if (m) return { ok: true, reserva: (o.reservas || {})[m[1]], reserva_pct: 5 }; return { ok: false, error: 'lettura_sconosciuta' }; },
     document: { getElementById: mk, querySelector: mk } };
   vm.createContext(ctx);
-  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'pantalla9', 'uidGestoEstable'].map((n) => fnDe(SRC, n)).join('\n') + '\nthis.F = { desgloseDeposito, desgloseHtml, pantalla9 };', ctx);
+  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'pantalla9', 'uidGestoEstable', 'rojaPendLeer', 'rojaSiguiente'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "k";\nthis.F = { desgloseDeposito, desgloseHtml, pantalla9 };', ctx);
   return { ctx, els, handlers, app, mk };
 }
 const S = (dia, nro, contado, declarado) => ({ sobre_nro: nro, dia, declarado: declarado || 0, conteo: contado == null ? null : { contado } });
@@ -64,13 +64,13 @@ const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log
   const k0 = ko, o0 = ok; muto = true; const k1 = ko; try { await banco(SRC0.replace(da, () => a)); } catch (e) { ko++; } muto = false; const rossi = ko - k1; ko = k0; ok = o0;
   t('⑥ mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
 await mut('no ordena las noches', "var dias = (noches || []).slice().sort();", "var dias = (noches || []).slice();");
-await mut('la reserva de TODAS las noches en cada fila', "var reserva = (porNoche && porNoche[d]) || 0;", "var reserva = 56600;");
+await mut('la reserva de TODAS las noches en cada fila', "var reserva = ((porNoche && porNoche[d]) || 0) + (sPorDia[d] || 0);", "var reserva = 56600;");
 await mut('sobres de todas las noches', "return (x.dia || '') === d; });", "return true; });");
 await mut('el declarado se ignora', "(x.conteo ? (x.conteo.contado || 0) : (x.declarado || 0))", "(x.conteo ? (x.conteo.contado || 0) : 0)");
 await mut('el ajuste no se calcula', "ajuste: (Number(contadoTotal) || 0) - sumaContado", "ajuste: 0");
 await mut('tabla con una sola noche', "if (!d || !d.filas || d.filas.length < 2) return '';", "if (!d || !d.filas) return '';");
 await mut('la retencion no se guarda por noche', "(RESERVA.porNoche = RESERVA.porNoche || {})[NOCHES[iN]] = rN.reserva;", "");
-await mut('la tabla fuera del recalc', "(MULTI && NOCHES.length > 1 ? desgloseHtml(desgloseDeposito(MANANA.sobres, RESERVA.porNoche, NOCHES, c)) : '')", "''");
+await mut('la tabla fuera del recalc', "(MULTI && NOCHES.length > 1 ? desgloseHtml(desgloseDeposito(MANANA.sobres, RESERVA.porNoche, NOCHES, c, ROJA ? ROJA.sueltas : null)) : '')", "''");
 await mut('la leyenda del deposito unico', "(el banco recibe un solo depósito)", "");
 await mut('el ajuste sin signo', "(d.ajuste > 0 ? '+' : '−')", "''");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
