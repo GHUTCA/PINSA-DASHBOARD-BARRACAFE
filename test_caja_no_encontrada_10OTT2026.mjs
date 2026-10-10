@@ -130,7 +130,7 @@ async function banco(SRC) {
   { const m = mondo(SRC, { pend: { ok: true, sobres: [S('1003'), S('1004')], noches: ['2026-10-08'] } }); m.ctx.DEJADAS = { '2026-10-08:1003': 1, '2026-10-08:1004': 1 }; await m.ctx.F.pantalla6();
     t('⑩ sexto TODAS dejadas: «Nada que contar» con la lista y paso a los cortes, no «la caja fuerte esta vacia»', /Nada que contar/.test(m.app.innerHTML) && /2 sobres para después/.test(m.app.innerHTML) && !/la caja fuerte está vacía/i.test(m.app.innerHTML) && /irPos/.test(m.app.innerHTML), m.app.innerHTML.slice(0, 220)); }
   { const src = SRC; t('⑩ séptimo el deposito AVISA cuantos sobres no viajan (no encontrados o dejados)', /NO van en este depósito/.test(src) && /MANANA\.noEnc \|\| \[\]\)\.length \+ \(MANANA\.dejadas \|\| \[\]\)\.length/.test(src)); }
-  t('⑧ versión: caja 1.3.1', /caja 1\.3\.1<\/small>/.test(SRC));
+  t('⑧ versión: caja >= 1.3 (busta no encontrada y elegir/dejar ya estan)', /caja 1\.[3-9]\.\d<\/small>/.test(SRC));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }
