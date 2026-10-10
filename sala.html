@@ -1108,7 +1108,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.225.5 · vetro</span>
+      <span class="ver" id="ver">sala v3.225.6 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3362,7 +3362,10 @@ function _ofreceCorteSinPlaza(codigo, nombre) {
 function showEntrada(msg) {
   /* [AUT-0216c] il JL NON vede mai la tastiera del codigo: ogni strada che qui
      chiederebbe il turno lo rimanda alla SUA app, che il codigo lo ha. */
-  if (JL) { location.replace(_jlBackUrl()); return; }
+  if (JL) {   // [10-ott] il rimbalzo NON e' piu' muto: l'app_jl legge `jl_rimbalzo` e dice PERCHE' la sala l'ha rimandato indietro
+    try { sessionStorage.setItem('jl_rimbalzo', JSON.stringify({ ts: Date.now(), msg: String(msg || 'la sala te devolvió a tu app') })); } catch (e) {}
+    location.replace(_jlBackUrl()); return;
+  }
   /* [reperto di Alberto, 23-set] salir()/salirPorCierre() non chiudevano il
      pannello di una mesa se era aperto quando il turno finiva: restava
      visibile SOPRA la schermata di login, coi suoi sei bottoni ancora
@@ -14877,6 +14880,25 @@ async function _repetidoManeja(rB, body, pg) {
   pg.uid = body.pago_uid;
   return { rB: await _pagoAlBorde(body, pg.tot) };
 }
+/* ═══ [10-ott · V28 «LEZIONE PER LA RIPROVA»] L'ESITO DEL COBRO LASCIA UNA TRACCIA CHE RESTA, NON SOLO UN TOAST ═══════════════════════════════════════════════════
+   La prova A sulla mesa 200 e' andata male e NESSUNO ha visto perche': il toast dura 3 secondi, l'etichetta in fondo e' piccola, e in modalita' JL un rifiuto del bordo rimbalzava alla
+   app_jl in silenzio. Ora ogni cobro scrive il suo esito in TRE posti: ① `localStorage` (gli ultimi 30, leggibili dopo sul telefono) · ② un fatto al bordo (`pago_esito`) ·
+   ③ per il JL, se NON e' ok, una BARRA ROSSA che resta finche' non la tocchi (mai piu' solo un toast). */
+function _pagoEsito(pg, esito, motivo) {
+  const rec = { ts: Date.now(), mesa: String((pg && pg.mesa) || ''), medio: String((pg && pg.medio) || ''), monto: Math.round(Number((pg && pg.tot) || 0)),
+    esito: esito, motivo: String(motivo || ''), jl: JL ? 1 : 0 };
+  try { const l = JSON.parse(localStorage.getItem('pinsita_pago_esito') || '[]'); l.push(rec); localStorage.setItem('pinsita_pago_esito', JSON.stringify(l.slice(-30))); } catch (e) {}
+  try { bordeHecho('pago_esito', { mesa: rec.mesa, medio: rec.medio, monto: rec.monto, esito: esito, motivo: rec.motivo }); } catch (e) {}
+  if (esito !== 'ok' && JL) { try { _pagoFallaBanner(rec); } catch (e) {} }
+}
+function _pagoFallaBanner(rec) {
+  let el = document.getElementById('pagoFalla'); if (el) el.remove();
+  el = document.createElement('div'); el.id = 'pagoFalla';
+  el.setAttribute('style', 'position:fixed;left:0;right:0;bottom:0;z-index:2147483000;background:#8a1c1c;color:#fff;font-weight:800;padding:14px 16px;font-size:15px;text-align:center;cursor:pointer');
+  el.textContent = '⛔ El cobro de la mesa ' + rec.mesa + ' NO se registró (' + (rec.motivo || 'sin motivo') + ') — toca para cerrar';
+  el.onclick = function () { el.remove(); };
+  document.body.appendChild(el);
+}
 async function pagoConfirmar(btn) {
   /* [AUT-0251] un nuovo tentativo cancella il rifiuto precedente: la banda
      racconta L'ULTIMO esito, mai uno vecchio rimasto sullo schermo. */
@@ -14937,7 +14959,7 @@ async function pagoConfirmar(btn) {
   let intest = null;
   if (JL) {   // [10-ott · AUT-0646] il JL incassa: il mesero del tavolo si prende dalla plaza ADESSO; se manca il cobro non parte
     intest = await _jlIntestatario((pg.mesas && pg.mesas.length) ? pg.mesas : [pg.mesa]);
-    if (!intest.ok) { pg.enviando = false; renderPago(); _intestatarioAnomalia(intest, 'pagoConfirmar'); return; }
+    if (!intest.ok) { pg.enviando = false; renderPago(); _intestatarioAnomalia(intest, 'pagoConfirmar'); _pagoEsito(pg, 'anomalia', intest.motivo); return; }
   }
   const esCort = pg.medio === 'cortesia';
   /* v1.1 · il fossile porta il monto VERO: cortesía = $0 (e niente boleta —
@@ -15111,6 +15133,7 @@ async function pagoConfirmar(btn) {
       rB = x.rB;
     }
     if (rB && rB.ok !== false) {
+      _pagoEsito(pg, 'ok', 'bordo');
       /* la mesa si chiude ottimisticamente come sempre (v1.13): il GAS chiude
          TUTTA la mesa al pago, e lo farà anche stavolta — solo, lo fa dietro,
          chiamato dal bordo. La mano che fa sparire i pedidos è la stessa. */
@@ -15222,6 +15245,7 @@ async function pagoConfirmar(btn) {
       }
     }
     if (r && r.ok) {
+      _pagoEsito(pg, 'ok', r.mesa_abierta ? 'gas_parcial' : 'gas');
       /* ═══ v3.5.4 · LA PARTE CHE NON COPRE NON CHIUDE NIENTE ════════════════
          Il server dice `mesa_abierta:true` quando la somma dei pagos non copre
          ancora il consumo. Qui la mano ottimistica DEVE stare ferma: far
@@ -15330,11 +15354,13 @@ async function pagoConfirmar(btn) {
        stessa chiusura) — la mesa ERA già pagata, si chiude qui, non si
        apre la porta a un uid nuovo sulla stessa seduta. */
     if (r && !r.ok && r.error === 'pago_duplicado_bloqueado') {
+      _pagoEsito(pg, 'ok', 'duplicado');
       toast('ok', '✓ Mesa ' + pg.mesa + ' ya estaba pagada — no se cobró de nuevo');
       STATE.pago = null; renderPago(); cerrarMesa(); refrescar(false);
       return;
     }
     /* v1.4 · gli errori del PIN parlano chiaro e riaprono la serratura */
+    _pagoEsito(pg, 'rifiutato', (r && (r.error || r.motivo)) || '?');
     const errPin = { pin_jl_requerido: 'Falta el PIN del JL', pin_jl_invalido: 'PIN del JL incorrecto',
       pin_jl_bloqueado: 'PIN bloqueado 10 min (5 intentos fallidos)', pin_jl_no_configurado: 'PIN del JL no configurado — avisa a Alberto' };
     if (r && errPin[r.error]) { pg.jl = false; pg.pinAsk = true; pg.pinJL = ''; _rech('🔐 ' + errPin[r.error]); }
@@ -15418,6 +15444,7 @@ async function pagoConfirmar(btn) {
     }
     else _rech('No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
+    _pagoEsito(pg, 'sin_respuesta', (e && e.message) || '?');
     bordeHecho('pago_normal_sin_respuesta', { mesa: (pg && pg.mesa) || '', motivo: (e && e.message) || '?', monto: (pg && pg.tot) || 0 });
     /* 🚨 [AUT-0403] 23-set · IL COMMENTO QUI SOTTO DICEVA GIÀ «dopo un timeout
        SI VERIFICA, non si insiste» — e la riga sotto non verificava affatto,
