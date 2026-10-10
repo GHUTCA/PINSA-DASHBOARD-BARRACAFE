@@ -56,6 +56,7 @@ async function banco(SRC) {
   { const m = mondo(SRC, {}); await m.ctx.F.pantalla9(); await click(m, 'salir'); const s = SALIDA(m);
     t('② la salida: contado LORDO 1.731.500 · reserva 183.550 · a banca 1.547.950', s && s.contado === 1731500 && s.reserva === 183550 && s.a_depositar === 1547950, s);
     t('② bis l invariante di ADMIN: a banca = contado − reserva', s.a_depositar === s.contado - s.reserva);
+    t('② quater la salida dice quali buste R gia sigillate CONTA (la R-0001): `rojas` per il legame alla vuelta', s.rojas && s.rojas.length === 1 && s.rojas[0].uid === 'res-vieja' && s.rojas[0].numero === 'R-0001' && s.rojas[0].importo === 99500, s.rojas);
     t('② ter la salida dice quali sobres porta (4)', s.sobres.length === 4 && s.sobres[0].dia === '2026-10-09', s.sobres); }
   for (const nuovo of ['1000000', '1632000', '1700000']) {
     const m = mondo(SRC, {}); await m.ctx.F.pantalla9(); m.mk('contado').value = nuovo; m.handlers.contado.input(); await click(m, 'salir'); const s = SALIDA(m); const neto = Number(nuovo);
@@ -112,6 +113,8 @@ async function banco(SRC) {
   { const r = ROJA({ noches: ROJA().noches.map((n) => (n.dia === '2026-10-11' ? { dia: n.dia, estado: 'da_sigillare', importo: 21250, quota: 31250, coperto: 10000, debito: 21250 } : n)) });
     const m = mondo(SRC, { roja: r }); await m.ctx.F.pantalla9(); await click(m, 'salir'); await click(m, 'sellarRoja'); await click(m, 'sigRoja'); await click(m, 'sellarRoja');
     t('⑪ quota 31.250 con 10.000 gia coperti: la busta della notte 11 e di 21.250, e la salida porta il totale giusto (reserva 99.500 + 40.000 + 21.250 + 12.800)', BUSTE(m)[1].monto === 21250 && SALIDA(m).reserva === 173550 && SALIDA(m).a_depositar === 1632000 - 74050, [BUSTE(m)[1], SALIDA(m)]); }
+  { const r = ROJA({ sueltas: [], sueltas_total: 0 }); const m = mondo(SRC, { roja: r }); await m.ctx.F.pantalla9(); await click(m, 'salir');
+    t('⑫ senza buste gia sigillate: la salida NON porta `rojas`', SALIDA(m) && !('rojas' in SALIDA(m)), SALIDA(m)); }
   // ⑩ una notte sola
   { const m = mondo(SRC, { noches: ['2026-10-10'], sobres: [S('2026-10-10', '1006', 300000)], roja: ROJA({ sueltas: [], sueltas_total: 0, noches: [{ dia: '2026-10-10', estado: 'da_sigillare', importo: 40000, quota: 40000, coperto: 0, debito: 40000 }] }) }); await m.ctx.F.pantalla9();
     t('⑩ una notte sola con roja: niente tabella «Por día» e niente «Roja ya sellada»', !/Por día/.test(calc(m)) && !/Roja ya sellada/.test(calc(m)) && /Vas a depositar<\/span><span class="v">\$260000/.test(calc(m)), calc(m));
@@ -122,6 +125,7 @@ await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }
   const k0 = ko, o0 = ok; muto = true; const k1 = ko; try { await banco(SRC0.replace(da, () => a)); } catch (e) { ko++; } muto = false; const rossi = ko - k1; ko = k0; ok = o0;
   t('mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
+await mut('la salida non porta le rojas', "if (ROJA && ROJA.sueltas && ROJA.sueltas.length) cuerpoSalida.rojas =", "if (false) cuerpoSalida.rojas =");
 await mut('la roja non si legge', "var rjR = await getCaja('roja_estado?dia=' + DIA_HOY + '&noches=' + NOCHES.join(','));", "var rjR = { ok: false, error: 'lettura_sconosciuta' };");
 await mut('un errore diventa «sin roja»', "else if (!rjR.ok && rjR.error !== 'lettura_sconosciuta') { renderError('La roja', rjR.error); return; }", "");
 await mut('il contado non e lordo', "var c = (Number(document.getElementById('contado').value || '') || 0) + S;", "var c = (Number(document.getElementById('contado').value || '') || 0);");
