@@ -25,13 +25,13 @@ function banco(SRC) {
   { const m = mondo(SRC, { user: 'Eduardo' }); m.ctx.E(pg, 'rifiutato', 'no_asignado');
     const l = JSON.parse(m.ls.get('pinsita_pago_esito') || '[]');
     t('① l esito resta in localStorage: mesa, medio, monto, esito, motivo, jl', l.length === 1 && l[0].mesa === '200' && l[0].esito === 'rifiutato' && l[0].motivo === 'no_asignado' && l[0].monto === 2190 && l[0].jl === 1, l);
-    t('① bis e un fatto al bordo (pago_esito) con mesa/esito/motivo', m.hechos.length === 1 && m.hechos[0][0] === 'pago_esito' && m.hechos[0][1].esito === 'rifiutato' && m.hechos[0][1].motivo === 'no_asignado', m.hechos);
+    t('① bis NIENTE fatto al bordo: il bordo respinge pago_esito (gesto_invalido), quindi non si manda un gesto che viene buttato (EL GIRO)', m.hechos.length === 0, m.hechos);
     t('② il JL con un esito NON ok vede una BARRA che resta, col motivo', m.dom.el && /NO se registró/.test(m.dom.el.textContent) && /no_asignado/.test(m.dom.el.textContent) && /mesa 200/.test(m.dom.el.textContent) && !m.dom.quitado, m.dom.el && m.dom.el.textContent);
     if (m.dom.el && m.dom.el.onclick) m.dom.el.onclick(); t('② bis la barra si chiude solo al tocco', m.dom.quitado === true); }
   { const m = mondo(SRC, { user: 'Eduardo' }); m.ctx.E(pg, 'ok', 'bordo');
-    t('③ un esito ok NON accende nessuna barra (ma lascia la traccia)', m.dom.el === null && JSON.parse(m.ls.get('pinsita_pago_esito')).length === 1 && m.hechos.length === 1, [m.dom.el]); }
+    t('③ un esito ok NON accende nessuna barra (ma lascia la traccia)', m.dom.el === null && JSON.parse(m.ls.get('pinsita_pago_esito')).length === 1 && m.hechos.length === 0, [m.dom.el]); }
   { const m = mondo(SRC, null); m.ctx.E(pg, 'rifiutato', 'x');
-    t('③ bis un mesero normale: traccia e fatto si', JSON.parse(m.ls.get('pinsita_pago_esito')).length === 1 && m.hechos.length === 1);
+    t('③ bis un mesero normale: traccia si, nessun fatto al bordo', JSON.parse(m.ls.get('pinsita_pago_esito')).length === 1 && m.hechos.length === 0);
     t('③ ter … ma NESSUNA barra (per lui resta il toast di sempre)', m.dom.el === null); }
   { const m = mondo(SRC, null); for (let i = 0; i < 40; i++) m.ctx.E({ mesa: String(i), medio: 'efectivo', tot: 1 }, 'ok', 'gas');
     const l = JSON.parse(m.ls.get('pinsita_pago_esito'));
@@ -44,7 +44,7 @@ function banco(SRC) {
   // ④ i punti di uscita
   const a = SRC.indexOf('async function pagoConfirmar(btn) {'), b = SRC.indexOf('\n}\n', a); const fn = SRC.slice(a, b);
   const qua = (re) => (fn.match(re) || []).length;
-  t('④ pagoConfirmar dichiara l esito su: anomalia · ok bordo · ok gas · ok duplicato · rifiutato · sin_respuesta', qua(/_pagoEsito\(pg, 'anomalia'/g) === 1 && qua(/_pagoEsito\(pg, 'ok', 'bordo'\)/g) === 1 && qua(/_pagoEsito\(pg, 'ok', r\.mesa_abierta/g) === 1 && qua(/_pagoEsito\(pg, 'ok', 'duplicado'\)/g) === 1 && qua(/_pagoEsito\(pg, 'rifiutato'/g) === 1 && qua(/_pagoEsito\(pg, 'sin_respuesta'/g) === 1, qua(/_pagoEsito\(/g));
+  t('④ pagoConfirmar dichiara l esito su: anomalia · ok bordo · ok gas · ok duplicato · ok repetido(x.fin) · rifiutato · sin_respuesta', qua(/_pagoEsito\(pg, 'anomalia'/g) === 1 && qua(/_pagoEsito\(pg, 'ok', 'bordo'\)/g) === 1 && qua(/_pagoEsito\(pg, 'ok', r\.mesa_abierta/g) === 1 && qua(/_pagoEsito\(pg, 'ok', 'duplicado'\)/g) === 1 && qua(/_pagoEsito\(pg, 'ok', 'repetido_era_el_mismo'\)/g) === 1 && qua(/_pagoEsito\(pg, 'rifiutato'/g) === 1 && qua(/_pagoEsito\(pg, 'sin_respuesta'/g) === 1, qua(/_pagoEsito\(/g));
   t('④ bis l esito del rifiuto sta PRIMA della catena degli errori (non in un ramo solo)', fn.indexOf("_pagoEsito(pg, 'rifiutato'") > 0 && fn.indexOf("_pagoEsito(pg, 'rifiutato'") < fn.indexOf('const errPin'));
   return ko - k0;
 }
@@ -56,8 +56,9 @@ mut('la barra compare anche con esito ok', "if (esito !== 'ok' && JL) {", "if (J
 mut('la barra compare anche per i meseros', "if (esito !== 'ok' && JL) {", "if (esito !== 'ok') {");
 mut('la barra non compare mai', "if (esito !== 'ok' && JL) {", "if (false) {");
 mut('il registro senza tetto', "l.slice(-30)", "l");
-mut('il fatto al bordo sparisce', "try { bordeHecho('pago_esito',", "try { void ('pago_esito',");
+mut('il fatto al bordo torna (e il bordo lo butta)', "  /* ⚠️ NIENTE fatto al bordo:", "  try { bordeHecho('pago_esito', { mesa: rec.mesa }); } catch (e) {}\n  /* ⚠️ NIENTE fatto al bordo:");
 mut('il rifiuto non dichiara l esito', "_pagoEsito(pg, 'rifiutato', (r && (r.error || r.motivo)) || '?');", "");
 mut('il successo del bordo non dichiara l esito', "_pagoEsito(pg, 'ok', 'bordo');", "");
+mut('x.fin del pago repetido senza esito', "_pagoEsito(pg, 'ok', 'repetido_era_el_mismo');", "");
 mut('il rimbalzo torna muto', "sessionStorage.setItem('jl_rimbalzo',", "void (");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
