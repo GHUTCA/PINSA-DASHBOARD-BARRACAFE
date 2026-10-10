@@ -308,7 +308,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.5.0</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.6.0</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -657,6 +657,61 @@ async function leerLibroVentana(desde, hasta) {
   return getCaja('libro_ventana?dia=' + encodeURIComponent(DIA_CORTE || DIA_NOCHE) + '&desde=' + encodeURIComponent(desde) + '&hasta=' + encodeURIComponent(hasta));
 }
 function diasDeCorte() { return [DIA_NOCHE, diaAnterior(DIA_NOCHE), DIA_HOY]; }
+/* ═══ [10-ott · Alberto via V28 + DDL 16f6858f13] FORNITORE Y PIU' CORTES PER MACCHINA ═══════════════════════════════════════════════════════
+   ② ogni corte dice DI CHI e la macchina (MPago · Transbank · ANDCO · Otro, scritto a mano) ③ una macchina puo avere DUE cortes nello stesso giorno (uno AM e uno PM, ognuno con la sua finestra del ticket):
+   «+ otro corte de esta máquina». 🔴 La vista vigente del DB tiene UN corte per (macchina, giorno, FINESTRA): senza finestra il secondo SOSTITUIREBBE il primo — per questo, con piu di un corte per macchina,
+   OGNI corte deve portare la sua finestra, e due con la stessa finestra non si salvano. Con la leva spenta (o /salud muto) la pantalla e quella di ieri: un numero per macchina. */
+var PROVEEDORES = ['MPago', 'Transbank', 'ANDCO', 'Otro'];
+function ventanaLocal(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  var p = function(n){ return String(n).padStart(2, '0'); };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+/* las filas con valor, validadas ANTES de escribir la primera. vals: [{pt:{nombre}, v, ventana:{desde,hasta}, proveedor}] */
+function validarCortes(vals, conVentana) {
+  var conValor = (vals || []).filter(function(x){ return x.v !== null; });
+  if (!conValor.length) return { msg: 'Escribe al menos un corte' };
+  var mala = conValor.filter(function(x){ return !Number.isFinite(x.v) || x.v < 0; })[0];
+  if (mala) return { msg: 'El corte de ' + mala.pt.nombre + ' no es un número' };
+  if (!conVentana) return { ok: true, filas: conValor };
+  var porMaq = {};
+  for (var i = 0; i < conValor.length; i++) {
+    var x = conValor[i], w = x.ventana || {}, nom = x.pt.nombre;
+    if (!!w.desde !== !!w.hasta) return { msg: 'Falta el desde o el hasta del corte de ' + nom };
+    if (w.desde && Date.parse(w.hasta) <= Date.parse(w.desde)) return { msg: 'En ' + nom + ' el «hasta» tiene que ser después del «desde»' };
+    if (!x.proveedor) return { msg: 'Elige el proveedor del corte de ' + nom };
+    (porMaq[nom] = porMaq[nom] || []).push(x);
+  }
+  for (var nombre in porMaq) {
+    var lista = porMaq[nombre];
+    if (lista.length < 2) continue;
+    if (lista.some(function(x){ return !(x.ventana && x.ventana.desde); })) return { msg: 'Cada corte de ' + nombre + ' necesita su ventana (desde/hasta): hay más de uno y se pisarían' };
+    var vistas = {};
+    for (var j = 0; j < lista.length; j++) {
+      var kk = lista[j].ventana.desde + '|' + lista[j].ventana.hasta;
+      if (vistas[kk]) return { msg: 'Dos cortes de ' + nombre + ' con la misma ventana: uno pisaría al otro' };
+      vistas[kk] = 1;
+    }
+  }
+  return { ok: true, filas: conValor };
+}
+function htmlFilaCorte(r, conVentana) {
+  var k = r.k, prev = r.prev;
+  var provPrev = (prev && prev.proveedor) || '';
+  var provSel = provPrev ? (PROVEEDORES.indexOf(provPrev) >= 0 ? provPrev : 'Otro') : (function(){ try { return localStorage.getItem('caja_prov_' + r.pt.nombre) || 'MPago'; } catch (e) { return 'MPago'; } })();
+  var otroTxt = (provPrev && PROVEEDORES.indexOf(provPrev) < 0) ? provPrev : '';
+  return '<div id="fila' + k + '" style="' + (r.extra ? 'border-left:3px solid var(--acc);padding-left:8px;margin-top:8px' : '') + '">' +
+    (r.extra ? '<p class="lb" style="margin:0 0 2px">Otro corte de ' + esc(r.pt.nombre) + '</p>' : '') +
+    '<input class="inp" data-maq-corte="' + k + '" placeholder="$ (déjalo vacío si no se usó)" inputmode="numeric" value="' + (prev ? miles(prev.corte) : '') + '">' +
+    (conVentana
+      ? '<select class="inp" data-maq-prov="' + k + '" style="margin-top:4px">' + PROVEEDORES.map(function(p){ return '<option value="' + esc(p) + '"' + (p === provSel ? ' selected' : '') + '>' + esc(p) + '</option>'; }).join('') + '</select>' +
+        '<input class="inp" data-maq-provotro="' + k + '" placeholder="¿Cuál proveedor?" value="' + esc(otroTxt) + '" style="margin-top:4px;' + (provSel === 'Otro' ? '' : 'display:none') + '">' +
+        '<div class="two" style="margin-top:4px"><label style="font-size:.75em;color:var(--ink2)">Desde (del ticket)<input class="inp" type="datetime-local" data-maq-desde="' + k + '" value="' + ventanaLocal(prev && prev.desde) + '"></label>' +
+        '<label style="font-size:.75em;color:var(--ink2)">Hasta<input class="inp" type="datetime-local" data-maq-hasta="' + k + '" value="' + ventanaLocal(prev && prev.hasta) + '"></label></div>'
+      : '') + '</div>';
+}
 async function pantalla8() {
   if (!DIA_CORTE) DIA_CORTE = DIA_NOCHE;
   var dia = DIA_CORTE;
@@ -667,17 +722,23 @@ async function pantalla8() {
   var bordoNuevo = CORTES.puntos_fonte != null;
   var ventanaActiva = await ventanaOn();
   var puntos = (CORTES.puntos && CORTES.puntos.length) ? CORTES.puntos : [1,2,3,4,5,6].map(function(n){ return { caja_n: n, nombre: 'Caja ' + n, sn: null }; });
+  /* una fila por corte: la maquina trae tantas como cortes vigentes tenga guardados (AM y PM) — o una vacia */
+  var FILAS = [], nextK = 0;
+  puntos.forEach(function(pt, i){
+    var previos = ventanaActiva ? (CORTES.guardado || []).filter(function(g){ return g.maquina === pt.nombre; }) : [(CORTES.guardado || []).find(function(g){ return g.maquina === pt.nombre; })].filter(Boolean);
+    if (!previos.length) FILAS.push({ k: String(nextK++), pt: pt, pi: i, prev: null });
+    else previos.forEach(function(g, j){ FILAS.push({ k: String(nextK++), pt: pt, pi: i, prev: g, extra: j > 0 }); });
+  });
   var filas = puntos.map(function(pt, i){
-    var prev = (CORTES.guardado||[]).find(function(g){ return g.maquina === pt.nombre; });
     return '<p class="lb">' + esc(pt.nombre) + (pt.sn ? ' <small>S/N ' + esc(pt.sn) + '</small>' : '') + '</p>' +
-      '<input class="inp" data-maq-corte="' + i + '" placeholder="$ (déjalo vacío si no se usó)" inputmode="numeric" value="' + (prev ? miles(prev.corte) : '') + '">' +
-      (ventanaActiva ? '<div class="two" style="margin-top:4px"><label style="font-size:.75em;color:var(--ink2)">Desde (del ticket)<input class="inp" type="datetime-local" data-maq-desde="' + i + '"></label><label style="font-size:.75em;color:var(--ink2)">Hasta<input class="inp" type="datetime-local" data-maq-hasta="' + i + '"></label></div>' : '');
+      '<div id="maqFilas' + i + '">' + FILAS.filter(function(r){ return r.pi === i; }).map(function(r){ return htmlFilaCorte(r, ventanaActiva); }).join('') + '</div>' +
+      (ventanaActiva ? '<button class="btn gh" data-maq-mas="' + i + '" style="margin-top:6px;padding:6px 10px;font-size:.8em">+ otro corte de esta máquina</button>' : '');
   }).join('');
   var opcionesDia = diasDeCorte().filter(function(d, k, a){ return a.indexOf(d) === k; }).map(function(d){
     return '<option value="' + esc(d) + '"' + (d === dia ? ' selected' : '') + '>' + (d === DIA_NOCHE ? 'Ayer · ' : d === DIA_HOY ? 'Hoy · ' : '') + esc(fechaCorta(d)) + '</option>';
   }).join('');
   app.innerHTML = barra(true) +
-    '<div class="kick">Los cortes POS</div><h1>Las máquinas</h1><p class="sd">Un número por máquina, para el día que cierra</p>' +
+    '<div class="kick">Los cortes POS</div><h1>Las máquinas</h1><p class="sd">' + (ventanaActiva ? 'Un número por corte de cada máquina, con su proveedor y la ventana del ticket' : 'Un número por máquina, para el día que cierra') + '</p>' +
     '<p class="lb">Día del corte</p><select class="inp" id="diaCorte">' + opcionesDia + '</select>' +
     (bordoNuevo ? '' : '<div class="note bad"><b>El sistema todavía no acepta el día del corte</b><br>No se puede guardar hasta que se actualice. Avisa a Alberto.</div>') +
     filas +
@@ -686,13 +747,16 @@ async function pantalla8() {
     '<button class="btn acc" id="guardar"' + (bordoNuevo ? '' : ' disabled') + '>Guardar</button>' +
     '<button class="btn gh" id="siguiente">Ir al depósito</button>';
   function valores() {
-    return puntos.map(function(pt, i){
-      var raw = String(document.querySelector('[data-maq-corte="' + i + '"]').value || '').trim();
+    return FILAS.map(function(r){
+      var k = r.k;
+      var raw = String(document.querySelector('[data-maq-corte="' + k + '"]').value || '').trim();
       /* [09-ott · BKP (e) `un «-» o un «.» se volvia corte 0`] vacio = no se escribe; algo ESCRITO que no es una cifra (solo «-», solo «.», con letras o con signo menos) es INVALIDO (NaN): ya no se
          convierte en un 0 declarado. Aceptado: digitos con $ . , y espacios (separadores de miles). */
       var valida = raw !== '' && /^[\s$]*\d[\d.,\s]*$/.test(raw);
-      var elD = document.querySelector('[data-maq-desde="' + i + '"]'), elH = document.querySelector('[data-maq-hasta="' + i + '"]');
-      return { pt: pt, raw: raw, v: raw === '' ? null : (valida ? Number(raw.replace(/[^0-9]/g, '')) : NaN),
+      var elD = document.querySelector('[data-maq-desde="' + k + '"]'), elH = document.querySelector('[data-maq-hasta="' + k + '"]');
+      var elP = document.querySelector('[data-maq-prov="' + k + '"]'), elO = document.querySelector('[data-maq-provotro="' + k + '"]');
+      var prov = elP ? (elP.value === 'Otro' ? String((elO && elO.value) || '').trim() : String(elP.value || '').trim()) : '';
+      return { pt: r.pt, k: k, raw: raw, v: raw === '' ? null : (valida ? Number(raw.replace(/[^0-9]/g, '')) : NaN), proveedor: prov,
         ventana: { desde: elD ? ventanaIso(elD.value) : null, hasta: elH ? ventanaIso(elH.value) : null } };
     });
   }
@@ -731,21 +795,43 @@ async function pantalla8() {
       '<div class="r"><span class="n">' + etiqueta + '</span><span class="v">' + fmt(libro) + '</span></div></div>' + avisoV +
       (alguna && dif !== 0 ? '<div class="note ambar"><b>Diferencia ' + (dif > 0 ? '+' : '−') + fmt(Math.abs(dif)) + '</b><br>La suma de las máquinas no es igual al libro. Se guarda igual; queda para mirar.</div>' : '');
   }
-  puntos.forEach(function(pt, i){ var el = document.querySelector('[data-maq-corte="' + i + '"]'); milesInput(el); el.addEventListener('input', comparar);
-    ['desde', 'hasta'].forEach(function(w){ var ew = document.querySelector('[data-maq-' + w + '="' + i + '"]'); if (ew) ew.addEventListener('change', comparar); }); });   // el formato va PRIMERO: comparar() lee el valor ya formateado (y lo parsea igual)
+  function enlazarFila(r) {
+    var k = r.k, el = document.querySelector('[data-maq-corte="' + k + '"]'); milesInput(el); el.addEventListener('input', comparar);   // el formato va PRIMERO: comparar() lee el valor ya formateado (y lo parsea igual)
+    ['desde', 'hasta'].forEach(function(w){ var ew = document.querySelector('[data-maq-' + w + '="' + k + '"]'); if (ew) ew.addEventListener('change', comparar); });
+    var elP = document.querySelector('[data-maq-prov="' + k + '"]');
+    if (elP) elP.addEventListener('change', function(){
+      var o = document.querySelector('[data-maq-provotro="' + k + '"]');
+      if (o) o.style.display = elP.value === 'Otro' ? '' : 'none';
+      comparar();
+    });
+  }
+  FILAS.forEach(enlazarFila);
+  puntos.forEach(function(pt, i){
+    var mas = document.querySelector('[data-maq-mas="' + i + '"]');
+    if (mas) mas.onclick = function(){
+      var r = { k: String(nextK++), pt: pt, pi: i, prev: null, extra: true };
+      FILAS.push(r);
+      document.getElementById('maqFilas' + i).insertAdjacentHTML('beforeend', htmlFilaCorte(r, ventanaActiva));
+      enlazarFila(r); comparar();
+    };
+  });
   comparar();
   document.getElementById('diaCorte').addEventListener('change', function(){ DIA_CORTE = document.getElementById('diaCorte').value; pantalla8(); });
   unTocoUnHecho(document.getElementById('guardar'), async function(){
-    var vals = valores().filter(function(x){ return x.v !== null; });
-    if (!vals.length) { toast('Escribe al menos un corte', 'bad'); return; }
     /* se validan TODAS antes de escribir la primera: una fila invalida no deja a medias a las demas */
-    var mala = vals.filter(function(x){ return !Number.isFinite(x.v) || x.v < 0; })[0];
-    if (mala) { toast('El corte de ' + mala.pt.nombre + ' no es un número', 'bad'); return; }
+    var v = validarCortes(valores(), ventanaActiva);
+    if (!v.ok) { toast(v.msg, 'bad'); return; }
+    var vals = v.filas;
     for (var k = 0; k < vals.length; k++) {
       var x = vals[k];
-      if (!Number.isFinite(x.v) || x.v < 0) { toast('Falta el corte de ' + x.pt.nombre, 'bad'); return; }
-      var r = await postCaja({ verbo:'pos_corte', uid_gesto: uidGestoEstable('pos|' + dia + '|' + x.pt.nombre + '|' + x.v, 'pos'), maquina: x.pt.nombre, dia_op: dia,
-        corte: x.v, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+      var cuerpo = { verbo:'pos_corte', uid_gesto: uidGestoEstable('pos|' + dia + '|' + x.pt.nombre + '|' + x.v + (ventanaActiva ? '|' + (x.ventana.desde || '') + '|' + (x.ventana.hasta || '') + '|' + x.proveedor : ''), 'pos'), maquina: x.pt.nombre, dia_op: dia,
+        corte: x.v, firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' };
+      if (ventanaActiva) {
+        cuerpo.proveedor = x.proveedor;
+        if (x.ventana.desde) { cuerpo.desde = x.ventana.desde; cuerpo.hasta = x.ventana.hasta; }
+        try { localStorage.setItem('caja_prov_' + x.pt.nombre, ['MPago', 'Transbank', 'ANDCO'].indexOf(x.proveedor) >= 0 ? x.proveedor : 'Otro'); } catch (e) {}
+      }
+      var r = await postCaja(cuerpo);
       if (!r.ok) { toast('No se guardó ' + x.pt.nombre + ': ' + r.motivo, 'bad'); return; }
     }
     /* [08-ott · V28 `CORTES GUARDAR NON AVANZA`] un guardado que no cambia de pantalla parece no haber funcionado: tras guardar todo, sigue sola al deposito. */

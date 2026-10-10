@@ -14,20 +14,21 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function mondo(SRC, o) {
   o = o || {}; const els = {}, handlers = {}, reqs = [], app = { innerHTML: '' }, toasts = [];
-  const mk = (key) => (els[key] || (els[key] = { key, value: '', dataset: {}, innerHTML: '', onclick: null, addEventListener(ev, fn) { (handlers[key] = handlers[key] || {})[ev] = fn; }, disabled: false }));
+  const mk = (key) => (els[key] || (els[key] = { key, value: '', dataset: {}, style: {}, innerHTML: '', onclick: null, addEventListener(ev, fn) { (handlers[key] = handlers[key] || {})[ev] = fn; }, insertAdjacentHTML(pos, h) { this.innerHTML += h; ctx.inseriti.push([key, h]); }, disabled: false }));
   const ctx = { JSON, Math, Date, String, Number, Object, Array, Promise, setTimeout, clearTimeout, encodeURIComponent, isNaN, parseInt, console,
-    app, LOCAL: 'bks', BORDE: { bks: 'https://borde.test' }, DIA_HOY: '2026-10-10', DIA_NOCHE: '2026-10-09', DIA_CORTE: null, PASO: 3, SES: { user: 'Mayra' }, UIDS_GESTO: {}, _u: 0,
+    inseriti: [], posts: [], ls: new Map(), localStorage: { getItem: (k) => (ctx.ls.has(k) ? ctx.ls.get(k) : null), setItem: (k, v) => ctx.ls.set(k, String(v)) }, app, LOCAL: 'bks', BORDE: { bks: 'https://borde.test' }, DIA_HOY: '2026-10-10', DIA_NOCHE: '2026-10-09', DIA_CORTE: null, PASO: 3, SES: { user: 'Mayra' }, UIDS_GESTO: {}, _u: 0,
     barra: () => '', esc: (x) => String(x == null ? '' : x), fechaCorta: (d) => d, fmt: (n) => '$' + n, uidGesto: (p) => p + '-' + (++ctx._u), toast: (m, c) => toasts.push([m, c]), renderError() {}, pantalla9() {},
-    unTocoUnHecho: (btn, fn) => { btn.onclick = fn; }, postCaja: async () => ({ ok: true }),
+    unTocoUnHecho: (btn, fn) => { btn.onclick = fn; }, postCaja: async (b) => { ctx.posts.push(b); return o.postRisp || { ok: true }; },
     fetch: async (u) => { if (o.saludErr) throw new Error('rete'); return { json: async () => ({ flags: { caja_cortes_ventana_on: o.saludOn === undefined ? '1' : o.saludOn } }) }; },
-    getCaja: async (p) => { if (/^cortes_pos/.test(p)) return { ok: true, libro: 5000000, guardado: [], puntos_fonte: 'x', puntos: [{ caja_n: 1, nombre: 'Caja 1', sn: null }, { caja_n: 2, nombre: 'Caja 2', sn: null }] };
+    getCaja: async (p) => { if (/^cortes_pos/.test(p)) return { ok: true, libro: 5000000, guardado: o.guardado || [], puntos_fonte: 'x', puntos: [{ caja_n: 1, nombre: 'Caja 1', sn: null }, { caja_n: 2, nombre: 'Caja 2', sn: null }] };
       if (/^libro_ventana/.test(p)) { reqs.push(p); return o.libroRisp || { ok: true, libro: 7990344, n: 100 }; } return { ok: false }; },
     document: { getElementById: (id) => mk('#' + id), querySelector: (sel) => mk(sel) },
   };
   vm.createContext(ctx);
   const a = SRC.indexOf('var VENTANA_ON'), b = SRC.indexOf('function diasDeCorte()');
-  vm.runInContext(SRC.slice(SRC.indexOf('function miles('), SRC.indexOf('function milesInput')) + fnDe(SRC, 'milesInput') + '\n' + SRC.slice(a, b) + '\nfunction diasDeCorte() { return [DIA_NOCHE, DIA_HOY]; }\n' + fnDe(SRC, 'pantalla8') +
-    '\nthis.F = { ventanaOn, ventanaIso, ventanaComun, fechaHoraCorta, leerLibroVentana, pantalla8 };', ctx);
+  const pv = SRC.slice(SRC.indexOf('var PROVEEDORES'), SRC.indexOf('async function pantalla8()'));
+  vm.runInContext(SRC.slice(SRC.indexOf('function miles('), SRC.indexOf('function milesInput')) + fnDe(SRC, 'milesInput') + '\n' + SRC.slice(a, b) + '\nfunction diasDeCorte() { return [DIA_NOCHE, DIA_HOY]; }\n' + pv + fnDe(SRC, 'pantalla8') +
+    '\nthis.F = { ventanaOn, ventanaIso, ventanaComun, fechaHoraCorta, leerLibroVentana, pantalla8, validarCortes, ventanaLocal, htmlFilaCorte };', ctx);
   return { ctx, els, handlers, reqs, app, toasts, mk };
 }
 const LOC = (iso) => { const d = new Date(iso); const p = (n) => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()); };
@@ -82,7 +83,7 @@ async function banco(SRC) {
     m.mk('[data-maq-corte="0"]').value = '1.000.000'; m.mk('[data-maq-desde="0"]').value = '2026-10-08T18:48'; m.mk('[data-maq-hasta="0"]').value = '2026-10-09T18:48'; m.handlers['[data-maq-hasta="0"]'].change(); await espera(700);
     m.mk('[data-maq-corte="0"]').value = '1.500.000'; m.handlers['[data-maq-corte="0"]'].input(); await espera(50);
     t('⑤ bis cambiar solo el importe NO vuelve a pedir el libro (la ventana es la misma: se recuerda)', m.reqs.length === 1, m.reqs.length); }
-  t('⑦ version 1.5.0', /caja 1\.5\.0<\/small>/.test(SRC));
+  t('⑦ version >= 1.5.0 (la ventana del corte ya esta)', /caja 1\.[5-9]\.\d<\/small>/.test(SRC));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }
@@ -98,5 +99,5 @@ await mut('sin respuesta, finge el numero', "etiqueta = 'Dice nuestro libro <sma
 await mut('se pide a cada tecla', "if (VENTANA_PIDIENDO === k) return;\n    VENTANA_PIDIENDO = k;", "VENTANA_PIDIENDO = k;");
 await mut('no se recuerda la ventana', "if (VENTANA_LIBRO && VENTANA_LIBRO.k === vc.desde + '|' + vc.hasta && VENTANA_LIBRO.libro != null) {", "if (false) {");
 await mut('la lectura sin dia', "return getCaja('libro_ventana?dia=' + encodeURIComponent(DIA_CORTE || DIA_NOCHE) + '&desde='", "return getCaja('libro_ventana?desde='");
-await mut('campos de ventana siempre', "(ventanaActiva ? '<div class=\"two\"", "(true ? '<div class=\"two\"");
+await mut('campos de ventana siempre', "(conVentana\n      ? '<select", "(true\n      ? '<select");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
