@@ -63,7 +63,7 @@ async function bancoAsync(SRC) {
     t('② bis … e i tavoli aperti dalla FETTA (2.190 in 1 cuenta: la 200), non i 5.380 di Google', w && w.abierto === 2190 && w.n_abierto === 1, w);
     t('② ter Ray: incassato dal bordo (10.000 in 1), NON gli 80.000 in 6 di Google', r && r.cobrado === 10000 && r.ctas === 1, r);
     t('② quater Ray: aperto = la sua parte (mio 30.000 + 5.000 = 35.000 in 2 mesas), non il totale della 31 (40.000)', r && r.abierto === 35000 && r.n_abierto === 2, r);
-    const q = l.find((x) => x.qr); t('② quinto i pedidos QR (chiave vuota di Google) restano come erano', q && q.servido === 4000 && q.cobrado === 4000 && q.ctas === 1, q);
+    const q = l.find((x) => x.qr); t('② quinto la riga dei QR (chiave vuota): il servido di Google resta, l INCASSATO e quello del bordo (qui nessun pago senza nome => 0)', q && q.servido === 4000 && q.cobrado === 0, q);
     const c = m.ctx.F._cajaVista();
     t('② sesto i riquadri: venta e cuentas dal bordo (12.190 in 2), «abiertas» dalla fetta (3 mesas)', c.venta === 12190 && c.cuentas === 2 && c.abiertas_bordo === 3 && c.fuente_bordo === true, [c.venta, c.cuentas, c.abiertas_bordo]);
     t('⑧ STATE.caja NON si muta (la copia di Google resta com era)', m.STATE.caja.por_mesero.Ray.cobrado === 80000 && m.STATE.caja.venta === 100000 && m.STATE.caja.por_mesero.Wilbert.abierto === 5380, m.STATE.caja); }
@@ -84,6 +84,14 @@ async function bancoAsync(SRC) {
     t('④ quater timeout: nessun crash, Google resta, errore dichiarato', m.STATE.servErr === 'timeout' && m.ctx.F._cajaVista() === m.STATE.caja && m.STATE.servInVolo === false, m.STATE.servErr); }
   { const m = mondo(SRC, { risposta: { ok: false, error: 'servicio_spento' } }); await m.ctx.F.giroServicio();
     t('④ quinto leva del bordo spenta (servicio_spento): silenzio, Google', m.STATE.serv === null && m.ctx.F._cajaVista() === m.STATE.caja); }
+  { const m = mondo(SRC, { serv: bordoRisp([P('', 'credito', 5000, 0), P('Ray', 'debito', 10000, 0)]) });
+    const q = m.ctx.F._porMesero().find((x) => x.qr);
+    t('② (EL GIRO ①) un pago SENZA nome del bordo va nella riga dei QR (5.000), e il totale dei riquadri lo comprende (15.000)', q && q.cobrado === 5000 && q.ctas === 1 && m.ctx.F._cajaVista().venta === 15000, [q, m.ctx.F._cajaVista().venta]); }
+  { const v = VISTA(); v.meseros.ray = { ok: false, nombre: 'Ray' }; const cg = GOOGLE(); cg.por_mesero.Ray = { venta: 0, n: 0, cobrado: 0, n_cobros: 0, abierto: 777, n_abierto: 3 };
+    const m = mondo(SRC, { vista: v, caja: cg, serv: bordoRisp([P('Wilbert', 'efectivo', 2190, 0)]) });
+    const l = m.ctx.F._porMesero(); const r = riga(l, 'Ray'), w = riga(l, 'Wilbert'), g = riga(l, 'Gabriel');
+    t('③ (EL GIRO ③) Ray ha la fetta ROTTA: tiene l abierto di Google (777 in 3), non uno zero inventato', r && r.abierto === 777 && r.n_abierto === 3, r);
+    t('③ bis … mentre chi ha la fetta buona si azzera e si riempie dal bordo (Wilbert 2.190 in 1; Gabriel 10.000 in 1)', w && w.abierto === 2190 && g && g.abierto === 10000, [w, g]); }
   { const m = mondo(SRC, { vista: null, serv: bordoRisp([P('Wilbert', 'efectivo', 2190, 0)]) });
     const w = riga(m.ctx.F._porMesero(), 'Wilbert'); const c = m.ctx.F._cajaVista();
     t('⑤ senza fetta del bordo: incassato dal bordo, i tavoli aperti restano quelli di Google (non uno zero inventato)', w && w.cobrado === 2190 && w.abierto === 5380 && c.abiertas_bordo === undefined, [w, c.abiertas_bordo]); }
@@ -107,7 +115,7 @@ const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log
 await mut('la leva e ignorata', "return cjFlag('caja_servicio_on') && cjAtto1On();", "return true;");
 await mut('non serve il caja atto1', "return cjFlag('caja_servicio_on') && cjAtto1On();", "return cjFlag('caja_servicio_on');");
 await mut('il dato vecchio resta fresco', "(Date.now() - STATE.ts.serv) < 180000", "true");
-await mut('l incassato di Google si mescola', "pm[n].cobrado = 0; pm[n].n_cobros = 0; porSlug", "porSlug");
+await mut('l incassato di Google si mescola', "pm[n].cobrado = 0; pm[n].n_cobros = 0;   // l'incassato", "   // l'incassato");
 await mut('niente confronto per slug', "const k = _slugSalaJS(nome); if (porSlug[k] == null)", "const k = nome; if (porSlug[k] == null)");
 await mut('i tavoli aperti restano di Google', "if (buoni.length) {", "if (false) {");
 await mut('aperto = totale della mesa, non la parte sua', "const mio = +(x && x.mio) || 0;", "const mio = +(x && x.total) || 0;");
@@ -117,5 +125,6 @@ await mut('il PIN non viaggia', "{ verbo: 'servicio', pin_jl: STATE.pin }", "{ v
 await mut('la fonte non si dichiara (caja)', "'<p class=\"mini\">📷 caja ' + (_servFresco() ? 'del bordo ' + edadTxt('serv') : edadTxt('caja')) + '</p></div>'", "'<p class=\"mini\">📷 caja ' + edadTxt('caja') + '</p></div>'");
 await mut('giroCaja non chiama giroServicio', "giroServicio();   // [v1.37.2]", "// [v1.37.2]");
 await mut('un errore azzera il dato buono', "else STATE.servErr = (r && r.error) || 'no_ok';", "else { STATE.servErr = (r && r.error) || 'no_ok'; STATE.serv = null; }");
-await mut('i QR (chiave vuota) si azzerano', "if (String(n).trim()) { pm[n].cobrado = 0; pm[n].n_cobros = 0; porSlug", "{ pm[n].cobrado = 0; pm[n].n_cobros = 0; porSlug");
+await mut('la riga dei QR tiene l incassato di Google', "pm[n].cobrado = 0; pm[n].n_cobros = 0;   // l'incassato", "if (String(n).trim()) { pm[n].cobrado = 0; pm[n].n_cobros = 0; }   // l'incassato");
+await mut('azzera l abierto a chi non ha la fetta', "buoni.forEach(function (k) {\n      let tot = 0, n = 0;", "Object.keys(pm).forEach(function (n) { if (String(n).trim()) { pm[n].abierto = 0; pm[n].n_abierto = 0; } });\n    buoni.forEach(function (k) {\n      let tot = 0, n = 0;");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
