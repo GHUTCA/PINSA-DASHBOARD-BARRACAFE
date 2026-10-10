@@ -1108,7 +1108,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.224.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.225.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2932,6 +2932,8 @@ async function _pagoAlBorde(body, consumo, action) {
        sul token, un 503 sin_gate: tutto quanto è la via di sempre. */
     if (j && j.ok === true && j.borde === true) return j;
     if (j && j.ok === false && j.borde === true && j.definitivo === true) return j;   // [SCONTI AL BORDO] il bordo ha giudicato: NO
+    /* [09-ott · mesa 55 · BKP `PAGO REPETIDO`] «pago_repetido» e una risposta FINALE del bordo anche senza il timbro: il GAS registrerebbe PROPRIO il doppio. NON si ripiega: si chiede al mesero. */
+    if (j && j.ok === false && j.error === 'pago_repetido') return j;
     if (j && j.motivo === 'apagado') BORDE_PAGO.pausaHasta = Date.now() + BORDE_PAGO.APAGADO_MS;
     /* [AUT-0268] il bordo ha risposto e NON ha timbrato `borde:true`: è la via
        di sempre per decisione SUA, non nostra — e va distinta dal silenzio. */
@@ -14801,6 +14803,46 @@ function _cerrarAsk(pg) {
   });
 }
 
+/* ═══ [09-ott · mesa 55 · BKP `BKP PAGO REPETIDO SCRITTA E9E3BED`] LA GUARDIA DEL PAGO RIPETUTO — il lato del vetro ═══════════════════════════════════
+   Il bordo ferma un pago identico (stessa mesa · medio · monto · propina, uid DIVERSO) a meno di 120 s dal primo, o su una mesa senza niente di vivo, e risponde
+   `{ok:false, error:'pago_repetido', motivo, previo:{uid, ts, monto, hace_s}}` SENZA `need:'gas'`. Qui si chiede: «Este pago ya se registró hace N s · $X. ¿Es OTRO pago?».
+   «No, era el mismo» = il primo era giusto: la mesa si chiude, niente si cobra di nuovo. «Sí, es otro» = si rimanda LO STESSO payload con `confirmo_repetido:1` e un uid NUOVO.
+   Nasce con la leva del bordo `PAGO_REPETIDO_GUARDIA_ON` ("0"): con la leva spenta il bordo non risponde mai `pago_repetido` e questo codice non gira. */
+function _repetidoAsk(previo) {
+  return new Promise(function (resolve) {
+    const pv = previo || {};
+    const hace = Math.round(Number(pv.hace_s));
+    const cuando = Number.isFinite(hace) ? (hace < 60 ? 'hace ' + hace + ' s' : 'hace ' + Math.round(hace / 60) + ' min') : 'hace un momento';
+    const monto = Number(pv.monto);
+    const ov = document.createElement('div');
+    ov.className = 'cmAsk';
+    ov.innerHTML =
+      '<div class="cmAsk-box" role="alertdialog" aria-label="Este pago ya se registró">' +
+        '<div class="cmAsk-tit">⚠ Este pago ya se registró</div>' +
+        '<div class="cmAsk-num plata">' + (Number.isFinite(monto) && monto > 0 ? '$' + _fmtMiles(monto) : '') + '</div>' +
+        '<div class="cmAsk-dat">' + esc(cuando) + ' · mismo medio y mismo monto</div>' +
+        '<div class="cmAsk-dat" style="margin-top:6px"><b>¿Es OTRO pago?</b></div>' +
+        '<button class="cmAsk-si" type="button">Sí, es otro pago</button>' +
+        '<button class="cmAsk-no" type="button">No, era el mismo</button>' +
+      '</div>';
+    document.body.appendChild(ov);
+    const bSi = ov.querySelector('.cmAsk-si'), bNo = ov.querySelector('.cmAsk-no');
+    let finito = false;
+    function fin(v) { if (finito) return; finito = true; try { ov.remove(); } catch (e) {} resolve(v); }
+    bSi.onclick = function () { if (bSi.disabled) return; bSi.disabled = true; bSi.textContent = 'Enviando…'; fin(true); };
+    bNo.onclick = function () { fin(false); };
+    ov.onclick  = function (e) { if (e.target === ov) fin(false); };   // fuera = NO es otro pago (la opcion segura: no cobra de nuevo)
+  });
+}
+/* devuelve { fin:true } si el mesero dice «era el mismo» (no se reenvia nada), o { rB } con la respuesta del reenvio confirmado. El uid NUEVO nace aqui: es OTRO gesto. */
+async function _repetidoManeja(rB, body, pg) {
+  const esOtro = await _repetidoAsk(rB && rB.previo);
+  if (!esOtro) return { fin: true };
+  body.confirmo_repetido = 1;
+  body.pago_uid = 'PU-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+  pg.uid = body.pago_uid;
+  return { rB: await _pagoAlBorde(body, pg.tot) };
+}
 async function pagoConfirmar(btn) {
   /* [AUT-0251] un nuovo tentativo cancella il rifiuto precedente: la banda
      racconta L'ULTIMO esito, mai uno vecchio rimasto sullo schermo. */
@@ -14856,7 +14898,7 @@ async function pagoConfirmar(btn) {
   }
   // [AUT-0416] · l'ultima porta prima di impegnare: si NOMINA il tavolo.
   if (CERRAR_ASK_ON && !(await _cerrarAsk(pg))) return;
-  pg.enviando = true; renderPago();
+  pg.enviando = true; if (btn) btn.disabled = true; renderPago();   // [09-ott · mesa 55] el boton se apaga al PRIMER toque (Ray: 6-7 toques seguidos)
   const propina = _pagoPropina();
   let intest = null;
   if (JL) {   // [10-ott · AUT-0646] il JL incassa: il mesero del tavolo si prende dalla plaza ADESSO; se manca il cobro non parte
@@ -15024,7 +15066,16 @@ async function pagoConfirmar(btn) {
        turno è vecchio e quando la rete è morta: cinque no, una sola via
        d'uscita, ed è quella che la sala conosce da ieri.
        ⚠️ Sotto, dalla riga del gasPost in giù, NON è cambiato niente. */
-    const rB = await _pagoAlBorde(body, pg.tot);
+    let rB = await _pagoAlBorde(body, pg.tot);
+    if (rB && rB.ok === false && rB.error === 'pago_repetido' && !body.confirmo_repetido) {
+      const x = await _repetidoManeja(rB, body, pg);
+      if (x.fin) {
+        toast('ok', '✓ Ese pago ya estaba registrado — no se cobró de nuevo');
+        STATE.pago = null; renderPago(); cerrarMesa(); refrescar(false);
+        return;
+      }
+      rB = x.rB;
+    }
     if (rB && rB.ok !== false) {
       /* la mesa si chiude ottimisticamente come sempre (v1.13): il GAS chiude
          TUTTA la mesa al pago, e lo farà anche stavolta — solo, lo fa dietro,
