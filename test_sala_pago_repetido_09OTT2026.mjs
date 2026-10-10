@@ -10,7 +10,7 @@ const fn = (nome, asinc) => { const i = SRC.indexOf((asinc ? 'async function ' :
 function mundo(respuestaBordo, decision) {
   const pasados = []; const fetches = []; const botones = {}; let ultimoHtml = '';
   const mkBtn = (cls) => (botones[cls] = { disabled: false, textContent: '', onclick: null, cls });
-  const ctx = { bordeWriteOn: () => true, DTO_BORDE_ON: false, DTO_PORTAS_BORDE: [], BORDE_PAGO: { QS: '1', PORTAS: ['pin_jl', 'cortesia', 'fam'], MS: 1000, pausaHasta: 0, RETE_MS: 1, APAGADO_MS: 1 },
+  const ctx = { APP_ID: 'sala', bordeWriteOn: () => true, DTO_BORDE_ON: false, DTO_PORTAS_BORDE: [], BORDE_PAGO: { QS: '1', PORTAS: ['pin_jl', 'cortesia', 'fam'], MS: 1000, pausaHasta: 0, RETE_MS: 1, APAGADO_MS: 1 },
     BORDE_SALA: { URL: 'http://b', T: 't' }, CFG: { LOCAL: 'BKS' }, _pennaDice: (x) => pasados.push(x), _vediNoAsignado: (x) => x, esc: String, _fmtMiles: (n) => Number(n).toLocaleString('es-CL'),
     AbortController, setTimeout, clearTimeout, Date, JSON, Math, Object, String, Number, Promise, encodeURIComponent,
     fetch: async (u, op) => { fetches.push(JSON.parse(op.body)); return { json: async () => respuestaBordo(JSON.parse(op.body)) }; },
