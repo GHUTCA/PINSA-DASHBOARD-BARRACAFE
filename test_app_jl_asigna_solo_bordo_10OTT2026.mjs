@@ -31,7 +31,7 @@ async function banco(SRC) {
   { const m = mondo(SRC, { salud: SAL('BKS'), franja: '19–cierre' }); await m.ctx.F.asignar();
     t('② franja vecchia: «formato antiguo» con la franja, MAI il GAS, niente fetch, la riga «guardando…» si toglie', m.gas.length === 0 && m.fetches.length === 0 && m.toasts.length === 1 && m.toasts[0][0] === 'err' && /«19–cierre» está en un formato antiguo/.test(m.toasts[0][1]) && /No se escribió nada/.test(m.toasts[0][1]) && m.ctx.STATE.turno.asignaciones.length === 0, [m.toasts, m.gas.length]); }
   { const m = mondo(SRC, { salud: SAL('1'), fonte: 'gas' }); await m.ctx.F.asignar();
-    t('② bis lista non da Postgres: «No encuentro a esa persona», MAI il GAS', m.gas.length === 0 && /No encuentro a esa persona/.test(m.toasts[0][1]), [m.toasts, m.gas.length]); }
+    t('② bis lista del GAS (TURNO_PG_ON spento o Postgres muto): la CAUSA vera «viene del sistema viejo», MAI il GAS (EL GIRO ⑤)', m.gas.length === 0 && /todavía viene del sistema viejo/.test(m.toasts[0][1]) && !/No encuentro/.test(m.toasts[0][1]) && /No se escribió nada/.test(m.toasts[0][1]), [m.toasts, m.gas.length]); }
   { const m = mondo(SRC, { salud: SAL('BKS'), mesero: 'Nadie' }); await m.ctx.F.asignar();
     t('② ter nome non risolto: stesso messaggio, MAI il GAS', m.gas.length === 0 && m.fetches.length === 0 && /No encuentro a esa persona/.test(m.toasts[0][1]), [m.toasts, m.gas.length]); }
   { const m = mondo(SRC, { salud: SAL('BKS'), fetch: { status: 404, body: { ok: false, error: 'ruta_apagada' } } }); await m.ctx.F.asignar();
@@ -67,6 +67,7 @@ await mut('la lista ignora il locale', ".indexOf(loc) >= 0;", ".length >= 0;");
 await mut('il locale non si mappa a PG', "String(LOC_PG[CFG.LOCAL] || CFG.LOCAL || '')", "String(CFG.LOCAL || '')");
 await mut('franja vecchia senza motivo', "[0-5][0-9]$/.test(f)) return { usado: false, por: 'franja_vieja' };", "[0-5][0-9]$/.test(f)) return { usado: false };");
 await mut('il bordo che non risponde senza motivo', "if (i === 0) return { usado: false, por: 'bordo_no_responde' };", "if (i === 0) return { usado: false };");
+await mut('lista_gas detto come «no encuentro»', "if (por === 'lista_gas') return", "if (false) return");
 await mut('la riga guardando non si toglie', "if (turnoEscribeOn()) { togli();", "if (turnoEscribeOn()) { ");
 await mut('il messaggio perde «no se escribió»', "Reintenta en un minuto. No se escribió nada", "Reintenta en un minuto");
 await mut('chi resta nella plaza non si dice', "(_prima ? ' · ' + p + ' sigue con ' + _prima : '')); return; }   // [P4]", "''); return; }   // [P4]");
