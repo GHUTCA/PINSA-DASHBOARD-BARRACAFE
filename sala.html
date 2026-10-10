@@ -1108,7 +1108,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.221.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.221.1 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2884,8 +2884,14 @@ async function leerSala(codigo, nombre) {
       const r = await fetch(u, { signal: ctrl.signal, cache: 'no-store' });
       clearTimeout(to);
       const j = await r.json();
-      // codigo sbagliato = risposta VALIDA: il giro dei 3-strikes resta quello di sempre
-      if (j && j.error === 'codigo_invalid') return { ok: false, error: 'codigo_invalid' };
+      /* [10-ott · URGENTE 09:24 · V28 `CONSOLA 8086 TURNO SE CERRO`] IL BORDO NON E' L'AUTORITA' DEL CODIGO, IL GAS SI'.
+         🩸 Il gate del bordo e' il digesto del codigo che il BATTITO del GAS ha pubblicato in `sala_vista`; dopo `abrirTurno` il battito completo arriva dopo 1-3 minuti
+         (giro fino a ~85 s, cache dei turni 5 s) e fino ad allora il bordo tiene il digesto di IERI: ogni lettura col codigo NUOVO e' un 403 `codigo_invalid` — e tre
+         conferme di fila (`_strikeTurno`, poll ogni pochi secondi) buttano fuori dalla sessione un mesero che ha appena fatto login e che il GAS riconosce.
+         ⇒ un `codigo_invalid` del BORDO non e' una risposta DEFINITIVA: prima di contarlo come strike si chiede al GAS (`getSalaMesero` valida il codigo sul turno
+         vero). Se anche il GAS dice `codigo_invalid` il giro dei 3 strike resta quello di sempre. Costo: UNA chiamata al GAS solo quando il bordo rifiuta.
+         (Era scritto «codigo sbagliato = risposta VALIDA»: vero per il GAS, non per un digesto che puo' essere vecchio.) */
+      if (j && j.error === 'codigo_invalid') { _pennaDice('leer:bordo-codigo-invalid→gas'); throw { _bordoCodigoInvalid: true }; }
       if (r.ok && j && j.ok && j.datos && j.datos.datos && j.datos.datos.ok) {
         const mia = (j.datos.datos.meseros || {})[_slugSalaJS(nombre)];
         try { STATE.salaTodos = j.datos.datos.meseros || null; } catch (e) {}   // [30-set] il corte al bordo: chi tiene le altre plazas
@@ -2999,7 +3005,10 @@ async function leerSala(codigo, nombre) {
         // il mio nombre non c'è nella foto (appena entrato, fila non ancora
         // scritta): non è un guasto del bordo — si chiede al GAS e basta
       } else if (!r.ok) { BORDE_SALA.fallos++; if (BORDE_FALLBACK_ON) BORDE_SALA.fallosTs = Date.now(); bordoFalloRed = true; _pennaDice('leer:bordo-red'); }
-    } catch (e) { BORDE_SALA.fallos++; if (BORDE_FALLBACK_ON) BORDE_SALA.fallosTs = Date.now(); bordoFalloRed = true; _pennaDice('leer:bordo-red'); }
+    } catch (e) {
+      if (e && e._bordoCodigoInvalid) { /* non e' un fallo di rete: il GAS decide (sotto) */ }
+      else { BORDE_SALA.fallos++; if (BORDE_FALLBACK_ON) BORDE_SALA.fallosTs = Date.now(); bordoFalloRed = true; _pennaDice('leer:bordo-red'); }
+    }
   }
   /* v3.9 · IL GRADINO SENZA ATTESA: se il GAS è caduto da poco (<25s) e ho
      una foto-ombra in mano, non rifaccio la fila davanti a una porta morta —
