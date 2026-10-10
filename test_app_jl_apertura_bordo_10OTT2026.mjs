@@ -35,6 +35,9 @@ async function banco(SRC) {
     t('④ PIN sbagliato: «PIN incorrecto», MAI il GAS, niente giroTurno', m.toasts[0][0] === 'err' && /PIN incorrecto/.test(m.toasts[0][1]) && m.gas.length === 0 && m.giro() === 0, [m.toasts, m.gas.length]); }
   { const m = mondo(SRC, { fetch: { body: { ok: false, error: 'pin_bloqueado', faltan_s: 125 } } }); await m.ctx.F.abrirT();
     t('④ bis PIN bloccato: «espera 3 min», MAI il GAS', /espera 3 min/.test(m.toasts[0][1]) && m.gas.length === 0, m.toasts); }
+  for (const [nome, extra, atteso] of [['pin_jl_bloqueado', { faltan_s: 300 }, /espera 5 min/], ['pin_jl_bloqueado_apparecchio', { faltan_s: 61 }, /espera 2 min/], ['pin_jl_invalido', {}, /PIN incorrecto/], ['pin_jl_requerido', {}, /Falta el PIN/], ['pin_jl_no_configurado', {}, /no tiene PIN de JL/]]) {
+    const m = mondo(SRC, { fetch: { body: Object.assign({ ok: false, error: nome }, extra) } }); await m.ctx.F.abrirT();
+    t('④ nomi del freno VERO (EL GIRO): ' + nome + ' => parole (con i minuti), MAI il nome crudo, MAI il GAS', m.toasts[0][0] === 'err' && atteso.test(m.toasts[0][1]) && !/pin_jl/.test(m.toasts[0][1]) && m.gas.length === 0, m.toasts); }
   { const m = mondo(SRC, { fetch: { status: 400, body: { ok: false, error: 'accion_invalida' } } }); await m.ctx.F.abrirT();
     t('④ ter HTTP 400 (errore del gesto): detto, MAI il GAS', m.toasts[0][0] === 'err' && /Acción no válida/.test(m.toasts[0][1]) && m.gas.length === 0, [m.toasts, m.gas.length]); }
   for (const [n, fe] of [['timeout/rete', new Error('abort')], ['5xx', { status: 503, body: { ok: false } }], ['5xx senza corpo', { status: 502, illeggibile: true }], ['risposta senza codice', { body: { ok: true } }]]) {
@@ -63,5 +66,7 @@ await mut('il PIN non viaggia', "pin_jl: STATE.pin }), signal", "}), signal");
 await mut('uid fisso (stesso per ogni tocco)', "_aperturaPorBordo(_uidGesto())", "_aperturaPorBordo('uid-1')");
 await mut('senza giroTurno dopo l\'apertura', "(bd.por ? ' · abierto por ' + bd.por : '') + ')' : '')); giroTurno(); return; }", "(bd.por ? ' · abierto por ' + bd.por : '') + ')' : '')); return; }");
 await mut('il token del bordo manca', "'x-borde-token': CFG.T },\n      body: JSON.stringify({ accion: 'abrir'", "},\n      body: JSON.stringify({ accion: 'abrir'");
+await mut('il freno vero (pin_jl_bloqueado) non da i minuti', "/^pin(_jl)?_bloqueado/.test(String(j.error))", "j.error === 'pin_bloqueado'");
+await mut('pin_jl_requerido crudo', "pin_jl_requerido: 'Falta el PIN', ", "");
 await mut('il blocco del PIN senza minuti', "Math.ceil(bd.bloqueado / 60) + ' min'", "bd.bloqueado + ' min'");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
