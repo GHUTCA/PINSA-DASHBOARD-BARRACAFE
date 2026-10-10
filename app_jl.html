@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.36.0</span>
+<span class="ver" id="ver">app_jl v1.37.3</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -773,6 +773,48 @@ function cjRetAbrir(nombre) {
   CJ1.ret = { mesero: m.mesero, att: m, uid: CJ1.retDubbio[m.mesero] || cajaNuevoUid('CJ-RIT') };
   pintaTab();
 }
+/* ═══ [10-ott · AUT-0646 · 🎛 V28 `COBRO JL DUE NOMI INTESTATARIO E MANO`] «¿QUIÉN ENTREGA?» ═══════════════════════════════════════
+   Il `mesero` del ritiro e' l'INTESTATARIO del denaro. Se i biglietti li ha in mano UN ALTRO (il JL che ha cobrado il tavolo del mesero,
+   un collega), il ritiro porta anche `entregado_por` = quel nome. VUOTO = il mesero consegna i suoi biglietti, come oggi (la chiave non viaggia).
+   Si offre SOLO se il bordo lo dice (/salud → caja_entregado_por_on): a leva spenta il vetro e' quello di ieri, nessun controllo morto. */
+function _cjEntregaOn() { return cjFlag('caja_entregado_por_on'); }
+function _cjEntrega(ret) {
+  const e = String((ret && ret.entrega) || '').trim();
+  return (_cjEntregaOn() && e && e.toLowerCase() !== String((ret && ret.mesero) || '').trim().toLowerCase()) ? { entregado_por: e } : {};
+}
+/* l'en_mano e' di CHI HA I BIGLIETTI (il bordo accoppia il ritiro con `entregado_por`, o col mesero se vuoto): con un'altra persona scelta, la cifra che il JL
+   VEDE, firma (`visto`) e confronta e' la SUA, non quella del mesero. Una persona senza contante in mano => 0 (il bordo rifiuta nada_que_recibir). */
+function _cjEnManoDe(ret) {
+  const e = _cjEntrega(ret).entregado_por;
+  if (!e) return +(ret && ret.att && ret.att.en_mano) || 0;
+  const n = function (x) { return String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase(); };
+  const m = ((CJ1.st && CJ1.st.meseros) || []).find(function (x) { return n(x.mesero) === n(e); });
+  return m ? (+m.en_mano || 0) : 0;
+}
+/* [10-ott · AUT-0646 · V28] DA DOVE viene la cifra: il bordo divide il ritiro da solo (una riga per intestatario + la parte del JL) e lo dice in `reparto`
+   (stessa funzione che scrive le righe: cio che si vede e cio che si scrive). Una riga per persona, la cifra SOLO se la leva del bordo e accesa. */
+function _cjReparto(a) {
+  if (!_cjEntregaOn() || !a || !a.reparto || !a.reparto.length) return '';
+  return '<p class="mini" style="margin:6px 0 2px">Incluye</p>' + a.reparto.map(function (x) {
+    return _cjRiga(esc(x.mesero) + (x.propio ? ' (lo tuyo)' : ''), fmt(x.monto));
+  }).join('');
+}
+function _cjPartesTxt(partes) {
+  return (partes || []).map(function (x) { return x.mesero + ' ' + fmt(x.monto); }).join(' · ');
+}
+function cjRetEntrega(v) { if (!CJ1.ret) return; CJ1.ret.entrega = String(v || ''); CJ1.ret.conf = 0; pintaTab(); }
+function _cjEntregaSel(ret) {
+  if (!_cjEntregaOn() || !ret) return '';
+  const otros = []; const vi = {};
+  [STATE.user].concat(((CJ1.st && CJ1.st.meseros) || []).map(function (m) { return m.mesero; })).forEach(function (n) {
+    const k = String(n || '').trim(); if (!k || k.toLowerCase() === String(ret.mesero || '').trim().toLowerCase() || vi[k.toLowerCase()]) return;
+    vi[k.toLowerCase()] = 1; otros.push(k);
+  });
+  return '<p class="mini" style="margin:8px 0 2px">¿Quién entrega los billetes?</p>' +
+    '<select id="cj1Entrega" class="busca" onchange="cjRetEntrega(this.value)" style="font-size:16px;margin-bottom:6px">' +
+    '<option value="">' + esc(ret.mesero) + ' (como siempre)</option>' +
+    otros.map(function (n) { return '<option value="' + esc(n) + '"' + (ret.entrega === n ? ' selected' : '') + '>' + (n === STATE.user ? 'Yo (' + esc(n) + ')' : esc(n)) + '</option>'; }).join('') + '</select>';
+}
 function cjRetCerrar() { CJ1.ret = null; const e = $('cj1Monto'); if (e) e.value = ''; pintaTab(); }
 /* [v1.36.0 · AUT-0613 ①] «Recibí $X»: UN tocco. La cifra NO la manda questo telefono: la calcola il bordo (l'en_mano che il vetro ha davanti e il bordo conosce). La garanzia non e il campo
    vuoto: e la firma del mesero sulla stessa cifra. «Recibí otra cifra» apre il campo di sempre, con la guardia di sempre (AUT-0607). */
@@ -783,10 +825,11 @@ async function cjRetTodo(btn) {
   CJ1.enviando = true;
   const ret = CJ1.ret;
   try {
-    const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, recibi: 'todo', visto: ret.att.en_mano, uid_gesto: ret.uid });   // la firma es sulla cifra che il JL HA VISTO sul bottone (revisione BKP): se il bordo ne sa un'altra, non scrive
+    const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, recibi: 'todo', visto: _cjEnManoDe(ret), uid_gesto: ret.uid, ..._cjEntrega(ret) });   // la firma es sulla cifra che il JL HA VISTO sul bottone (revisione BKP): se il bordo ne sa un'altra, non scrive
     if (r && r.ok && r.accodato) {
       if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero];
       if (r.ya) toast('ok', '✓ Este retiro ya estaba registrado — no se cuenta dos veces.');
+      else if (r.diviso) toast('ok', '✓ Recibiste ' + fmt(r.monto) + ' de ' + ret.mesero + ' · ' + _cjPartesTxt(r.partes));
       else toast('ok', '✓ Recibiste ' + fmt(r.monto) + ' de ' + ret.mesero + ' · ahora confirma él en su teléfono');
       CJ1.ret = null; cjAtto1Giro();
     } else if (r && r.error === 'rifiutato' && r.motivo === 'en_mano_cambiato') {
@@ -868,7 +911,7 @@ async function cjRetEnviar(btn) {
   if (!Number.isFinite(monto) || monto <= 0) { toast('warn', 'Escribe lo que contaste'); return; }
   /* [08-ott · v1.35.4 · PRIMA NOTTE ATTO I] Ruth e Gabriel, notte del 07: il secondo ritiro portava il TOTALE al posto del
      RESTO (+$192.293) e il vetro l'ha preso senza chiedere. Sopra l'esperado si ferma e chiede, per QUEL monto. */
-  const att = +(CJ1.ret.att && CJ1.ret.att.en_mano) || 0;
+  const att = _cjEnManoDe(CJ1.ret);
   if (monto > att && CJ1.ret.confOk !== monto) {
     CJ1.ret.conf = monto;
     try { const ae = document.activeElement; if (ae && ae.blur) ae.blur(); } catch (e) {}   // su iOS il tocco del bottone non toglie il fuoco: senza, pintaTab aspetterebbe e la domanda non comparirebbe
@@ -879,8 +922,8 @@ async function cjRetEnviar(btn) {
   const ret = CJ1.ret;
   try {
     const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, monto: monto,
-      esperado_ora: ret.att.en_mano, uid_gesto: ret.uid,
-      ...(ret.confOk === monto ? { confirmo_sobre_esperado: 1 } : {}) });   // [08-ott · AUT-0607] il «Sí, retiro $X» viaggia fino al bordo
+      esperado_ora: _cjEnManoDe(ret), uid_gesto: ret.uid,
+      ...(ret.confOk === monto ? { confirmo_sobre_esperado: 1 } : {}), ..._cjEntrega(ret) });   // [08-ott · AUT-0607] il «Sí, retiro $X» viaggia fino al bordo
     if (r && r.ok && r.accodato) {
       if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero];
       if (r.ya) toast('ok', '✓ Este retiro ya estaba registrado — no se cuenta dos veces. Revisa la lista.');
@@ -974,8 +1017,8 @@ function cjAtto1Html() {
       h += '<div class="card"><h4>El retiro de</h4><p style="font-size:28px;font-weight:900;margin:2px 0 8px;line-height:1.1">' + esc(a.mesero) + '</p>' +
         _cjRiga('Ventas en efectivo', fmt(a.ventas_efectivo)) + _cjRiga('Propinas en efectivo', fmt(a.propina_efectivo)) +
         (a.residuo ? _cjRiga('De ayer', fmt(a.residuo)) : '') + (a.entregado ? _cjRiga('Ya entregó hoy', '−' + fmt(a.entregado)) : '') +
-        _cjRiga('<b>ENTREGA</b>', '<b style="font-size:26px">' + fmt(a.en_mano) + '</b>', ';padding:8px 0') +
-        '<button class="btn acc" onclick="cjRetTodo(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Recibí ' + fmt(a.en_mano)) + '</button>' +
+        _cjRiga('<b>ENTREGA</b>', '<b style="font-size:26px">' + fmt(_cjEnManoDe(CJ1.ret)) + '</b>', ';padding:8px 0') + (CJ1.ret.entrega ? '' : _cjReparto(a)) + _cjEntregaSel(CJ1.ret) +
+        '<button class="btn acc" onclick="cjRetTodo(this)"' + (CJ1.enviando || !(_cjEnManoDe(CJ1.ret) > 0) ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Recibí ' + fmt(_cjEnManoDe(CJ1.ret))) + '</button>' +
         '<button class="btn gh" onclick="cjRetOtra()">Recibí otra cifra</button>' +
         '<button class="btn gh" onclick="cjRetCerrar()">Volver</button></div>';
       return h;
@@ -983,13 +1026,13 @@ function cjAtto1Html() {
     h += '<div class="card"><h4>El retiro de</h4><p style="font-size:28px;font-weight:900;margin:2px 0 8px;line-height:1.1">' + esc(a.mesero) + '</p>' +
       _cjRiga('Ventas en efectivo', fmt(a.ventas_efectivo)) + _cjRiga('Propinas en efectivo', fmt(a.propina_efectivo)) +
       (a.residuo ? _cjRiga('De ayer', fmt(a.residuo)) : '') + (a.entregado ? _cjRiga('Ya entregó hoy', '−' + fmt(a.entregado)) : '') +
-      _cjRiga('<b>Total efectivo</b>', '<b style="font-size:20px">' + fmt(a.en_mano) + '</b>', ';padding:8px 0') +
+      _cjRiga('<b>Total efectivo</b>', '<b style="font-size:20px">' + fmt(_cjEnManoDe(CJ1.ret)) + '</b>', ';padding:8px 0') + _cjEntregaSel(CJ1.ret) +
       /* [08-ott · v1.35.4 · PRIMA NOTTE ATTO I DUE RITIRI DOPPI SENZA BUSTA] il valore vive nel RITIRO (CJ1.ret.monto), non nel
          DOM: un ritiro nuovo nasce vuoto e nessun ridisegno può riportargli la cifra di un altro (cj1Monto è uscito da _CAMPI_TENUTI). */
       '<input class="busca" id="cj1Monto" type="text" inputmode="numeric" placeholder="$" autocomplete="off" style="font-size:22px;font-weight:800;text-align:center"' +
         ' value="' + esc(CJ1.ret.monto || '') + '" oninput="cjRetMonto(this.value)">' +
       (CJ1.ret.conf ? '<div class="card rossa" style="margin:8px 0"><p style="font-size:17px;font-weight:800;margin:0 0 6px">¿Retiras ' + fmt(CJ1.ret.conf) +
-        '? Faltaban ' + fmt(a.en_mano) + '</p><p class="mini">Es ' + fmt(CJ1.ret.conf - a.en_mano) + ' más de lo que tiene en la mano.</p>' +
+        '? Faltaban ' + fmt(_cjEnManoDe(CJ1.ret)) + '</p><p class="mini">Es ' + fmt(CJ1.ret.conf - _cjEnManoDe(CJ1.ret)) + ' más de lo que tiene en la mano.</p>' +
         '<button class="btn acc" onclick="cjRetConfirma(this)">Sí, retiro ' + fmt(CJ1.ret.conf) + '</button>' +
         '<button class="btn gh" onclick="cjRetCorrige()">Corregir el monto</button></div>'
       : '<button class="btn acc" onclick="cjRetEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Confirmar') + '</button>') +
@@ -1184,8 +1227,56 @@ function _cierresTodos() {
   });
   return out;
 }
+/* ═══ [10-ott · v1.37.2 · V28 «El servicio dell'app_jl deve leggere dal bordo»] ═══════════════════════════════════════════════
+   La card «El servicio» (e i 5 riquadri della testata) leggevano chi ha incassato quanto da `getCaja` = GOOGLE: dopo un cobro la card diceva «2 cuentas abiertas ·
+   sin cobrar todavía» per ore (la coda bordo→Google arrivava a 85-96 min di ritardo) — un vetro che legge Google, esattamente il piano del 23-ott.
+   Con la leva del bordo accesa (/salud → caja_servicio_on) il denaro INCASSATO viene dal verbo caja `servicio` (pagos di Postgres + coda del bordo, chiave = il mesero
+   a cui va il denaro) e i tavoli APERTI dalla fetta del bordo che l'app ha gia' (STATE.vista, nessun poll nuovo per questi). Google resta il ripiego: leva spenta, bordo
+   in errore o dato piu' vecchio di 3 minuti => la card e' quella di ieri, e la riga «📷 caja» dice DA DOVE e quanto e' vecchio.
+   🪦 DEBITO DICHIARATO (N2): `giroServicio` e' una lettura in piu' (stessa cadenza di giroCaja, 60 s). Muore con `getCaja` quando la caja intera esce da Google (cantiere 23-ott). */
+function _servOn() { return cjFlag('caja_servicio_on') && cjAtto1On(); }
+function _servFresco() { return !!(_servOn() && STATE.serv && STATE.serv.ok && STATE.ts.serv && (Date.now() - STATE.ts.serv) < 180000); }
+async function giroServicio() {
+  if (DEMO || !STATE.pin || !_servOn() || STATE.servInVolo) return;
+  STATE.servInVolo = true;
+  try {
+    const r = await cajaPost1({ verbo: 'servicio', pin_jl: STATE.pin });
+    if (r && r.ok) { STATE.serv = r; STATE.ts.serv = Date.now(); STATE.servErr = ''; pintaTesta(); pintaTab(); }
+    else STATE.servErr = (r && r.error) || 'no_ok';   // spento o errore: silenzio, resta Google — e la riga «📷 caja» dice quanto e' vecchio
+  } catch (e) { STATE.servErr = e && e.message === 'timeout' ? 'timeout' : 'sin_conexion'; }
+  STATE.servInVolo = false;
+}
+/* la caja come la VEDE il JL: Google + (se il bordo la serve fresca) il denaro incassato e i tavoli aperti del bordo. NON muta STATE.caja. */
+function _cajaVista() {
+  const c = STATE.caja;
+  if (!_servFresco()) return c;
+  const sv = STATE.serv, base = Object.assign({}, c || { ok: true }), g = (c && c.por_mesero) || {}, pm = {}, porSlug = {};
+  Object.keys(g).forEach(function (n) {
+    pm[n] = Object.assign({}, g[n]);
+    pm[n].cobrado = 0; pm[n].n_cobros = 0;   // l'incassato di Google non si mescola con quello del bordo (anche la riga dei QR, chiave vuota: il bordo ora la porta)
+    if (String(n).trim()) porSlug[_slugSalaJS(n)] = n;
+  });
+  const chiave = function (nome) { const k = _slugSalaJS(nome); if (porSlug[k] == null) { porSlug[k] = nome; if (!pm[nome]) pm[nome] = {}; } return porSlug[k]; };
+  Object.keys(sv.por_mesero || {}).forEach(function (n) {
+    const m = pm[chiave(n)]; m.cobrado = +sv.por_mesero[n].cobrado || 0; m.n_cobros = +sv.por_mesero[n].n_cobros || 0;
+  });
+  const ms = STATE.vista && STATE.vista.meseros;
+  const buoni = ms ? Object.keys(ms).filter(function (k) { return ms[k] && ms[k].ok; }) : [];
+  if (buoni.length) {   // la fetta del bordo c'e': i tavoli APERTI vengono da li', non dall'abierto di Google
+    /* [EL GIRO ③] si azzera SOLO chi ha una fetta buona: chi non la ha (rotta, assente) tiene l'abierto di Google, mai uno zero inventato */
+    buoni.forEach(function (k) {
+      let tot = 0, n = 0;
+      ((ms[k] && ms[k].mesas) || []).forEach(function (x) { const mio = +(x && x.mio) || 0; if (mio > 0) { tot += mio; n++; } });
+      const m = pm[chiave(ms[k].nombre || k)]; m.abierto = Math.round(tot); m.n_abierto = n;
+    });
+    base.abiertas_bordo = _cjMesasAbiertas().length;
+  }
+  base.por_mesero = pm; base.venta = +sv.venta || 0; base.cuentas = +sv.cuentas || 0; base.fuente_bordo = true;
+  return base;
+}
 async function giroCaja() {
   if (DEMO || !STATE.pin) return;
+  giroServicio();   // [v1.37.2] in parallelo, senza aspettare Google; a leva spenta esce subito
   try {
     /* [06-set · Alberto: «i 4 numeri non si vedono ancora»] getCaja legge
        `payload.pin_jl`, NON `payload.pin` (r.20192 del GAS): col nome
@@ -1267,9 +1358,9 @@ function pintaTesta() {
   /* [06-set · Alberto] «i 4 numeri non hanno nessun valore, solo un trattino»:
      il «—» non distingueva «sto caricando» da «è zero». Ora: puntini mentre
      la caja è in volo, numeri veri appena atterra. Un dato che manca lo dice. */
-  const c = STATE.caja;
-  const vuoto = STATE.ts.caja ? '0' : '···';
-  const abiertas = c && c.mesas_abiertas ? c.mesas_abiertas.length : null;
+  const c = _cajaVista();
+  const vuoto = (STATE.ts.caja || _servFresco()) ? '0' : '···';
+  const abiertas = c && c.abiertas_bordo != null ? c.abiertas_bordo : (c && c.mesas_abiertas ? c.mesas_abiertas.length : null);
   /* v1.27.0 · [PASSAGGIO CONTROLLER, AUT-0227-bis, 10-set] Alberto, in sala:
      «dovrei vedere DUE numeros: quanto ho en sala ahora y quanto pagato».
      I quattro riquadri di sempre vengono tutti dal PAGATO (`venta`) — a metà
@@ -1327,7 +1418,7 @@ function _enSalaDaVista() {
 
 /* ═════ SCHEDA SALA ═════ */
 function _porMesero() {
-  const c = STATE.caja;
+  const c = _cajaVista();
   const out = [];
   /* 🔴 [06-set · reperti di Alberto: «Eduardo $0», «(sin mesero)», «0 cuentas»]
      Il GAS tiene DUE fatti diversi nello stesso oggetto (v3.93.0, VB di
@@ -1597,7 +1688,7 @@ function vSala() {
        err ? '⚠️ La caja no responde: <b>' + esc(err) + '</b>' :
         (STATE.ts.caja ? 'Sin ventas todavía.' : 'Cargando la caja detrás… la pantalla no espera.')) + '</p>' +
       (err ? '<button class="btn" onclick="giroCaja()">Reintentar</button>' : '') +
-      '<p class="mini">📷 caja ' + edadTxt('caja') + '</p></div>';
+      '<p class="mini">📷 caja ' + (_servFresco() ? 'del bordo ' + edadTxt('serv') : edadTxt('caja')) + '</p></div>';
   } else {
     /* la legenda dei colori: la prima volta si legge, poi l'occhio la sa */
     h += '<p class="mini" style="margin:2px 2px 8px">' +
@@ -1904,7 +1995,7 @@ function vTurno() {
        nessun bottone che la chiami. */
     h += '<p class="mini">El turno se cierra solo cuando se abre el siguiente: el código de hoy deja de valer en ese momento.</p></div>';
   }
-  h += '<p class="mini" style="margin:4px 2px">📷 turno ' + edadTxt('turno') + ' · caja ' + edadTxt('caja') + '</p>';
+  h += '<p class="mini" style="margin:4px 2px">📷 turno ' + edadTxt('turno') + ' · caja ' + (_servFresco() ? 'del bordo ' + edadTxt('serv') : edadTxt('caja')) + '</p>';
   return h;
 }
 /* ── la leva parla due lingue: il vetro dice esca|estandar|off, il server
@@ -2587,6 +2678,22 @@ function bootDemo() {
   $('gate').className = 'hide';
   pintaTesta(); tab(0);
 }
+/* [10-ott · PROVA A mesa 200 · V28 «lezione per la riprova»] LA SALA CHE TI RIMANDA INDIETRO DICE PERCHE'. In `sala.html?jl=1` ogni strada che chiederebbe il turno (codigo vecchio, no_asignado,
+   turno chiuso) rimanda il JL alla sua app: prima in SILENZIO (Alberto non ha visto niente e il cobro della 200 e' sparito). Ora la sala scrive `jl_rimbalzo` e questa app lo mostra con una BARRA
+   che resta finche' non la tocchi. Vale 10 minuti e si consuma alla prima lettura. */
+function _cjRimbalzo() {
+  let r = null;
+  try { r = JSON.parse(sessionStorage.getItem('jl_rimbalzo') || 'null'); sessionStorage.removeItem('jl_rimbalzo'); } catch (e) { r = null; }
+  if (!r || !r.ts || Date.now() - r.ts > 600000) return false;
+  let el = document.getElementById('rimbalzo'); if (el) el.remove();
+  el = document.createElement('div'); el.id = 'rimbalzo';
+  el.setAttribute('style', 'position:fixed;left:0;right:0;bottom:0;z-index:2147483000;background:#8a1c1c;color:#fff;font-weight:800;padding:14px 16px;font-size:15px;text-align:center;cursor:pointer');
+  el.textContent = '↩ La sala te devolvió a tu app: ' + String(r.msg || 'sin motivo') + ' — toca para cerrar';
+  el.onclick = function () { el.remove(); };
+  document.body.appendChild(el);
+  return true;
+}
+try { _cjRimbalzo(); } catch (e) {}
 if (DEMO) bootDemo();
 else if (STATE.pin) { $('gate').className = 'hide'; boot(); }
 else { pintaTesta(); pintaTab(); }
