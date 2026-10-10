@@ -48,7 +48,7 @@ async function banco(SRC) {
   { const m = mondo(SRC, {}); await m.ctx.F.pantalla9(); const c = calc(m);
     t('① la lettura va a `roja_estado` con il giorno e TUTTE le notti', /^roja_estado\?dia=2026-10-13&noches=2026-10-09,2026-10-10,2026-10-11,2026-10-12$/.test(m.ctx.rojaPath), m.ctx.rojaPath);
     t('① il totale e UNO: «Vas a depositar» = lo contato 1.632.000 − le buste nuove 84.050 = 1.547.950', /Vas a depositar<\/span><span class="v">\$1547950</.test(c), c.slice(0, 600));
-    t('① bis «Roja ya sellada (R-0001) + $99500» come riga e la reserva totale 183.550 (R-0001 + 3 buste nuove)', /Roja ya sellada \(R-0001\)<\/span><span class="v">\+ \$99500/.test(c) && /Reserva: roja ya sellada \+ 3 buste nuevas<\/span><span class="v">\$183550/.test(c), c);
+    t('① bis «Roja ya sellada (R-0001) + $99500» come riga e la reserva totale 183.550 (R-0001 + 3 buste nuove)', /Roja ya sellada \(R-0001\)<\/span><span class="v">\+ \$99500/.test(c) && /Reserva: roja ya sellada \+ 3 sobres nuevos<\/span><span class="v">\$183550/.test(c), c);
     t('① ter la tabella «Por día» con la R-0001 sul 09: 1.081.500 − 99.500 → 982.000; e 10 · 11 · 12 con C − R', /2026-10-09<small>1 sobre · contado \$1081500 − reserva \$99500<\/small><\/span><span class="v">\$982000/.test(c) && /2026-10-10<small>1 sobre · contado \$300000 − reserva \$40000<\/small><\/span><span class="v">\$260000/.test(c) && /2026-10-12<small>1 sobre · contado \$100000 − reserva \$12800<\/small><\/span><span class="v">\$87200/.test(c), c);
     t('① quater nessun «Ajuste manual» (le righe sommano al totale: 1.731.500 lordo)', !/Ajuste manual/.test(c), c);
     t('① quinto la nota della cuota non c e (tutte le notti hanno quota)', !/Sin cuota/.test(c)); }
@@ -65,11 +65,11 @@ async function banco(SRC) {
     t('② quinto un contado che non copre le buste nuove: il bottone si spegne e lo dice', m.mk('salir').disabled === true && /no cubre la reserva/.test(calc(m)), calc(m)); }
   // ③ la sequenza
   { const m = mondo(SRC, {}); await m.ctx.F.pantalla9(); await click(m, 'salir'); const dep = SALIDA(m).uid_gesto;
-    t('③ dopo la salida: la prima schermata e «busta 1 de 3» della notte 10, 40.000, SENZA il 09', /busta 1 de 3/.test(m.app.innerHTML) && /Noche 2026-10-10/.test(m.app.innerHTML) && /\$40000/.test(m.app.innerHTML) && !/2026-10-09/.test(m.app.innerHTML), m.app.innerHTML);
+    t('③ dopo la salida: la prima schermata e «sobre 1 de 3» della notte 10, 40.000, SENZA il 09', /sobre 1 de 3/.test(m.app.innerHTML) && /Noche 2026-10-10/.test(m.app.innerHTML) && /\$40000/.test(m.app.innerHTML) && !/2026-10-09/.test(m.app.innerHTML), m.app.innerHTML);
     await click(m, 'sellarRoja');
     t('③ bis la 1a busta: verbo reserva_sobre, uid res-<salida>-<notte>, dia_op = la notte, monto = il debito, referencia = la salida', BUSTE(m).length === 1 && BUSTE(m)[0].uid_gesto === 'res-' + dep + '-2026-10-10' && BUSTE(m)[0].dia_op === '2026-10-10' && BUSTE(m)[0].monto === 40000 && BUSTE(m)[0].referencia_uid === dep, BUSTE(m));
-    t('③ ter il numero del bordo resta a schermo (persistente) e il bottone dice «Siguiente busta»', /R-0002/.test(m.app.innerHTML) && /Siguiente busta/.test(m.app.innerHTML), m.app.innerHTML);
-    await click(m, 'sigRoja'); t('③ quater busta 2 de 3: notte 11, 31.250', /busta 2 de 3/.test(m.app.innerHTML) && /Noche 2026-10-11/.test(m.app.innerHTML) && /\$31250/.test(m.app.innerHTML));
+    t('③ ter il numero del bordo resta a schermo (persistente) e il bottone dice «Siguiente sobre»', /R-0002/.test(m.app.innerHTML) && /Siguiente sobre/.test(m.app.innerHTML), m.app.innerHTML);
+    await click(m, 'sigRoja'); t('③ quater sobre 2 de 3: notte 11, 31.250', /sobre 2 de 3/.test(m.app.innerHTML) && /Noche 2026-10-11/.test(m.app.innerHTML) && /\$31250/.test(m.app.innerHTML));
     await click(m, 'sellarRoja'); await click(m, 'sigRoja'); await click(m, 'sellarRoja');
     t('③ quinto in tutto 3 buste (10 · 11 · 12), MAI il 09: i dia_op sono nell ordine e i monti sono i debiti', BUSTE(m).map((b) => b.dia_op).join() === '2026-10-10,2026-10-11,2026-10-12' && BUSTE(m).map((b) => b.monto).join() === '40000,31250,12800', BUSTE(m).map((b) => [b.dia_op, b.monto]));
     t('③ sesto l ultima dice «Listo»', /Listo/.test(m.app.innerHTML) && /R-0004/.test(m.app.innerHTML));
@@ -77,13 +77,13 @@ async function banco(SRC) {
     t('③ settimo dopo «Listo»: «Registrado», la memoria locale si pulisce, torna al deposito', m.toasts.some((x) => /Registrado/.test(x[0])) && m.ls.caja_roja_pend_v1 === undefined, [m.toasts, m.ls]); }
   // ④ un rifiuto non avanza
   { const m = mondo(SRC, { falla: ['rifiutato'] }); await m.ctx.F.pantalla9(); await click(m, 'salir'); await click(m, 'sellarRoja');
-    t('④ il bordo rifiuta: «No se guardó», si resta sulla STESSA busta (nessun avanzamento)', m.toasts.some((x) => /No se guardó: rifiutato/.test(x[0])) && /busta 1 de 3/.test(m.app.innerHTML) && BUSTE(m).length === 1, [m.toasts, BUSTE(m).length]);
+    t('④ il bordo rifiuta: «No se guardó», si resta sulla STESSA busta (nessun avanzamento)', m.toasts.some((x) => /No se guardó: rifiutato/.test(x[0])) && /sobre 1 de 3/.test(m.app.innerHTML) && BUSTE(m).length === 1, [m.toasts, BUSTE(m).length]);
     await click(m, 'sellarRoja');
     t('④ bis il retry riusa lo STESSO uid (il bordo risponde con lo stesso numero, mai un secondo)', BUSTE(m).length === 2 && BUSTE(m)[0].uid_gesto === BUSTE(m)[1].uid_gesto, BUSTE(m).map((b) => b.uid_gesto)); }
   // ⑤ riprendere dopo un cierre dell'app
   { const m = mondo(SRC, {}); await m.ctx.F.pantalla9(); await click(m, 'salir'); const dep = SALIDA(m).uid_gesto; await click(m, 'sellarRoja');   // la 1a sigillata, poi si chiude l app
     const m2 = mondo(SRC, { ls: m.ls, pend: { uid_gesto: dep, a_depositar: 1547950 } }); await m2.ctx.F.pantalla9();
-    t('⑤ riaperta l app con la salida pendiente: NON «De vuelta del banco» ma la busta 2 de 3 (la 1a e gia sigillata)', /busta 2 de 3/.test(m2.app.innerHTML) && /Noche 2026-10-11/.test(m2.app.innerHTML) && !/De vuelta del banco/.test(m2.app.innerHTML), m2.app.innerHTML);
+    t('⑤ riaperta l app con la salida pendiente: NON «De vuelta del banco» ma la sobre 2 de 3 (la 1a e gia sigillata)', /sobre 2 de 3/.test(m2.app.innerHTML) && /Noche 2026-10-11/.test(m2.app.innerHTML) && !/De vuelta del banco/.test(m2.app.innerHTML), m2.app.innerHTML);
     await click(m2, 'sellarRoja'); await click(m2, 'sigRoja'); await click(m2, 'sellarRoja'); await click(m2, 'sigRoja');
     t('⑤ bis completate le altre due, solo 2 buste nuove (11 e 12) e poi «Registrado»', BUSTE(m2).map((b) => b.dia_op).join() === '2026-10-11,2026-10-12' && m2.toasts.some((x) => /Registrado/.test(x[0])), BUSTE(m2).map((b) => b.dia_op));
     const m3 = mondo(SRC, { ls: m.ls, pend: { uid_gesto: 'OTRA-SALIDA', a_depositar: 1 } }); await m3.ctx.F.pantalla9();
@@ -113,10 +113,10 @@ async function banco(SRC) {
     t('⑨ tutte coperte: nessuna busta nuova, la salida porta solo la roja ya sellada (reserva 99.500, a banca = lo contato)', BUSTE(m).length === 0 && s.reserva === 99500 && s.a_depositar === 1632000 && m.toasts.some((x) => /Registrado/.test(x[0])), [BUSTE(m).length, s]); }
   // ⑬ (EL GIRO 🟡) piu buste sin deposito di quante la salida puo portare: si ferma e lo dice, senza uscire al banco
   { const m = mondo(SRC, { roja: ROJA({ sueltas_exceso: true }) }); await m.ctx.F.pantalla9();
-    t('⑬ `sueltas_exceso`: «Hay más buste R sin depósito…», niente Reintentar (non serve), niente «Salir al banco», nessun post, e mai «contrato pendiente»', /Hay más buste R sin depósito/.test(m.app.innerHTML) && !/retryRoja/.test(m.app.innerHTML) && !/contrato pendiente/.test(m.app.innerHTML) && m.posts.length === 0 && !m.mk('salir').onclick, m.app.innerHTML); }
+    t('⑬ `sueltas_exceso`: «Hay más sobres R sin depósito…», niente Reintentar (non serve), niente «Salir al banco», nessun post, e mai «contrato pendiente»', /Hay más sobres R sin depósito/.test(m.app.innerHTML) && !/retryRoja/.test(m.app.innerHTML) && !/contrato pendiente/.test(m.app.innerHTML) && m.posts.length === 0 && !m.mk('salir').onclick, m.app.innerHTML); }
   // ⑭ (EL GIRO 🟡) los legames que esperan o fueron rechazados se VEN en «Antes de salir»
   { const m = mondo(SRC, { roja: ROJA({ legami: [{ deposito: 'dep-0', numero: 'R-0001', importo: 99500, estado: 'pendiente', intentos: 2, edad_min: 190, err: 'pg_http_409' }, { deposito: 'dep-9', numero: 'R-0003', importo: 5000, estado: 'rifiutata', intentos: 1, edad_min: 20, err: 'pg_http_400' }] }) }); await m.ctx.F.pantalla9();
-    t('⑭ la nota «legame de la roja sin concluir» con numero, importo, esperando/RECHAZADO y la edad', /Hay un legame de la roja sin concluir/.test(m.app.innerHTML) && /R-0001 \(\$99500\) — esperando · hace 3 h/.test(m.app.innerHTML) && /R-0003 \(\$5000\) — RECHAZADO · hace 20 min/.test(m.app.innerHTML) && /avisa a MIGRACIÓN/.test(m.app.innerHTML), m.app.innerHTML.slice(0, 700));
+    t('⑭ la nota «legame de la roja sin concluir» con numero, importo, esperando/RECHAZADO y la edad', /Hay un sobre de la roja sin ligar a su depósito/.test(m.app.innerHTML) && /R-0001 \(\$99500\) — esperando · hace 3 h/.test(m.app.innerHTML) && /R-0003 \(\$5000\) — RECHAZADO · hace 20 min/.test(m.app.innerHTML) && /avisa a MIGRACIÓN/.test(m.app.innerHTML), m.app.innerHTML.slice(0, 700));
     const n = mondo(SRC, {}); await n.ctx.F.pantalla9(); t('⑭ bis sin legami: nada', !/legame de la roja/.test(n.app.innerHTML)); }
   // ⑪ una quota gia in parte coperta: la busta e il RESTO, mai la quota intera
   { const r = ROJA({ noches: ROJA().noches.map((n) => (n.dia === '2026-10-11' ? { dia: n.dia, estado: 'da_sigillare', importo: 21250, quota: 31250, coperto: 10000, debito: 21250 } : n)) });
@@ -127,7 +127,7 @@ async function banco(SRC) {
   // ⑩ una notte sola
   { const m = mondo(SRC, { noches: ['2026-10-10'], sobres: [S('2026-10-10', '1006', 300000)], roja: ROJA({ sueltas: [], sueltas_total: 0, noches: [{ dia: '2026-10-10', estado: 'da_sigillare', importo: 40000, quota: 40000, coperto: 0, debito: 40000 }] }) }); await m.ctx.F.pantalla9();
     t('⑩ una notte sola con roja: niente tabella «Por día» e niente «Roja ya sellada»', !/Por día/.test(calc(m)) && !/Roja ya sellada/.test(calc(m)) && /Vas a depositar<\/span><span class="v">\$260000/.test(calc(m)), calc(m));
-    await click(m, 'salir'); t('⑩ bis una busta sola: «busta 1 de 1»', /busta 1 de 1/.test(m.app.innerHTML), m.app.innerHTML); }
+    await click(m, 'salir'); t('⑩ bis una busta sola: «sobre 1 de 1»', /sobre 1 de 1/.test(m.app.innerHTML), m.app.innerHTML); }
   t('versione >= 1.9.0', /caja 1\.(9\.\d|[1-9]\d\.\d)<\/small>/.test(SRC));
 }
 await banco(SRC0);
