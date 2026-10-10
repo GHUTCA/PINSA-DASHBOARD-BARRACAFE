@@ -19,7 +19,7 @@ function mondo(SRC, o) {
     getCaja: async (p) => { if (/^deposito_pendiente/.test(p)) return { ok: true, salida_pendiente: null }; const m = p.match(/^reserva\?dia=(.+)$/); if (m) return { ok: true, reserva: (o.reservas || {})[m[1]], reserva_pct: 5 }; return { ok: false, error: 'lettura_sconosciuta' }; },
     document: { getElementById: mk, querySelector: mk } };
   vm.createContext(ctx);
-  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'pantalla9', 'uidGestoEstable', 'rojaPendLeer', 'rojaSiguiente'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "k";\nthis.F = { desgloseDeposito, desgloseHtml, pantalla9 };', ctx);
+  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'pantalla9', 'uidGestoEstable', 'legamiHtml', 'rojaPendLeer', 'rojaSiguiente'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "k";\nthis.F = { desgloseDeposito, desgloseHtml, pantalla9 };', ctx);
   return { ctx, els, handlers, app, mk };
 }
 const S = (dia, nro, contado, declarado) => ({ sobre_nro: nro, dia, declarado: declarado || 0, conteo: contado == null ? null : { contado } });

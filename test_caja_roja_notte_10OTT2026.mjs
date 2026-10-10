@@ -35,7 +35,7 @@ function mondo(SRC, o) {
       return { ok: false, error: 'lettura_sconosciuta' }; },
     document: { getElementById: mk, querySelector: mk } };
   vm.createContext(ctx);
-  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'rojaPendLeer', 'rojaPendGuardar', 'rojaPendLimpiar', 'rojaSiguiente', 'pantallaRojaNotte', 'pantalla9', 'uidGestoEstable'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "caja_roja_pend_v1";\nthis.F = { pantalla9, pantallaRojaNotte, desgloseDeposito };', ctx);
+  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'legamiHtml', 'rojaPendLeer', 'rojaPendGuardar', 'rojaPendLimpiar', 'rojaSiguiente', 'pantallaRojaNotte', 'pantalla9', 'uidGestoEstable'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "caja_roja_pend_v1";\nthis.F = { pantalla9, pantallaRojaNotte, desgloseDeposito };', ctx);
   return { ctx, mk, handlers, toasts, posts, app, ls };
 }
 const calc = (m) => m.mk('calc').innerHTML;
@@ -112,6 +112,10 @@ async function banco(SRC) {
   // ⑬ (EL GIRO 🟡) piu buste sin deposito di quante la salida puo portare: si ferma e lo dice, senza uscire al banco
   { const m = mondo(SRC, { roja: ROJA({ sueltas_exceso: true }) }); await m.ctx.F.pantalla9();
     t('⑬ `sueltas_exceso`: schermata di errore `demasiadas_buste_sin_deposito`, NIENTE «Salir al banco», nessun post', m.ctx.rendered.some((r) => r[0] === 'error' && r[2] === 'demasiadas_buste_sin_deposito') && m.posts.length === 0 && !m.mk('salir').onclick, m.ctx.rendered); }
+  // ⑭ (EL GIRO 🟡) los legames que esperan o fueron rechazados se VEN en «Antes de salir»
+  { const m = mondo(SRC, { roja: ROJA({ legami: [{ deposito: 'dep-0', numero: 'R-0001', importo: 99500, estado: 'pendiente', intentos: 2, edad_min: 190, err: 'pg_http_409' }, { deposito: 'dep-9', numero: 'R-0003', importo: 5000, estado: 'rifiutata', intentos: 1, edad_min: 20, err: 'pg_http_400' }] }) }); await m.ctx.F.pantalla9();
+    t('⑭ la nota «legame de la roja sin concluir» con numero, importo, esperando/RECHAZADO y la edad', /Hay un legame de la roja sin concluir/.test(m.app.innerHTML) && /R-0001 \(\$99500\) — esperando · hace 3 h/.test(m.app.innerHTML) && /R-0003 \(\$5000\) — RECHAZADO · hace 20 min/.test(m.app.innerHTML) && /avisa a MIGRACIÓN/.test(m.app.innerHTML), m.app.innerHTML.slice(0, 700));
+    const n = mondo(SRC, {}); await n.ctx.F.pantalla9(); t('⑭ bis sin legami: nada', !/legame de la roja/.test(n.app.innerHTML)); }
   // ⑪ una quota gia in parte coperta: la busta e il RESTO, mai la quota intera
   { const r = ROJA({ noches: ROJA().noches.map((n) => (n.dia === '2026-10-11' ? { dia: n.dia, estado: 'da_sigillare', importo: 21250, quota: 31250, coperto: 10000, debito: 21250 } : n)) });
     const m = mondo(SRC, { roja: r }); await m.ctx.F.pantalla9(); await click(m, 'salir'); await click(m, 'sellarRoja'); await click(m, 'sigRoja'); await click(m, 'sellarRoja');
@@ -130,6 +134,8 @@ const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log
   t('mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
 await mut('la salida non porta le rojas', "if (ROJA && ROJA.sueltas && ROJA.sueltas.length) cuerpoSalida.rojas =", "if (false) cuerpoSalida.rojas =");
 await mut('l eccesso di sueltas non ferma', "if (rjR.sueltas_exceso) { renderError('La roja', 'demasiadas_buste_sin_deposito'); return; }", "");
+await mut('i legami non si mostrano', "'<div id=\"calc\"></div>' + legamiHtml(ROJA) +", "'<div id=\"calc\"></div>' +");
+await mut('rifiutato come esperando', "(x.estado === 'rifiutata' ? 'RECHAZADO' : 'esperando')", "'esperando'");
 await mut('la roja non si legge', "var rjR = await getCaja('roja_estado?dia=' + DIA_HOY + '&noches=' + NOCHES.join(','));", "var rjR = { ok: false, error: 'lettura_sconosciuta' };");
 await mut('un errore diventa «sin roja»', "else if (!rjR.ok && rjR.error !== 'lettura_sconosciuta') { renderError('La roja', rjR.error); return; }", "");
 await mut('il contado non e lordo', "var c = (Number(document.getElementById('contado').value || '') || 0) + S;", "var c = (Number(document.getElementById('contado').value || '') || 0);");
