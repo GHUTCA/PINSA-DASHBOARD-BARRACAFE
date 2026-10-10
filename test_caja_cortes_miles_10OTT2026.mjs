@@ -30,7 +30,7 @@ function banco(SRC) {
   t('⑤ el corte ya guardado se muestra formateado (miles(prev.corte))', /value="' \+ \(prev \? miles\(prev\.corte\) : ''\) \+ '"/.test(SRC));
   const iF = SRC.indexOf('milesInput(el); el.addEventListener(\'input\', comparar)');
   t('⑥ el formato se engancha ANTES del confronto (comparar lee el valor ya formateado)', iF > 0);
-  t('⑥ bis version 1.4.0', /caja 1\.4\.0<\/small>/.test(SRC));
+  t('⑥ bis version >= 1.4.0 (el separador de miles ya esta)', /caja 1\.[4-9]\.\d<\/small>/.test(SRC));
 }
 banco(SRC0);
 const mut = (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }

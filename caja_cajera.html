@@ -308,7 +308,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.4.0</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.5.0</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -618,6 +618,44 @@ function milesDe(raw) {
 function milesInput(el) {
   el.addEventListener('input', function(){ var f = milesDe(el.value); if (f !== el.value) el.value = f; });
 }
+/* ═══ [10-ott · ADMIN + Alberto via V28] «DICE NUESTRO LIBRO» SOBRE LA VENTANA DEL CORTE ═══════════════════════════════════════════════════
+   El ticket de la maquina dice «Desde 08/10 18:48 hasta 09/10 18:48»: el corte NO sigue el dia operativo. Comparar con el dia completo daba −3,38M (casi todo PERIODO); sobre la misma
+   ventana, −228 mil. Cada maquina puede llevar su ventana (desde/hasta del ticket, opcionales); si hay, el libro se pide al bordo SOBRE ESA VENTANA (lectura libro_ventana) y la etiqueta lo dice.
+   Sin ventana (o con la palanca apagada) todo sigue como ayer: el libro del dia. El libro no sabe de maquinas: se compara con la SUMA, sobre [el desde mas temprano, el hasta mas tarde]; si las
+   ventanas difieren mas de 30 min la pantalla lo avisa. */
+var VENTANA_ON = null, VENTANA_TS = 0;
+async function ventanaOn() {
+  if (VENTANA_ON !== null && Date.now() - VENTANA_TS < 60000) return VENTANA_ON;
+  VENTANA_TS = Date.now();
+  try {
+    var r = await fetch(BORDE[LOCAL] + '/salud', { cache: 'no-store' });
+    var j = await r.json();
+    VENTANA_ON = !!(j && j.flags && String(j.flags.caja_cortes_ventana_on) === '1');
+  } catch (e) { VENTANA_ON = false; }
+  return VENTANA_ON;
+}
+/* «2026-10-08T18:48» (hora LOCAL del telefono) → ISO; vacio o invalido → null */
+function ventanaIso(local) {
+  var v = String(local == null ? '' : local).trim();
+  if (!v) return null;
+  var d = new Date(v);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+/* de las filas con corte: la ventana comun y si las maquinas discrepan. filas: [{desde, hasta}] en ISO o null */
+function ventanaComun(filas) {
+  var d = [], h = [];
+  (filas || []).forEach(function(x){ if (x && x.desde && x.hasta) { d.push(Date.parse(x.desde)); h.push(Date.parse(x.hasta)); } });
+  if (!d.length) return null;
+  var dMin = Math.min.apply(null, d), dMax = Math.max.apply(null, d), hMin = Math.min.apply(null, h), hMax = Math.max.apply(null, h);
+  return { desde: new Date(dMin).toISOString(), hasta: new Date(hMax).toISOString(), difieren: (dMax - dMin > 30 * 60000) || (hMax - hMin > 30 * 60000) };
+}
+function fechaHoraCorta(iso) {
+  var d = new Date(iso);
+  return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+async function leerLibroVentana(desde, hasta) {
+  return getCaja('libro_ventana?dia=' + encodeURIComponent(DIA_CORTE || DIA_NOCHE) + '&desde=' + encodeURIComponent(desde) + '&hasta=' + encodeURIComponent(hasta));
+}
 function diasDeCorte() { return [DIA_NOCHE, diaAnterior(DIA_NOCHE), DIA_HOY]; }
 async function pantalla8() {
   if (!DIA_CORTE) DIA_CORTE = DIA_NOCHE;
@@ -627,11 +665,13 @@ async function pantalla8() {
   if (!CORTES.ok) { renderError('Los cortes POS', CORTES.error); return; }
   /* el bordo viejo no entiende `dia_op` y escribiria el corte con el dia de HOY: la marca `puntos_fonte` dice que es el nuevo. Sin ella, no se guarda (se avisa). */
   var bordoNuevo = CORTES.puntos_fonte != null;
+  var ventanaActiva = await ventanaOn();
   var puntos = (CORTES.puntos && CORTES.puntos.length) ? CORTES.puntos : [1,2,3,4,5,6].map(function(n){ return { caja_n: n, nombre: 'Caja ' + n, sn: null }; });
   var filas = puntos.map(function(pt, i){
     var prev = (CORTES.guardado||[]).find(function(g){ return g.maquina === pt.nombre; });
     return '<p class="lb">' + esc(pt.nombre) + (pt.sn ? ' <small>S/N ' + esc(pt.sn) + '</small>' : '') + '</p>' +
-      '<input class="inp" data-maq-corte="' + i + '" placeholder="$ (déjalo vacío si no se usó)" inputmode="numeric" value="' + (prev ? miles(prev.corte) : '') + '">';
+      '<input class="inp" data-maq-corte="' + i + '" placeholder="$ (déjalo vacío si no se usó)" inputmode="numeric" value="' + (prev ? miles(prev.corte) : '') + '">' +
+      (ventanaActiva ? '<div class="two" style="margin-top:4px"><label style="font-size:.75em;color:var(--ink2)">Desde (del ticket)<input class="inp" type="datetime-local" data-maq-desde="' + i + '"></label><label style="font-size:.75em;color:var(--ink2)">Hasta<input class="inp" type="datetime-local" data-maq-hasta="' + i + '"></label></div>' : '');
   }).join('');
   var opcionesDia = diasDeCorte().filter(function(d, k, a){ return a.indexOf(d) === k; }).map(function(d){
     return '<option value="' + esc(d) + '"' + (d === dia ? ' selected' : '') + '>' + (d === DIA_NOCHE ? 'Ayer · ' : d === DIA_HOY ? 'Hoy · ' : '') + esc(fechaCorta(d)) + '</option>';
@@ -651,21 +691,48 @@ async function pantalla8() {
       /* [09-ott · BKP (e) `un «-» o un «.» se volvia corte 0`] vacio = no se escribe; algo ESCRITO que no es una cifra (solo «-», solo «.», con letras o con signo menos) es INVALIDO (NaN): ya no se
          convierte en un 0 declarado. Aceptado: digitos con $ . , y espacios (separadores de miles). */
       var valida = raw !== '' && /^[\s$]*\d[\d.,\s]*$/.test(raw);
-      return { pt: pt, raw: raw, v: raw === '' ? null : (valida ? Number(raw.replace(/[^0-9]/g, '')) : NaN) };
+      var elD = document.querySelector('[data-maq-desde="' + i + '"]'), elH = document.querySelector('[data-maq-hasta="' + i + '"]');
+      return { pt: pt, raw: raw, v: raw === '' ? null : (valida ? Number(raw.replace(/[^0-9]/g, '')) : NaN),
+        ventana: { desde: elD ? ventanaIso(elD.value) : null, hasta: elH ? ventanaIso(elH.value) : null } };
     });
+  }
+  var VENTANA_LIBRO = null, VENTANA_PIDIENDO = '';
+  function pedirLibroVentana(vc) {
+    var k = vc.desde + '|' + vc.hasta;
+    if (VENTANA_PIDIENDO === k) return;
+    VENTANA_PIDIENDO = k;
+    setTimeout(async function(){
+      var r = await leerLibroVentana(vc.desde, vc.hasta);
+      VENTANA_LIBRO = { k: k, libro: (r && r.ok && r.libro != null) ? r.libro : null };
+      VENTANA_PIDIENDO = '';
+      comparar();
+    }, 500);   // el desde/hasta se escribe de a poco: no se pide el libro a cada tecla
   }
   /* la JORNADA contra la SUMA de las maquinas — tolerancia cero, ambar y sin bloquear */
   function comparar() {
     var vals = valores(), suma = 0, alguna = false;
     vals.forEach(function(x){ if (x.v !== null && Number.isFinite(x.v)) { suma += x.v; alguna = true; } });
     var box = document.getElementById('comparacion');
-    if (CORTES.libro == null) { box.innerHTML = ''; return; }
-    var dif = suma - CORTES.libro;
+    /* [10-ott] la ventana de las maquinas con corte: si hay, el libro se compara SOBRE ella (lectura libro_ventana); si el bordo no la da, el del dia, con la etiqueta que lo dice */
+    var vc = ventanaActiva ? ventanaComun(vals.filter(function(x){ return x.v !== null && Number.isFinite(x.v); }).map(function(x){ return x.ventana; })) : null;
+    var libro = CORTES.libro, etiqueta = 'Dice nuestro libro <small>(día completo)</small>', avisoV = '';
+    if (vc) {
+      if (VENTANA_LIBRO && VENTANA_LIBRO.k === vc.desde + '|' + vc.hasta && VENTANA_LIBRO.libro != null) {
+        libro = VENTANA_LIBRO.libro; etiqueta = 'Dice nuestro libro <small>(' + fechaHoraCorta(vc.desde) + ' → ' + fechaHoraCorta(vc.hasta) + ')</small>';
+      } else {
+        etiqueta = 'Dice nuestro libro <small>(día completo — falta la ventana)</small>';
+        pedirLibroVentana(vc);
+      }
+      if (vc.difieren) avisoV = '<div class="note ambar"><b>Las máquinas no cubren la misma ventana</b><br>El libro no sabe de máquinas: se compara con la suma sobre la ventana más amplia.</div>';
+    }
+    if (libro == null) { box.innerHTML = avisoV; return; }
+    var dif = suma - libro;
     box.innerHTML = '<div class="rows"><div class="r"><span class="n">Suma de las máquinas</span><span class="v">' + fmt(suma) + '</span></div>' +
-      '<div class="r"><span class="n">Dice nuestro libro</span><span class="v">' + fmt(CORTES.libro) + '</span></div></div>' +
+      '<div class="r"><span class="n">' + etiqueta + '</span><span class="v">' + fmt(libro) + '</span></div></div>' + avisoV +
       (alguna && dif !== 0 ? '<div class="note ambar"><b>Diferencia ' + (dif > 0 ? '+' : '−') + fmt(Math.abs(dif)) + '</b><br>La suma de las máquinas no es igual al libro. Se guarda igual; queda para mirar.</div>' : '');
   }
-  puntos.forEach(function(pt, i){ var el = document.querySelector('[data-maq-corte="' + i + '"]'); milesInput(el); el.addEventListener('input', comparar); });   // el formato va PRIMERO: comparar() lee el valor ya formateado (y lo parsea igual)
+  puntos.forEach(function(pt, i){ var el = document.querySelector('[data-maq-corte="' + i + '"]'); milesInput(el); el.addEventListener('input', comparar);
+    ['desde', 'hasta'].forEach(function(w){ var ew = document.querySelector('[data-maq-' + w + '="' + i + '"]'); if (ew) ew.addEventListener('change', comparar); }); });   // el formato va PRIMERO: comparar() lee el valor ya formateado (y lo parsea igual)
   comparar();
   document.getElementById('diaCorte').addEventListener('change', function(){ DIA_CORTE = document.getElementById('diaCorte').value; pantalla8(); });
   unTocoUnHecho(document.getElementById('guardar'), async function(){
