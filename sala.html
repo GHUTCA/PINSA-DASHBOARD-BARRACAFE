@@ -1616,7 +1616,7 @@ function _vistaNombre() { return (JL && STATE.vista) ? STATE.vista : STATE.nombr
    quaranta minuti fa). L'invariante di Alberto: ogni tavolo ha una plaza e ogni plaza un mesero ⇒ se manca e' un'ANOMALIA: il vetro lo
    dice al JL, il fatto si registra (`bordeHecho`), e il cobro NON parte e NON si intesta al JL. Una junta si risolve solo se tutte le sue
    mesas hanno lo STESSO intestatario. PURA: (mesas, plazaDe(mesa), todos) -> { ok, nombre, plaza } | { ok:false, motivo, mesa, plaza }. */
-function _intestatarioPuro(mesas, plazaDe, todos) {
+function _intestatarioPuro(mesas, plazaDe, todos, apertura) {
   let nombre = '', plaza = '';
   const lista = (mesas && mesas.length) ? mesas : [];
   if (!lista.length) return { ok: false, motivo: 'mesa_sin_plaza', mesa: '', plaza: '' };
@@ -1629,9 +1629,20 @@ function _intestatarioPuro(mesas, plazaDe, todos) {
       if ((v.plazas || []).indexOf(pl) >= 0) duenos.push(v.nombre || sl);
     }
     if (!duenos.length) return { ok: false, motivo: 'plaza_sin_mesero', mesa: mesa, plaza: pl };
-    if (duenos.length > 1) return { ok: false, motivo: 'plaza_con_varios_meseros', mesa: mesa, plaza: pl };
-    if (nombre && duenos[0] !== nombre) return { ok: false, motivo: 'junta_con_varios_meseros', mesa: mesa, plaza: pl };
-    nombre = duenos[0]; if (!plaza) plaza = pl;
+    let dueno = duenos[0];
+    if (duenos.length > 1) {
+      /* [10-ott · 🎛 V28 `PLAZA CONDIVISA INTESTATARIO CHI HA APERTO IL CONTO`] plaza condivisa = legittima, il cobro NON si ferma: l'intestatario e' il mesero che ha
+         APERTO il conto (il mesero del primo pedido, un fatto del sistema — il bordo lo dice in \`apertura\`) e deve essere uno dei dueños. Niente tap del JL. */
+      if (!apertura) return { ok: false, motivo: 'plaza_condivisa', mesa: mesa, plaza: pl, duenos: duenos };
+      const a = apertura[mesa];
+      if (!a) return { ok: false, motivo: 'conto_no_leido', mesa: mesa, plaza: pl };
+      if (!a.mesero) return { ok: false, motivo: 'conto_sin_mesero', mesa: mesa, plaza: pl, detalle: a.motivo || '' };
+      const hit = duenos.find(function (d) { return _slugSalaJS(d) === _slugSalaJS(a.mesero); });
+      if (!hit) return { ok: false, motivo: 'conto_fuera_duenos', mesa: mesa, plaza: pl, detalle: a.mesero };
+      dueno = hit;
+    }
+    if (nombre && dueno !== nombre) return { ok: false, motivo: 'junta_con_varios_meseros', mesa: mesa, plaza: pl };
+    nombre = dueno; if (!plaza) plaza = pl;
   }
   return { ok: true, nombre: nombre, plaza: plaza };
 }
@@ -1649,7 +1660,8 @@ async function _jlIntestatario(mesas) {
   } catch (e) { todos = null; }
   if (!todos) return { ok: false, motivo: 'sala_no_leida', mesa: String((mesas || [])[0] || ''), plaza: '' };
   /* [10-ott · 🟡② di EL GIRO] la plaza del tavolo si cerca PRIMA nella sala letta adesso (le mesas/pendientes/mios di OGNI mesero, dove il bordo la scrive),
-     e solo se il tavolo non c'e' (nessun consumo visibile) si ripiega sulla memoria del telefono. Il ripiego e' dichiarato: `fonte_plaza` torna con l'esito. */
+     e solo se il tavolo non c'e' (nessun consumo visibile) si ripiega sulla memoria del telefono. Il ripiego e' dichiarato: `fonte_plaza` torna con l'esito
+     (e VIAGGIA: nel body del pago e, se e' memoria, in un fatto `pago_intestatario_da_memoria` — un intestatario preso dalla memoria non resta invisibile). */
   let fonte = 'sala';
   const dam = function (m) {
     for (const sl in todos) {
@@ -1663,19 +1675,39 @@ async function _jlIntestatario(mesas) {
     if (mem) { fonte = 'memoria'; return mem.plaza; }
     return '';
   };
-  const r = _intestatarioPuro(mesas, dam, todos);
+  let r = _intestatarioPuro(mesas, dam, todos);
+  if (!r.ok && r.motivo === 'plaza_condivisa') {
+    /* chi ha aperto il conto lo sa il BORDO (il primo pedido aperto della mesa); se la rotta e' spenta o non risponde, il cobro si ferma e lo dice: mai il JL, mai il primo che capita */
+    if (!CONTO_APERTURA_ON) { r.motivo = 'plaza_con_varios_meseros'; }
+    else {
+      let ap = null;
+      try {
+        const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, CIE_FRESCO_TIMEOUT_MS);
+        const rr = await fetch(BORDE_SALA.URL + '/conto/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?mesas=' + encodeURIComponent((mesas || []).join(',')),
+          { signal: ctrl.signal, cache: 'no-store', headers: { 'X-Borde-Token': BORDE_SALA.T } });
+        clearTimeout(to);
+        const jj = await rr.json();
+        if (rr.ok && jj && jj.ok && jj.mesas) ap = jj.mesas;
+      } catch (e) { ap = null; }
+      r = ap ? _intestatarioPuro(mesas, dam, todos, ap) : { ok: false, motivo: 'conto_no_leido', mesa: r.mesa, plaza: r.plaza };
+    }
+  }
   r.fonte_plaza = fonte;
+  if (r.ok && fonte === 'memoria') { try { bordeHecho('pago_intestatario_da_memoria', { mesa: String((mesas || [])[0] || ''), plaza: r.plaza || '' }); } catch (e) {} }
   return r;
 }
 const _INTEST_MSG = {
   sala_no_leida: 'No pude leer la sala ahora mismo — reintenta en unos segundos.',
   mesa_sin_plaza: 'Esta mesa no tiene plaza — avisa al administrador; el cobro no se hace a tu nombre.',
   plaza_sin_mesero: 'La plaza de esta mesa no tiene a nadie asignado — asígnala y vuelve a cobrar; el cobro no se hace a tu nombre.',
-  plaza_con_varios_meseros: 'La plaza de esta mesa tiene más de un mesero — deja uno solo y vuelve a cobrar.',
+  plaza_con_varios_meseros: 'La plaza de esta mesa tiene más de un mesero y todavía no puedo saber quién abrió la cuenta — avisa al administrador.',
+  conto_no_leido: 'No pude saber quién abrió la cuenta — reintenta en unos segundos.',
+  conto_sin_mesero: 'Nadie tomó el primer pedido de esta cuenta — asígnala a un mesero y vuelve a cobrar; el cobro no se hace a tu nombre.',
+  conto_fuera_duenos: 'Quien abrió la cuenta no es dueño de esta plaza — avisa al administrador; el cobro no se hace a tu nombre.',
   junta_con_varios_meseros: 'Las mesas de esta junta son de meseros distintos — no se puede cobrar junto.'
 };
 function _intestatarioAnomalia(a, accion) {
-  try { bordeHecho('pago_sin_intestatario', { mesa: a.mesa || '', plaza: a.plaza || '', motivo: a.motivo, accion: accion }); } catch (e) {}
+  try { bordeHecho('pago_sin_intestatario', { mesa: a.mesa || '', plaza: a.plaza || '', motivo: a.motivo, accion: accion, detalle: a.detalle || '' }); } catch (e) {}
   toast('err', _INTEST_MSG[a.motivo] || 'No se pudo saber el mesero de esta mesa.', 7000);
 }
 function _jlBackUrl() {
@@ -9070,6 +9102,7 @@ var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propi
 /* [10-ott · decisione ⓐ di Alberto · 🎛 V28 `JL FA TUTTO DALLA SUA APP COBRAR`] il JL fa tutto dalla sua app: PEDIR · COBRAR · MOVER tornano nel `?jl=1`.
    Leva del bordo (/salud → jl_todo_on). NASCE SPENTA: spenta, `VJ` filtra come ieri (solo PEDIDOS ed ELIMINAR). */
 var JL_TODO_ON = false;
+var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
 /* [29-set · Alberto: «il tetto del 30% fallo subito»] il tetto NON e' piu' una
    copia del vetro: si legge dal bordo (/salud → desc_max_pct), che e' la fonte
    unica e lo applica. 30 resta solo finche' il bordo non ha risposto. */
@@ -9098,6 +9131,7 @@ var JL_TODO_ON = false;
       CORTE_BORDE_ON = String(cercaK(j, 'corte_borde_on')) === '1';         // [08-ott · 1.6]
       CAJA_ATTO3_ON = String(cercaK(j, 'caja_atto3_on')) === '1';           // [03-ott · ATTO III]
       JL_TODO_ON = String(cercaK(j, 'jl_todo_on')) === '1';                 // [10-ott · decisione ⓐ]
+      CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
     }).catch(function () {});
   } catch (e) { /* senza il bordo resta 30 */ }
 })();
@@ -12104,7 +12138,7 @@ async function fintocRegistrar__in(mesa) {
   try {
     const r = await gasPost('registrarPago', {
       codigo: STATE.codigo, nombre: STATE.nombre, registrado_por: STATE.nombre,
-      intestatario: intF ? intF.nombre : undefined, intestatario_plaza: intF ? intF.plaza : undefined,   // [10-ott · AUT-0646] solo in `?jl=1`
+      intestatario: intF ? intF.nombre : undefined, intestatario_plaza: intF ? intF.plaza : undefined, intestatario_fonte: intF ? intF.fonte_plaza : undefined,   // [10-ott · AUT-0646] solo in `?jl=1`
       mesa: mesa, medio: 'fintoc', ref: pagFin.pi || '',
       propina: Math.max(0, Math.round(pagFin.monto - tot)), boleta: 1 });
     if (r && r.ok) {
@@ -14853,7 +14887,7 @@ async function pagoConfirmar(btn) {
      `abrirPago` l'ha popolato (pago di junta vero): un `gid` a caso su una
      mesa singola non aiuterebbe e sporcherebbe l'audit
      (`mesas_payload_rechazado`) senza motivo. */
-  if (intest) { body.intestatario = intest.nombre; body.intestatario_plaza = intest.plaza; }   // [10-ott · AUT-0646] il mesero A CUI VA il denaro; `registrado_por` resta chi incassa
+  if (intest) { body.intestatario = intest.nombre; body.intestatario_plaza = intest.plaza; body.intestatario_fonte = intest.fonte_plaza || ''; }   // [10-ott · AUT-0646] il mesero A CUI VA il denaro; `registrado_por` resta chi incassa
   if (pg.gid) body.gid = pg.gid;
   if (pg.uuids && pg.uuids.length) body.uuids = pg.uuids;   // [AUT-0462] le righe del pannello, congelate all apertura
   /* v1.4 · le mosse del JL viaggiano DICHIARATE + col PIN (GAS v3.75.0):

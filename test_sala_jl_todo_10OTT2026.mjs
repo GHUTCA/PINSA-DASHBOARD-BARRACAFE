@@ -30,12 +30,16 @@ const E = (SRC, JL, on) => filtraVJ(SRC, { JL, JL_TODO_ON: on }).join(',');
 // la sala letta dal bordo: due meseros, plazas, e una plaza senza nessuno
 const SALA_OK = { marcela: { ok: true, nombre: 'Marcela', plazas: ['AURORA A'] }, ray: { ok: true, nombre: 'Ray', plazas: ['VIP A', 'VIP B'] }, sola: { ok: true, nombre: 'Doble1', plazas: ['TERRAZA'] }, sola2: { ok: true, nombre: 'Doble2', plazas: ['TERRAZA'] } };
 const PLAZA = { 12: 'AURORA A', 13: 'AURORA A', 40: 'VIP A', 41: 'VIP B', 50: 'HUERFANA', 60: 'TERRAZA', 70: '' };
-function mundoIntest(SRC, { salud, fetchFalla, edadMs = 1000, lugar = PLAZA }) {
+function mundoIntest(SRC, { salud, fetchFalla, edadMs = 1000, lugar = PLAZA, conto, contoOn = false }) {
+  const hechos = [];
   const ctx = { STATE: { codigo: 'X1', sala: { mesas: Object.keys(lugar).map((m) => ({ mesa: m, plaza: lugar[m] })) } },
     BORDE_SALA: { ON: true, URL: 'http://b', T: 't' }, CFG: { LOCAL: 'BKS' }, CIE_FRESCO_TIMEOUT_MS: 50, CIE_FRESCO_MAX_MS: 600000, AbortController, setTimeout, clearTimeout, Date, JSON, Object, String, Number, encodeURIComponent,
-    fetch: async () => { if (fetchFalla) throw new Error('rete'); return { ok: true, json: async () => ({ ok: true, datos: { datos: { ok: true, ts_datos: Date.now() - edadMs, meseros: salud } } }) }; } };
+    CONTO_APERTURA_ON: contoOn, bordeHecho: (g, d) => hechos.push([g, d]), _hechos: hechos,
+    fetch: async (u, init) => { if (fetchFalla) throw new Error('rete');
+      if (/\/conto\//.test(String(u))) { ctx._contoUrl = String(u); ctx._contoHdr = init && init.headers; if (conto === 'falla') throw new Error('rete'); return { ok: conto !== 'rotto', json: async () => ({ ok: conto !== 'rotto', mesas: conto }) }; }
+      return { ok: true, json: async () => ({ ok: true, datos: { datos: { ok: true, ts_datos: Date.now() - edadMs, meseros: salud } } }) }; } };
   vm.createContext(ctx);
-  vm.runInContext(fnDe(SRC, '_intestatarioPuro') + fnDe(SRC, '_jlIntestatario', true) + '\nthis.I = _jlIntestatario;', ctx); return ctx;
+  vm.runInContext(fnDe(SRC, '_slugSalaJS') + fnDe(SRC, '_intestatarioPuro') + fnDe(SRC, '_jlIntestatario', true) + '\nthis.I = _jlIntestatario;', ctx); return ctx;
 }
 
 function banco(SRC) {
@@ -45,6 +49,7 @@ function banco(SRC) {
   t('② leva ACCESA: PEDIR · PRECUENTA · COBRAR · MOVER tornano, SEPARAR/TIEMPOS no', E(SRC, JLX, true) === 'pedir,precuenta,cobrar,pedidos,mover,descontar', E(SRC, JLX, true));
   t('② bis fuori da JL il filtro non esiste: i verbi sono tutti, con o senza leva', E(SRC, null, false) === 'pedir,precuenta,cobrar,pedidos,mover,separar,tiempos,descontar' && E(SRC, null, true) === E(SRC, null, false));
   t('③ JL_TODO_ON nasce false e si accende SOLO da /salud → jl_todo_on === "1"', /var JL_TODO_ON = false;/.test(SRC) && /JL_TODO_ON = String\(cercaK\(j, 'jl_todo_on'\)\) === '1'/.test(SRC));
+  t('③ ter CONTO_APERTURA_ON nasce false e si accende SOLO da /salud → conto_apertura_on === "1"', /var CONTO_APERTURA_ON = false;/.test(SRC) && SRC.includes("CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1'"));
 
   // ④ ⑤ l'intestatario, preso ADESSO dalla sala
   return Promise.all([
@@ -58,6 +63,42 @@ function banco(SRC) {
     // tavolo che la sala fresca non mostra: ripiega sulla memoria e lo DICHIARA
     mundoIntest(SRC, { salud: SALA_OK }).I(['13']),
   ]).then(([a, b, junta, mista, huerfana, doble, sinPl, desconocida, sinRed, vieja, futura, caida, fresca, memoria]) => {
+    // ── la PLAZA CONDIVISA (V28: l'intestatario e il mesero che ha APERTO il conto, se e uno dei dueños) ──
+    return Promise.all([
+      mundoIntest(SRC, { salud: SALA_OK, contoOn: true, conto: { 60: { mesero: 'Doble2', n: 2 } } }).I(['60']),
+      mundoIntest(SRC, { salud: SALA_OK, contoOn: true, conto: { 60: { mesero: 'doble1', n: 1 } } }).I(['60']),
+      mundoIntest(SRC, { salud: SALA_OK, contoOn: true, conto: { 60: { mesero: 'Ray', n: 1 } } }).I(['60']),
+      mundoIntest(SRC, { salud: SALA_OK, contoOn: true, conto: { 60: { mesero: '', n: 1, motivo: 'primo_sin_mesero' } } }).I(['60']),
+      mundoIntest(SRC, { salud: SALA_OK, contoOn: true, conto: 'falla' }).I(['60']),
+      mundoIntest(SRC, { salud: SALA_OK, contoOn: true, conto: 'rotto' }).I(['60']),
+      mundoIntest(SRC, { salud: SALA_OK, contoOn: true, conto: {} }).I(['60']),
+      mundoIntest(SRC, { salud: SALA_OK, contoOn: false, conto: { 60: { mesero: 'Doble2' } } }).I(['60']),
+      mundoIntest(SRC, { salud: SALA_OK, contoOn: true, conto: { 60: { mesero: 'Doble2' }, 12: { mesero: 'Zzz' } }, lugar: { ...PLAZA, 61: 'TERRAZA' } }).I(['60', '12']),
+      mundoIntest(SRC, { salud: SALA_OK, contoOn: true, conto: { 60: { mesero: 'Doble2' }, 61: { mesero: 'Doble1' } }, lugar: { ...PLAZA, 61: 'TERRAZA' } }).I(['60', '61']),
+      mundoIntest(SRC, { salud: SALA_OK, contoOn: true, conto: { 60: { mesero: 'Doble2' }, 61: { mesero: 'Doble2' } }, lugar: { ...PLAZA, 61: 'TERRAZA' } }).I(['60', '61']),
+    ]).then(([c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11]) => {
+      t('⑩ plaza condivisa, il conto l ha aperto Doble2 (uno dei dueños): intestatario DOBLE2, il cobro NON si ferma', c1.ok && c1.nombre === 'Doble2' && c1.plaza === 'TERRAZA', c1);
+      t('⑩ bis il confronto col dueño e per slug (maiuscole/accenti): doble1 => Doble1', c2.ok && c2.nombre === 'Doble1', c2);
+      t('⑩ ter chi ha aperto NON e dueño della plaza (Ray): anomalia conto_fuera_duenos, niente cobro', !c3.ok && c3.motivo === 'conto_fuera_duenos', c3);
+      t('⑩ quater il conto non ha mesero (nessuno ha preso il primo pedido): anomalia conto_sin_mesero, MAI il primo dueño', !c4.ok && c4.motivo === 'conto_sin_mesero' && c4.detalle === 'primo_sin_mesero', c4);
+      t('⑩ quinquies il bordo non risponde: anomalia conto_no_leido (non ripiega su un dueño a caso)', !c5.ok && c5.motivo === 'conto_no_leido', c5);
+      t('⑩ sexies il bordo risponde ok:false: conto_no_leido', !c6.ok && c6.motivo === 'conto_no_leido', c6);
+      t('⑩ septies il bordo non conosce la mesa: conto_no_leido', !c7.ok && c7.motivo === 'conto_no_leido', c7);
+      t('⑩ octies rotta spenta (CONTO_APERTURA_ON falsa): il blocco di prima, plaza_con_varios_meseros, e NON chiama la rotta', !c8.ok && c8.motivo === 'plaza_con_varios_meseros', c8);
+      t('⑩ nonies junta con plaza condivisa e una mesa di un altro mesero singolo: Marcela per la 12 non e Doble2 => junta mista', !c9.ok && c9.motivo === 'junta_con_varios_meseros', c9);
+      t('⑩ decies junta della stessa plaza aperta da due meseros diversi: junta mista, si ferma', !c10.ok && c10.motivo === 'junta_con_varios_meseros', c10);
+      t('⑩ undecies junta della stessa plaza aperta dallo STESSO mesero: un intestatario solo', c11.ok && c11.nombre === 'Doble2', c11);
+      const mm = mundoIntest(SRC, { salud: SALA_OK, contoOn: true, conto: { 60: { mesero: 'Doble2' } } });
+      return mm.I(['60']).then((rr) => {
+        t('⑩ la rotta si chiama con le mesas e il token in HEADER (mai in querystring)', /\/conto\/BKS\?mesas=60$/.test(mm._contoUrl) && mm._contoHdr && mm._contoHdr['X-Borde-Token'] === 't' && !/[?&]t=/.test(mm._contoUrl), [mm._contoUrl, mm._contoHdr]);
+        const mem = mundoIntest(SRC, { salud: SALA_OK });
+        return mem.I(['13']).then((r13) => {
+          t('⑩ un intestatario preso dalla MEMORIA non resta invisibile: fonte_plaza e un fatto pago_intestatario_da_memoria', r13.ok && r13.fonte_plaza === 'memoria' && mem._hechos.some((h) => h[0] === 'pago_intestatario_da_memoria' && h[1].plaza === 'AURORA A'), [r13, mem._hechos]);
+          const fr = mundoIntest(SRC, { salud: { ...SALA_OK, marcela: { ...SALA_OK.marcela, mios: [{ mesa: '12', plaza: 'AURORA A' }] } } });
+          return fr.I(['12']).then((r12) => { t('⑩ dalla sala fresca (il tavolo c e) nessun fatto di memoria', r12.ok && r12.fonte_plaza === 'sala' && !fr._hechos.length, [r12, fr._hechos]); });
+        });
+      });
+    }).then(() => {
     t('④ la plaza viene dalla sala FRESCA, non dalla memoria: il tavolo 12 passato a Ray => intestatario RAY, fonte sala', fresca.ok && fresca.nombre === 'Ray' && fresca.plaza === 'VIP A' && fresca.fonte_plaza === 'sala', fresca);
     t('④ se la sala fresca non mostra il tavolo si ripiega sulla memoria e lo si DICHIARA (fonte_plaza: memoria)', memoria.ok && memoria.nombre === 'Marcela' && memoria.fonte_plaza === 'memoria', memoria);
     t('④ tavolo di Marcela: intestatario = MARCELA (la plaza AURORA A), con la plaza', a.ok && a.nombre === 'Marcela' && a.plaza === 'AURORA A', a);
@@ -78,7 +119,7 @@ function banco(SRC) {
     t('⑥ pagoConfirmar: `registrado_por` RESTA STATE.nombre (chi incassa: ha i biglietti in mano)', /codigo: STATE\.codigo, nombre: STATE\.nombre, registrado_por: STATE\.nombre,/.test(pc));
     t('⑥ pagoConfirmar: in JL risolve l intestatario PRIMA di costruire il body, con la sala della junta', /if \(JL\) \{[^}]*_jlIntestatario\(\(pg\.mesas && pg\.mesas\.length\) \? pg\.mesas : \[pg\.mesa\]\)/s.test(pc));
     t('⑥ pagoConfirmar: sull anomalia SBLOCCA il pannello, avvisa il JL e NON prosegue', /if \(!intest\.ok\) \{ pg\.enviando = false; renderPago\(\); _intestatarioAnomalia\(intest, 'pagoConfirmar'\); return; \}/.test(pc));
-    t('⑥ pagoConfirmar: il body porta intestatario + intestatario_plaza SOLO se c e (fuori da JL il body e identico a ieri)', /if \(intest\) \{ body\.intestatario = intest\.nombre; body\.intestatario_plaza = intest\.plaza; \}/.test(pc));
+    t('⑥ pagoConfirmar: il body porta intestatario + intestatario_plaza + la FONTE SOLO se c e (fuori da JL il body e identico a ieri)', /if \(intest\) \{ body\.intestatario = intest\.nombre; body\.intestatario_plaza = intest\.plaza; body\.intestatario_fonte = intest\.fonte_plaza \|\| ''; \}/.test(pc));
     const ancora = pc.indexOf('let intest = null;'), cob = pc.indexOf('const body = {');
     t('⑥ l intestatario si risolve PRIMA di `const body` (altrimenti il body non puo portarlo)', ancora > 0 && cob > ancora, [ancora, cob]);
     const fi = SRC.slice(SRC.indexOf('let intF = null;') - 10, SRC.indexOf("medio: 'fintoc'") + 40);
@@ -87,6 +128,7 @@ function banco(SRC) {
     t('⑥ la porta FAM/colacion/ELIMINAR non cambia (registrado_por: STATE.nombre, due siti)', (SRC.match(/registrado_por: STATE\.nombre, mesa: mesa, medio: 'fam'/g) || []).length === 1 && (SRC.match(/registrado_por: STATE\.nombre,\n      mesa: pg\.mesa, medio: 'fam'|registrado_por: STATE\.nombre,\n      mesa: pg\.mesa/g) || []).length >= 0);
     t('nessun resto del vecchio disegno (`_registradoPor` / `cobrado_por`)', !/_registradoPor|_cobradoPor|cobrado_por/.test(SRC));
     return ko - k0;
+    });
   });
 }
 
@@ -118,8 +160,16 @@ await mut('registrado_por torna al mesero (cancella chi ha i biglietti)', 'nombr
 await mut('l anomalia non ferma il cobro', "if (!intest.ok) { pg.enviando = false; renderPago(); _intestatarioAnomalia(intest, 'pagoConfirmar'); return; }", "if (!intest.ok) { _intestatarioAnomalia(intest, 'pagoConfirmar'); }");
 await mut('il body non porta l intestatario', 'body.intestatario = intest.nombre;', 'body.xx = intest.nombre;');
 await mut('plaza senza mesero => intestato al JL', "return { ok: false, motivo: 'plaza_sin_mesero', mesa: mesa, plaza: pl };", "return { ok: true, nombre: STATE.nombre, plaza: pl };");
-await mut('due meseros: ne sceglie uno', "if (duenos.length > 1) return { ok: false, motivo: 'plaza_con_varios_meseros', mesa: mesa, plaza: pl };", "");
-await mut('junta mista accettata', "if (nombre && duenos[0] !== nombre) return { ok: false, motivo: 'junta_con_varios_meseros', mesa: mesa, plaza: pl };", "");
+await mut('plaza condivisa: ne sceglie uno', "if (duenos.length > 1) {", "if (false) {");
+await mut('junta mista accettata', "if (nombre && dueno !== nombre) return { ok: false, motivo: 'junta_con_varios_meseros', mesa: mesa, plaza: pl };", "");
+await mut('chi ha aperto non e dueño: passa', "if (!hit) return { ok: false, motivo: 'conto_fuera_duenos', mesa: mesa, plaza: pl, detalle: a.mesero };", "if (!hit) { nombre = a.mesero; }");
+await mut('conto senza mesero: passa col primo dueño', "if (!a.mesero) return { ok: false, motivo: 'conto_sin_mesero', mesa: mesa, plaza: pl, detalle: a.motivo || '' };", "");
+await mut('il bordo muto: ripiega sul primo dueño', "r = ap ? _intestatarioPuro(mesas, dam, todos, ap) : { ok: false, motivo: 'conto_no_leido', mesa: r.mesa, plaza: r.plaza };", "r = _intestatarioPuro(mesas, dam, todos, ap || { [r.mesa]: { mesero: r.duenos[0] } });");
+await mut('la rotta si chiama anche a leva spenta', "if (!CONTO_APERTURA_ON) { r.motivo = 'plaza_con_varios_meseros'; }", "if (false) { r.motivo = 'plaza_con_varios_meseros'; }");
+await mut('il token va in querystring', "{ signal: ctrl.signal, cache: 'no-store', headers: { 'X-Borde-Token': BORDE_SALA.T } }", "{ signal: ctrl.signal, cache: 'no-store' }");
+await mut('la memoria non lascia traccia', "try { bordeHecho('pago_intestatario_da_memoria'", "try { void ('pago_intestatario_da_memoria'");
+await mut('la fonte non viaggia nel body', "body.intestatario_fonte = intest.fonte_plaza || '';", "");
+await mut('la leva conto_apertura_on non si legge', "CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';", "CONTO_APERTURA_ON = false;");
 await mut('sala vecchia accettata', 'Date.now() - tsD <= CIE_FRESCO_MAX_MS', 'true');
 await mut('rete morta => ripiega sulla memoria', "if (!todos) return { ok: false, motivo: 'sala_no_leida', mesa: String((mesas || [])[0] || ''), plaza: '' };", "if (!todos) todos = { marcela: { ok: true, nombre: 'Marcela', plazas: ['AURORA A'] } };");
 await mut('l anomalia non si registra', "try { bordeHecho('pago_sin_intestatario'", "try { void ('pago_sin_intestatario'");
