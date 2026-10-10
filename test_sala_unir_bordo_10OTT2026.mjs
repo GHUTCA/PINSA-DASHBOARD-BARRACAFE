@@ -25,6 +25,14 @@ function mondo(SRC, { leva, previas = [], seleccion, staffRisp, gasRisp }) {
 }
 const JV = (n, mesas, gid) => ({ n, principal: mesas[0], ts: 1, gid, mesas });
 const tick = () => new Promise((r) => setTimeout(r, 5));
+// la porta del SEPARAR: juntaSeparar vera, con la junta in locale e staffPost finto
+function mondoSep(SRC, junta) {
+  const chiamate = []; let juntas = [{ ...junta }];
+  const ctx = { JFIX_ON: false, STATE: { codigo: 'C1', nombre: 'Wilbert' }, _juntasLoad: () => juntas.map((j) => ({ ...j })), _juntasSave: (l) => { juntas = l; }, _gid: (p) => p + '-gidX',
+    toast() {}, bordeHecho() {}, cerrarMesa() {}, refrescarMapa() {}, staffPost: async (a, b) => { chiamate.push([a, b]); return { ok: true, borde: true }; }, Date, JSON, Array, Object };
+  vm.createContext(ctx); vm.runInContext(fnDe(SRC, 'juntaSeparar') + '\nthis.sep = juntaSeparar;', ctx);
+  return { ctx, chiamate };
+}
 
 async function banco(SRC) {
   const k0 = ko;
@@ -55,6 +63,19 @@ async function banco(SRC) {
     t('⑤ il testimone (eco per gli altri telefoni) parte comunque e PRIMA, ottimistico', m.hechos.length === 1 && m.hechos[0][0] === 'unir', m.hechos); }
   { const m = mondo(SRC, { leva: true, seleccion: ['200'] }); m.ctx.crea(); await tick();
     t('una sola mesa non e una junta: niente gesto', m.chiamate.length === 0 && m.hechos.length === 0, m.chiamate); }
+  // 1.4b (QUARTA df3944f): il separar chiude la riga in grupos_mesa per OGNI gid di gid_rotti — e la chiave e quella CHE IL LIBRO CONOSCE
+  { const m = mondoSep(SRC, { n: 1, principal: '200', ts: 1, gid: 'un-vetro', gidSrv: 'G-LIBRO', mesas: ['199', '200'] }); m.ctx.sep(1); await tick();
+    const b = (m.chiamate[0] || [])[1] || {};
+    t('1.4b il separar manda gid_rotti = [gidSrv] (la chiave che il LIBRO conosce), NON il gid del gesto', m.chiamate[0] && m.chiamate[0][0] === 'separarMesas' && JSON.stringify(b.gid_rotti) === '["G-LIBRO"]' && b.gid === 'sp-gidX', m.chiamate); }
+  { const m = mondoSep(SRC, { n: 1, principal: '200', ts: 1, gid: 'un-vetro', mesas: ['199', '200'] }); m.ctx.sep(1); await tick();
+    const b = (m.chiamate[0] || [])[1] || {};
+    t('1.4b bis senza gidSrv (il libro non ha ancora confermato) ripiega sul gid della junta', JSON.stringify(b.gid_rotti) === '["un-vetro"]', b); }
+  { const m = mondoSep(SRC, { n: 1, principal: '200', ts: 1, gid: '', mesas: ['199', '200'] }); m.ctx.sep(1); await tick();
+    const b = (m.chiamate[0] || [])[1] || {};
+    t('1.4b ter una junta SENZA nessuna chiave: gid_rotti non nasce (mai un gid inventato: scriverebbe una junta fantasma chiusa)', !('gid_rotti' in b) && b.principal === '200', b); }
+  { const m = mondo(SRC, { leva: true, previas: [{ n: 1, principal: '10', ts: 1, gid: 'un-v', gidSrv: 'G-LIBRO', mesas: ['10', '11'] }], seleccion: ['11', '30'] }); m.ctx.crea(); await tick();
+    const c = (m.chiamate[0] || [])[2] || {};
+    t('1.4b quater anche l unir nomina le junte sciolte con la chiave del LIBRO (gidSrv), non con il gid del vetro', JSON.stringify(c.gid_rotti) === '["G-LIBRO"]', c); }
   t('⑥ UNIR_VIA_BORDE_ON nasce false e si accende SOLO da /salud → unir_via_borde_on === "1"', /var UNIR_VIA_BORDE_ON = false;/.test(SRC) && SRC.includes("UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1'"));
   return ko - k0;
 }
@@ -69,5 +90,9 @@ await mut('gid_rotti parte sempre (anche vuoto)', "if (gidRotti.length) _corpoUn
 await mut('gid_rotti nomina tutte le junte', "const gidRotti = prima.filter(function (j) { return j.mesas.some(function (m) { return sel.indexOf(m) >= 0; }); })", "const gidRotti = prima.filter(function (j) { return true; })");
 await mut('il testimone non parte', "bordeHecho('unir', { principal: principal, mesas: _mesasOrden });", "");
 await mut('la junta si conferma anche senza grupo_id', "if (r && r.ok && r.grupo_id) {", "if (r && r.ok) {");
+await mut('il separar manda il gid del gesto invece della chiave del libro', "const _chiaveLibro = j.gidSrv || j.gid || '';", "const _chiaveLibro = '';");
+await mut('il separar ignora gidSrv', "const _chiaveLibro = j.gidSrv || j.gid || '';", "const _chiaveLibro = j.gid || '';");
+await mut('il separar inventa una chiave', "const _chiaveLibro = j.gidSrv || j.gid || '';", "const _chiaveLibro = j.gidSrv || j.gid || 'x';");
+await mut('l unir ignora gidSrv', "return j.gidSrv || j.gid; }).filter(Boolean);", "return j.gid; }).filter(Boolean);");
 await mut('la leva non si legge da /salud', "UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';", "UNIR_VIA_BORDE_ON = false;");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
