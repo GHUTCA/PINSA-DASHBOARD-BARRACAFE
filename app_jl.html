@@ -782,7 +782,16 @@ function _cjEntrega(ret) {
   const e = String((ret && ret.entrega) || '').trim();
   return (_cjEntregaOn() && e && e.toLowerCase() !== String((ret && ret.mesero) || '').trim().toLowerCase()) ? { entregado_por: e } : {};
 }
-function cjRetEntrega(v) { if (!CJ1.ret) return; CJ1.ret.entrega = String(v || ''); }
+/* l'en_mano e' di CHI HA I BIGLIETTI (il bordo accoppia il ritiro con `entregado_por`, o col mesero se vuoto): con un'altra persona scelta, la cifra che il JL
+   VEDE, firma (`visto`) e confronta e' la SUA, non quella del mesero. Una persona senza contante in mano => 0 (il bordo rifiuta nada_que_recibir). */
+function _cjEnManoDe(ret) {
+  const e = _cjEntrega(ret).entregado_por;
+  if (!e) return +(ret && ret.att && ret.att.en_mano) || 0;
+  const n = function (x) { return String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase(); };
+  const m = ((CJ1.st && CJ1.st.meseros) || []).find(function (x) { return n(x.mesero) === n(e); });
+  return m ? (+m.en_mano || 0) : 0;
+}
+function cjRetEntrega(v) { if (!CJ1.ret) return; CJ1.ret.entrega = String(v || ''); CJ1.ret.conf = 0; pintaTab(); }
 function _cjEntregaSel(ret) {
   if (!_cjEntregaOn() || !ret) return '';
   const otros = []; const vi = {};
@@ -805,7 +814,7 @@ async function cjRetTodo(btn) {
   CJ1.enviando = true;
   const ret = CJ1.ret;
   try {
-    const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, recibi: 'todo', visto: ret.att.en_mano, uid_gesto: ret.uid, ..._cjEntrega(ret) });   // la firma es sulla cifra che il JL HA VISTO sul bottone (revisione BKP): se il bordo ne sa un'altra, non scrive
+    const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, recibi: 'todo', visto: _cjEnManoDe(ret), uid_gesto: ret.uid, ..._cjEntrega(ret) });   // la firma es sulla cifra che il JL HA VISTO sul bottone (revisione BKP): se il bordo ne sa un'altra, non scrive
     if (r && r.ok && r.accodato) {
       if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero];
       if (r.ya) toast('ok', '✓ Este retiro ya estaba registrado — no se cuenta dos veces.');
@@ -890,7 +899,7 @@ async function cjRetEnviar(btn) {
   if (!Number.isFinite(monto) || monto <= 0) { toast('warn', 'Escribe lo que contaste'); return; }
   /* [08-ott · v1.35.4 · PRIMA NOTTE ATTO I] Ruth e Gabriel, notte del 07: il secondo ritiro portava il TOTALE al posto del
      RESTO (+$192.293) e il vetro l'ha preso senza chiedere. Sopra l'esperado si ferma e chiede, per QUEL monto. */
-  const att = +(CJ1.ret.att && CJ1.ret.att.en_mano) || 0;
+  const att = _cjEnManoDe(CJ1.ret);
   if (monto > att && CJ1.ret.confOk !== monto) {
     CJ1.ret.conf = monto;
     try { const ae = document.activeElement; if (ae && ae.blur) ae.blur(); } catch (e) {}   // su iOS il tocco del bottone non toglie il fuoco: senza, pintaTab aspetterebbe e la domanda non comparirebbe
@@ -901,7 +910,7 @@ async function cjRetEnviar(btn) {
   const ret = CJ1.ret;
   try {
     const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, monto: monto,
-      esperado_ora: ret.att.en_mano, uid_gesto: ret.uid,
+      esperado_ora: _cjEnManoDe(ret), uid_gesto: ret.uid,
       ...(ret.confOk === monto ? { confirmo_sobre_esperado: 1 } : {}), ..._cjEntrega(ret) });   // [08-ott · AUT-0607] il «Sí, retiro $X» viaggia fino al bordo
     if (r && r.ok && r.accodato) {
       if (CJ1.retDubbio) delete CJ1.retDubbio[ret.mesero];
@@ -996,8 +1005,8 @@ function cjAtto1Html() {
       h += '<div class="card"><h4>El retiro de</h4><p style="font-size:28px;font-weight:900;margin:2px 0 8px;line-height:1.1">' + esc(a.mesero) + '</p>' +
         _cjRiga('Ventas en efectivo', fmt(a.ventas_efectivo)) + _cjRiga('Propinas en efectivo', fmt(a.propina_efectivo)) +
         (a.residuo ? _cjRiga('De ayer', fmt(a.residuo)) : '') + (a.entregado ? _cjRiga('Ya entregó hoy', '−' + fmt(a.entregado)) : '') +
-        _cjRiga('<b>ENTREGA</b>', '<b style="font-size:26px">' + fmt(a.en_mano) + '</b>', ';padding:8px 0') + _cjEntregaSel(CJ1.ret) +
-        '<button class="btn acc" onclick="cjRetTodo(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Recibí ' + fmt(a.en_mano)) + '</button>' +
+        _cjRiga('<b>ENTREGA</b>', '<b style="font-size:26px">' + fmt(_cjEnManoDe(CJ1.ret)) + '</b>', ';padding:8px 0') + _cjEntregaSel(CJ1.ret) +
+        '<button class="btn acc" onclick="cjRetTodo(this)"' + (CJ1.enviando || !(_cjEnManoDe(CJ1.ret) > 0) ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Recibí ' + fmt(_cjEnManoDe(CJ1.ret))) + '</button>' +
         '<button class="btn gh" onclick="cjRetOtra()">Recibí otra cifra</button>' +
         '<button class="btn gh" onclick="cjRetCerrar()">Volver</button></div>';
       return h;
@@ -1005,13 +1014,13 @@ function cjAtto1Html() {
     h += '<div class="card"><h4>El retiro de</h4><p style="font-size:28px;font-weight:900;margin:2px 0 8px;line-height:1.1">' + esc(a.mesero) + '</p>' +
       _cjRiga('Ventas en efectivo', fmt(a.ventas_efectivo)) + _cjRiga('Propinas en efectivo', fmt(a.propina_efectivo)) +
       (a.residuo ? _cjRiga('De ayer', fmt(a.residuo)) : '') + (a.entregado ? _cjRiga('Ya entregó hoy', '−' + fmt(a.entregado)) : '') +
-      _cjRiga('<b>Total efectivo</b>', '<b style="font-size:20px">' + fmt(a.en_mano) + '</b>', ';padding:8px 0') + _cjEntregaSel(CJ1.ret) +
+      _cjRiga('<b>Total efectivo</b>', '<b style="font-size:20px">' + fmt(_cjEnManoDe(CJ1.ret)) + '</b>', ';padding:8px 0') + _cjEntregaSel(CJ1.ret) +
       /* [08-ott · v1.35.4 · PRIMA NOTTE ATTO I DUE RITIRI DOPPI SENZA BUSTA] il valore vive nel RITIRO (CJ1.ret.monto), non nel
          DOM: un ritiro nuovo nasce vuoto e nessun ridisegno può riportargli la cifra di un altro (cj1Monto è uscito da _CAMPI_TENUTI). */
       '<input class="busca" id="cj1Monto" type="text" inputmode="numeric" placeholder="$" autocomplete="off" style="font-size:22px;font-weight:800;text-align:center"' +
         ' value="' + esc(CJ1.ret.monto || '') + '" oninput="cjRetMonto(this.value)">' +
       (CJ1.ret.conf ? '<div class="card rossa" style="margin:8px 0"><p style="font-size:17px;font-weight:800;margin:0 0 6px">¿Retiras ' + fmt(CJ1.ret.conf) +
-        '? Faltaban ' + fmt(a.en_mano) + '</p><p class="mini">Es ' + fmt(CJ1.ret.conf - a.en_mano) + ' más de lo que tiene en la mano.</p>' +
+        '? Faltaban ' + fmt(_cjEnManoDe(CJ1.ret)) + '</p><p class="mini">Es ' + fmt(CJ1.ret.conf - _cjEnManoDe(CJ1.ret)) + ' más de lo que tiene en la mano.</p>' +
         '<button class="btn acc" onclick="cjRetConfirma(this)">Sí, retiro ' + fmt(CJ1.ret.conf) + '</button>' +
         '<button class="btn gh" onclick="cjRetCorrige()">Corregir el monto</button></div>'
       : '<button class="btn acc" onclick="cjRetEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Confirmar') + '</button>') +
