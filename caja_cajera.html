@@ -308,7 +308,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.6.0</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.6.1</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -670,7 +670,7 @@ function ventanaLocal(iso) {
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
 }
 /* las filas con valor, validadas ANTES de escribir la primera. vals: [{pt:{nombre}, v, ventana:{desde,hasta}, proveedor}] */
-function validarCortes(vals, conVentana) {
+function validarCortes(vals, conVentana, ahora) {
   var conValor = (vals || []).filter(function(x){ return x.v !== null; });
   if (!conValor.length) return { msg: 'Escribe al menos un corte' };
   var mala = conValor.filter(function(x){ return !Number.isFinite(x.v) || x.v < 0; })[0];
@@ -681,6 +681,13 @@ function validarCortes(vals, conVentana) {
     var x = conValor[i], w = x.ventana || {}, nom = x.pt.nombre;
     if (!!w.desde !== !!w.hasta) return { msg: 'Falta el desde o el hasta del corte de ' + nom };
     if (w.desde && Date.parse(w.hasta) <= Date.parse(w.desde)) return { msg: 'En ' + nom + ' el «hasta» tiene que ser después del «desde»' };
+    /* [EL GIRO 🟡] las MISMAS tres reglas del bordo (cajaAtto2VentanaValida): sin ellas un corte seria rechazado DESPUES de haber escrito los anteriores (guardado a medias). */
+    if (w.desde) {
+      var n = Number(ahora) || Date.now(), d0 = Date.parse(w.desde), h0 = Date.parse(w.hasta);
+      if (h0 - d0 > 48 * 3600000) return { msg: 'La ventana de ' + nom + ' es de más de 48 horas: revisa el desde y el hasta del ticket' };
+      if (h0 > n + 3600000) return { msg: 'El «hasta» de ' + nom + ' está en el futuro: revisa la fecha' };
+      if (d0 < n - 14 * 86400000) return { msg: 'El «desde» de ' + nom + ' es de hace más de 14 días: revisa la fecha' };
+    }
     if (!x.proveedor) return { msg: 'Elige el proveedor del corte de ' + nom };
     (porMaq[nom] = porMaq[nom] || []).push(x);
   }
@@ -819,7 +826,7 @@ async function pantalla8() {
   document.getElementById('diaCorte').addEventListener('change', function(){ DIA_CORTE = document.getElementById('diaCorte').value; pantalla8(); });
   unTocoUnHecho(document.getElementById('guardar'), async function(){
     /* se validan TODAS antes de escribir la primera: una fila invalida no deja a medias a las demas */
-    var v = validarCortes(valores(), ventanaActiva);
+    var v = validarCortes(valores(), ventanaActiva, Date.now());
     if (!v.ok) { toast(v.msg, 'bad'); return; }
     var vals = v.filas;
     for (var k = 0; k < vals.length; k++) {

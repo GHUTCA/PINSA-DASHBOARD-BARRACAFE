@@ -51,6 +51,14 @@ async function banco(SRC) {
   t('① noveno AM y PM distintos => ok, con las dos filas', (F.validarCortes([V('Caja 1', 100, AM[0], AM[1]), V('Caja 1', 200, PM[0], PM[1])], true).filas || []).length === 2);
   t('① decimo Caja 1 con AM+PM y Caja 2 con uno solo sin ventana: ok (la regla es por maquina)', F.validarCortes([V('Caja 1', 100, AM[0], AM[1]), V('Caja 1', 200, PM[0], PM[1]), V('Caja 2', 50)], true).ok === true);
   t('③ ventanaLocal es la inversa de ventanaIso (para precargar lo guardado)', F.ventanaLocal(F.ventanaIso('2026-10-08T18:48')) === '2026-10-08T18:48' && F.ventanaLocal('') === '' && F.ventanaLocal('xx') === '');
+  // ① bis las tres reglas del bordo (EL GIRO 🟡): si el vetro no las tiene, un corte lo rechaza el bordo DESPUES de haber escrito los anteriores
+  { const AH = Date.parse('2026-10-10T12:00:00'); const VV = (d, h) => [V('Caja 1', 100, d, h)];
+    t('① undecimo ventana de mas de 48 h => msg, antes de escribir', /más de 48 horas/.test(F.validarCortes(VV('2026-10-05T10:00', '2026-10-08T10:00'), true, AH).msg || ''));
+    t('① duodecimo exactamente 48 h pasa; 48 h y un minuto no', F.validarCortes(VV('2026-10-08T10:00', '2026-10-10T10:00'), true, AH).ok === true && /más de 48/.test(F.validarCortes(VV('2026-10-08T09:59', '2026-10-10T10:00'), true, AH).msg || ''));
+    t('① 13o el hasta en el futuro (> +1 h) => msg; +30 min pasa (reloj del telefono)', /en el futuro/.test(F.validarCortes(VV('2026-10-10T08:00', '2026-10-10T14:00'), true, AH).msg || '') && F.validarCortes(VV('2026-10-10T08:00', '2026-10-10T12:30'), true, AH).ok === true);
+    t('① 14o el desde de hace mas de 14 dias => msg', /más de 14 días/.test(F.validarCortes(VV('2026-09-20T10:00', '2026-09-21T10:00'), true, AH).msg || ''));
+    t('① 15o sin ventana (leva apagada) estas reglas no aplican', F.validarCortes([V('Caja 1', 100, '2026-09-01T10:00', '2026-09-30T10:00')], false, AH).ok === true);
+    t('① 16o la regla aplica a CADA fila: la segunda de la misma maquina, fuera de tope, frena TODO', /más de 48/.test(F.validarCortes([V('Caja 1', 1, '2026-10-09T06:00', '2026-10-09T18:00'), V('Caja 1', 2, '2026-10-05T06:00', '2026-10-09T06:00')], true, AH).msg || '')); }
   // ② leva spenta
   { const m = mondo(SRC, { saludOn: '0' }); await m.ctx.F.pantalla8();
     t('② leva spenta: ni fornitor, ni ventana, ni «+ otro corte»', !/data-maq-prov/.test(m.app.innerHTML) && !/data-maq-mas/.test(m.app.innerHTML) && !/data-maq-desde/.test(m.app.innerHTML) && /Un número por máquina/.test(m.app.innerHTML), m.app.innerHTML.slice(0, 200));
@@ -108,6 +116,9 @@ await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }
   const k0 = ko, o0 = ok; muto = true; const k1 = ko; try { await banco(SRC0.replace(da, () => a)); } catch (e) { ko++; } muto = false; const rossi = ko - k1; ko = k0; ok = o0;
   t('⑦ mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
+await mut('la ventana de mas de 48 h pasa', "if (h0 - d0 > 48 * 3600000) return", "if (false) return");
+await mut('el hasta en el futuro pasa', "if (h0 > n + 3600000) return", "if (false) return");
+await mut('el desde de hace 14 dias pasa', "if (d0 < n - 14 * 86400000) return", "if (false) return");
 await mut('proveedor no obligatorio', "if (!x.proveedor) return { msg: 'Elige el proveedor del corte de ' + nom };", "");
 await mut('ventana a medias pasa', "if (!!w.desde !== !!w.hasta) return", "if (false) return");
 await mut('hasta antes de desde pasa', "if (w.desde && Date.parse(w.hasta) <= Date.parse(w.desde)) return", "if (false) return");
@@ -121,5 +132,5 @@ await mut('lo guardado no vuelve como filas', "previos = ventanaActiva ? (CORTES
 await mut('Otro no usa el texto', "elP.value === 'Otro' ? String((elO && elO.value) || '').trim() : String(elP.value || '').trim()", "String(elP.value || '').trim()");
 await mut('el proveedor no se recuerda', "try { localStorage.setItem('caja_prov_' + x.pt.nombre,", "try { void ('caja_prov_' + x.pt.nombre,");
 await mut('leva spenta con select de proveedor', "(conVentana\n      ? '<select", "(true\n      ? '<select");
-await mut('se escribe antes de validar todo', "var v = validarCortes(valores(), ventanaActiva);\n    if (!v.ok) { toast(v.msg, 'bad'); return; }", "var v = { ok: true, filas: valores().filter(function(x){ return x.v !== null; }) };");
+await mut('se escribe antes de validar todo', "var v = validarCortes(valores(), ventanaActiva, Date.now());\n    if (!v.ok) { toast(v.msg, 'bad'); return; }", "var v = { ok: true, filas: valores().filter(function(x){ return x.v !== null; }) };");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
