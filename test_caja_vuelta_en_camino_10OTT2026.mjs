@@ -16,7 +16,7 @@ function mondo(SRC, o) {
     barra: () => '', esc: (x) => String(x == null ? '' : x), fmt: (n) => '$' + n, toast: (m, k) => toasts.push([m, k]), renderError() {}, pantalla6() { ctx.fatto = true; }, pantallaReservaSobre() {}, uidGesto: (p) => p + '-1',
     unTocoUnHecho: (b, fn) => { b.onclick = fn; }, SES: { user: 'Mayra' }, localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, pantallaRojaNotte() {}, postCaja: async (b) => { posts.push(b); return o.risposta; },
     getCaja: async () => ({ ok: true, salida_pendiente: { uid_gesto: 'dep-1', a_depositar: 358532, en_cola: o.enCola ? true : undefined } }), document: { getElementById: mk, querySelector: mk } };
-  vm.createContext(ctx);
+  vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx);
   vm.runInContext(['uidGestoEstable', 'pantalla9', 'rojaPendLeer', 'rojaSiguiente'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "k";\nthis.F = { pantalla9 };', ctx);
   return { ctx, mk, toasts, posts, app };
 }
@@ -34,7 +34,7 @@ async function banco(SRC) {
     t('⑤ exito: «Depositado · N° …» y vuelve a la pantalla de inicio; el post lleva la referencia', m.toasts.length === 1 && m.toasts[0][0] === 'Depositado · N° 48213' && m.ctx.fatto === true && m.posts[0].referencia_uid === 'dep-1' && m.posts[0].nro_deposito === '48213', [m.toasts, m.posts]); }
   { const m = mondo(SRC, { enCola: true, risposta: { ok: true } }); await m.ctx.F.pantalla9(); await m.mk('cerrar').onclick();
     t('sin numero: no postea', m.posts.length === 0 && /Escribe el número/.test(m.toasts[0][0])); }
-  t('version >= 1.8.2', /caja 1\.(8\.[2-9]|9\.\d)<\/small>/.test(SRC));
+  t('version >= 1.8.2', /caja 1\.(8\.[2-9]|9\.\d|[1-9]\d\.\d)<\/small>/.test(SRC));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }

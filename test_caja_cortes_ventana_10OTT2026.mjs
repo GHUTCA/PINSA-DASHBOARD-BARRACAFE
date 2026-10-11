@@ -83,7 +83,7 @@ async function banco(SRC) {
     m.mk('[data-maq-corte="0"]').value = '1.000.000'; m.mk('[data-maq-desde="0"]').value = '2026-10-08T18:48'; m.mk('[data-maq-hasta="0"]').value = '2026-10-09T18:48'; m.handlers['[data-maq-hasta="0"]'].change(); await espera(700);
     m.mk('[data-maq-corte="0"]').value = '1.500.000'; m.handlers['[data-maq-corte="0"]'].input(); await espera(50);
     t('⑤ bis cambiar solo el importe NO vuelve a pedir el libro (la ventana es la misma: se recuerda)', m.reqs.length === 1, m.reqs.length); }
-  t('⑦ version >= 1.5.0 (la ventana del corte ya esta)', /caja 1\.[5-9]\.\d<\/small>/.test(SRC));
+  t('⑦ version >= 1.5.0 (la ventana del corte ya esta)', /caja 1\.([5-9]\.\d|[1-9]\d\.\d)<\/small>/.test(SRC));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }

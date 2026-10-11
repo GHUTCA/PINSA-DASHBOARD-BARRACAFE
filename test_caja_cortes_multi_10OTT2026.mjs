@@ -110,7 +110,7 @@ async function banco(SRC) {
     m.mk('[data-maq-corte="0"]').value = '900.000';
     await m.els['#guardar'].onclick();
     t('⑤ sexto UN corte por maquina sin ventana, con MPago por defecto: se escribe, con proveedor y SIN desde/hasta (columnas en NULL)', m.posts.length === 1 && m.posts[0].proveedor === 'MPago' && !('desde' in m.posts[0]) && !('hasta' in m.posts[0]) && m.ctx.fine === true, m.posts); }
-  t('⑦ version >= 1.6.0', /caja 1\.[6-9]\.\d<\/small>/.test(SRC));
+  t('⑦ version >= 1.6.0', /caja 1\.([6-9]\.\d|[1-9]\d\.\d)<\/small>/.test(SRC));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }

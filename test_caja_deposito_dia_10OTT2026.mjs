@@ -18,7 +18,7 @@ function mondo(SRC, o) {
     barra: () => '', esc: (x) => String(x == null ? '' : x), fmt: (n) => '$' + n, fechaCorta: (d) => d, toast() {}, renderError() {}, pantalla6() {}, pantallaReservaSobre() {}, uidGesto: (p) => p + '-' + (++ctx._u), unTocoUnHecho: (b, fn) => { b.onclick = fn; }, postCaja: async () => ({ ok: true }), SES: { user: 'Mayra' }, localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, renderError() {}, pantallaRojaNotte() {},
     getCaja: async (p) => { if (/^deposito_pendiente/.test(p)) return { ok: true, salida_pendiente: null }; const m = p.match(/^reserva\?dia=(.+)$/); if (m) return { ok: true, reserva: (o.reservas || {})[m[1]], reserva_pct: 5 }; return { ok: false, error: 'lettura_sconosciuta' }; },
     document: { getElementById: mk, querySelector: mk } };
-  vm.createContext(ctx);
+  vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx);
   vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'pantalla9', 'uidGestoEstable', 'legamiHtml', 'rojaPendLeer', 'rojaSiguiente'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "k";\nthis.F = { desgloseDeposito, desgloseHtml, pantalla9 };', ctx);
   return { ctx, els, handlers, app, mk };
 }
@@ -57,7 +57,7 @@ async function banco(SRC) {
     t('⑤ la noche del 12 sin sobres pero con 5% aparece (0 sobres · −2.500) y suma al total', /2026-10-12<small>0 sobres · contado \$0 − reserva \$2500/.test(m.mk('calc').innerHTML) && /Vas a depositar<\/span><span class="v">\$930400/.test(m.mk('calc').innerHTML), m.mk('calc').innerHTML); }
   { const F = mondo(SRC, { noches: [], sobres: [] }).ctx.F;
     t('④ ter la pura HTML: una sola fila => vacio; dos => tabla', F.desgloseHtml({ filas: [{ dia: 'a', n: 1, contado: 1, reserva: 0, neto: 1 }], ajuste: 0 }) === '' && /Por día/.test(F.desgloseHtml({ filas: [{ dia: 'a', n: 1, contado: 1, reserva: 0, neto: 1 }, { dia: 'b', n: 1, contado: 1, reserva: 0, neto: 1 }], ajuste: 0 }))); }
-  t('⑥ version >= 1.8.0', /caja 1\.[8-9]\.\d<\/small>/.test(SRC));
+  t('⑥ version >= 1.8.0', /caja 1\.([8-9]\.\d|[1-9]\d\.\d)<\/small>/.test(SRC));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }

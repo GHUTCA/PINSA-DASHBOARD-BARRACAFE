@@ -19,7 +19,7 @@ function mundo(manana, respuestas) {
     // el DOM de mentira lee el `value` del input «contado» del HTML que la pantalla acaba de escribir (como haría el navegador)
     document: { getElementById: (id) => { const e = el(id); if (id === 'contado') { const m = /id="contado"[^>]*value="([^"]*)"/.exec(ctx.app.innerHTML); if (m) e.value = m[1]; } return e; },
       querySelector: () => el('q'), querySelectorAll: () => [] } };
-  vm.createContext(ctx);
+  vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx);
   vm.runInContext(PRE_NUEVAS + ['pantalla6', 'pantalla9'].map((n) => fn(n, true)).join('\n') + '\n;this.API = { pantalla6, pantalla9 };', ctx);
   return { ctx, el, llamadas };
 }

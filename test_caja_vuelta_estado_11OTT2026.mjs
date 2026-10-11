@@ -18,7 +18,7 @@ function mondo(SRC, o) {
     barra: () => '', esc: (x) => String(x == null ? '' : x), fmt: (n) => '$' + n, toast: (m, k) => toasts.push([m, k]), renderError() {}, pantalla6() { ctx.fatto = true; }, pantallaReservaSobre() {}, uidGesto: (p) => p + '-1',
     unTocoUnHecho: (b, fn) => { b.onclick = fn; }, SES: { user: 'Mayra' }, localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, pantallaRojaNotte() {}, postCaja: async (b) => { posts.push(b); return o.risposta || { ok: true }; },
     getCaja: async () => ({ ok: true, salida_pendiente: { uid_gesto: 'dep-1', a_depositar: 895774 } }), document: { getElementById: mk, querySelector: mk } };
-  vm.createContext(ctx);
+  vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx);
   vm.runInContext(['uidGestoEstable', 'pantalla9', 'rojaPendLeer', 'rojaSiguiente'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "k";\nthis.F = { pantalla9 };', ctx);
   return { ctx, mk, toasts, posts, app };
 }
@@ -38,7 +38,7 @@ async function banco(SRC) {
   { const m = mondo(SRC, {}); await m.ctx.F.pantalla9(); await m.mk('cerrar').onclick();
     t('④ bis senza N°: niente vuelta e niente «Depositado»', m.posts.length === 0 && !/Depositado/.test(m.toasts.map((x) => x[0]).join()), m.toasts); }
   t('⑤ il file non contiene piu «Depositaste» ne «De vuelta del banco»', !/Depositaste|De vuelta del banco/.test(SRC));
-  t('⑤ bis «Depositado» compare in UN solo posto: il toast dopo la vuelta riuscita', (SRC.match(/Depositado/g) || []).length === 1 && /toast\('Depositado · N° ' \+ nro, 'ok'\)/.test(SRC));
+  t('⑤ bis «Depositado» compare solo nel toast dopo una vuelta riuscita (due schermate: la vuelta singola e il N° unico)', (SRC.match(/Depositado/g) || []).length === 2 && (SRC.split("toast('Depositado · N° ' + nro, 'ok')").length - 1) === 2);
   t('versione >= 1.9.8', /caja 1\.9\.([89])<\/small>/.test(SRC) || /caja 1\.(1\d|[2-9]\d)\.\d<\/small>/.test(SRC));
 }
 await banco(SRC0);
@@ -47,8 +47,8 @@ const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log
   t('mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
 await mut('torna «Depositaste»', '<span class="n">Por depositar</span>', '<span class="n">Depositaste</span>');
 await mut('torna «De vuelta del banco»', '<h1>En camino al banco</h1>', '<h1>De vuelta del banco</h1>');
-await mut('il toast dice «Depositado» senza N°', "toast('Depositado · N° ' + nro, 'ok');", "toast('Depositado', 'ok');");
-await mut('il toast dice «Depósito cerrado»', "toast('Depositado · N° ' + nro, 'ok');", "toast('Depósito cerrado', 'ok');");
+await mut('il toast dice «Depositado» senza N°', "toast('Depositado · N° ' + nro, 'ok');\n      PASO = 1; pantalla6();", "toast('Depositado', 'ok');\n      PASO = 1; pantalla6();");
+await mut('il toast dice «Depósito cerrado»', "toast('Depositado · N° ' + nro, 'ok');\n      PASO = 1; pantalla6();", "toast('Depósito cerrado', 'ok');\n      PASO = 1; pantalla6();");
 await mut('«Depositado» prima del N° (nel sottotitolo)', 'Cuando vuelvas, escribe el número del depósito', 'Depositado');
 await mut('il sottotitolo non dice cosa fare', 'Cuando vuelvas, escribe el número del depósito', 'Listo');
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);

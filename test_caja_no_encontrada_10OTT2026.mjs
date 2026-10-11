@@ -24,7 +24,7 @@ function mondo(SRC, o) {
     postCaja: async (b) => { posts.push(b); return o.postRisp ? (typeof o.postRisp === 'function' ? o.postRisp(b) : o.postRisp) : { ok: true, esito: 'scritto' }; },
     unTocoUnHecho: (btn, fn) => { btn.onclick = fn; },
   };
-  vm.createContext(ctx);
+  vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx);
   vm.runInContext(['noEncOn', 'marcarNoEncontrada', 'noEncHtml', 'noEncBind', 'dejadasHtml', 'dejadasBind', 'claveSobre', 'pantalla6', 'pantalla7', 'uidGestoEstable'].map((n) => fnDe(SRC, n)).join('\n') + '\n' +
     SRC.slice(SRC.indexOf('var DEJADAS'), SRC.indexOf('function claveSobre')) + SRC.slice(SRC.indexOf('var NOENC_ON'), SRC.indexOf('async function noEncOn')) + SRC.slice(SRC.indexOf('var NOENC_TXT'), SRC.indexOf('async function marcarNoEncontrada')) +
     '\nthis.F = { noEncOn, marcarNoEncontrada, noEncHtml, noEncBind, dejadasHtml, dejadasBind, pantalla6, pantalla7, NOENC_TXT };', ctx);
@@ -130,7 +130,7 @@ async function banco(SRC) {
   { const m = mondo(SRC, { pend: { ok: true, sobres: [S('1003'), S('1004')], noches: ['2026-10-08'] } }); m.ctx.DEJADAS = { '2026-10-08:1003': 1, '2026-10-08:1004': 1 }; await m.ctx.F.pantalla6();
     t('⑩ sexto TODAS dejadas: «Nada que contar» con la lista y paso a los cortes, no «la caja fuerte esta vacia»', /Nada que contar/.test(m.app.innerHTML) && /2 sobres para después/.test(m.app.innerHTML) && !/la caja fuerte está vacía/i.test(m.app.innerHTML) && /irPos/.test(m.app.innerHTML), m.app.innerHTML.slice(0, 220)); }
   { const src = SRC; t('⑩ séptimo el deposito AVISA cuantos sobres no viajan (no encontrados o dejados)', /NO van en este depósito/.test(src) && /MANANA\.noEnc \|\| \[\]\)\.length \+ \(MANANA\.dejadas \|\| \[\]\)\.length/.test(src)); }
-  t('⑧ versión: caja >= 1.3 (busta no encontrada y elegir/dejar ya estan)', /caja 1\.[3-9]\.\d<\/small>/.test(SRC));
+  t('⑧ versión: caja >= 1.3 (busta no encontrada y elegir/dejar ya estan)', /caja 1\.([3-9]\.\d|[1-9]\d\.\d)<\/small>/.test(SRC));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }

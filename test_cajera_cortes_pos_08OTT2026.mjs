@@ -16,7 +16,7 @@ function mundo(corTes, respuestaPost) {
     postCaja: async (b) => { posts.push(b); return respuestaPost ? respuestaPost(b) : { ok: true, accodato: true }; },
     uidGestoEstable: (k, p) => p + '|' + k, pantalla9: () => log.push('→pantalla9'), unTocoUnHecho: (b, f) => { b._hecho = f; },
     document: { getElementById: (id) => el('id:' + id), querySelector: (sel) => el('q:' + sel) } };
-  vm.createContext(ctx); vm.runInContext(dcSrc + '\n' + fnSrc + '\n;this.p8 = pantalla8; this.getDia = () => DIA_CORTE;', ctx);
+  vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx); vm.runInContext(dcSrc + '\n' + fnSrc + '\n;this.p8 = pantalla8; this.getDia = () => DIA_CORTE;', ctx);
   return { ctx, el, posts, log };
 }
 const PUNTOS = [1, 2, 3, 4, 5, 6].map((n) => ({ caja_n: n, nombre: 'Caja ' + n, sn: 'SN' + n }));

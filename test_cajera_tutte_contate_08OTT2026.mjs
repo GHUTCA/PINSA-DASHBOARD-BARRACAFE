@@ -12,7 +12,7 @@ async function corre(sobres) {
     getCaja: async () => ({ ok: true, sobres: sobres }),
     pantalla7: () => llamadas.push('p7'), pantalla8: () => llamadas.push('p8'),
     document: { getElementById: () => btn } };
-  vm.createContext(ctx); vm.runInContext(PRE_NUEVAS + fn + '\n;globalThis.__p6 = pantalla6;', ctx);
+  vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx); vm.runInContext(PRE_NUEVAS + fn + '\n;globalThis.__p6 = pantalla6;', ctx);
   await ctx.__p6(); const html = app.innerHTML;
   if (btn.onclick) btn.onclick();
   return { html, llamadas, idx: ctx.SOBRE_IDX, paso: ctx.PASO };
