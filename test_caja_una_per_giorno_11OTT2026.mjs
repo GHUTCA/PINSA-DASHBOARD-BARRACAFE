@@ -127,6 +127,10 @@ async function banco(SRC) {
     t('⑥ decies una salida local de hace 1 h que el bordo YA no lista (anulada) no se queda para siempre', !/En camino al banco/.test(m.ctx.app.innerHTML), m.ctx.app.innerHTML); }
   { const m = mondo(SRC, { ls: { caja_en_camino_v1: JSON.stringify([{ uid: 'dep-Y', dia: '2026-10-09', a_depositar: 7, ts: Date.now() - 60000 }]) }, get: (p) => (/^depositos_en_camino/.test(p) ? { ok: true, depositos: [] } : null) }); await m.ctx.F.pantallaCajas();
     t('⑥ undecies ...pero una de hace 1 minuto (el bordo tarda en verla) SI se ve', /Caja del f:2026-10-09 · Por depositar \$7/.test(m.ctx.app.innerHTML), m.ctx.app.innerHTML); }
+  { const m = mondo(SRC, { ls: { caja_en_camino_v1: JSON.stringify([{ uid: 'dep-L', dia: '2026-10-09', a_depositar: 982000, ts: Date.now() - 20000 }]) } }); await m.ctx.F.pantallaCajas(); const h = m.ctx.app.innerHTML;
+    t('⑥ duodecies una caja con su salida YA escrita (aunque el bordo todavia no saque sus sobres de la lista) NO se reabre: la lista ofrece solo la del 10, y la del 09 esta «En camino»', /Caja del f:2026-10-10/.test(h) && !/id="caja1"/.test(h) && (h.match(/id="caja\d"/g) || []).length === 1 && h.includes("Caja del f:2026-10-09 · Por depositar $982000") && /Una caja por contar/.test(h), h); }
+  { const m = mondo(SRC, {}); await m.ctx.F.pantallaCajas();
+    t('⑥ terdecies la lectura de las salidas en camino lleva `dia` (el bordo valida siempre el dia: sin el, 400 a cada apertura)', m.llamadas.includes('depositos_en_camino?dia=2026-10-13'), m.llamadas); }
   // ⑦ cerrar la app a mitad de la roja y trasSalida
   { const m = mondo(SRC, { ls: { caja_roja_pend_v1: JSON.stringify({ dep: 'dep-Z', lista: [{ dia: '2026-10-10', importo: 66900 }], hechas: {} }) } }); await m.ctx.F.pantallaCajas();
     t('⑦ si cerro la app entre la salida y la ultima busta R: la secuencia se retoma ANTES de la lista', /A la caja fuerte ROJA/.test(m.ctx.app.innerHTML) && !/Las cajas/.test(m.ctx.app.innerHTML), m.ctx.app.innerHTML.slice(0, 200)); }
@@ -164,6 +168,8 @@ await mut('la vuelta no lleva el dia de su caja', "nro_deposito: nro, caja_dia: 
 await mut('una sola vuelta para todas', "for (var i = 0; i < enc.length; i++) {\n      var x = enc[i];", "for (var i = 0; i < 1; i++) {\n      var x = enc[i];");
 await mut('la vuelta se guarda aunque la anterior falle', "if (!r.ok) { toast(vueltaErrorTxt(r.motivo), 'bad'); return; }\n      enCaminoQuitar(x.uid);", "if (!r.ok) { toast(vueltaErrorTxt(r.motivo), 'bad'); }\n      enCaminoQuitar(x.uid);");
 await mut('el toast dice Depositado antes del N°', "toast('Depositado · N° ' + nro, 'ok');\n    pantallaCajas();", "toast('Depositado', 'ok');\n    pantallaCajas();");
+await mut('la caja con salida escrita se reabre', "var cajas = PENDC.cajas_pendientes.filter(function(c){ return !enc.some(function(e){ return e.dia === String(c.dia || '').slice(0, 10); }); });", "var cajas = PENDC.cajas_pendientes;");
+await mut('la lectura en camino sin dia', "getCaja('depositos_en_camino?dia=' + DIA_HOY)", "getCaja('depositos_en_camino')");
 await mut('las salidas locales viejas no caducan', "if (srv !== null && !(Date.now() - (x.ts || 0) < 600000)) return;", "");
 await mut('el bordo no manda sobre las locales', "(srv || []).forEach(function(x){", "([]).forEach(function(x){");
 await mut('la roja pendiente no se retoma', "if (rpC && rpC.lista && rojaSiguiente(rpC) >= 0) { pantallaRojaNotte(rpC.dep, rpC.lista, rpC.hechas); return; }", "");
