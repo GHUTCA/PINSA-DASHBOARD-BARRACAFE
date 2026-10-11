@@ -62,6 +62,8 @@ async function banco(SRC) {
   { const m = mondo(SRC, { saldos: MESAS }); const h = m.F.cjSaldosHtml();
     t('⑤ la scheda: mesa, resto, pagato/consumo, chi, il conteggio', /Mesa 100/.test(h) && /resto \$120\.000/.test(h) && /pagado \$41\.970 de \$161\.970/.test(h) && /Isa, Pedro/.test(h) && /Mesas a saldo <span class="pill off">2<\/span>/.test(h), h.slice(0, 400));
     t('⑤ bis le due uscite del JL per ogni mesa: Cobrar/eliminar (mesaAbrir) e Se fue sin pagar (cjSeFue: il fatto, poi la chiusura)', (h.match(/mesaAbrir\(/g) || []).length === 2 && (h.match(/cjSeFue\(/g) || []).length === 2 && /Se fue sin pagar/.test(h) && /Cobrar \/ eliminar/.test(h), h.slice(0, 200));
+    { const mp = mondo(SRC, { saldos: [{ mesa: '55', consumo: 9000, pagado: 3000, resto: 6000, ts_ultimo_pago: 1, meseros: ['Isa'] }] }); const hp = mp.F.cjSaldosHtml();
+      t('⑤ ter-bis legge `pagado` (il nome del contratto di BKP) e, se manca, `pagato`', hp.includes('pagado $3.000 de $9.000') && mondo(SRC, { saldos: [{ mesa: '56', consumo: 9000, pagato: 4000, resto: 5000, ts_ultimo_pago: 1, meseros: [] }] }).F.cjSaldosHtml().includes('pagado $4.000 de $9.000'), hp.slice(0, 300)); }
     t('⑤ ter senza il mesero non si inventa un nome (mesa 7 non ha meseros) e la prima apre con il nome vuoto', /mesaAbrir\(&quot;Isa&quot;,&quot;100&quot;\)/.test(h) && /mesaAbrir\(&quot;&quot;,&quot;7&quot;\)/.test(h), h.match(/mesaAbrir\([^)]*\)/g)); }
   { const NASTY = "9'<b>\"\\", NM = "<i>x'"; const m = mondo(SRC, { saldos: [{ mesa: NASTY, consumo: 5000, pagato: 1000, resto: 4000, ts_ultimo_pago: 1, meseros: [NM] }] }); const h = m.F.cjSaldosHtml();
     t('⑤ quater niente HTML crudo dai nomi (tag o apici fuori posto)', !/<b>|<i>/.test(h), h.slice(0, 300));
@@ -85,12 +87,17 @@ async function banco(SRC) {
   t('⑥ octies spenta e nulla: nessun altro punto di app_jl legge /saldi', (SRC.match(/CFG\.BORDE \+ '\/saldi\/'/g) || []).length === 1);
   t('versione >= 1.39.0', /id="ver">app_jl v1\.(39\.\d|[4-9]\d\.\d)</.test(SRC));
   // ⑦ contratto col bordo (sorgente vero, mai un letterale mio)
-  let B = ''; try { B = process.env.BORDO_SRC ? fs.readFileSync(process.env.BORDO_SRC, 'utf8') : execSync('git -C ../_wt_roja show saldo-sin-padron-leva-11ott:src/index.js', { cwd: AQUI, maxBuffer: 1 << 28 }).toString(); } catch (e) { B = ''; }
+  let B = ''; try { B = process.env.BORDO_SRC ? fs.readFileSync(process.env.BORDO_SRC, 'utf8') : execSync('git -C ../_wt_roja show origin/bkp-sefue-0666-11ott:src/index.js', { cwd: AQUI, maxBuffer: 1 << 28 }).toString(); } catch (e) { B = ''; }
   if (!B) { if (!muto) console.log('⚠ sorgente del bordo non trovato (BORDO_SRC): il ⑦ NON gira'); ko++; }
   else {
     t('⑦ il bordo espone GET /saldi/:local con il token di lettura (header X-Borde-Token)', /if \(rotta === 'saldi'\)/.test(B) && /X-Borde-Token/.test(B.slice(B.indexOf("rotta === 'saldi'"), B.indexOf("rotta === 'saldi'") + 600)));
-    t('⑦ bis i campi della mesa sono quelli che il vetro legge (mesa · consumo · pagato · resto · ts_ultimo_pago · meseros)', /out\.mesas\.push\(\{ mesa: m, consumo: consumo, pagato: pagato, resto: consumo - pagato, n_pagos: n, ts_ultimo_pago: ult, meseros: meseros \}\)/.test(B));
+    const PL = B.slice(B.indexOf('out.mesas.push({'), B.indexOf('out.mesas.push({') + 260);
+    t('⑦ bis i campi della mesa sono quelli che il vetro legge (mesa · consumo · pagado · pagato · resto · ts_ultimo_pago · meseros)', ['mesa: m', 'consumo: consumo', 'pagado: pagato', 'pagato: pagato', 'resto: consumo - pagato', 'ts_ultimo_pago: ult', 'meseros: meseros'].every((k) => PL.includes(k)), PL);
     t('⑦ ter sin_hechos e {ok:false} (il vetro lo legge come NON SO)', /return \{ ok: false, error: 'sin_hechos' \}/.test(B));
+    const SF = B.slice(B.indexOf('async _seFue('), B.indexOf('async _seFue(') + 3500), RT = B.slice(B.indexOf("rotta === 'sefue'"), B.indexOf("rotta === 'sefue'") + 900);
+    t('⑦ quinquies /sefue: POST, token in X-Borde-Token, 404 ruta_apagada a leva spenta, e i campi che il telefono manda (mesa · uid_gesto · motivo · pin)', B.includes("rotta === 'sefue'") && RT.includes('X-Borde-Token') && RT.includes("error: 'ruta_apagada'") && RT.includes("req.method !== 'POST'") && SF.includes('payload.mesa') && SF.includes('payload.uid_gesto') && SF.includes('payload.motivo') && SF.includes('payload.pin'));
+    t('⑦ sexies la leva del bordo si chiama sefue_on in /salud (il nome che cjSeFueOn cerca)', B.includes('F(env.SEFUE_ON') && B.includes('sefue_on:') && SRC.includes("cjFlag('sefue_on')"));
+    t('⑦ septies l uid_gesto del vetro rispetta la regola del bordo (8-80 caratteri [A-Za-z0-9._:-])', B.includes('[A-Za-z0-9._:-]{8,80}') && /^[A-Za-z0-9._:-]{8,80}$/.test('g' + Date.now().toString(36) + '-' + 'a1b2c3d4e5f6a7b8'));
     t('⑦ quater la leva si chiama saldo_sin_padron_on in /salud (lo stesso nome che il vetro cerca)', /saldo_sin_padron_on/.test(B) && new RegExp("cjFlag\\('saldo_sin_padron_on'\\)").test(SRC)); }
   // ⑧ abrirT col gate VERO
   const aper = (o) => { const toasts = [], fetches = [], gas = []; let giro = 0; const m = mondo(SRC, o);
@@ -114,37 +121,40 @@ async function banco3(SRC) {
   function se(o) {
     o = o || {}; const toasts = [], fetches = [], gas = [], sp = { mesa: '', motivo: '' }; let tabN = 0, uidN = 0, spVerN = 0; const bodies = [];
     const ctx = { JSON, Math, Date, String, Number, Object, Array, Promise, console, encodeURIComponent, AbortController, clearTimeout: () => {}, setTimeout: (fn) => 0, esc: ESC, fmt: FMT,
-      CFG: { BORDE: 'https://b.test', T: 'tok', LOCAL: 'BKS' }, LOC_PG: { BKS: 'BKS' }, STATE: { pin: '4321', user: 'Pedro', salud: o.salud === undefined ? { flags: { saldo_sin_padron_on: '1' } } : o.salud },
+      CFG: { BORDE: 'https://b.test', T: 'tok', LOCAL: 'BKS' }, LOC_PG: { BKS: 'BKS' }, STATE: { pin: '4321', user: 'Pedro', salud: o.salud === undefined ? { flags: { saldo_sin_padron_on: '1', sefue_on: '1' } } : o.salud },
       CJ1: { saldos: o.saldos === undefined ? MESAS.map((m) => Object.assign({}, m)) : o.saldos }, _SP: sp, _uidGesto: () => 'u-' + (++uidN),
       prompt: (m) => { ctx.__prompts.push(m); return o.prompt === undefined ? 'el cliente se fue por la puerta' : o.prompt; }, __prompts: [], tab: () => { tabN++; }, $: () => null, spVer: () => { spVerN++; },
       toast: (k, m) => toasts.push([k, m]), cjSinPagoMesa: (m) => { ctx.__viejo = m; }, gasPost: async (a) => { gas.push(a); return { ok: true }; },
       fetch: async (url, opt) => { fetches.push([url, opt]); bodies.push(JSON.parse(opt.body)); const r = typeof o.fetch === 'function' ? o.fetch(fetches.length) : o.fetch; if (r instanceof Error) throw r; return { status: r.status || 200, ok: (r.status || 200) < 400, json: async () => { if (r.illeggibile) throw new Error('x'); return r.body; } }; } };
     vm.createContext(ctx);
     const erra = SRC.match(/const _ERR_APERTURA = (\{[^\n]*\});/)[1], errs = SRC.match(/const _ERR_SEFUE = (\{[\s\S]*?\});/)[1], dev = SRC.match(/var _SE = (\{[^\n]*\});/)[1];
-    vm.runInContext('const _ERR_APERTURA = ' + erra + ';\nconst _ERR_SEFUE = ' + errs + ';\nvar _SE = ' + dev + ';\n' + ['cjFlag', 'cjSaldoOn', '_seFuePost', 'cjSeFue'].map((n) => fnDe(SRC, n)).join('\n') + '\nthis.G = { cjSeFue, _SE };', ctx);
+    vm.runInContext('const _ERR_APERTURA = ' + erra + ';\nconst _ERR_SEFUE = ' + errs + ';\nvar _SE = ' + dev + ';\n' + ['cjFlag', 'cjSaldoOn', 'cjSeFueOn', '_seFuePost', 'cjSeFue'].map((n) => fnDe(SRC, n)).join('\n') + '\nthis.G = { cjSeFue, _SE };', ctx);
     return { ctx, G: ctx.G, toasts, fetches, bodies, gas, sp, tab: () => tabN, spVer: () => spVerN };
   }
   const OKJ = { body: { ok: true, mesa: '100', resto: 120000 } };
   // a) leva spenta = la porta di ieri
   { const m = se({ salud: {} }); await m.G.cjSeFue('100');
     t('⑩ leva SPENTA: «Se fue sin pagar» e quello di ieri (porta alla sezione), niente prompt, niente POST', m.ctx.__viejo === '100' && m.fetches.length === 0 && m.ctx.__prompts.length === 0, [m.ctx.__viejo, m.fetches.length]); }
+  for (const [nome, salud] of [['solo la nostra (sefue_on spenta)', { flags: { saldo_sin_padron_on: '1' } }], ['solo sefue_on (la nostra spenta)', { flags: { sefue_on: '1' } }], ['sefue_on "0"', { flags: { saldo_sin_padron_on: '1', sefue_on: '0' } }]]) {
+    const m = se({ salud: salud }); await m.G.cjSeFue('100');
+    t('⑩ leva SPENTA a meta — ' + nome + ': il bottone e quello di ieri (porta alla sezione), niente prompt, niente POST (mai «ruta_apagada» in faccia al JL)', m.ctx.__viejo === '100' && m.fetches.length === 0 && m.ctx.__prompts.length === 0, [m.ctx.__viejo, m.fetches.length]); }
   // b) annullare / motivo corto
   { const m = se({ prompt: null }); await m.G.cjSeFue('100'); t('⑩ bis «annulla» al prompt: non si scrive niente', m.fetches.length === 0 && m.toasts.length === 0); }
   for (const corto of ['abc', '  ab ', '1234']) { const m = se({ prompt: corto }); await m.G.cjSeFue('100');
     t('⑩ ter motivo corto («' + corto + '»): avvisa e NON manda (il bordo vuole >=5 lettere)', m.fetches.length === 0 && m.toasts.length === 1 && m.toasts[0][0] === 'warn' && /mínimo 5/.test(m.toasts[0][1]), m.toasts); }
   // c) il caso buono: rotta, corpo ESATTO (niente importi), poi la chiusura gia compilata
   { const m = se({ fetch: OKJ }); await m.G.cjSeFue('100'); const b = m.bodies[0];
-    t('⑩ quater POST /pedido-staff/<local>?t=<token>, azione seFueSinPagar', m.fetches.length === 1 && m.fetches[0][0] === 'https://b.test/pedido-staff/BKS?t=tok' && m.fetches[0][1].method === 'POST' && b.action === 'seFueSinPagar', m.fetches[0][0]);
-    t('⑩ quinquies il corpo e ESATTAMENTE {action,local,mesa,uid_gesto,motivo,pin}: il telefono NON manda importi, t0_sesion ne dia', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['action', 'local', 'mesa', 'motivo', 'pin', 'uid_gesto']) && b.mesa === '100' && b.motivo === 'el cliente se fue por la puerta' && b.pin === '4321' && b.uid_gesto === 'u-1', b);
+    t('⑩ quater POST /sefue/<local>, token in x-borde-token (mai in query), JSON', m.fetches.length === 1 && m.fetches[0][0] === 'https://b.test/sefue/BKS' && m.fetches[0][1].method === 'POST' && m.fetches[0][1].headers['x-borde-token'] === 'tok' && m.fetches[0][1].headers['content-type'] === 'application/json' && !/[?&]t=/.test(m.fetches[0][0]) && !!m.fetches[0][1].signal, [m.fetches[0][0], m.fetches[0][1].headers]);
+    t('⑩ quinquies il corpo e ESATTAMENTE {mesa,uid_gesto,motivo,pin}: niente importi, niente t0_sesion, niente dia_operativo, e nemmeno action/local (li mette la rotta)', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['mesa', 'motivo', 'pin', 'uid_gesto']) && b.mesa === '100' && b.motivo === 'el cliente se fue por la puerta' && b.pin === '4321' && b.uid_gesto === 'u-1', b);
     t('⑩ sexies fatto riuscito: avviso ok, la mesa esce dalla scheda, e si passa alla chiusura GIA COMPILATA (mesa + motivo «se fue sin pagar»)', m.toasts[0][0] === 'ok' && /Registrado/.test(m.toasts[0][1]) && !/ya estaba/.test(m.toasts[0][1]) && m.ctx.CJ1.saldos.length === 1 && m.ctx.CJ1.saldos[0].mesa === '7' && m.sp.mesa === '100' && m.sp.motivo === 'se_fue_sin_pagar' && m.tab() === 1, [m.toasts, m.sp, m.tab()]);
     t('⑩ septies il prompt dice mesa e resto (la cifra la vede, non la manda)', /Mesa 100 · resto \$120\.000/.test(m.ctx.__prompts[0]), m.ctx.__prompts[0]);
     t('⑩ octies nessun ripiego sul GAS', m.gas.length === 0); }
   { const m = se({ fetch: { body: { ok: true, ya: true, mesa: '100', resto: 120000 } } }); await m.G.cjSeFue('100');
     t('⑩ nonies ya:true (secondo invio): ok, lo dice, e prosegue con la chiusura', /Registrado \(ya estaba\)/.test(m.toasts[0][1]) && m.sp.motivo === 'se_fue_sin_pagar' && m.tab() === 1, m.toasts); }
   // d) errori definitivi: detti, uid nuovo al prossimo tentativo, niente chiusura, MAI il GAS
-  for (const [err, extra, atteso] of [['no_a_saldo', {}, /ya no está a saldo/], ['motivo_corto', {}, /muy corto/], ['mesa_sin_pago_conflitto', {}, /OTRO motivo/], ['pin_jl_invalido', {}, /PIN incorrecto/], ['pin_jl_requerido', {}, /Falta el PIN/], ['pin_jl_bloqueado', { faltan_s: 125 }, /espera 3 min/], ['accion_desconocida', {}, /todavía no acepta/]]) {
+  for (const [err, extra, atteso] of [['no_a_saldo', {}, /ya no está a saldo/], ['motivo_corto', {}, /muy corto/], ['mesa_sin_pago_conflitto', {}, /OTRO motivo/], ['pin_jl_invalido', {}, /PIN incorrecto/], ['pin_jl_requerido', {}, /Falta el PIN/], ['pin_jl_bloqueado', { faltan_s: 125 }, /espera 3 min/], ['ruta_apagada', {}, /todavía no acepta/], ['uid_missing', {}, /Falta un dato/], ['pin_jl_no_al_bordo', {}, /PIN del JL no está configurado/], ['token_invalid', {}, /Sin permiso/]]) {
     const m = se({ fetch: { body: Object.assign({ ok: false, error: err, definitivo: true }, extra) } }); await m.G.cjSeFue('100'); await m.G.cjSeFue('100');
-    t('⑩ decies errore «' + err + '»: parole vere, niente chiusura, MAI il GAS, e un uid NUOVO al secondo tentativo (la risposta era definitiva)', m.toasts[0][0] === 'err' && atteso.test(m.toasts[0][1]) && !/pin_jl|no_a_saldo|mesa_sin/.test(m.toasts[0][1]) && m.tab() === 0 && m.gas.length === 0 && m.bodies[0].uid_gesto !== m.bodies[1].uid_gesto && m.ctx.CJ1.saldos.length === 2, [m.toasts[0], m.bodies.map((x) => x.uid_gesto)]); }
+    t('⑩ decies errore «' + err + '»: parole vere, niente chiusura, MAI il GAS, e un uid NUOVO al secondo tentativo (la risposta era definitiva)', m.toasts[0][0] === 'err' && atteso.test(m.toasts[0][1]) && !/pin_jl|no_a_saldo|mesa_sin|ruta_apagada|uid_missing|token_invalid/.test(m.toasts[0][1]) && m.tab() === 0 && m.gas.length === 0 && m.bodies[0].uid_gesto !== m.bodies[1].uid_gesto && m.ctx.CJ1.saldos.length === 2, [m.toasts[0], m.bodies.map((x) => x.uid_gesto)]); }
   // e) NON SO: rete, 5xx, illeggibile => «puede que SI», lo STESSO uid, mai il GAS
   for (const [nome, fetch] of [['rete caduta', new Error('net')], ['HTTP 500 senza JSON', { status: 500, illeggibile: true }], ['risposta senza ok', { body: { x: 1 } }], ['corpo vuoto', { body: null }]]) {
     const m = se({ fetch: fetch }); await m.G.cjSeFue('100'); await m.G.cjSeFue('100');
@@ -192,10 +202,15 @@ await mut('cjCieIgualEnviar senza gate (cerrar igual salta il saldo)', "const sg
 await mut('cjCieIgualEnviar non libera il bottone', "if (sgI.bloquea) { if (btn) btn.disabled = false; return; }", "if (sgI.bloquea) { return; }");
 await mut('la scheda non e nel cierre', "  h += cjSaldosHtml();   // [AUT-0666]", "  // [AUT-0666]");
 await mut('il giro non legge i saldi', "if (cjSaldoOn()) { const sd = await cjSaldosLeer(); if (sd.ok) CJ1.saldos = sd.mesas; }", "");
-await mut('la leva non spegne il fatto', "if (!cjSaldoOn()) { cjSinPagoMesa(mesa); return; }", "");
+await mut('le leve non spengono il fatto', "if (!cjSeFueOn()) { cjSinPagoMesa(mesa); return; }", "");
+await mut('basta la nostra leva (sefue_on ignorata)', "function cjSeFueOn() { return cjSaldoOn() && cjFlag('sefue_on'); }", "function cjSeFueOn() { return cjSaldoOn(); }");
+await mut('basta sefue_on (la nostra ignorata)', "function cjSeFueOn() { return cjSaldoOn() && cjFlag('sefue_on'); }", "function cjSeFueOn() { return cjFlag('sefue_on'); }");
+await mut('la leva ha un altro nome (sefue)', "cjFlag('sefue_on')", "cjFlag('sefue')");
 await mut('il fatto manda un importo', "mesa: mesa, uid_gesto: _SE.uid[k], motivo: motivo, pin: STATE.pin }", "mesa: mesa, uid_gesto: _SE.uid[k], motivo: motivo, pin: STATE.pin, resto: mm && mm.resto }");
 await mut('il fatto si ripiega sul GAS', "if (j && typeof j.ok === 'boolean') return j;", "if (j && typeof j.ok === 'boolean') return j; if (!j) return await gasPost('seFueSinPagar', body);");
-await mut('l azione ha un altro nome', "action: 'seFueSinPagar', local", "action: 'se_fue_sin_pagar', local");
+await mut('la rotta ha un altro nome', "'/sefue/'", "'/se_fue/'");
+await mut('il token va nella query', "'x-borde-token': CFG.T }, body: JSON.stringify(body)", "}, body: JSON.stringify(body)");
+await mut('manca la tabella LOC_PG sulla rotta', "'/sefue/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL)", "'/sefue/' + encodeURIComponent(CFG.LOCAL + 'X')");
 await mut('il motivo corto passa', "if (motivo.length < 5) {", "if (motivo.length < 1) {");
 await mut('uid nuovo a ogni tocco (la chiave nasce dal lato che ripete: qui NON si tiene)', "if (!_SE.uid[k]) _SE.uid[k] = _uidGesto();", "_SE.uid[k] = _uidGesto();");
 await mut('il non-so cancella l uid', "} else if (j.dudoso) toast('warn',", "} else if (j.dudoso) { delete _SE.uid[k]; toast('warn',");
