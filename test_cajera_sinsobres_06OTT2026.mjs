@@ -59,9 +59,9 @@ const conSobre = (contado) => ({ ok: true, sobres: [{ sobre_nro: '1001', conteo:
   t('contado = reserva: depósito $0 es válido, botón activo', m.el('salir').disabled === false); }
 
 // ── ④ lo que no cambia
-t('una salida pendiente (volvió del banco) sigue yendo a «De vuelta del banco»', await (async () => {
+t('una salida pendiente (volvió del banco) sigue yendo a «En camino al banco»', await (async () => {
   const m = mundo(sinSobres, R({ deposito_pendiente: { ok: true, salida_pendiente: { uid_gesto: 'dep-1', a_depositar: 43000 } } })); await m.ctx.API.pantalla9();
-  return /De vuelta del banco/.test(m.ctx.app.innerHTML) && !/Nada que depositar/.test(m.ctx.app.innerHTML); })());
+  return /En camino al banco/.test(m.ctx.app.innerHTML) && !/Nada que depositar/.test(m.ctx.app.innerHTML); })());
 t('sin el parámetro de la retención: «Falta un parámetro» (igual que antes)', await (async () => {
   const m = mundo(sinSobres, R({ reserva: { ok: false, error: 'x' } })); await m.ctx.API.pantalla9();
   return /Falta un parámetro/.test(m.ctx.app.innerHTML); })());

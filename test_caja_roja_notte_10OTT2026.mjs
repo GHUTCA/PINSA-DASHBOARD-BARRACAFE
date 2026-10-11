@@ -83,11 +83,11 @@ async function banco(SRC) {
   // ⑤ riprendere dopo un cierre dell'app
   { const m = mondo(SRC, {}); await m.ctx.F.pantalla9(); await click(m, 'salir'); const dep = SALIDA(m).uid_gesto; await click(m, 'sellarRoja');   // la 1a sigillata, poi si chiude l app
     const m2 = mondo(SRC, { ls: m.ls, pend: { uid_gesto: dep, a_depositar: 1547950 } }); await m2.ctx.F.pantalla9();
-    t('⑤ riaperta l app con la salida pendiente: NON «De vuelta del banco» ma la sobre 2 de 3 (la 1a e gia sigillata)', /sobre 2 de 3/.test(m2.app.innerHTML) && /Noche 2026-10-11/.test(m2.app.innerHTML) && !/De vuelta del banco/.test(m2.app.innerHTML), m2.app.innerHTML);
+    t('⑤ riaperta l app con la salida pendiente: NON «En camino al banco» ma la sobre 2 de 3 (la 1a e gia sigillata)', /sobre 2 de 3/.test(m2.app.innerHTML) && /Noche 2026-10-11/.test(m2.app.innerHTML) && !/En camino al banco/.test(m2.app.innerHTML), m2.app.innerHTML);
     await click(m2, 'sellarRoja'); await click(m2, 'sigRoja'); await click(m2, 'sellarRoja'); await click(m2, 'sigRoja');
     t('⑤ bis completate le altre due, solo 2 buste nuove (11 e 12) e poi «Registrado»', BUSTE(m2).map((b) => b.dia_op).join() === '2026-10-11,2026-10-12' && m2.toasts.some((x) => /Registrado/.test(x[0])), BUSTE(m2).map((b) => b.dia_op));
     const m3 = mondo(SRC, { ls: m.ls, pend: { uid_gesto: 'OTRA-SALIDA', a_depositar: 1 } }); await m3.ctx.F.pantalla9();
-    t('⑤ ter una salida pendiente DIVERSA: la secuenza ricordata non si impone (vuelta normale)', /De vuelta del banco/.test(m3.app.innerHTML) && !/busta \d de/.test(m3.app.innerHTML), m3.app.innerHTML); }
+    t('⑤ ter una salida pendiente DIVERSA: la secuenza ricordata non si impone (vuelta normale)', /En camino al banco/.test(m3.app.innerHTML) && !/busta \d de/.test(m3.app.innerHTML), m3.app.innerHTML); }
   // ⑥ leva spenta
   { const m = mondo(SRC, { roja: { ok: false, error: 'lettura_sconosciuta' }, reservas: { '2026-10-09': 49100, '2026-10-10': 40000, '2026-10-11': 31250, '2026-10-12': 12800 } }); await m.ctx.F.pantalla9(); await click(m, 'salir'); const s = SALIDA(m);
     t('⑥ leva spenta (404 lettura_sconosciuta): la busta UNICA di sempre — contado netto, reserva = somma delle notti, nessuna «roja ya sellada»', s.contado === 1632000 && s.reserva === 133150 && s.a_depositar === 1498850 && !/Roja ya sellada/.test(calc(m)), s);
