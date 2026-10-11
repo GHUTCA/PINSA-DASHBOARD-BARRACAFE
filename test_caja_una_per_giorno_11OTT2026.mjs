@@ -33,7 +33,7 @@ function mondo(SRC, o) {
     document: { getElementById: mk, querySelector: mk, querySelectorAll: () => [] } };
   vm.createContext(ctx);
   vm.runInContext("var CAJA_DIA = null, UNA_ON = null, UNA_TS = 0, DIA_CORTE = null, UIDS_GESTO = {}, DEJADAS = {}, SENZA_ESITO = [], EN_CAMINO_KEY = 'caja_en_camino_v1', ROJA_PEND_KEY = 'caja_roja_pend_v1'; async function noEncOn() { return false; } function dejadasHtml() { return ''; } function dejadasBind() {} function noEncHtml() { return ''; } function noEncBind() {} function senzaEsitoHtml() { return ''; } async function ventanaOn() { return false; } function claveSobre(x) { return (x.dia || DIA_NOCHE) + ':' + x.sobre_nro; }", ctx);
-  const NOMI = ['unaOn', 'enCaminoLocal', 'enCaminoGuardar', 'enCaminoAgregar', 'enCaminoQuitar', 'enCaminoTodas', 'pantallaCajas', 'abrirCaja', 'trasSalida', 'vueltaErrorTxt', 'pantallaEnCamino', 'pantalla6', 'pantalla9', 'diasDeCorte', 'desgloseDeposito', 'desgloseHtml', 'legamiHtml',
+  const NOMI = ['unaOn', 'enCaminoLocal', 'enCaminoGuardar', 'enCaminoAgregar', 'enCaminoQuitar', 'enCaminoTodas', 'pantallaCajas', 'abrirCaja', 'trasSalida', 'vueltaErrorTxt', 'salidaErrorTxt', 'pantallaEnCamino', 'pantalla6', 'pantalla9', 'diasDeCorte', 'desgloseDeposito', 'desgloseHtml', 'legamiHtml',
     'diaAnterior', 'pantallaRojaError', 'rojaPendLeer', 'rojaPendGuardar', 'rojaPendLimpiar', 'rojaSiguiente', 'pantallaRojaNotte', 'pantallaReservaSobre', 'uidGestoEstable', 'uidGesto2'].filter((n) => n !== 'uidGesto2');
   vm.runInContext(NOMI.map((n) => fnDe(SRC, n)).join('\n') + '\nthis.F = { ' + NOMI.join(', ') + ' };', ctx);
   return { ctx, mk, toasts, posts, llamadas, app, ls };
@@ -128,6 +128,17 @@ async function banco(SRC) {
   { const m = mondo(SRC, {}); m.ctx.MULTI = true; m.ctx.NOCHES = ['2026-10-09']; m.ctx.MANANA = { sobres: SOBRES.filter((x) => x.dia === '2026-10-09').map((x) => Object.assign({}, x, { conteo: { contado: x.declarado } })), noEnc: [], dejadas: [] };
     await m.ctx.F.pantalla9(); const h = m.app.innerHTML;
     t('④-bis j SIN caja abierta (el vetro de ayer) el campo sigue siendo «Contado» y NO dice «Contante para el banco»', !/Contante para el banco/.test(h), h.slice(0, 300)); }
+  // ④-ter [11-ott · 💵 EL GIRO «LA CAJA NON SI DEPOSITA DUE VOLTE» 🟡] los rechazos de la SALIDA, con palabras
+  const rechazo = (motivo) => async (dia) => { const m = await abreDeposito(dia || '2026-10-09', { postFalla: (b) => (b.verbo === 'deposito' && b.evento === 'salida' ? { ok: false, motivo: motivo } : null) }); await click(m, 'salir'); await new Promise((r) => setTimeout(r, 30)); return m; };
+  { const m = await rechazo('sobre_ya_depositado_o_ignoto')();
+    t('④-ter la caja ya depositada (409 sobre_ya_depositado_o_ignoto): la cajera lee POR QUE — «Esta caja ya salió al banco… No se deposita dos veces»', m.toasts.length >= 1 && m.toasts[0][0].includes('Esta caja ya salió al banco') && m.toasts[0][0].includes('No se deposita dos veces') && !m.toasts[0][0].includes('sobre_ya_depositado_o_ignoto'), m.toasts);
+    t('④-ter b ...y se la lleva a la LISTA (donde esa caja esta «En camino al banco»), sin escribir nada en el telefono', m.llamadas.some((x) => /^pendientes/.test(x)) && (JSON.parse(m.ls.caja_en_camino_v1 || '[]')).length === 0, [m.llamadas.slice(-3), m.ls]); }
+  for (const [mot, frag] of [['salida_somma_notti', 'mezcla noches'], ['caja_dia_no_cerrado', 'todavía no se cierra'], ['roja_di_altro_giorno', 'no es de esta noche']]) {
+    const m = await rechazo(mot)(); t('④-ter c ' + mot + ' => palabras (' + frag + '), nunca el codigo', m.toasts[0][0].includes(frag) && !m.toasts[0][0].includes(mot), m.toasts); }
+  { const m = await rechazo('otro_motivo_xyz')(); t('④-ter d un motivo desconocido sigue diciendo «No se guardó: <codigo>» (no se inventa una causa)', m.toasts[0][0] === 'No se guardó: otro_motivo_xyz' && !m.llamadas.some((x) => /^pendientes/.test(x) && m.llamadas.indexOf(x) > 3), m.toasts); }
+  { const m = mondo(SRC, { flags: {}, postFalla: (b) => (b.evento === 'salida' ? { ok: false, motivo: 'sobre_ya_depositado_o_ignoto' } : null) }); m.ctx.MULTI = true; m.ctx.NOCHES = ['2026-10-09']; m.ctx.MANANA = { sobres: SOBRES.filter((x) => x.dia === '2026-10-09').map((x) => Object.assign({}, x, { conteo: { contado: x.declarado } })), noEnc: [], dejadas: [] };
+    await m.ctx.F.pantalla9(); await click(m, 'salir'); await new Promise((r) => setTimeout(r, 30));
+    t('④-ter e SIN caja abierta (el vetro de ayer) el 409 tambien se lee con palabras, pero NO navega a la lista (esa pantalla no existe sin la leva)', m.toasts[0][0].includes('Esta caja ya salió al banco') && !m.llamadas.some((x) => /^pendientes/.test(x)), [m.toasts, m.llamadas]); }
   // ⑥ UN N° para todas
   const ENC = [{ uid: 'dep-A', dia: '2026-10-09', a_depositar: 982000 }, { uid: 'dep-B', dia: '2026-10-10', a_depositar: 919500 }];
   { const m = mondo(SRC, { get: (p) => (/^depositos_en_camino/.test(p) ? { ok: true, depositos: ENC } : null) }); await m.ctx.F.pantallaCajas(); const h = m.ctx.app.innerHTML;
@@ -214,6 +225,11 @@ await mut('se guarda tambien la no marcada', "if (!marcadas[i]) continue;", "");
 await mut('el total suma todas, marcadas o no', "if (m[i]) { tot += x.a_depositar; n++; }", "{ tot += x.a_depositar; n++; }");
 await mut('con ninguna marcada el boton sigue', "document.getElementById('cerrarEnCamino').disabled = !n;", "");
 await mut('las cajas no vienen marcadas', '" checked style="margin-right:8px">', '" style="margin-right:8px">');
+await mut('el 409 vuelve a ser un codigo', "if (m === 'sobre_ya_depositado_o_ignoto') return 'Esta caja ya salió al banco", "if (m === 'sobre_ya_depositado_o_ignoto_X') return 'Esta caja ya salió al banco");
+await mut('el 409 no lleva a la lista', "if (r.motivo === 'sobre_ya_depositado_o_ignoto' && CAJA_DIA) pantallaCajas();", "");
+await mut('el 409 navega tambien sin caja abierta', "if (r.motivo === 'sobre_ya_depositado_o_ignoto' && CAJA_DIA) pantallaCajas();", "if (r.motivo === 'sobre_ya_depositado_o_ignoto') pantallaCajas();");
+await mut('la salida rechazada se anota «en camino»', "toast(salidaErrorTxt(r.motivo), 'bad');", "toast(salidaErrorTxt(r.motivo), 'bad'); if (CAJA_DIA) enCaminoAgregar({ uid: depositoUid, dia: CAJA_DIA, a_depositar: 1, ts: Date.now() });");
+await mut('se inventa una causa para el motivo desconocido', "return 'No se guardó: ' + m;", "return 'Esta caja ya salió al banco';");
 await mut('las salidas locales viejas no caducan', "if (srv !== null && !(Date.now() - (x.ts || 0) < 600000)) return;", "");
 await mut('el bordo no manda sobre las locales', "(srv || []).forEach(function(x){", "([]).forEach(function(x){");
 await mut('la roja pendiente no se retoma', "if (rpC && rpC.lista && rojaSiguiente(rpC) >= 0) { pantallaRojaNotte(rpC.dep, rpC.lista, rpC.hechas); return; }", "");

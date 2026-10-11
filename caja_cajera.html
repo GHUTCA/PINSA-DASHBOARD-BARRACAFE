@@ -310,7 +310,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return senzaEsitoHtml() + (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.10.5</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.10.6</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -515,6 +515,14 @@ async function pantallaCajas() {
 function abrirCaja(dia) { CAJA_DIA = dia; DIA_CORTE = dia; PASO = 1; pantalla6(); }
 /* terminada la salida (y sus busta R): en el vetro de ayer sigue «En camino al banco»; con una caja por dia se vuelve a la lista, donde esa caja ya no esta y la salida aparece «En camino» */
 function trasSalida() { if (UNA_ON === true) { CAJA_DIA = null; pantallaCajas(); } else pantalla9(); }
+/* [11-ott · 💵 EL GIRO «LA CAJA NON SI DEPOSITA DUE VOLTE» 🟡] los rechazos de la SALIDA, con palabras: el bordo ya no deja depositar dos veces una caja ni mezclar noches, pero la cajera solo veia «No se guardó: <codigo>» o nada. */
+function salidaErrorTxt(m) {
+  if (m === 'sobre_ya_depositado_o_ignoto') return 'Esta caja ya salió al banco (o uno de sus sobres no existe). No se deposita dos veces: mírala en «En camino al banco»';
+  if (m === 'salida_somma_notti') return 'Esta salida mezcla noches: una caja es un solo día. Avisa a Alberto';
+  if (m === 'caja_dia_no_cerrado') return 'Esa noche todavía no se cierra: no se puede depositar aún';
+  if (m === 'roja_di_altro_giorno') return 'Una busta roja no es de esta noche. Avisa a MIGRACIÓN';
+  return 'No se guardó: ' + m;
+}
 function vueltaErrorTxt(m) {
   if (m === 'salida_en_camino') return 'El depósito todavía está llegando al sistema. Espera un minuto y guarda el número otra vez';
   if (m === 'salida_no_llego') return 'El depósito NO llegó al sistema. No escribas el número: avisa a MIGRACIÓN';
@@ -1240,7 +1248,11 @@ async function pantalla9() {
     /* [10-ott · AUT-0659 · 🚚 `MIGRACION ROJA LEGAME ALLA VUELTA DAL BORDO`] las buste R ya selladas que ESTA salida cuenta (la R-0001): el bordo las liga a la salida cuando ella escribe el N° de deposito */
     if (ROJA && ROJA.sueltas && ROJA.sueltas.length) cuerpoSalida.rojas = ROJA.sueltas.map(function (x) { return { uid: x.uid, numero: x.numero, importo: x.importo }; });
     var r = await postCaja(cuerpoSalida);
-    if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
+    if (!r.ok) {
+      toast(salidaErrorTxt(r.motivo), 'bad');
+      if (r.motivo === 'sobre_ya_depositado_o_ignoto' && CAJA_DIA) pantallaCajas();   // esa caja ya salió: a la lista, donde aparece «En camino al banco»
+      return;
+    }
     if (CAJA_DIA) enCaminoAgregar({ uid: depositoUid, dia: CAJA_DIA, a_depositar: ultimo.aDep, ts: Date.now() });   // [AUT-0667] «En camino al banco» hasta que ella escriba el N°
     /* ✏️ 03-ott · bacheca SPECIFICA BUSTA R-nnnn CAJA ROJA (DESIGN, orden de
        Alberto): si reserva === 0 la pantalla NO aparece — una busta vacía
