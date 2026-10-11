@@ -1110,7 +1110,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.226.6 · vetro</span>
+      <span class="ver" id="ver">sala v3.226.7 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -4180,13 +4180,19 @@ async function cierreEnviar() {
        risponde con la forma del GAS: si ASPETTA la sua risposta e il GAS non si chiama. Un corte con mesas da passare
        resta sul GAS (il traspaso vive lì fino al 6.3), e così ogni risposta del bordo che non sia sua (`need:'gas'`,
        rete, timeout): il ripiego è il cammino di ieri, mai due corti. A leva spenta questa riga è quella di ieri. */
-    let r = null;
+    let r = null, rbSaldo = null;
     if (CORTE_BORDE_ON && CAJA_ATTO1_ON && !CIE.pasarMesas) {
       const rb = await _cerrarMeseroAlBorde(_cierreBody);
-      if (rb && (rb.ok || rb.error === 'mesas_abiertas')) { r = rb; bordeHecho('corte_borde', { ok: !!rb.ok }); }
+      if (rb && rb.error === 'mesa_a_saldo') rbSaldo = rb;   // [AUT-0666] definitivo
+      else if (rb && (rb.ok || rb.error === 'mesas_abiertas')) { r = rb; bordeHecho('corte_borde', { ok: !!rb.ok }); }
+    } else if (CORTE_SALDO_ON) {
+      /* [AUT-0666] anche la strada del «passa le mesas» (GAS) deve passare dal cancello del saldo: con la leva si ASPETTA il bordo (prima era fire-and-forget); solo `mesa_a_saldo` ferma, tutto il resto prosegue su GAS come ieri */
+      const rb2 = await _cerrarMeseroAlBorde(_cierreBody).catch(function () { return null; });
+      if (rb2 && rb2.error === 'mesa_a_saldo') rbSaldo = rb2;
     } else {
       _cerrarMeseroAlBorde(_cierreBody).catch(function () {});
     }
+    if (rbSaldo) { _cieSaldo(rbSaldo); CIE.enviando = false; return; }   // [AUT-0666] niente GAS, niente ripiego: il corte NON si chiude con una mesa a saldo
     if (!r) r = await gasPost('cerrarMesero', _cierreBody);
     if (r && r.ok) {
       /* v2.0.1 · REPERTO ROSSO del collaudo a teste diverse: l'uid persistito
@@ -4336,6 +4342,19 @@ function _cieListo() { _CIE_FIRMADO = true; _cieCerrar(); salir(); }   // [30-se
    gesto normale — e quello lo spegne qualcuno entro una settimana.*
    🟢 Sicurezza identica ad `AUT-0284`: parola nuova ⇒ nessun `pgo:` (bordo
    r.3463) ⇒ non può sottrarre nessun tavolo. E non trattiene il mesero. */
+/* [11-ott · AUT-0666] LA SCHERMATA DEL SALDO — il bordo ha rifiutato il corte: una o piu mesas tue (o cobradas da te) hanno un PAGO PARZIALE e un RESTO che nessuno ha chiuso. Non e un guasto e non si ritenta:
+   si dice quali, quanto resta e le TRE uscite (cobrar il resto · eliminar/descuento con motivo · «se fue sin pagar», che firma il JL). La terza non si fa da qui: la firma il JL. */
+function _cieSaldo(r) {
+  const ms = (r && r.mesas) || [];
+  const tot = ms.reduce(function (a, m) { return a + (Math.round(Number(m.resto)) || 0); }, 0);
+  _cieRender('<div class="cie-h">🧾 Cerrar mi turno</div>' +
+    '<div class="cie-warn">No puedes cerrar tu turno con una mesa a saldo: pagaron una parte y el resto no es de nadie. Tienes ' + ms.length + (ms.length === 1 ? ' mesa' : ' mesas') + ' con ' + esc(fmtPrice(tot)) + ' por cerrar.</div>' +
+    '<div class="cie-box">' + ms.map(function (m) { return '<div class="cie-row"><span>Mesa ' + esc(m.mesa) + ' <small>pagado ' + esc(fmtPrice(m.pagado || 0)) + ' de ' + esc(fmtPrice(m.consumo || 0)) + '</small></span><b>resto ' + esc(fmtPrice(m.resto || 0)) + '</b></div>'; }).join('') + '</div>' +
+    '<div class="cie-nota" style="margin:8px 0">① <b>Cobra el resto</b> · ② <b>ELIMINAR</b> o descuento, con motivo · ③ si el cliente <b>se fue sin pagar</b>, díselo al JL: él lo firma.</div>' +
+    '<button class="btn" onclick="_cieVoyACobrar()">Cobro el resto ahora</button>' +
+    '<div class="cie-out" onclick="_cieSalirSinCerrar()">Salir sin cerrar</div>');
+  try { bordeHecho('corte_rechazado_saldo', { n: ms.length, resto: tot }); } catch (e) { /* un testimone che inciampa non trattiene il mesero */ }
+}
 function _cieVoyACobrar() {
   try {
     const d = (CIE && CIE.data) || {};
@@ -9205,6 +9224,10 @@ const UNIRDEF_QS = (function () {
   } catch (e) { return (q === '1' || q === '0') ? q : ''; }
 })();
 function _unirAlBordo() { return UNIRDEF_QS === '0' ? UNIR_VIA_BORDE_ON === true : UNIR_VIA_BORDE_ON !== false; }
+/* [11-ott · AUT-0666 punto 2 · 🎛 V28 `AUT 0666 NESSUN SALDO SENZA PADRONE`] il corte del mesero NON si chiude con una mesa a saldo (pago parziale: il resto non e di nessuno). Il cancello e del BORDO
+   (`CORTE_SALDO_ON`, risposta `mesa_a_saldo` DEFINITIVA, mai il ripiego sul GAS); questo vetro la legge da /salud → corte_saldo_on per sapere se deve AFFIANCARE il bordo anche nella strada del
+   «passa le mesas» (che oggi lo chiama senza aspettarlo). Nasce spenta = il corte di ieri. */
+var CORTE_SALDO_ON = false;
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
 /* ═══ [10-ott · 🎛 V28 AUT-0663 `FOTO SALVATA SENZA ETA CURA ALLA RADICE`] UNA SALA SALVATA PIU VECCHIA DEL TETTO NON SI DISEGNA MAI COME SE FOSSE VIVA ═══════════
    IL FATTO (mesa 100, telefono di Ary, 10-ott): il catch del poll ridisegnava `sala_foto_v1` SENZA tetto d'eta («una sala di un'ora fa, dichiarata, batte il vuoto») e il ricarico non la toglie: Ary ha visto
@@ -9271,6 +9294,7 @@ function _salaMuertaPinta(edadMs) {
       ENVMESA_SRV = String(cercaK(j, 'sala_envmesa_on')) === '1';           // [14-ott · AUT-0672]
       if (!(j && j.ok === false)) UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';   // [10-ott · 1.4] · [AUT-0687] un JSON d'errore non è «spenta»: resta null
       CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
+      CORTE_SALDO_ON = String(cercaK(j, 'corte_saldo_on')) === '1';             // [11-ott · AUT-0666]
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
       FOTO_VIVA_LEIDA = true;                                               // [EL GIRO ⑥⑦] il bordo ha risposto: da qui vale la leva (assente = spenta)
     }).catch(function () {});
