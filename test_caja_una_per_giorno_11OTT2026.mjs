@@ -21,7 +21,7 @@ const ROJA09 = { ok: true, roja: true, reserva_pct: 5, sueltas: [{ uid: 'res-R1'
 const UIDN = { n: 0 };
 function mondo(SRC, o) {
   o = o || {}; const els = {}, toasts = [], posts = [], llamadas = [], ls = Object.assign({}, o.ls || {}); const app = { innerHTML: '' }; let u = UIDN.n;
-  const mk = (id) => (els[id] || (els[id] = { id, _v: undefined, get value() { if (this._v !== undefined) return this._v; const q = app.innerHTML.match(new RegExp('id="' + id + '"[^>]*value="([0-9]+)"')); return q ? q[1] : ''; }, set value(x) { this._v = x; }, innerHTML: '', onclick: null, disabled: false, h: {}, addEventListener(ev, fn) { this.h[ev] = fn; }, style: {}, dataset: {} }));
+  const mk = (id) => (els[id] || (els[id] = { id, _v: undefined, get value() { if (this._v !== undefined) return this._v; const q = app.innerHTML.match(new RegExp('id="' + id + '"[^>]*value="([0-9]+)"')); return q ? q[1] : ''; }, set value(x) { this._v = x; }, innerHTML: '', onclick: null, disabled: false, checked: true, h: {}, addEventListener(ev, fn) { this.h[ev] = fn; }, style: {}, dataset: {} }));
   const ctx = { JSON, Math, Date, String, Number, Object, Array, Promise, console, setTimeout, clearTimeout, encodeURIComponent, app, DEPOSITO_PENDIENTE: null, MANANA: null, MULTI: false, NOCHES: [], PASO: 1, SOBRE_IDX: 0, PROVA: false, DIA_HOY: o.hoy || '2026-10-13', DIA_NOCHE: '2026-10-12',
     LOCAL: 'bks', BORDE: { bks: 'https://b.test' }, SES: { user: 'Mayra' }, barra: () => '[bar]', esc: (x) => String(x == null ? '' : x), fmt: (n) => '$' + n, fechaCorta: (d) => 'f:' + d, toast: (m, k) => toasts.push([m, k]),
     renderError: (a, b) => { ctx.app.innerHTML = '[error ' + a + ' ' + b + ']'; ctx.erroresR = (ctx.erroresR || 0) + 1; }, pantalla7() { llamadas.push('→pantalla7'); }, pantalla8() { llamadas.push('→pantalla8'); }, plantarBustaPrueba() {},
@@ -134,13 +134,24 @@ async function banco(SRC) {
     t('⑥ la lista muestra «En camino al banco» con CADA caja separada y «Por depositar $X»', /En camino al banco/.test(h) && /Caja del f:2026-10-09 · Por depositar \$982000/.test(h) && /Caja del f:2026-10-10 · Por depositar \$919500/.test(h), h);
     t('⑥ bis ...y NUNCA «Depositaste»/«Depositado» antes del N°', !/Depositaste|Depositado/.test(h));
     await click(m, 'yaVolvi'); await new Promise((r) => setTimeout(r, 20)); const h2 = m.ctx.app.innerHTML;
-    t('⑥ ter «Ya volví del banco» abre UNA pantalla con las dos cajas y UN campo de N°', /En camino al banco/.test(h2) && /Un solo depósito en el banco/.test(h2) && (h2.match(/id="nro"/g) || []).length === 1 && /982000/.test(h2) && /919500/.test(h2), h2);
-    t('⑥ quater ...sin SUMAR las dos cajas en un total', !/1901500|1\.901\.500/.test(h2), h2);
+    t('⑥ ter «Ya volví del banco» abre UNA pantalla con las dos cajas MARCADAS y UN campo de N°', /En camino al banco/.test(h2) && /Marca las cajas que van en ese papel/.test(h2) && (h2.match(/id="nro"/g) || []).length === 1 && (h2.match(/type="checkbox"/g) || []).length === 2 && h2.split('" checked ').length - 1 === 2 && h2.includes('982000') && h2.includes('919500'), h2);
+    t('⑥ quater ...y el total del PAPEL DEL BANCO es el de las marcadas (para compararlo con el papel; en el libro cada caja sigue separada)', m.mk('totalSel').innerHTML.includes('Comprobante del banco: <b>$1901500</b>') && m.mk('totalSel').innerHTML.includes('2 cajas marcadas'), m.mk('totalSel').innerHTML);
     m.mk('nro').value = '61418'; await click(m, 'cerrarEnCamino'); await new Promise((r) => setTimeout(r, 30));
     const v = m.posts.filter((p) => p.evento === 'vuelta');
     t('⑥ quinquies se guardan DOS vueltas, una por salida, con el MISMO N° 61418', v.length === 2 && v.every((x) => x.nro_deposito === '61418') && v[0].referencia_uid === 'dep-A' && v[1].referencia_uid === 'dep-B', v);
     t('⑥ sexies cada vuelta lleva el dia de SU caja y un uid propio', v[0].caja_dia === '2026-10-09' && v[1].caja_dia === '2026-10-10' && v[0].uid_gesto !== v[1].uid_gesto, v);
     t('⑥ septies recien AHORA «Depositado · N° 61418» y de vuelta a la lista', m.toasts.some((x) => x[0] === 'Depositado · N° 61418') && /Las cajas/.test(m.ctx.app.innerHTML), [m.toasts, m.ctx.app.innerHTML.slice(0, 100)]); }
+  { const ENC3 = [{ uid: 'dep-8', dia: '2026-10-08', a_depositar: 500000 }].concat(ENC);
+    const m = mondo(SRC, { get: (p) => (/^depositos_en_camino/.test(p) ? { ok: true, depositos: ENC3 } : null) }); await m.ctx.F.pantallaEnCamino();
+    t('⑥ bis-1 con una salida de OTRO viaje (la del 08, 500.000) el total sale de las MARCADAS: 3 marcadas = 2.401.500', m.mk('totalSel').innerHTML.includes('$2401500') && m.mk('totalSel').innerHTML.includes('3 cajas marcadas'), m.mk('totalSel').innerHTML);
+    m.mk('chk0').checked = false; m.mk('chk0').h.change();
+    t('⑥ bis-2 desmarcar la del 08: el total vuelve a 1.901.500 (2 marcadas) y el boton sigue activo', m.mk('totalSel').innerHTML.includes('$1901500') && m.mk('cerrarEnCamino').disabled === false, m.mk('totalSel').innerHTML);
+    m.mk('nro').value = '61418'; await click(m, 'cerrarEnCamino'); await new Promise((r) => setTimeout(r, 30));
+    const v = m.posts.filter((p) => p.evento === 'vuelta');
+    t('⑥ bis-3 el N° 61418 se guarda SOLO en las marcadas (09 y 10): la del 08 NO recibe vuelta y sigue «En camino»', v.length === 2 && v.every((x) => x.referencia_uid !== 'dep-8') && v.map((x) => x.referencia_uid).join() === 'dep-A,dep-B', v); }
+  { const m = mondo(SRC, { get: (p) => (/^depositos_en_camino/.test(p) ? { ok: true, depositos: ENC } : null) }); await m.ctx.F.pantallaEnCamino(); m.mk('chk0').checked = false; m.mk('chk1').checked = false; m.mk('chk0').h.change();
+    t('⑥ bis-4 con NINGUNA marcada el boton se apaga y lo dice', m.mk('cerrarEnCamino').disabled === true && m.mk('totalSel').innerHTML.includes('No hay ninguna caja marcada'), m.mk('totalSel').innerHTML);
+    m.mk('nro').value = '1'; await click(m, 'cerrarEnCamino'); t('⑥ bis-5 ...y aunque se fuerce el toque no se guarda nada', m.posts.length === 0, m.posts); }
   { const m = mondo(SRC, { ls: { caja_en_camino_v1: JSON.stringify(ENC.map((x) => Object.assign({ ts: Date.now() }, x))) }, postFalla: (b, n) => (n === 2 ? { ok: false, motivo: 'salida_en_camino' } : null) });
     await m.ctx.F.pantallaEnCamino(); m.mk('nro').value = '61418'; await click(m, 'cerrarEnCamino');
     const rest = JSON.parse(m.ls.caja_en_camino_v1 || '[]');
@@ -199,9 +210,12 @@ await mut('el contado lordo no suma la R', "var c = esUna ? inp + reserva : inp;
 await mut('a banco es el lordo (la R pasa por el banco)', "var aDep = c - reserva;   // = inp con una caja", "var aDep = c;   // = inp con una caja");
 await mut('el ajuste no se señala', "(esUna && inp !== esperado ?", "(false ?");
 await mut('el vetro de ayer tambien pide el campo nuevo', "var esUna = !!CAJA_DIA;", "var esUna = true;");
+await mut('se guarda tambien la no marcada', "if (!marcadas[i]) continue;", "");
+await mut('el total suma todas, marcadas o no', "if (m[i]) { tot += x.a_depositar; n++; }", "{ tot += x.a_depositar; n++; }");
+await mut('con ninguna marcada el boton sigue', "document.getElementById('cerrarEnCamino').disabled = !n;", "");
+await mut('las cajas no vienen marcadas', '" checked style="margin-right:8px">', '" style="margin-right:8px">');
 await mut('las salidas locales viejas no caducan', "if (srv !== null && !(Date.now() - (x.ts || 0) < 600000)) return;", "");
 await mut('el bordo no manda sobre las locales', "(srv || []).forEach(function(x){", "([]).forEach(function(x){");
 await mut('la roja pendiente no se retoma', "if (rpC && rpC.lista && rojaSiguiente(rpC) >= 0) { pantallaRojaNotte(rpC.dep, rpC.lista, rpC.hechas); return; }", "");
 await mut('pantalla9 sin caja no va a la lista', "if (UNA_ON === true && !CAJA_DIA) { pantallaCajas(); return; }", "");
-await mut('las salidas en camino muestran el total sumado', "'<div class=\"rows\">' + enc.map(function(x){ return '<div class=\"r\"><span class=\"n\">Caja del '", "'<div class=\"rows\"><div class=\"r\"><span class=\"n\">Total 1901500</span></div>' + enc.map(function(x){ return '<div class=\"r\"><span class=\"n\">Caja del '");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);

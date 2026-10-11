@@ -310,7 +310,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return senzaEsitoHtml() + (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.10.4</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.10.5</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -526,17 +526,31 @@ async function pantallaEnCamino() {
   var enc = await enCaminoTodas();
   if (!enc.length) { pantallaCajas(); return; }
   app.innerHTML = barra(true) +
-    '<div class="kick">El depósito</div><h1>En camino al banco</h1><p class="sd">Un solo depósito en el banco: escribe el número una vez</p>' +
-    '<div class="rows">' + enc.map(function(x){ return '<div class="r"><span class="n">Caja del ' + esc(fechaCorta(x.dia)) + '</span><span class="v">Por depositar ' + fmt(x.a_depositar) + '</span></div>'; }).join('') + '</div>' +
+    /* [11-ott · 💵 EL GIRO «PACCHETTO 9BF5A6B» 🟡] una salida de OTRO telefono (o de otro viaje al banco) tomaba el mismo N° que las demas y lo hacia falso: ahora ella MARCA las cajas que cubre ESTE papel del banco (por defecto todas) y el N° se guarda solo en las marcadas; las otras siguen «En camino». El total de las marcadas es para comparar con el papel del banco. */
+    '<div class="kick">El depósito</div><h1>En camino al banco</h1><p class="sd">Un depósito en el banco = un número. Marca las cajas que van en ese papel</p>' +
+    '<div class="rows">' + enc.map(function(x, i){ return '<label class="r" style="cursor:pointer"><span class="n"><input type="checkbox" id="chk' + i + '" checked style="margin-right:8px">Caja del ' + esc(fechaCorta(x.dia)) + '</span><span class="v">Por depositar ' + fmt(x.a_depositar) + '</span></label>'; }).join('') + '</div>' +
+    '<div class="note" id="totalSel"></div>' +
     '<p class="lb">N° de depósito</p><input class="inp" id="nro" placeholder="Lo escribes cuando vuelves">' +
     '<button class="btn acc" id="cerrarEnCamino">Guardar número de depósito</button>' +
     '<button class="btn gh" id="volverCajas2">‹ Las cajas</button>';
   document.getElementById('volverCajas2').onclick = function(){ pantallaCajas(); };
+  function marcadasEnCamino() { return enc.map(function(x, i){ return !!document.getElementById('chk' + i).checked; }); }
+  function pintaTotalSel() {
+    var m = marcadasEnCamino(), tot = 0, n = 0;
+    enc.forEach(function(x, i){ if (m[i]) { tot += x.a_depositar; n++; } });
+    document.getElementById('totalSel').innerHTML = n ? 'Comprobante del banco: <b>' + fmt(tot) + '</b> <small>(' + n + (n === 1 ? ' caja marcada' : ' cajas marcadas') + ' · debe coincidir con el papel del banco)</small>' : 'No hay ninguna caja marcada.';
+    document.getElementById('cerrarEnCamino').disabled = !n;
+  }
+  enc.forEach(function(x, i){ document.getElementById('chk' + i).addEventListener('change', pintaTotalSel); });
+  pintaTotalSel();
   unTocoUnHecho(document.getElementById('cerrarEnCamino'), async function(){
     var nro = document.getElementById('nro').value.trim();
     if (!nro) { toast('Escribe el número de depósito', 'bad'); return; }
+    var marcadas = marcadasEnCamino();
+    if (!marcadas.some(Boolean)) { toast('Marca al menos una caja', 'bad'); return; }
     for (var i = 0; i < enc.length; i++) {
       var x = enc[i];
+      if (!marcadas[i]) continue;   // las no marcadas siguen «En camino»: ese N° no es de ellas
       var r = await postCaja({ verbo:'deposito', uid_gesto: uidGestoEstable('depv|' + x.uid + '|' + nro, 'dep'), evento:'vuelta', referencia_uid: x.uid, nro_deposito: nro, caja_dia: x.dia,
         firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
       if (!r.ok) { toast(vueltaErrorTxt(r.motivo), 'bad'); return; }
