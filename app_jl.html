@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.40.0</span>
+<span class="ver" id="ver">app_jl v1.40.1</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -745,26 +745,28 @@ function cjSaldosHtml() {
       const quien = (m.meseros && m.meseros.length) ? m.meseros.join(', ') : '';
       const hace = m.ts_ultimo_pago ? Math.max(0, Math.round((Date.now() - m.ts_ultimo_pago) / 60000)) : null;
       const edad = hace == null ? '' : ' · hace ' + (hace >= 90 ? Math.round(hace / 60) + ' h' : hace + ' min');
-      return '<div class="cob">Mesa ' + esc(m.mesa) + ' <small style="color:#b9b2a4">' + esc(quien) + edad + ' · pagado ' + fmt(m.pagato != null ? m.pagato : (m.pagado || 0)) + ' de ' + fmt(m.consumo || 0) + '</small>' +
+      return '<div class="cob">Mesa ' + esc(m.mesa) + ' <small style="color:#b9b2a4">' + esc(quien) + edad + ' · pagado ' + fmt(m.pagado != null ? m.pagado : (m.pagato || 0)) + ' de ' + fmt(m.consumo || 0) + '</small>' +
         '<span class="st2 mid">resto ' + fmt(m.resto || 0) + '</span>' +
         '<button class="btn acc" style="margin-left:8px;padding:6px 10px" onclick="mesaAbrir(' + _cjJs((m.meseros && m.meseros[0]) || '') + ',' + _cjJs(m.mesa) + ')">Cobrar / eliminar</button>' +
         '<button class="btn gh" style="margin-left:8px;padding:6px 10px" onclick="cjSeFue(' + _cjJs(m.mesa) + ')">Se fue sin pagar</button></div>';
     }).join('') + '</div>';
 }
 /* ═══ [11-ott · AUT-0666 punto 2 · LA TERZA USCITA] «SE FUE SIN PAGAR» COME FATTO ═══════════════════════════════════════
-   Contratto di 🎛 BKP (`BKP 0666 47A9543 E IL CONTRATTO DEL SE FUE`): POST del gesto staff (/pedido-staff, come moverMesa) con action 'seFueSinPagar' e {mesa, uid_gesto, motivo, pin}. Il telefono NON manda importi, t0_sesion ne dia:
+   Contratto di 🎛 BKP (`BKP 0666 47A9543 E IL CONTRATTO DEL SE FUE` + `BKP 0666 D02865B IL SE FUE AL BORDO`): POST <borde>/sefue/<local> (token in x-borde-token, come /saldi) con {mesa, uid_gesto, motivo, pin}. Leva del bordo SEFUE_ON → /salud sefue_on: il bottone nuovo vive solo con le DUE (la nostra e quella); con una sola, e la porta di ieri. Il telefono NON manda importi, t0_sesion ne dia:
    il bordo ricalcola il resto dalla stessa misura di /saldi. uid_gesto = chiave d'idempotenza, coniata QUI (dal lato che RIPETE) e tenuta fino all'esito. Risposte: {ok:true,mesa,resto} · {ok:true,ya:true} · no_a_saldo ·
    motivo_corto · mesa_sin_pago_conflitto · errori del PIN (_ERR_APERTURA). ⚠️ Niente ripiego sul GAS (staffPost lo farebbe): il GAS non conosce questo verbo, e «provare dall'altra parte» non e un esito.
    Il fatto dice PERCHE il denaro non c'e; NON chiude la mesa: la chiusura resta «Cerrar una mesa sin pago» (sinPagoJL), a cui si arriva subito dopo, gia compilata. Prima il fatto, poi la chiusura: se il fatto riesce e la
-   chiusura no, il JL riprova e il fatto risponde `ya`; il contrario perderebbe il perche. Leva = saldo_sin_padron_on: spenta, il bottone fa solo quello che faceva ieri (porta alla sezione). */
+   chiusura no, il JL riprova e il fatto risponde `ya`; il contrario perderebbe il perche. Leve = saldo_sin_padron_on E sefue_on: se manca una, il bottone fa solo quello che faceva ieri (porta alla sezione). */
 var _SE = { uid: {}, enviando: false };
+function cjSeFueOn() { return cjSaldoOn() && cjFlag('sefue_on'); }
 const _ERR_SEFUE = { no_a_saldo: 'Esa mesa ya no está a saldo (la cerraron o la pagaron). Mírala de nuevo.', motivo_corto: 'El motivo es muy corto (mínimo 5 letras).',
-  mesa_sin_pago_conflitto: 'Esa mesa ya tiene un «se fue sin pagar» con OTRO motivo. Avisa a ADMIN.', accion_desconocida: 'El sistema todavía no acepta este gesto: avisa a ADMIN.', sin_gate: 'Falta el código del turno: abre la pestaña Turno.' };
+  mesa_sin_pago_conflitto: 'Esa mesa ya tiene un «se fue sin pagar» con OTRO motivo. Avisa a ADMIN.', ruta_apagada: 'El sistema todavía no acepta este gesto: avisa a ADMIN.', uid_missing: 'Falta un dato del gesto: reintenta.',
+  pin_jl_no_al_bordo: 'El PIN del JL no está configurado en el sistema: avisa a ADMIN.', token_invalid: 'Sin permiso del sistema: avisa a ADMIN.', local_desconocido: 'El sistema no reconoce este local: avisa a ADMIN.', payload_grande: 'El motivo es demasiado largo.', json_invalid: 'El gesto salió mal: reintenta.' };
 async function _seFuePost(body) {
   const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 8000);
   try {
-    const r = await fetch(CFG.BORDE + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T),
-      { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ action: 'seFueSinPagar', local: CFG.LOCAL }, body)), signal: ctrl.signal, cache: 'no-store' });
+    const r = await fetch(CFG.BORDE + '/sefue/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL),
+      { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T }, body: JSON.stringify(body), signal: ctrl.signal, cache: 'no-store' });
     clearTimeout(to);
     const j = await r.json().catch(function () { return null; });
     if (j && typeof j.ok === 'boolean') return j;
@@ -773,7 +775,7 @@ async function _seFuePost(body) {
 }
 async function cjSeFue(mesa) {
   mesa = String(mesa == null ? '' : mesa).trim();
-  if (!cjSaldoOn()) { cjSinPagoMesa(mesa); return; }   // leva spenta: la porta di ieri
+  if (!cjSeFueOn()) { cjSinPagoMesa(mesa); return; }   // una leva spenta: la porta di ieri
   if (_SE.enviando || !mesa) return;
   const mm = (CJ1.saldos || []).filter(function (m) { return String(m.mesa) === mesa; })[0];
   const motivo = String(prompt('Mesa ' + mesa + (mm ? ' · resto ' + fmt(mm.resto) : '') + ' — ¿Qué pasó? Escribe el motivo (mínimo 5 letras). Queda firmado a tu nombre.') || '').trim();
