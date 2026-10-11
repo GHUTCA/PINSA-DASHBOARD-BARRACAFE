@@ -129,7 +129,7 @@ function banco(SRC) {
     const pc = SRC.slice(SRC.indexOf('async function pagoConfirmar('), SRC.indexOf('\n}\n', SRC.indexOf('async function pagoConfirmar(')) + 3);
     t('⑥ pagoConfirmar: `registrado_por` RESTA STATE.nombre (chi incassa: ha i biglietti in mano)', /codigo: STATE\.codigo, nombre: STATE\.nombre, registrado_por: STATE\.nombre,/.test(pc));
     t('⑥ pagoConfirmar: in JL risolve l intestatario PRIMA di costruire il body, con la sala della junta', /if \(JL\) \{[^}]*_jlIntestatario\(\(pg\.mesas && pg\.mesas\.length\) \? pg\.mesas : \[pg\.mesa\]\)/s.test(pc));
-    t('⑥ pagoConfirmar: sull anomalia SBLOCCA il pannello, avvisa il JL e NON prosegue', /if \(!intest\.ok\) \{ pg\.enviando = false; renderPago\(\); _intestatarioAnomalia\(intest, 'pagoConfirmar'\); return; \}/.test(pc));
+    t('⑥ pagoConfirmar: sull anomalia SBLOCCA il pannello, avvisa il JL, lascia l esito e NON prosegue', pc.includes("if (!intest.ok) { pg.enviando = false; renderPago(); _intestatarioAnomalia(intest, 'pagoConfirmar'); _pagoEsito(pg, 'anomalia', intest.motivo); return; }"));
     t('⑥ pagoConfirmar: il body porta intestatario + intestatario_plaza + la FONTE SOLO se c e (fuori da JL il body e identico a ieri)', /if \(intest\) \{ body\.intestatario = intest\.nombre; body\.intestatario_plaza = intest\.plaza; body\.intestatario_fonte = intest\.fonte_plaza \|\| ''; \}/.test(pc));
     const ancora = pc.indexOf('let intest = null;'), cob = pc.indexOf('const body = {');
     t('⑥ l intestatario si risolve PRIMA di `const body` (altrimenti il body non puo portarlo)', ancora > 0 && cob > ancora, [ancora, cob]);
@@ -168,7 +168,7 @@ await mut('la leva nasce accesa', 'var JL_TODO_ON = false;', 'var JL_TODO_ON = t
 await mut('il nome della leva di /salud cambia', "cercaK(j, 'jl_todo_on')", "cercaK(j, 'jl_tutto_on')");
 await mut('la plaza torna a leggere solo la memoria', "for (const k of ['mesas', 'mios', 'pendientes', 'por_limpiar'])", "for (const k of [])");
 await mut('registrado_por torna al mesero (cancella chi ha i biglietti)', 'nombre: STATE.nombre, registrado_por: STATE.nombre,\n    mesa: pg.mesa', 'nombre: STATE.nombre, registrado_por: (intest ? intest.nombre : STATE.nombre),\n    mesa: pg.mesa');
-await mut('l anomalia non ferma il cobro', "if (!intest.ok) { pg.enviando = false; renderPago(); _intestatarioAnomalia(intest, 'pagoConfirmar'); return; }", "if (!intest.ok) { _intestatarioAnomalia(intest, 'pagoConfirmar'); }");
+await mut('l anomalia non ferma il cobro', "_intestatarioAnomalia(intest, 'pagoConfirmar'); _pagoEsito(pg, 'anomalia', intest.motivo); return; }", "_intestatarioAnomalia(intest, 'pagoConfirmar'); _pagoEsito(pg, 'anomalia', intest.motivo); }");
 await mut('il body non porta l intestatario', 'body.intestatario = intest.nombre;', 'body.xx = intest.nombre;');
 await mut('plaza senza mesero => intestato al JL', "return { ok: false, motivo: 'plaza_sin_mesero', mesa: mesa, plaza: pl };", "return { ok: true, nombre: STATE.nombre, plaza: pl };");
 await mut('plaza condivisa: ne sceglie uno', "if (duenos.length > 1) {", "if (false) {");

@@ -1108,7 +1108,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.225.5 · vetro</span>
+      <span class="ver" id="ver">sala v3.226.2 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3362,7 +3362,10 @@ function _ofreceCorteSinPlaza(codigo, nombre) {
 function showEntrada(msg) {
   /* [AUT-0216c] il JL NON vede mai la tastiera del codigo: ogni strada che qui
      chiederebbe il turno lo rimanda alla SUA app, che il codigo lo ha. */
-  if (JL) { location.replace(_jlBackUrl()); return; }
+  if (JL) {   // [10-ott] il rimbalzo NON e' piu' muto: l'app_jl legge `jl_rimbalzo` e dice PERCHE' la sala l'ha rimandato indietro
+    try { sessionStorage.setItem('jl_rimbalzo', JSON.stringify({ ts: Date.now(), msg: String(msg || 'la sala te devolvió a tu app') })); } catch (e) {}
+    location.replace(_jlBackUrl()); return;
+  }
   /* [reperto di Alberto, 23-set] salir()/salirPorCierre() non chiudevano il
      pannello di una mesa se era aperto quando il turno finiva: restava
      visibile SOPRA la schermata di login, coi suoi sei bottoni ancora
@@ -7285,6 +7288,7 @@ function entrarSala() {
            = seconda boleta). Il flag muore col primo poll fresco, che
            riscrive STATE.sala intero. */
         f.r._foto_local = Math.max(1, Math.round((Date.now() - f.ts) / 1000));
+        STATE.salaFotoTs = f.ts;   // [AUT-0663] l'eta' vera: il catch decide col tetto
         STATE.sala = f.r;
         render(f.r);
         const _of = $('offline');
@@ -7940,7 +7944,9 @@ async function refrescar(conSkeleton) {
        Riapplicata da 🛎 SALA V24 il 17-set sul tronco v3.119.0: contenitore
        `secPend` (confermato ancora unico e vivo), nessun'altra riga toccata. */
     if (PINTA_ON) try {
-      if (STATE.sala) {
+      if (STATE.sala && _fotoMuerta(_salaEdadMs())) {
+        _salaMuertaPinta(_salaEdadMs());          // [AUT-0663] l'ultima buona e' oltre il tetto: non e' la sala di adesso
+      } else if (STATE.sala && !STATE.sala._muerta) {   // [EL GIRO 19:55] lo scheletro della sala morta NON e una sala: se la guardia si e spenta nel frattempo (il /salud ha detto «spenta») si cade sulla foto salvata come ieri, mai su un telefono vuoto
         render(STATE.sala);                      // l'ultima buona, resta in piedi
       } else {
         let f = null;
@@ -7950,11 +7956,16 @@ async function refrescar(conSkeleton) {
              SCARTA perché sta per arrivarne una fresca. Qui la fresca NON è
              arrivata — e una sala di un'ora fa, dichiarata, batte il vuoto.
              Il `_foto_local` la marca: i gesti di denaro non si fidano di lei. */
+          STATE.salaFotoTs = f.ts;   // [AUT-0663]
+          if (_fotoMuerta(Date.now() - f.ts)) {
+            _salaMuertaPinta(Date.now() - f.ts);   // [AUT-0663] oltre il tetto non si ridisegna: «sin datos» con l'eta'
+          } else {
           f.r._foto_local = Math.max(1, Math.round((Date.now() - f.ts) / 1000));
           STATE.sala = f.r; render(f.r);
           _of.textContent = '📷 Sala de hace ' + Math.max(1, Math.round((Date.now() - f.ts) / 60000)) +
             ' min — no logro actualizar. Tus gestos igual quedan guardados.';
           _of.classList.add('show', 'vieja');
+          }
         } else if (!document.querySelector('.mtile')) {
           /* niente foto e niente disegnato: **mai lo schermo nero**. Si dice la
              verità e si dà un dito da premere — l'attesa cieca è la cosa che
@@ -9116,6 +9127,38 @@ var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propi
 var JL_TODO_ON = false;
 var UNIR_VIA_BORDE_ON = false;   // [10-ott · 1.4 · BKP `BKP 1 4 UNIR VA DIRITTO AL GAS`] /salud → unir_via_borde_on: l'UNIR passa dal bordo come mover e separar. Nasce spenta = il gasPost di ieri.
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
+/* ═══ [10-ott · 🎛 V28 AUT-0663 `FOTO SALVATA SENZA ETA CURA ALLA RADICE`] UNA SALA SALVATA PIU VECCHIA DEL TETTO NON SI DISEGNA MAI COME SE FOSSE VIVA ═══════════
+   IL FATTO (mesa 100, telefono di Ary, 10-ott): il catch del poll ridisegnava `sala_foto_v1` SENZA tetto d'eta («una sala di un'ora fa, dichiarata, batte il vuoto») e il ricarico non la toglie: Ary ha visto
+   per ~6 ore «135.780 confirmar» su una mesa dove il pedido era gia stato spostato, consegnato e pagato — con i bottoni del denaro accesi. Il boot ha il suo tetto (30 min, r.~7290); il catch no: due regole per la stessa foto.
+   ⇒ UNA regola sola, il tetto del boot (30 min = FOTO_TETTO_MS). Oltre: niente tessere, niente card, niente bottoni — «Mesas: sin datos» con l'eta in chiaro (N4: chi mostra un dato dichiara l'eta di cio
+   che NON ha visto), `STATE.sala` diventa uno scheletro vuoto marcato `_foto_local` (i gesti di denaro gia non si fidano di lei) e la sala vera ricompare al primo poll buono.
+   LEVA: /salud → foto_viva_on (nasce SPENTA = il vetro di ieri). Sul telefono: `?fotoviva=1` la forza (prova con Alberto), `?fotoviva=0` la spegne. */
+var FOTO_VIVA_ON = false;
+var FOTO_VIVA_LEIDA = false;   // [EL GIRO ⑥⑦] /salud non ha ancora risposto (o non risponde mai): finche non si sa, la guardia vale — il verso sicuro e «sin datos», mai una foto vecchia con i soldi
+var FOTO_TETTO_MS = 30 * 60000;
+function _fotoVivaOn() { try { const q = QS.get('fotoviva'); if (q === '1') return true; if (q === '0') return false; } catch (e) {} return FOTO_VIVA_LEIDA ? FOTO_VIVA_ON === true : true; }
+function _fotoMuerta(edadMs) { return _fotoVivaOn() && edadMs > FOTO_TETTO_MS; }
+function _salaEdadMs() { const t = STATE.salaTs || STATE.salaFotoTs || 0; return t ? Date.now() - t : 0; }
+function _edadTxtMs(ms) { const m = Math.max(1, Math.round(ms / 60000)); return m < 90 ? m + ' min' : (Math.round(ms / 360000) / 10) + ' h'; }
+function _salaMuertaPinta(edadMs) {
+  const txt = _edadTxtMs(edadMs);
+  STATE.sala = { _foto_local: 1, _muerta: true, mios: [], pendientes: [], por_limpiar: [], sin_dueno: [], llamadas: [], plazas_detalle: [], grupos: [], mesas_pagadas: [] };
+  STATE.mesasModel = []; STATE.selMesas = [];
+  /* [EL GIRO ①] anche l'intestazione tiene i soldi della sala morta («Venta turno», «Por cobrar ahora», il ticker, il pannello dei verbi, la scheda della mesa): si svuota tutto cio che render() scrive */
+  ['secPend', 'secSinDueno', 'secMios', 'secLimpiar', 'kpis', 'csHero', 'tick', 'vpanel', 'mesaSheetContent', 'salaSub'].forEach(function (id) { const e = $(id); if (e) e.innerHTML = ''; });
+  const hh = $('csHero'); if (hh && hh.classList) hh.classList.add('hide');
+  try { if (typeof cerrarMesa === 'function') cerrarMesa(); } catch (e) {}
+  const g = $('secMesas');
+  if (g) g.innerHTML =
+    '<div style="padding:26px 18px;text-align:center;color:#c2bcae">' +
+    '<div style="font-size:34px;margin-bottom:8px">📡</div>' +
+    '<div style="font-size:15px;font-weight:800;margin-bottom:5px">Mesas: sin datos</div>' +
+    '<div style="font-size:13px;opacity:.85;line-height:1.5">La última sala de este teléfono es de hace <b>' + txt + '</b> y ya no es la de ahora: no se muestra, para que nadie cobre ni elimine sobre una foto vieja.<br>' +
+    '<b>Lo que toques igual queda guardado</b> y entra al volver la señal. Si sigue igual: toca «Salir» y vuelve a entrar, o avisa al JL.</div>' +
+    '<button class="btn" style="margin-top:14px" onclick="STATE.pollProxOk=0;refrescar(true)">Reintentar</button></div>';
+  const of = $('offline');
+  if (of) { of.textContent = 'Sin sala — la última de este teléfono es de hace ' + txt + '. Reintento solo.'; of.classList.remove('vieja'); of.classList.add('show'); }
+}
 /* [29-set · Alberto: «il tetto del 30% fallo subito»] il tetto NON e' piu' una
    copia del vetro: si legge dal bordo (/salud → desc_max_pct), che e' la fonte
    unica e lo applica. 30 resta solo finche' il bordo non ha risposto. */
@@ -9146,6 +9189,8 @@ var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertu
       JL_TODO_ON = String(cercaK(j, 'jl_todo_on')) === '1';                 // [10-ott · decisione ⓐ]
       UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';   // [10-ott · 1.4]
       CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
+      FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
+      FOTO_VIVA_LEIDA = true;                                               // [EL GIRO ⑥⑦] il bordo ha risposto: da qui vale la leva (assente = spenta)
     }).catch(function () {});
   } catch (e) { /* senza il bordo resta 30 */ }
 })();
@@ -14877,6 +14922,26 @@ async function _repetidoManeja(rB, body, pg) {
   pg.uid = body.pago_uid;
   return { rB: await _pagoAlBorde(body, pg.tot) };
 }
+/* ═══ [10-ott · V28 «LEZIONE PER LA RIPROVA»] L'ESITO DEL COBRO LASCIA UNA TRACCIA CHE RESTA, NON SOLO UN TOAST ═══════════════════════════════════════════════════
+   La prova A sulla mesa 200 e' andata male e NESSUNO ha visto perche': il toast dura 3 secondi, l'etichetta in fondo e' piccola, e in modalita' JL un rifiuto del bordo rimbalzava alla
+   app_jl in silenzio. Ora ogni cobro scrive il suo esito in DUE posti: ① `localStorage` (gli ultimi 30, leggibili dopo sul telefono) · ②
+   per il JL, se NON e' ok, una BARRA ROSSA che resta finche' non la tocchi (mai piu' solo un toast). */
+function _pagoEsito(pg, esito, motivo) {
+  const rec = { ts: Date.now(), mesa: String((pg && pg.mesa) || ''), medio: String((pg && pg.medio) || ''), monto: Math.round(Number((pg && pg.tot) || 0)),
+    esito: esito, motivo: String(motivo || ''), jl: JL ? 1 : 0 };
+  try { const l = JSON.parse(localStorage.getItem('pinsita_pago_esito') || '[]'); l.push(rec); localStorage.setItem('pinsita_pago_esito', JSON.stringify(l.slice(-30))); } catch (e) {}
+  /* ⚠️ NIENTE fatto al bordo: `gestoHecho` accetta solo mover/corregir/unir/separar/pago_gas e risponde `gesto_invalido` a `pago_esito` (trovato da EL GIRO). Un fatto che il bordo butta non e' una traccia:
+     l'esito vive SUL TELEFONO (qui sopra) e nella barra. Per averlo anche al bordo serve un gesto nuovo lato bordo — non e' di questa penna. */
+  if (esito !== 'ok' && JL) { try { _pagoFallaBanner(rec); } catch (e) {} }
+}
+function _pagoFallaBanner(rec) {
+  let el = document.getElementById('pagoFalla'); if (el) el.remove();
+  el = document.createElement('div'); el.id = 'pagoFalla';
+  el.setAttribute('style', 'position:fixed;left:0;right:0;bottom:0;z-index:2147483000;background:#8a1c1c;color:#fff;font-weight:800;padding:14px 16px;font-size:15px;text-align:center;cursor:pointer');
+  el.textContent = '⛔ El cobro de la mesa ' + rec.mesa + ' NO se registró (' + (rec.motivo || 'sin motivo') + ') — toca para cerrar';
+  el.onclick = function () { el.remove(); };
+  document.body.appendChild(el);
+}
 async function pagoConfirmar(btn) {
   /* [AUT-0251] un nuovo tentativo cancella il rifiuto precedente: la banda
      racconta L'ULTIMO esito, mai uno vecchio rimasto sullo schermo. */
@@ -14937,7 +15002,7 @@ async function pagoConfirmar(btn) {
   let intest = null;
   if (JL) {   // [10-ott · AUT-0646] il JL incassa: il mesero del tavolo si prende dalla plaza ADESSO; se manca il cobro non parte
     intest = await _jlIntestatario((pg.mesas && pg.mesas.length) ? pg.mesas : [pg.mesa]);
-    if (!intest.ok) { pg.enviando = false; renderPago(); _intestatarioAnomalia(intest, 'pagoConfirmar'); return; }
+    if (!intest.ok) { pg.enviando = false; renderPago(); _intestatarioAnomalia(intest, 'pagoConfirmar'); _pagoEsito(pg, 'anomalia', intest.motivo); return; }
   }
   const esCort = pg.medio === 'cortesia';
   /* v1.1 · il fossile porta il monto VERO: cortesía = $0 (e niente boleta —
@@ -15104,6 +15169,7 @@ async function pagoConfirmar(btn) {
     if (rB && rB.ok === false && rB.error === 'pago_repetido' && !body.confirmo_repetido) {
       const x = await _repetidoManeja(rB, body, pg);
       if (x.fin) {
+        _pagoEsito(pg, 'ok', 'repetido_era_el_mismo');
         toast('ok', '✓ Ese pago ya estaba registrado — no se cobró de nuevo');
         STATE.pago = null; renderPago(); cerrarMesa(); refrescar(false);
         return;
@@ -15111,6 +15177,7 @@ async function pagoConfirmar(btn) {
       rB = x.rB;
     }
     if (rB && rB.ok !== false) {
+      _pagoEsito(pg, 'ok', 'bordo');
       /* la mesa si chiude ottimisticamente come sempre (v1.13): il GAS chiude
          TUTTA la mesa al pago, e lo farà anche stavolta — solo, lo fa dietro,
          chiamato dal bordo. La mano che fa sparire i pedidos è la stessa. */
@@ -15222,6 +15289,7 @@ async function pagoConfirmar(btn) {
       }
     }
     if (r && r.ok) {
+      _pagoEsito(pg, 'ok', r.mesa_abierta ? 'gas_parcial' : 'gas');
       /* ═══ v3.5.4 · LA PARTE CHE NON COPRE NON CHIUDE NIENTE ════════════════
          Il server dice `mesa_abierta:true` quando la somma dei pagos non copre
          ancora il consumo. Qui la mano ottimistica DEVE stare ferma: far
@@ -15330,11 +15398,13 @@ async function pagoConfirmar(btn) {
        stessa chiusura) — la mesa ERA già pagata, si chiude qui, non si
        apre la porta a un uid nuovo sulla stessa seduta. */
     if (r && !r.ok && r.error === 'pago_duplicado_bloqueado') {
+      _pagoEsito(pg, 'ok', 'duplicado');
       toast('ok', '✓ Mesa ' + pg.mesa + ' ya estaba pagada — no se cobró de nuevo');
       STATE.pago = null; renderPago(); cerrarMesa(); refrescar(false);
       return;
     }
     /* v1.4 · gli errori del PIN parlano chiaro e riaprono la serratura */
+    _pagoEsito(pg, 'rifiutato', (r && (r.error || r.motivo)) || '?');
     const errPin = { pin_jl_requerido: 'Falta el PIN del JL', pin_jl_invalido: 'PIN del JL incorrecto',
       pin_jl_bloqueado: 'PIN bloqueado 10 min (5 intentos fallidos)', pin_jl_no_configurado: 'PIN del JL no configurado — avisa a Alberto' };
     if (r && errPin[r.error]) { pg.jl = false; pg.pinAsk = true; pg.pinJL = ''; _rech('🔐 ' + errPin[r.error]); }
@@ -15418,6 +15488,7 @@ async function pagoConfirmar(btn) {
     }
     else _rech('No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
+    _pagoEsito(pg, 'sin_respuesta', (e && e.message) || '?');
     bordeHecho('pago_normal_sin_respuesta', { mesa: (pg && pg.mesa) || '', motivo: (e && e.message) || '?', monto: (pg && pg.tot) || 0 });
     /* 🚨 [AUT-0403] 23-set · IL COMMENTO QUI SOTTO DICEVA GIÀ «dopo un timeout
        SI VERIFICA, non si insiste» — e la riga sotto non verificava affatto,
