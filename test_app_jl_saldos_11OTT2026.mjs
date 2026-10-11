@@ -1,6 +1,6 @@
 // BANCO · NESSUN TURNO SI CHIUDE CON UNA MESA A SALDO — il cierre/apertura del JL (AUT-0666 punto 2 · app_jl v1.39.0) · TERZA PENNA
 // Contratto di 🎛 BKP (`BKP 0666 PUNTO 2 D1716DE IL CANCELLO E LA PORTA`): GET <borde>/saldi/<local> con x-borde-token => { ok, mesas:[{mesa, consumo, pagato, resto, n_pagos, ts_ultimo_pago, meseros[]}], ignote:[…] };
-// `sin_hechos` => {ok:false}. Regola: «NON SO NON BLOCCA» — una lettura che non riesce avvisa e NON ferma. Leva = /salud → corte_saldo_on (la stessa del cancello del corte).
+// `sin_hechos` => {ok:false}. Regola: «NON SO NON BLOCCA» — una lettura che non riesce avvisa e NON ferma. Leva = /salud → saldo_sin_padron_on (leva PROPRIA dei vetri; CORTE_SALDO_ON e quella del cancello del bordo: una leva per penna).
 // ① leva SPENTA: nessuna lettura, nessun blocco, nessuna scheda (il vetro di ieri) ② ACCESA: rotta+token+local giusti (RIESCO→RSC) ③ con mesas a saldo BLOCCA e lo dice (singolare/plurale) ④ NON SO (HTTP 5xx/403, sin_hechos, rete, JSON, mesas non array, timeout 5 s) avvisa e NON blocca
 // ⑤ la scheda: resto, chi, eta, le due uscite del JL, nomi/mesa ESCAPATI ⑥ cablaggio: i tre cancelli (abrirT · cjCieEnviar · cjCieIgualEnviar) prima di ogni scrittura, bottone bloccato PRIMA dell'attesa e liberato se blocca, «cerrar igual» NON salta il saldo,
 //   la scheda dentro il cierre, la lettura nel giro ⑦ CONTRATTO COL BORDO letto dal SORGENTE del bordo (rotta, header, nomi dei campi, nome della leva in /salud) ⑧ comportamento di abrirT col gate vero ⑨ mutanti.
@@ -21,7 +21,7 @@ function mondo(SRC, o) {
   const ctx = { JSON, Math, Date, String, Number, Object, Array, Promise, console, encodeURIComponent, AbortController, esc: ESC, fmt: FMT,
     clearTimeout: () => {}, setTimeout: (fn) => { timers.push(fn); return timers.length; },
     CFG: { BORDE: 'https://b.test', T: 'tok', LOCAL: o.local || 'BKS' }, LOC_PG: { BKS: 'BKS', RIESCO: 'RSC' },
-    STATE: { salud: o.salud === undefined ? { flags: { corte_saldo_on: '1' } } : o.salud }, CJ1: { st: null, saldos: o.saldos },
+    STATE: { salud: o.salud === undefined ? { flags: { saldo_sin_padron_on: '1' } } : o.salud }, CJ1: { st: null, saldos: o.saldos },
     toast: (k, m) => toasts.push([k, m]), pintaTab: () => { pinta++; },
     clicks: [], mesaAbrir: (a, b) => { ctxClicks.push(['abrir', a, b]); }, cjSinPagoMesa: (a) => { ctxClicks.push(['sinpago', a]); },
     fetch: async (url, opt) => { fetches.push([url, opt]); const r = o.fetch; if (r instanceof Error) throw r; if (r && r.cuelga) return new Promise((_, rej) => { opt.signal.addEventListener('abort', () => rej(new Error('abort'))); });
@@ -33,7 +33,7 @@ function mondo(SRC, o) {
 const OK = (mesas) => ({ body: { ok: true, local: 'BKS', ts: 1, foto_edad_s: 3, mesas: mesas, ignote: [] } });
 async function banco(SRC) {
   // ① leva spenta
-  for (const salud of [undefined, null, {}, { flags: {} }, { flags: { corte_saldo_on: '0' } }]) {
+  for (const salud of [undefined, null, {}, { flags: {} }, { flags: { saldo_sin_padron_on: '0' } }]) {
     const m = mondo(SRC, { salud: salud === undefined ? {} : salud, fetch: OK(MESAS), saldos: MESAS }); const g = await m.F.cjSaldosGate();
     t('① leva spenta (' + JSON.stringify(salud) + '): nessuna lettura, nessun blocco, nessun avviso', m.fetches.length === 0 && g.bloquea === false && g.nosabe === false && m.F.cjSaldosHtml() === '' && m.toasts.length === 0, [m.fetches.length, g]); }
   // ② accesa: rotta, token, local
@@ -81,20 +81,20 @@ async function banco(SRC) {
   t('⑥ quater cjCieIgualEnviar: «cerrar igual» NON salta il saldo — gate dopo motivo+PIN e PRIMA di cajaPost1', ord(SRC, 'cjCieIgualEnviar', "Escribe tu PIN", 'await cjSaldosGate()') && ord(SRC, 'cjCieIgualEnviar', 'await cjSaldosGate()', 'await cajaPost1('));
   t('⑥ quinquies bottone bloccato PRIMA dell attesa e liberato se il gate blocca (cjCieEnviar + cjCieIgualEnviar)', ['cjCieEnviar', 'cjCieIgualEnviar'].every((n) => { const f = fnDe(SRC, n); return f.indexOf('btn.disabled = true') >= 0 && f.indexOf('btn.disabled = true') < f.indexOf('await cjSaldosGate()') && /if \(sg[CI]\.bloquea\) \{ if \(btn\) btn\.disabled = false; return; \}/.test(f); }));
   t('⑥ sexies la scheda sta dentro il cierre (cjAtto1Html) e la lettura nel giro, dietro la leva', /h \+= cjSaldosHtml\(\);/.test(fnDe(SRC, 'cjAtto1Html')) && /if \(cjSaldoOn\(\)\) \{ const sd = await cjSaldosLeer\(\); if \(sd\.ok\) CJ1\.saldos = sd\.mesas; \}/.test(fnDe(SRC, 'cjAtto1Giro')));
-  t('⑥ septies la leva e quella del bordo e si legge da /salud (cjFlag), mai un letterale acceso', /function cjSaldoOn\(\) \{ return cjFlag\('corte_saldo_on'\); \}/.test(SRC) && !/corte_saldo_on\s*=\s*true/.test(SRC));
+  t('⑥ septies la leva e quella dei vetri e si legge da /salud (cjFlag), mai un letterale acceso', /function cjSaldoOn\(\) \{ return cjFlag\('saldo_sin_padron_on'\); \}/.test(SRC) && !/saldo_sin_padron_on\s*=\s*true/.test(SRC));
   t('⑥ octies spenta e nulla: nessun altro punto di app_jl legge /saldi', (SRC.match(/CFG\.BORDE \+ '\/saldi\/'/g) || []).length === 1);
   t('versione >= 1.39.0', /id="ver">app_jl v1\.(39\.\d|[4-9]\d\.\d)</.test(SRC));
   // ⑦ contratto col bordo (sorgente vero, mai un letterale mio)
-  let B = ''; try { B = process.env.BORDO_SRC ? fs.readFileSync(process.env.BORDO_SRC, 'utf8') : execSync('git -C ../_wt_roja show bkp-saldo-0666-11ott:src/index.js', { cwd: AQUI, maxBuffer: 1 << 28 }).toString(); } catch (e) { B = ''; }
+  let B = ''; try { B = process.env.BORDO_SRC ? fs.readFileSync(process.env.BORDO_SRC, 'utf8') : execSync('git -C ../_wt_roja show saldo-sin-padron-leva-11ott:src/index.js', { cwd: AQUI, maxBuffer: 1 << 28 }).toString(); } catch (e) { B = ''; }
   if (!B) { if (!muto) console.log('⚠ sorgente del bordo non trovato (BORDO_SRC): il ⑦ NON gira'); ko++; }
   else {
     t('⑦ il bordo espone GET /saldi/:local con il token di lettura (header X-Borde-Token)', /if \(rotta === 'saldi'\)/.test(B) && /X-Borde-Token/.test(B.slice(B.indexOf("rotta === 'saldi'"), B.indexOf("rotta === 'saldi'") + 600)));
     t('⑦ bis i campi della mesa sono quelli che il vetro legge (mesa · consumo · pagato · resto · ts_ultimo_pago · meseros)', /out\.mesas\.push\(\{ mesa: m, consumo: consumo, pagato: pagato, resto: consumo - pagato, n_pagos: n, ts_ultimo_pago: ult, meseros: meseros \}\)/.test(B));
     t('⑦ ter sin_hechos e {ok:false} (il vetro lo legge come NON SO)', /return \{ ok: false, error: 'sin_hechos' \}/.test(B));
-    t('⑦ quater la leva si chiama corte_saldo_on in /salud (lo stesso nome che il vetro cerca)', /corte_saldo_on/.test(B) && new RegExp("cjFlag\\('corte_saldo_on'\\)").test(SRC)); }
+    t('⑦ quater la leva si chiama saldo_sin_padron_on in /salud (lo stesso nome che il vetro cerca)', /saldo_sin_padron_on/.test(B) && new RegExp("cjFlag\\('saldo_sin_padron_on'\\)").test(SRC)); }
   // ⑧ abrirT col gate VERO
   const aper = (o) => { const toasts = [], fetches = [], gas = []; let giro = 0; const m = mondo(SRC, o);
-    Object.assign(m.ctx, { STATE: { pin: '4321', user: 'Pedro', salud: { flags: { corte_saldo_on: '1' } } }, confirm: () => true, giroTurno: () => { giro++; }, _uidGesto: () => 'u-1',
+    Object.assign(m.ctx, { STATE: { pin: '4321', user: 'Pedro', salud: { flags: { saldo_sin_padron_on: '1' } } }, confirm: () => true, giroTurno: () => { giro++; }, _uidGesto: () => 'u-1',
       gasPost: async (a, b) => { gas.push([a, b]); return { ok: true, codigo: '9999' }; }, toast: (k, mm) => toasts.push([k, mm]), apertura: [] });
     const f0 = m.ctx.fetch; m.ctx.fetch = async (url, opt) => { if (/\/saldi\//.test(url)) return f0(url, opt); fetches.push(url); return { status: 200, ok: true, json: async () => ({ ok: true, abierto: true, ya_abierto: false, codigo: '1234', abierto_por: 'Pedro', ts_apertura: 1 }) }; };
     vm.runInContext(['_aperturaPorBordo', 'abrirT'].map((n) => fnDe(SRC, n)).join('\n') + '\nconst _ERR_APERTURA = ' + SRC.match(/const _ERR_APERTURA = (\{[^\n]*\});/)[1] + ';\nthis.G = { abrirT };', m.ctx);
@@ -113,8 +113,8 @@ const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log
   const k0 = ko, o0 = ok; muto = true; const k1 = ko; try { await banco(SRC0.replace(da, () => a)); } catch (e) { ko++; } muto = false; const rossi = ko - k1; ko = k0; ok = o0;
   t('mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
 await mut('la leva non spegne la lettura', "if (!cjSaldoOn()) return { bloquea: false, nosabe: false, mesas: [] };", "");
-await mut('la leva nasce accesa', "function cjSaldoOn() { return cjFlag('corte_saldo_on'); }", "function cjSaldoOn() { return true; }");
-await mut('la leva ha un altro nome', "return cjFlag('corte_saldo_on'); }", "return cjFlag('corte_saldo'); }");
+await mut('la leva nasce accesa', "function cjSaldoOn() { return cjFlag('saldo_sin_padron_on'); }", "function cjSaldoOn() { return true; }");
+await mut('la leva ha un altro nome', "return cjFlag('saldo_sin_padron_on'); }", "return cjFlag('corte_saldo'); }");
 await mut('il token va in query', "headers: { 'x-borde-token': CFG.T }, cache", "headers: {}, cache");
 await mut('manca la tabella LOC_PG', "encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL)", "encodeURIComponent(CFG.LOCAL)");
 await mut('niente timeout', "setTimeout(function () { ctrl.abort(); }, 5000)", "setTimeout(function () { }, 5000)");
