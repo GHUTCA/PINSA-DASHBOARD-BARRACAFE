@@ -156,7 +156,8 @@
   <div id="mapaPlazas"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.7 · 24set</span>
+    <span class="ver" id="ver">v1.8 · 10ott</span>
+    <span class="ver" id="fuente" style="margin-left:8px"></span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
@@ -398,11 +399,76 @@ function entrarMapa() {
   if (STATE.pollTimer) clearInterval(STATE.pollTimer);
   STATE.pollTimer = setInterval(() => refrescar(false), CFG.POLL_MS);
 }
+/* ═══ [10-ott · 1.10 · ordine di Alberto «basta lunedi»] LA SALA DAL BORDO ═══════════════════════════════════════════════════════
+   Prima: `getSalaAnfitriona` = GAS = Google. Ora, se il bordo lo dice (/salud → anfitriona_borde_on "1"), la mappa viene da `sala_vista.anfitriona` (stessi items della sala dei
+   meseros + le sedute che il bordo ha accettato), ripiego sul GAS in QUALUNQUE altro caso: leva spenta, bordo muto, dato senza `anfitriona`, dato vecchio. La riga in fondo dice
+   DA DOVE viene la mappa e quanto e' vecchia. `?anfborde=0` e' il freno per apparecchio (si ricorda), `?anfborde=1` lo toglie.
+   🔴 Le SEDUTE devono arrivare al bordo, o la mappa del bordo non le vede: con la leva accesa il tap «Sentados» passa dal bordo (come con `?sentarborde=1`), e per un tap che il bordo non
+   ha preso (rete, `need:gas`) la seduta si ricorda anche QUI per 25 min, cosi' la mesa non torna «libre» e non si siede due volte. */
+const ANF_BORDE = { on: false, ts: 0, ver: '' };
+const ANF_SEAT_VIGENCIA_MS = 25 * 60000, ANF_FRESCO_S = 90;
+function _anfFreno() {
+  const q = QS.get('anfborde');
+  try {
+    if (q === '0') { localStorage.setItem('anfi_borde_off', '1'); return true; }
+    if (q === '1') { localStorage.removeItem('anfi_borde_off'); return false; }
+    return localStorage.getItem('anfi_borde_off') === '1';
+  } catch (e) { return q === '0'; }
+}
+async function anfSaludLeva() {
+  if (Date.now() - ANF_BORDE.ts < 60000) return ANF_BORDE.on;
+  ANF_BORDE.ts = Date.now();
+  try {
+    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 4000);
+    const r = await fetch(BORDE_SALA.URL + '/salud', { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    const j = await r.json();
+    ANF_BORDE.on = !!(j && j.flags && String(j.flags.anfitriona_borde_on) === '1') && !_anfFreno();
+    ANF_BORDE.ver = (j && j.version) || '';
+  } catch (e) { ANF_BORDE.on = false; }   // /salud muto = spenta: mai una mappa del bordo senza che il bordo l'abbia detto
+  return ANF_BORDE.on;
+}
+function _anfSeatsLocales() { STATE.seatsLoc = (STATE.seatsLoc || []).filter(x => Date.now() - x.ts <= ANF_SEAT_VIGENCIA_MS); return STATE.seatsLoc; }
+/* la mappa del bordo + le sedute che il bordo ancora non mostra (suo ritardo o suo rifiuto) */
+function anfAplicaSeatsLocales(r) {
+  const loc = _anfSeatsLocales();
+  if (!loc.length || !r || !r.plazas) return r;
+  const ts0 = r.ts || 0;
+  r.plazas.forEach(p => (p.mesas || []).forEach(m => {
+    const l = loc.filter(x => String(x.mesa).toUpperCase() === String(m.mesa).toUpperCase()).sort((a, b) => b.ts - a.ts)[0];
+    if (!l) return;
+    if (m.estado === 'libre' || m.estado === 'presunta') {
+      m.estado = 'ocupada'; m.desde_iso = new Date(l.ts).toISOString(); m.pax = l.pax; m.pendiente = false;
+    }
+  }));
+  return r;
+}
+async function leerSalaBorde() {
+  if (!(await anfSaludLeva())) return null;
+  try {
+    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(BORDE_SALA.URL + '/estado/' + encodeURIComponent(CFG.LOCAL) + '?seccion=sala_vista&codigo=' + encodeURIComponent(STATE.codigo),
+      { headers: { 'X-Borde-Token': BORDE_SALA.T }, signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    const j = await r.json();
+    const d = j && j.ok && j.datos && j.datos.datos;
+    if (!d || !d.anfitriona || !Array.isArray(d.anfitriona.plazas)) return null;      // el bordo no la trae: GAS
+    const edad = typeof d.edad_borde_s === 'number' ? d.edad_borde_s : null;
+    if (edad == null || edad > ANF_FRESCO_S) return null;                              // dato del bordo viejo: GAS
+    return Object.assign({ ok: true, _fuente: 'bordo', _edad_s: edad }, d.anfitriona, { ts_datos: d.ts_datos });
+  } catch (e) { return null; }
+}
+function pintaFuente(r) {
+  const el = $('fuente'); if (!el) return;
+  el.textContent = r && r._fuente === 'bordo' ? '· bordo hace ' + (r._edad_s || 0) + ' s' : '· google';
+}
 async function refrescar(conSkeleton) {
   if (!STATE.codigo || !STATE.nombre) return;
   if (conSkeleton) $('mapaPlazas').innerHTML = '<div class="h">Cargando mapa…</div><div class="grid">' +
     '<div class="m cargando"></div>'.repeat(8) + '</div>';
   try {
+    const rB = await leerSalaBorde();
+    if (rB) { STATE.strikes = 0; STATE.sala = rB; $('offline').classList.remove('show'); render(anfAplicaSeatsLocales(rB)); pintaFuente(rB); return; }
     const r = await gasGet('getSalaAnfitriona', { codigo: STATE.codigo, nombre: STATE.nombre });
     if (!r || !r.ok) {
       // v1.3 · corazza: si esce solo dopo 3 conferme consecutive
@@ -410,7 +476,7 @@ async function refrescar(conSkeleton) {
       throw new Error(r && r.error || 'error');
     }
     STATE.strikes = 0;
-    STATE.sala = r; $('offline').classList.remove('show'); render(r);
+    STATE.sala = r; $('offline').classList.remove('show'); render(r); pintaFuente(r);
   } catch (e) { $('offline').classList.add('show'); }
 }
 
@@ -485,7 +551,7 @@ const SENTARBORDE_ON = (function () {
    è mai finale qui: a differenza del PIN di AUT-0412, non c'è un freno da
    rispettare — solo un dato mancante che Google può ancora accettare. */
 async function _sentarAlBorde(body) {
-  if (!SENTARBORDE_ON) return null;
+  if (!SENTARBORDE_ON && !(await anfSaludLeva())) return null;   // [1.10] con la mappa del bordo accesa le sedute vanno al bordo, o la mappa non le vede
   try {
     const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS');
     const ctrl = new AbortController();
@@ -511,7 +577,7 @@ async function confirmarSentar() {
       seat_uid: STATE.bsSeatUid };   // [AUT-0424] la chiave d'idempotenza, mai dal server
     const rB = await _sentarAlBorde(body);
     const r = rB || await gasPost('sentarMesa', body);
-    if (r && r.ok) { toast('ok', '✓ Mesa ' + r.mesa + ' · ' + r.pax + ' pax'); cerrarSheet(); }
+    if (r && r.ok) { toast('ok', '✓ Mesa ' + r.mesa + ' · ' + r.pax + ' pax'); (STATE.seatsLoc = STATE.seatsLoc || []).push({ mesa: String(r.mesa || STATE.bsMesa), pax: STATE.bsPax, ts: Date.now() }); cerrarSheet(); }
     else if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) { cerrarSheet(); _strikeTurno(); return; }   // v1.3 · corazza
     else toast('err', 'No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
