@@ -153,7 +153,7 @@ await mut('Reintentar non rilegge', "b.onclick = function(){ return pantalla9();
 await mut('un errore di PIN si legge come guasto della roja', "if (rjR.pin && (rjR.error === 'pin_caja_invalido' || rjR.error === 'pin_caja_requerido')) { return pantalla9(); }", "");
 await mut('la roja non si legge', "var rjR = await getCaja('roja_estado?dia=' + DIA_HOY + '&noches=' + NOCHES.join(','));", "var rjR = { ok: false, error: 'lettura_sconosciuta' };");
 await mut('un errore diventa «sin roja»', "      pantallaRojaError(rjR.error); return;", "");
-await mut('la roja se suma otra vez al contado (la regla vieja de AUT-0659)', "var c = Number(document.getElementById('contado').value || '') || 0;", "var c = (Number(document.getElementById('contado').value || '') || 0) + S;");
+await mut('la roja se suma otra vez al contado (la regla vieja de AUT-0659)', "var c = esUna ? inp + reserva : inp;", "var c = esUna ? inp + reserva : inp + S;");
 await mut('la reserva senza la roja ya sellada', "if (RESERVA.reserva !== null) RESERVA.reserva = RESERVA.nuevas + ROJA.sueltas_total;", "if (RESERVA.reserva !== null) RESERVA.reserva = RESERVA.nuevas;");
 await mut('la coperta si sigilla', "if ((nR.estado === 'da_sigillare' || nR.estado === 'sin_cuota') && nR.importo > 0) {", "if (true) {");
 await mut('la busta con la quota intera', "RESERVA.aSellar.push({ dia: nR.dia, importo: nR.importo,", "RESERVA.aSellar.push({ dia: nR.dia, importo: (nR.quota || nR.importo),");

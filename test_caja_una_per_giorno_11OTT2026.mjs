@@ -21,7 +21,7 @@ const ROJA09 = { ok: true, roja: true, reserva_pct: 5, sueltas: [{ uid: 'res-R1'
 const UIDN = { n: 0 };
 function mondo(SRC, o) {
   o = o || {}; const els = {}, toasts = [], posts = [], llamadas = [], ls = Object.assign({}, o.ls || {}); const app = { innerHTML: '' }; let u = UIDN.n;
-  const mk = (id) => (els[id] || (els[id] = { id, _v: undefined, get value() { if (this._v !== undefined) return this._v; const q = app.innerHTML.match(new RegExp('id="' + id + '"[^>]*value="([0-9]+)"')); return q ? q[1] : ''; }, set value(x) { this._v = x; }, innerHTML: '', onclick: null, disabled: false, addEventListener() {}, style: {}, dataset: {} }));
+  const mk = (id) => (els[id] || (els[id] = { id, _v: undefined, get value() { if (this._v !== undefined) return this._v; const q = app.innerHTML.match(new RegExp('id="' + id + '"[^>]*value="([0-9]+)"')); return q ? q[1] : ''; }, set value(x) { this._v = x; }, innerHTML: '', onclick: null, disabled: false, h: {}, addEventListener(ev, fn) { this.h[ev] = fn; }, style: {}, dataset: {} }));
   const ctx = { JSON, Math, Date, String, Number, Object, Array, Promise, console, setTimeout, clearTimeout, encodeURIComponent, app, DEPOSITO_PENDIENTE: null, MANANA: null, MULTI: false, NOCHES: [], PASO: 1, SOBRE_IDX: 0, PROVA: false, DIA_HOY: o.hoy || '2026-10-13', DIA_NOCHE: '2026-10-12',
     LOCAL: 'bks', BORDE: { bks: 'https://b.test' }, SES: { user: 'Mayra' }, barra: () => '[bar]', esc: (x) => String(x == null ? '' : x), fmt: (n) => '$' + n, fechaCorta: (d) => 'f:' + d, toast: (m, k) => toasts.push([m, k]),
     renderError: (a, b) => { ctx.app.innerHTML = '[error ' + a + ' ' + b + ']'; ctx.erroresR = (ctx.erroresR || 0) + 1; }, pantalla7() { llamadas.push('→pantalla7'); }, pantalla8() { llamadas.push('→pantalla8'); }, plantarBustaPrueba() {},
@@ -104,6 +104,30 @@ async function banco(SRC) {
   { const mA = await abreDeposito('2026-10-09'); await click(mA, 'salir'); const mB = await abreDeposito('2026-10-10'); await click(mB, 'salir');
     const ua = mA.posts.find((p) => p.verbo === 'deposito').uid_gesto, ub = mB.posts.find((p) => p.verbo === 'deposito').uid_gesto;
     t('④ ter dos cajas = dos uid distintos', ua !== ub, [ua, ub]); }
+  // ④-bis [11-ott · ADMIN «DENTRO O A PARTE» + V28 «campo a DOS numeros»] el campo editable es el CONTANTE PARA EL BANCO; la R la pone el sistema y NO se escribe
+  const calcDe = (m) => m.mk('calc').innerHTML;
+  const escribe = async (m, v) => { m.mk('contado').value = String(v); m.mk('contado').h.input(); };
+  { const m = await abreDeposito('2026-10-09'); const h = m.app.innerHTML, c = calcDe(m);
+    t('④-bis la etiqueta dice «Contante para el banco · lo que pones en la bolsa» y el valor por defecto es lo contado MENOS la roja (1.081.500 − 99.500 = 982.000)', /Contante para el banco/.test(h) && /id="contado"[^>]*value="982000"/.test(h), h.slice(0, 500));
+    t('④-bis b la pantalla muestra los dos numeros: «Contado de los sobres (con la roja adentro) $1081500» y «Vas a depositar $982000»', c.includes('Contado de los sobres <small>(con la roja adentro)</small></span><span class="v">$1081500') && c.includes('Vas a depositar</span><span class="v">$982000'), c);
+    t('④-bis c por defecto no hay aviso de ajuste', !/Lo contado menos la roja/.test(c)); }
+  { const m = await abreDeposito('2026-10-09'); await escribe(m, 982000); await click(m, 'salir'); const s2 = m.posts.find((p) => p.verbo === 'deposito');
+    t('④-bis d Mayra escribe el NETO (lo que le queda en la mano, 982.000): la salida es la correcta — contado lordo 1.081.500 · reserva 99.500 · a banco 982.000 (la R NO se quita dos veces)', s2.contado === 1081500 && s2.reserva === 99500 && s2.a_depositar === 982000, s2); }
+  { const m = await abreDeposito('2026-10-09'); await escribe(m, 1081500); const c = calcDe(m); await click(m, 'salir'); const s2 = m.posts.find((p) => p.verbo === 'deposito');
+    t('④-bis e si escribe el LORDO por error (1.081.500): a banco 1.081.500, y la pantalla lo SEÑALA como ajuste +99.500 sobre lo esperado (no lo bloquea)', s2.a_depositar === 1081500 && s2.contado === 1181000 && c.includes('Lo contado menos la roja es $982000') && c.includes('ajuste de +$99500'), [s2, c]); }
+  { const m = await abreDeposito('2026-10-09'); await escribe(m, 900000); const c = calcDe(m); await click(m, 'salir'); const s2 = m.posts.find((p) => p.verbo === 'deposito');
+    t('④-bis f menos de lo esperado (900.000): a banco 900.000, contado lordo 999.500, ajuste −82.000 señalado', s2.a_depositar === 900000 && s2.contado === 999500 && s2.reserva === 99500 && c.includes('ajuste de −$82000'), [s2, c]); }
+  for (const v of [0, 1, 50000, 982000, 1500000]) {
+    const m = await abreDeposito('2026-10-09'); await escribe(m, v); await click(m, 'salir'); const s2 = m.posts.find((p) => p.verbo === 'deposito');
+    t('④-bis g invariante para ' + v + ': a banco = lo escrito · contado lordo = lo escrito + la R · a banco = contado − reserva (la R no pasa nunca por el banco)', s2.a_depositar === v && s2.contado === v + s2.reserva && s2.a_depositar === s2.contado - s2.reserva, s2); }
+  { const m = await abreDeposito('2026-10-10', { get: (p) => (/^roja_estado/.test(p) ? { ok: true, roja: true, reserva_pct: 5, sueltas: [{ uid: 'res-R2', numero: 'R-0002', dia: '2026-10-10', importo: 66900 }], sueltas_total: 66900, noches: [{ dia: '2026-10-10', estado: 'coperta', importo: 0, quota: 66900, coperto: 66900, debito: 0 }] } : null) });
+    const decl = 96000 + 6000 + 114000; const h = m.app.innerHTML;
+    t('④-bis h la caja del 10 con la R-0002 ya sellada: por defecto ' + (decl - 66900) + ' para el banco (lo contado − 66.900), y la salida lo dice', new RegExp('id="contado"[^>]*value="' + (decl - 66900) + '"').test(h), h.slice(0, 400));
+    await click(m, 'salir'); const s2 = m.posts.find((p) => p.verbo === 'deposito');
+    t('④-bis i ...salida: a banco = ' + (decl - 66900) + ' · reserva 66.900 · contado lordo ' + decl, s2.a_depositar === decl - 66900 && s2.reserva === 66900 && s2.contado === decl, s2); }
+  { const m = mondo(SRC, {}); m.ctx.MULTI = true; m.ctx.NOCHES = ['2026-10-09']; m.ctx.MANANA = { sobres: SOBRES.filter((x) => x.dia === '2026-10-09').map((x) => Object.assign({}, x, { conteo: { contado: x.declarado } })), noEnc: [], dejadas: [] };
+    await m.ctx.F.pantalla9(); const h = m.app.innerHTML;
+    t('④-bis j SIN caja abierta (el vetro de ayer) el campo sigue siendo «Contado» y NO dice «Contante para el banco»', !/Contante para el banco/.test(h), h.slice(0, 300)); }
   // ⑥ UN N° para todas
   const ENC = [{ uid: 'dep-A', dia: '2026-10-09', a_depositar: 982000 }, { uid: 'dep-B', dia: '2026-10-10', a_depositar: 919500 }];
   { const m = mondo(SRC, { get: (p) => (/^depositos_en_camino/.test(p) ? { ok: true, depositos: ENC } : null) }); await m.ctx.F.pantallaCajas(); const h = m.ctx.app.innerHTML;
@@ -170,6 +194,11 @@ await mut('la vuelta se guarda aunque la anterior falle', "if (!r.ok) { toast(vu
 await mut('el toast dice Depositado antes del N°', "toast('Depositado · N° ' + nro, 'ok');\n    pantallaCajas();", "toast('Depositado', 'ok');\n    pantallaCajas();");
 await mut('la caja con salida escrita se reabre', "var cajas = PENDC.cajas_pendientes.filter(function(c){ return !enc.some(function(e){ return e.dia === String(c.dia || '').slice(0, 10); }); });", "var cajas = PENDC.cajas_pendientes;");
 await mut('la lectura en camino sin dia', "getCaja('depositos_en_camino?dia=' + DIA_HOY)", "getCaja('depositos_en_camino')");
+await mut('el valor por defecto olvida la roja', "(esUna ? contadoTotal - RESERVA.reserva : contadoTotal)", "(esUna ? contadoTotal : contadoTotal)");
+await mut('el contado lordo no suma la R', "var c = esUna ? inp + reserva : inp;", "var c = esUna ? inp : inp;");
+await mut('a banco es el lordo (la R pasa por el banco)', "var aDep = c - reserva;   // = inp con una caja", "var aDep = c;   // = inp con una caja");
+await mut('el ajuste no se señala', "(esUna && inp !== esperado ?", "(false ?");
+await mut('el vetro de ayer tambien pide el campo nuevo', "var esUna = !!CAJA_DIA;", "var esUna = true;");
 await mut('las salidas locales viejas no caducan', "if (srv !== null && !(Date.now() - (x.ts || 0) < 600000)) return;", "");
 await mut('el bordo no manda sobre las locales', "(srv || []).forEach(function(x){", "([]).forEach(function(x){");
 await mut('la roja pendiente no se retoma', "if (rpC && rpC.lista && rojaSiguiente(rpC) >= 0) { pantallaRojaNotte(rpC.dep, rpC.lista, rpC.hechas); return; }", "");
