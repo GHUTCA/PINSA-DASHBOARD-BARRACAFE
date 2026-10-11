@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.39.1</span>
+<span class="ver" id="ver">app_jl v1.40.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -740,7 +740,7 @@ function cjSaldosHtml() {
   const l = (cjSaldoOn() && CJ1.saldos) || [];
   if (!l.length) return '';
   return '<div class="card rossa"><h4>🔴 Mesas a saldo <span class="pill off">' + l.length + '</span></h4>' +
-    '<p class="mini" style="margin:0 0 6px">Pagaron una parte y el resto no es de nadie. El turno no se cierra así: ① cobra el resto · ② ELIMINAR o descuento con motivo · ③ si se fue sin pagar, ciérrala sin pago (queda firmado).</p>' +
+    '<p class="mini" style="margin:0 0 6px">Pagaron una parte y el resto no es de nadie. El turno no se cierra así: ① cobra el resto · ② ELIMINAR o descuento con motivo · ③ si se fue sin pagar, toca «Se fue sin pagar»: escribes el motivo, queda firmado, y cierras la mesa sin pago.</p>' +
     l.map(function (m) {
       const quien = (m.meseros && m.meseros.length) ? m.meseros.join(', ') : '';
       const hace = m.ts_ultimo_pago ? Math.max(0, Math.round((Date.now() - m.ts_ultimo_pago) / 60000)) : null;
@@ -748,8 +748,51 @@ function cjSaldosHtml() {
       return '<div class="cob">Mesa ' + esc(m.mesa) + ' <small style="color:#b9b2a4">' + esc(quien) + edad + ' · pagado ' + fmt(m.pagato != null ? m.pagato : (m.pagado || 0)) + ' de ' + fmt(m.consumo || 0) + '</small>' +
         '<span class="st2 mid">resto ' + fmt(m.resto || 0) + '</span>' +
         '<button class="btn acc" style="margin-left:8px;padding:6px 10px" onclick="mesaAbrir(' + _cjJs((m.meseros && m.meseros[0]) || '') + ',' + _cjJs(m.mesa) + ')">Cobrar / eliminar</button>' +
-        '<button class="btn gh" style="margin-left:8px;padding:6px 10px" onclick="cjSinPagoMesa(' + _cjJs(m.mesa) + ')">Se fue sin pagar</button></div>';
+        '<button class="btn gh" style="margin-left:8px;padding:6px 10px" onclick="cjSeFue(' + _cjJs(m.mesa) + ')">Se fue sin pagar</button></div>';
     }).join('') + '</div>';
+}
+/* ═══ [11-ott · AUT-0666 punto 2 · LA TERZA USCITA] «SE FUE SIN PAGAR» COME FATTO ═══════════════════════════════════════
+   Contratto di 🎛 BKP (`BKP 0666 47A9543 E IL CONTRATTO DEL SE FUE`): POST del gesto staff (/pedido-staff, come moverMesa) con action 'seFueSinPagar' e {mesa, uid_gesto, motivo, pin}. Il telefono NON manda importi, t0_sesion ne dia:
+   il bordo ricalcola il resto dalla stessa misura di /saldi. uid_gesto = chiave d'idempotenza, coniata QUI (dal lato che RIPETE) e tenuta fino all'esito. Risposte: {ok:true,mesa,resto} · {ok:true,ya:true} · no_a_saldo ·
+   motivo_corto · mesa_sin_pago_conflitto · errori del PIN (_ERR_APERTURA). ⚠️ Niente ripiego sul GAS (staffPost lo farebbe): il GAS non conosce questo verbo, e «provare dall'altra parte» non e un esito.
+   Il fatto dice PERCHE il denaro non c'e; NON chiude la mesa: la chiusura resta «Cerrar una mesa sin pago» (sinPagoJL), a cui si arriva subito dopo, gia compilata. Prima il fatto, poi la chiusura: se il fatto riesce e la
+   chiusura no, il JL riprova e il fatto risponde `ya`; il contrario perderebbe il perche. Leva = saldo_sin_padron_on: spenta, il bottone fa solo quello che faceva ieri (porta alla sezione). */
+var _SE = { uid: {}, enviando: false };
+const _ERR_SEFUE = { no_a_saldo: 'Esa mesa ya no está a saldo (la cerraron o la pagaron). Mírala de nuevo.', motivo_corto: 'El motivo es muy corto (mínimo 5 letras).',
+  mesa_sin_pago_conflitto: 'Esa mesa ya tiene un «se fue sin pagar» con OTRO motivo. Avisa a ADMIN.', accion_desconocida: 'El sistema todavía no acepta este gesto: avisa a ADMIN.', sin_gate: 'Falta el código del turno: abre la pestaña Turno.' };
+async function _seFuePost(body) {
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 8000);
+  try {
+    const r = await fetch(CFG.BORDE + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T),
+      { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ action: 'seFueSinPagar', local: CFG.LOCAL }, body)), signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    const j = await r.json().catch(function () { return null; });
+    if (j && typeof j.ok === 'boolean') return j;
+    return { ok: false, dudoso: true };   // 5xx o una risposta che non so leggere: il bordo potrebbe averlo scritto
+  } catch (e) { clearTimeout(to); return { ok: false, dudoso: true }; }
+}
+async function cjSeFue(mesa) {
+  mesa = String(mesa == null ? '' : mesa).trim();
+  if (!cjSaldoOn()) { cjSinPagoMesa(mesa); return; }   // leva spenta: la porta di ieri
+  if (_SE.enviando || !mesa) return;
+  const mm = (CJ1.saldos || []).filter(function (m) { return String(m.mesa) === mesa; })[0];
+  const motivo = String(prompt('Mesa ' + mesa + (mm ? ' · resto ' + fmt(mm.resto) : '') + ' — ¿Qué pasó? Escribe el motivo (mínimo 5 letras). Queda firmado a tu nombre.') || '').trim();
+  if (!motivo) return;   // «cancelar»: non si scrive niente
+  if (motivo.length < 5) { toast('warn', 'Escribe el motivo completo (mínimo 5 letras)'); return; }
+  const k = mesa + '|' + motivo; if (!_SE.uid[k]) _SE.uid[k] = _uidGesto();   // stesso uid finche non c'e un esito: un secondo tocco NON e un secondo fatto
+  _SE.enviando = true;
+  try {
+    const j = await _seFuePost({ mesa: mesa, uid_gesto: _SE.uid[k], motivo: motivo, pin: STATE.pin });
+    if (j.ok === true) {
+      delete _SE.uid[k];
+      CJ1.saldos = (CJ1.saldos || []).filter(function (m) { return String(m.mesa) !== mesa; });
+      toast('ok', '✓ Registrado' + (j.ya ? ' (ya estaba)' : '') + ' · ahora cierra la mesa ' + mesa + ' sin pago, aquí abajo.');
+      _SP.mesa = mesa; _SP.motivo = 'se_fue_sin_pagar'; tab(0);
+      setTimeout(function () { const e = $('spMesa'); if (e) { e.scrollIntoView({ block: 'center' }); spVer(); } }, 50);
+    } else if (j.dudoso) toast('warn', '⏳ El sistema está lento: puede que SÍ se haya registrado. Toca de nuevo «Se fue sin pagar»: no se duplica.');
+    else { delete _SE.uid[k]; toast('err', '✋ ' + (/^pin_(jl_)?bloqueado/.test(String(j.error)) ? 'Demasiados intentos con el PIN, espera ' + Math.ceil((j.faltan_s || 60) / 60) + ' min' : (_ERR_SEFUE[j.error] || _ERR_APERTURA[j.error] || j.mensaje || j.error || 'No se pudo'))); }
+  } catch (e) { toast('err', 'Sin conexión — no se registró nada'); }
+  finally { _SE.enviando = false; }
 }
 function cjFlag(n) { try { return new RegExp('"' + n + '"\\s*:\\s*"1"').test(JSON.stringify(STATE.salud || {})); } catch (e) { return false; } }
 async function cajaPost1(payload) {
