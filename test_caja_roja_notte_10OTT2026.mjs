@@ -15,7 +15,7 @@ const fnDe = (SRC, nome) => { const i = SRC.indexOf('function ' + nome + '('); i
   return SRC.slice(a, SRC.indexOf('\n}\n', i) + 3); };
 const S = (dia, nro, contado) => ({ sobre_nro: nro, dia, declarado: 0, conteo: { contado } });
 const NOCHES = ['2026-10-09', '2026-10-10', '2026-10-11', '2026-10-12'];
-const SOBRES = [S('2026-10-09', '1005', 982000), S('2026-10-10', '1006', 300000), S('2026-10-11', '1007', 250000), S('2026-10-12', '1008', 100000)];
+const SOBRES = [S('2026-10-09', '1005', 1081500), S('2026-10-10', '1006', 300000), S('2026-10-11', '1007', 250000), S('2026-10-12', '1008', 100000)];   // [11-ott · ADMIN «LA R STA DENTRO IL CONTATO»] el 09 contado = 1.081.500 (la R-0001 esta ADENTRO)
 const ROJA = (o) => Object.assign({ ok: true, roja: true, reserva_pct: 5, sueltas: [{ uid: 'res-vieja', numero: 'R-0001', dia: '2026-10-09', importo: 99500 }], sueltas_total: 99500,
   noches: [{ dia: '2026-10-09', estado: 'coperta', importo: 0, quota: 51214, coperto: 51214, debito: 0 }, { dia: '2026-10-10', estado: 'da_sigillare', importo: 40000, quota: 40000, coperto: 0, debito: 40000 },
     { dia: '2026-10-11', estado: 'da_sigillare', importo: 31250, quota: 31250, coperto: 0, debito: 31250 }, { dia: '2026-10-12', estado: 'da_sigillare', importo: 12800, quota: 12800, coperto: 0, debito: 12800 }] }, o || {});
@@ -48,19 +48,19 @@ async function banco(SRC) {
   { const m = mondo(SRC, {}); await m.ctx.F.pantalla9(); const c = calc(m);
     t('① la lettura va a `roja_estado` con il giorno e TUTTE le notti', /^roja_estado\?dia=2026-10-13&noches=2026-10-09,2026-10-10,2026-10-11,2026-10-12$/.test(m.ctx.rojaPath), m.ctx.rojaPath);
     t('① il totale e UNO: «Vas a depositar» = lo contato 1.632.000 − le buste nuove 84.050 = 1.547.950', /Vas a depositar<\/span><span class="v">\$1547950</.test(c), c.slice(0, 600));
-    t('① bis «Roja ya sellada (R-0001) + $99500» come riga e la reserva totale 183.550 (R-0001 + 3 buste nuove)', /Roja ya sellada \(R-0001\)<\/span><span class="v">\+ \$99500/.test(c) && /Reserva: roja ya sellada \+ 3 sobres nuevos<\/span><span class="v">\$183550/.test(c), c);
+    t('① bis «Roja ya sellada (R-0001) · sale de este contado $99500» (sin «+») y la reserva total 183.550 (R-0001 + 3 buste nuove)', /Roja ya sellada \(R-0001\) <small>· sale de este contado<\/small><\/span><span class="v">\$99500/.test(c) && !c.includes('+ $99500') && /Reserva: roja ya sellada \+ 3 sobres nuevos<\/span><span class="v">\$183550/.test(c), c);
     t('① ter la tabella «Por día» con la R-0001 sul 09: 1.081.500 − 99.500 → 982.000; e 10 · 11 · 12 con C − R', /2026-10-09<small>1 sobre · contado \$1081500 − reserva \$99500<\/small><\/span><span class="v">\$982000/.test(c) && /2026-10-10<small>1 sobre · contado \$300000 − reserva \$40000<\/small><\/span><span class="v">\$260000/.test(c) && /2026-10-12<small>1 sobre · contado \$100000 − reserva \$12800<\/small><\/span><span class="v">\$87200/.test(c), c);
     t('① quater nessun «Ajuste manual» (le righe sommano al totale: 1.731.500 lordo)', !/Ajuste manual/.test(c), c);
     t('① quinto la nota della cuota non c e (tutte le notti hanno quota)', !/Sin cuota/.test(c)); }
   // ② la salida e l'invariante
   { const m = mondo(SRC, {}); await m.ctx.F.pantalla9(); await click(m, 'salir'); const s = SALIDA(m);
-    t('② la salida: contado LORDO 1.731.500 · reserva 183.550 · a banca 1.547.950', s && s.contado === 1731500 && s.reserva === 183550 && s.a_depositar === 1547950, s);
+    t('② la salida: contado = lo contato 1.731.500 (la R esta adentro) · reserva 183.550 · a banca 1.547.950', s && s.contado === 1731500 && s.reserva === 183550 && s.a_depositar === 1547950, s);
     t('② bis l invariante di ADMIN: a banca = contado − reserva', s.a_depositar === s.contado - s.reserva);
     t('② quater la salida dice quali buste R gia sigillate CONTA (la R-0001): `rojas` per il legame alla vuelta', s.rojas && s.rojas.length === 1 && s.rojas[0].uid === 'res-vieja' && s.rojas[0].numero === 'R-0001' && s.rojas[0].importo === 99500, s.rojas);
     t('② ter la salida dice quali sobres porta (4)', s.sobres.length === 4 && s.sobres[0].dia === '2026-10-09', s.sobres); }
   for (const nuovo of ['1000000', '1632000', '1700000']) {
     const m = mondo(SRC, {}); await m.ctx.F.pantalla9(); m.mk('contado').value = nuovo; m.handlers.contado.input(); await click(m, 'salir'); const s = SALIDA(m); const neto = Number(nuovo);
-    t('② quater contado editato a ' + nuovo + ': a banca = contado − reserva, e = lo contato − le buste nuove (' + (neto - 84050) + ')', s.a_depositar === s.contado - s.reserva && s.a_depositar === neto - 84050 && s.contado === neto + 99500, s); }
+    t('② quater contado editato a ' + nuovo + ': a banca = contado − reserva (' + (neto - 183550) + '), y la R no se suma', s.a_depositar === s.contado - s.reserva && s.a_depositar === neto - 183550 && s.contado === neto, s); }
   { const m = mondo(SRC, {}); await m.ctx.F.pantalla9(); m.mk('contado').value = '50000'; m.handlers.contado.input();
     t('② quinto un contado che non copre le buste nuove: il bottone si spegne e lo dice', m.mk('salir').disabled === true && /no cubre la reserva/.test(calc(m)), calc(m)); }
   // ③ la sequenza
@@ -90,7 +90,7 @@ async function banco(SRC) {
     t('⑤ ter una salida pendiente DIVERSA: la secuenza ricordata non si impone (vuelta normale)', /En camino al banco/.test(m3.app.innerHTML) && !/busta \d de/.test(m3.app.innerHTML), m3.app.innerHTML); }
   // ⑥ leva spenta
   { const m = mondo(SRC, { roja: { ok: false, error: 'lettura_sconosciuta' }, reservas: { '2026-10-09': 49100, '2026-10-10': 40000, '2026-10-11': 31250, '2026-10-12': 12800 } }); await m.ctx.F.pantalla9(); await click(m, 'salir'); const s = SALIDA(m);
-    t('⑥ leva spenta (404 lettura_sconosciuta): la busta UNICA di sempre — contado netto, reserva = somma delle notti, nessuna «roja ya sellada»', s.contado === 1632000 && s.reserva === 133150 && s.a_depositar === 1498850 && !/Roja ya sellada/.test(calc(m)), s);
+    t('⑥ leva spenta (404 lettura_sconosciuta): la busta UNICA di sempre — contado netto, reserva = somma delle notti, nessuna «roja ya sellada»', s.contado === 1731500 && s.reserva === 133150 && s.a_depositar === 1598350 && !/Roja ya sellada/.test(calc(m)), s);
     t('⑥ bis e una sola schermata di busta (pantallaReservaSobre) col totale, non la secuenza', m.ctx.rendered.some((r) => r[0] === 'unica' && r[2] === 133150) && BUSTE(m).length === 0, m.ctx.rendered); }
   // ⑦ un errore che non e «sin roja»
   for (const [err, frase, conRetry] of [['pg_no_responde', /la base no contesta/, true], ['porta_non_installata', /todavía no está instalada/, false], ['sin_red', /sin conexión/, true], ['x_strano', /No pude leer la roja \(x_strano\)/, true]]) {
@@ -153,7 +153,7 @@ await mut('Reintentar non rilegge', "b.onclick = function(){ return pantalla9();
 await mut('un errore di PIN si legge come guasto della roja', "if (rjR.pin && (rjR.error === 'pin_caja_invalido' || rjR.error === 'pin_caja_requerido')) { return pantalla9(); }", "");
 await mut('la roja non si legge', "var rjR = await getCaja('roja_estado?dia=' + DIA_HOY + '&noches=' + NOCHES.join(','));", "var rjR = { ok: false, error: 'lettura_sconosciuta' };");
 await mut('un errore diventa «sin roja»', "      pantallaRojaError(rjR.error); return;", "");
-await mut('il contado non e lordo', "var c = (Number(document.getElementById('contado').value || '') || 0) + S;", "var c = (Number(document.getElementById('contado').value || '') || 0);");
+await mut('la roja se suma otra vez al contado (la regla vieja de AUT-0659)', "var c = Number(document.getElementById('contado').value || '') || 0;", "var c = (Number(document.getElementById('contado').value || '') || 0) + S;");
 await mut('la reserva senza la roja ya sellada', "if (RESERVA.reserva !== null) RESERVA.reserva = RESERVA.nuevas + ROJA.sueltas_total;", "if (RESERVA.reserva !== null) RESERVA.reserva = RESERVA.nuevas;");
 await mut('la coperta si sigilla', "if ((nR.estado === 'da_sigillare' || nR.estado === 'sin_cuota') && nR.importo > 0) {", "if (true) {");
 await mut('la busta con la quota intera', "RESERVA.aSellar.push({ dia: nR.dia, importo: nR.importo,", "RESERVA.aSellar.push({ dia: nR.dia, importo: (nR.quota || nR.importo),");

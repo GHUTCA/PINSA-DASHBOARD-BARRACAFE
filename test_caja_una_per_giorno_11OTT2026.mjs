@@ -89,13 +89,13 @@ async function banco(SRC) {
     t('④ bis no mira `deposito_pendiente` (las salidas en camino viven en la lista)', !m.llamadas.some((x) => /^deposito_pendiente/.test(x)), m.llamadas);
     await click(m, 'salir'); const s = m.posts.find((p) => p.verbo === 'deposito');
     t('④ ter la salida del 09: `caja_dia` = 09 y SOLO sus dos sobres', s && s.caja_dia === '2026-10-09' && s.sobres.length === 2 && s.sobres.every((x) => x.dia === '2026-10-09'), s);
-    t('④ quater contado = lo contado 1.081.500 + la R-0001 99.500; reserva 99.500 (la 09 esta coperta: ninguna busta nueva); a banca 1.081.500', s.contado === 1181000 && s.reserva === 99500 && s.a_depositar === 1081500, s);
+    t('④ quater contado = lo contado 1.081.500 (la R-0001 esta ADENTRO: ADMIN «LA R STA DENTRO IL CONTATO»); reserva 99.500 (la 09 esta coperta: ninguna busta nueva); a banco 982.000', s.contado === 1081500 && s.reserva === 99500 && s.a_depositar === 982000, s);
     t('④ quinquies la salida lleva la R-0001 en `rojas` (la lectura le dio solo esa)', s.rojas && s.rojas.length === 1 && s.rojas[0].numero === 'R-0001', s.rojas);
     t('④ sexies el uid de la salida depende del DIA de la caja (dos cajas, dos salidas)', /^dep-/.test(s.uid_gesto) && Object.keys(m.ctx.UIDS_GESTO || {}).some((k) => k.indexOf('deps|2026-10-09|') === 0), Object.keys(m.ctx.UIDS_GESTO || {})); }
   { const m = await abreDeposito('2026-10-09'); await click(m, 'salir');
     t('⑤ tras la salida: vuelve a la LISTA (no a una pantalla de deposito sumada)', /Las cajas/.test(m.ctx.app.innerHTML) || m.llamadas.some((x) => /^pendientes/.test(x)), m.llamadas.slice(-3));
     const l = JSON.parse(m.ls.caja_en_camino_v1 || '[]');
-    t('⑤ bis la salida queda en la lista de ESTE telefono («en camino»), con su dia y su a-banca', l.length === 1 && l[0].dia === '2026-10-09' && l[0].a_depositar === 1081500 && l[0].uid === m.posts[0].uid_gesto, l); }
+    t('⑤ bis la salida queda en la lista de ESTE telefono («en camino»), con su dia y su a-banco 982.000', l.length === 1 && l[0].dia === '2026-10-09' && l[0].a_depositar === 982000 && l[0].uid === m.posts[0].uid_gesto, l); }
   { const m = await abreDeposito('2026-10-10', { get: (p) => (/^roja_estado/.test(p) ? { ok: true, roja: true, reserva_pct: 5, sueltas: [], sueltas_total: 0, noches: [{ dia: '2026-10-10', estado: 'da_sigillare', importo: 66900, quota: 66900, coperto: 0, debito: 66900 }] } : null) });
     await click(m, 'salir'); const s = m.posts.find((p) => p.verbo === 'deposito');
     t('④ la caja del 10: caja_dia 10, sus 3 sobres, contado 216.000-… (declarado, nada contado: se usa el declarado), reserva 66.900 de SU noche', s.caja_dia === '2026-10-10' && s.sobres.length === 3 && s.reserva === 66900 && s.contado - s.reserva === s.a_depositar, s);

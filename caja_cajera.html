@@ -310,7 +310,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return senzaEsitoHtml() + (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.10.1</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.10.2</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -988,15 +988,15 @@ async function pantalla8() {
    PURA: no calcula nada nuevo (el contado de cada sobre y la retencion de cada noche ya se leian); solo los agrupa por dia. */
 function desgloseDeposito(sobres, porNoche, noches, contadoTotal, sueltas) {
   var dias = (noches || []).slice().sort();
-  /* [10-ott · AUT-0659] las buste R ya selladas (la R-0001) pertenecen a su noche: su monto es parte del contado BRUTO de esa noche y de su reserva — 09: 982.000 + 99.500 − 99.500 = 982.000 */
+  /* [10-ott · AUT-0659 · CORREGIDO 11-ott por ADMIN] las buste R ya selladas (la R-0001) pertenecen a su noche y salen DE SU CONTADO (no se suman): 09: contado 1.081.500 − reserva 99.500 = 982.000 */
   var sPorDia = {}, sFuera = [];
   (sueltas || []).forEach(function(r){ if (dias.indexOf(r.dia) >= 0) sPorDia[r.dia] = (sPorDia[r.dia] || 0) + r.importo; else sFuera.push(r); });
   var filas = dias.map(function(d){
     var mios = (sobres || []).filter(function(x){ return (x.dia || '') === d; });
-    var contado = mios.reduce(function(a, x){ return a + (x.conteo ? (x.conteo.contado || 0) : (x.declarado || 0)); }, 0) + (sPorDia[d] || 0);
+    var contado = mios.reduce(function(a, x){ return a + (x.conteo ? (x.conteo.contado || 0) : (x.declarado || 0)); }, 0);   // [AUT-0667] la roja ya sellada esta DENTRO de este contado
     var reserva = ((porNoche && porNoche[d]) || 0) + (sPorDia[d] || 0);
     return { dia: d, n: mios.length, contado: contado, reserva: reserva, neto: contado - reserva };
-  }).concat(sFuera.map(function(r){ return { dia: r.dia, n: 0, contado: r.importo, reserva: r.importo, neto: 0, roja: r.numero }; }));
+  }).concat(sFuera.map(function(r){ return { dia: r.dia, n: 0, contado: 0, reserva: r.importo, neto: -r.importo, roja: r.numero }; }));
   var sumaContado = filas.reduce(function(a, x){ return a + x.contado; }, 0);
   return { filas: filas, ajuste: (Number(contadoTotal) || 0) - sumaContado };
 }
@@ -1177,14 +1177,14 @@ async function pantalla9() {
   }
   app.innerHTML = barra(true) +
     '<div class="kick">El depósito</div><h1>Antes de salir</h1><p class="sd">Los dos números se escriben ahora</p>' +
-    '<p class="lb">' + (ROJA && ROJA.sueltas_total > 0 ? 'Contado de los sobres (editable si hace falta)' : 'Contado (editable si hace falta)') + '</p><input class="inp" id="contado" inputmode="numeric" value="' + contadoTotal + '">' +
+    '<p class="lb">' + (ROJA && ROJA.sueltas_total > 0 ? 'Contado de los sobres, con la roja adentro (editable si hace falta)' : 'Contado (editable si hace falta)') + '</p><input class="inp" id="contado" inputmode="numeric" value="' + contadoTotal + '">' +
     '<div id="calc"></div>' + legamiHtml(ROJA) +
     ((((MANANA.noEnc || []).length + (MANANA.dejadas || []).length) > 0) ? '<div class="note bad"><b>' + ((MANANA.noEnc || []).length + (MANANA.dejadas || []).length) + ' sobre(s) NO van en este depósito</b><br>No encontrados o dejados para después. Si en realidad los llevas, vuelve y cuéntalos.</div>' : '') +
     '<div class="note">El camino al banco es el único tramo sin testigo. Por eso los números quedan escritos <b>antes</b> de que salgas.</div>' +
     '<button class="btn acc" id="salir">Salir al banco</button>';
   function recalc() {
     var S = ROJA ? ROJA.sueltas_total : 0;
-    var c = (Number(document.getElementById('contado').value || '') || 0) + S;   // [AUT-0659] BRUTO = lo contado + la roja ya sellada (que sale del mismo contante)
+    var c = Number(document.getElementById('contado').value || '') || 0;   // [AUT-0667 · ADMIN dom 11 «LA R STA DENTRO IL CONTATO»] el contado de los sobres YA CONTIENE la roja: sale de ahi, no se suma (a banco = contado − reserva; la R no pasa nunca por el banco)
     /* la retención es un PESO FIJO (de la propina no efectivo de anoche), no
        un porcentaje del contado: si ella ajusta el contado, cambia cuánto
        deposita, nunca cuánto se retiene. */
@@ -1192,7 +1192,7 @@ async function pantalla9() {
     var aDep = c - reserva;
     document.getElementById('calc').innerHTML =
       '<div class="rows">' + (MULTI ? '<div class="r"><span class="n">Sobres que lleva</span><span class="v">' + (MANANA.sobres || []).length + ' · ' + NOCHES.length + (NOCHES.length === 1 ? ' noche' : ' noches') + '</span></div>' : '') +
-      (S > 0 ? '<div class="r"><span class="n">Roja ya sellada (' + esc(ROJA.sueltas.map(function(x){ return x.numero; }).join(', ')) + ')</span><span class="v">+ ' + fmt(S) + '</span></div>' : '') +
+      (S > 0 ? '<div class="r"><span class="n">Roja ya sellada (' + esc(ROJA.sueltas.map(function(x){ return x.numero; }).join(', ')) + ') <small>· sale de este contado</small></span><span class="v">' + fmt(S) + '</span></div>' : '') +
       '<div class="r"><span class="n">' + (ROJA ? 'Reserva: roja ya sellada + ' + RESERVA.aSellar.length + (RESERVA.aSellar.length === 1 ? ' sobre nuevo' : ' sobres nuevos') : 'A la reserva (' + RESERVA.reserva_pct + '% de la propina no efectivo' + (MULTI && NOCHES.length > 1 ? ' de esas noches' : '') + ')') + '</span><span class="v">' + fmt(reserva) + '</span></div>' +
       '<div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>' +
       (ROJA && RESERVA.sinCuota.length ? '<div class="note">Sin cuota de ADMIN para ' + esc(RESERVA.sinCuota.map(fechaCorta).join(', ')) + ': se usa el cálculo del sistema.</div>' : '') +
