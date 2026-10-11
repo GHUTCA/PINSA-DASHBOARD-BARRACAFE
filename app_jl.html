@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.38.4</span>
+<span class="ver" id="ver">app_jl v1.39.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -705,6 +705,52 @@ function cjAtto1On() { try { return /"caja_atto1_on"\s*:\s*"1"/.test(JSON.string
 function cjAtto3On() { try { return /"caja_atto3_on"\s*:\s*"1"/.test(JSON.stringify(STATE.salud || {})); } catch (e) { return false; } }
 /* [08-ott · v1.36.0 · AUT-0613 · EL JL A CERO GESTOS] ciò che il JL puo dimenticare lo fa il sistema, o il sistema lo mette davanti e non lo lascia passare. Tre leve del bordo,
    lette dal /salud come le altre: senza /salud o a "0" ⇒ il vetro e quello di ieri (v1.35.6), byte per byte nel comportamento. */
+/* ═══ [11-ott · AUT-0666 punto 2 · 🎛 V28 `AUT 0666 NESSUN SALDO SENZA PADRONE` · 🎛 BKP `BKP 0666 PUNTO 2 D1716DE IL CANCELLO E LA PORTA`] NESSUN TURNO SI CHIUDE CON UNA MESA A SALDO ═══════════════════════════════════
+   Un PAGO PARZIALE lascia un resto che non e di nessuno (la 100 del 10-ott: 161.970 − 41.970 = 120.000, nessun fatto che dica perche). Il bordo espone `GET /saldi/<local>` (token di lettura, sempre vivo) con le mesas a saldo;
+   il cierre del turno del JL vive sul GAS, quindi questo vetro CHIEDE prima di chiudere/aprire (aprire il turno successivo CHIUDE il precedente) e non va avanti se ce n'e una. Leva = la stessa del cancello del bordo
+   (/salud → corte_saldo_on): spenta, nessuna lettura e nessun blocco = il vetro di ieri. «NON SO NON BLOCCA» (regola di BKP): una lettura che non riesce — rete, 5xx, `sin_hechos` — avvisa e NON ferma. */
+function cjSaldoOn() { return cjFlag('corte_saldo_on'); }
+async function cjSaldosLeer() {
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 5000);
+  try {
+    const r = await fetch(CFG.BORDE + '/saldi/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, cache: 'no-store', signal: ctrl.signal });
+    clearTimeout(to);
+    const j = await r.json().catch(function () { return null; });
+    if (!r.ok || !j || j.ok !== true || !Array.isArray(j.mesas)) return { ok: false };
+    return { ok: true, mesas: j.mesas, ignote: Array.isArray(j.ignote) ? j.ignote : [] };
+  } catch (e) { clearTimeout(to); return { ok: false }; }
+}
+/* il gate: { bloquea, nosabe, mesas }. Leva spenta => no. Lettura fallita => nosabe (avvisa, non ferma). Con mesas => bloquea e la scheda si ridisegna. */
+async function cjSaldosGate() {
+  if (!cjSaldoOn()) return { bloquea: false, nosabe: false, mesas: [] };
+  const sd = await cjSaldosLeer();
+  if (!sd.ok) return { bloquea: false, nosabe: true, mesas: [] };
+  CJ1.saldos = sd.mesas;
+  return { bloquea: sd.mesas.length > 0, nosabe: false, mesas: sd.mesas };
+}
+function cjSaldosAviso(sg) {
+  if (sg.bloquea) {
+    toast('err', '✋ Hay ' + sg.mesas.length + (sg.mesas.length === 1 ? ' mesa a saldo' : ' mesas a saldo') + ': el turno no se cierra con un resto sin dueño. Míralas en «Caja».');
+    try { pintaTab(); } catch (e) {}
+  } else if (sg.nosabe) toast('warn', 'No pude revisar los saldos — sigue, pero míralos a mano.');
+}
+/* un argomento JS dentro un onclick="…": JSON (stringa JS valida, con \" e \ gia messi) POI escapato per l'HTML — l'attributo viene decodificato PRIMA di girare, quindi un ' escapato da esc() tornerebbe apice vero (_cjArg ha questo difetto, qui non lo ereditiamo) */
+function _cjJs(x) { return esc(JSON.stringify(String(x == null ? '' : x))); }
+function cjSaldosHtml() {
+  const l = (cjSaldoOn() && CJ1.saldos) || [];
+  if (!l.length) return '';
+  return '<div class="card rossa"><h4>🔴 Mesas a saldo <span class="pill off">' + l.length + '</span></h4>' +
+    '<p class="mini" style="margin:0 0 6px">Pagaron una parte y el resto no es de nadie. El turno no se cierra así: ① cobra el resto · ② ELIMINAR o descuento con motivo · ③ si se fue sin pagar, ciérrala sin pago (queda firmado).</p>' +
+    l.map(function (m) {
+      const quien = (m.meseros && m.meseros.length) ? m.meseros.join(', ') : '';
+      const hace = m.ts_ultimo_pago ? Math.max(0, Math.round((Date.now() - m.ts_ultimo_pago) / 60000)) : null;
+      const edad = hace == null ? '' : ' · hace ' + (hace >= 90 ? Math.round(hace / 60) + ' h' : hace + ' min');
+      return '<div class="cob">Mesa ' + esc(m.mesa) + ' <small style="color:#b9b2a4">' + esc(quien) + edad + ' · pagado ' + fmt(m.pagato != null ? m.pagato : (m.pagado || 0)) + ' de ' + fmt(m.consumo || 0) + '</small>' +
+        '<span class="st2 mid">resto ' + fmt(m.resto || 0) + '</span>' +
+        '<button class="btn acc" style="margin-left:8px;padding:6px 10px" onclick="mesaAbrir(' + _cjJs((m.meseros && m.meseros[0]) || '') + ',' + _cjJs(m.mesa) + ')">Cobrar / eliminar</button>' +
+        '<button class="btn gh" style="margin-left:8px;padding:6px 10px" onclick="cjSinPagoMesa(' + _cjJs(m.mesa) + ')">Se fue sin pagar</button></div>';
+    }).join('') + '</div>';
+}
 function cjFlag(n) { try { return new RegExp('"' + n + '"\\s*:\\s*"1"').test(JSON.stringify(STATE.salud || {})); } catch (e) { return false; } }
 async function cajaPost1(payload) {
   const ctrl = new AbortController();
@@ -740,6 +786,7 @@ async function cjAtto1Giro() {
     const r = await cajaPost1({ verbo: 'estado', pin_jl: STATE.pin });
     if (r && r.ok) { CJ1.st = r; CJ1.ts = Date.now(); CJ1.err = ''; }
     else CJ1.err = (r && r.error) || 'sin_respuesta';
+    if (cjSaldoOn()) { const sd = await cjSaldosLeer(); if (sd.ok) CJ1.saldos = sd.mesas; }   // [AUT-0666] la scheda del saldo se ve ANTES de querer cerrar
   } catch (e) { CJ1.err = e && e.message === 'timeout' ? 'timeout' : 'sin_conexion'; }
   CJ1.inVolo = false;
   if (TAB === 2) pintaTab();
@@ -871,7 +918,8 @@ async function cjCieIgualEnviar(btn) {
   const pin = String(CJ1.cie.pin || '').trim();
   if (motivo.length < 3) { toast('warn', 'Escribe por qué cierras así'); return; }
   if (!pin) { toast('warn', 'Escribe tu PIN'); return; }
-  if (btn) btn.disabled = true;
+  if (btn) btn.disabled = true;   // [AUT-0666] prima del gate (vedi cjCieEnviar)
+  const sgI = await cjSaldosGate(); if (sgI.bloquea || sgI.nosabe) { cjSaldosAviso(sgI); if (sgI.bloquea) { if (btn) btn.disabled = false; return; } }   // [AUT-0666] «cerrar igual» NO salta un saldo
   CJ1.enviando = true;
   const turno = (($('cj1CieTurno') || {}).value) || 'PM';
   const st = CJ1.st || {};
@@ -973,7 +1021,8 @@ async function cjCieEnviar(btn) {
   const st = CJ1.st || {};
   const mesas = _cjMesasAbiertas();
   if (mesas.length) { toast('warn', 'Quedan mesas abiertas'); return; }
-  if (btn) btn.disabled = true;
+  if (btn) btn.disabled = true;   // [AUT-0666] prima del gate: l'attesa (fino a 5 s) non ammette un secondo tocco
+  const sgC = await cjSaldosGate(); if (sgC.bloquea || sgC.nosabe) { cjSaldosAviso(sgC); if (sgC.bloquea) { if (btn) btn.disabled = false; return; } }   // [AUT-0666]
   const turno = (($('cj1CieTurno') || {}).value) || 'PM';
   let monto = 0; (st.sobres || []).forEach(function (x) { monto += (+x.suma_ritiri || 0); });
   if (!CJ1.cieUid) CJ1.cieUid = cajaNuevoUid('CJ-CIE');
@@ -1086,6 +1135,7 @@ function cjAtto1Html() {
       '<button class="btn acc" onclick="cjSobAuto(this,\'' + esc(pv.dia) + '\')"' + (CJ1.enviando ? ' disabled' : '') + '>Hacer el sobre ahora</button></div>';
   }
   /* ④ EL CIERRE — ninguna mesa queda abierta; sin el total de la caja fuerte a la vista */
+  h += cjSaldosHtml();   // [AUT-0666] las mesas a saldo, con el resto y las tres salidas
   const mesas = _cjMesasDetalle();
   const nGar = (st.meseros || []).length, nCer = (st.meseros || []).filter(function (m) { return !(m.en_mano > 0); }).length;
   if (mesas.length) {
@@ -2116,6 +2166,7 @@ async function _aperturaPorBordo(uid) {
 async function abrirT() {
   if (!confirm('¿Abrir el turno de hoy?')) return;
   try {
+    const sgA = await cjSaldosGate(); if (sgA.bloquea || sgA.nosabe) { cjSaldosAviso(sgA); if (sgA.bloquea) return; }   // [AUT-0666] abrir el turno nuevo CIERRA el anterior: no con un saldo sin dueño
     const bd = await _aperturaPorBordo(_uidGesto());
     if (bd.usado) {
       if (bd.ok) { toast('ok', '🔑 Turno abierto · código ' + bd.codigo + (bd.ya ? ' (ya estaba' + (bd.por ? ' · abierto por ' + bd.por : '') + ')' : '')); giroTurno(); return; }
