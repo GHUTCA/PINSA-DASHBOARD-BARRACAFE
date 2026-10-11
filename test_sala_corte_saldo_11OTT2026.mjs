@@ -10,7 +10,7 @@ let ok = 0, ko = 0, muto = false; const t = (n, c, i) => { c ? ok++ : (ko++, mut
 const fnDe = (SRC, nome) => { const i = SRC.indexOf('function ' + nome + '('); if (i < 0) throw new Error(nome); const a = SRC.slice(Math.max(0, i - 6), i) === 'async ' ? i - 6 : i; return SRC.slice(a, SRC.indexOf('\n}\n', i) + 3); };
 function mondo(SRC, o) {
   const ev = { render: [], bordo: [], gas: [], hechos: [], paso4: [], toasts: [] };
-  const ctx = { CORTE_BORDE_ON: !!o.corteBorde, CAJA_ATTO1_ON: o.atto1 !== false, CORTE_SALDO_ON: !!o.saldoOn,
+  const ctx = { CORTE_BORDE_ON: !!o.corteBorde, CAJA_ATTO1_ON: o.atto1 !== false, SALDO_SIN_PADRON_ON: !!o.saldoOn,
     CIE: { enviando: false, paso: 2, uidMonto: 5000, motivo: '', pasarMesas: !!o.pasar, res: null, franja: 'noche' },
     _cieMontoValor: () => 5000, $: () => null, toast: (k, m) => ev.toasts.push([k, m]), esc: (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), fmtPrice: (n) => '$' + n, STATE: { codigo: 'C1', nombre: 'Anthony' },
     _cieUid: () => 'uid-1', _cieUidKey: () => 'k', localStorage: { removeItem() {} }, Date, Math, Number, Object, Array, Promise, String, JSON, console,
@@ -54,7 +54,7 @@ async function banco(SRC) {
   { const m = mondo(SRC, {}); m.ctx.F._cieSaldo(SALDO({ mesas: [{ mesa: '<b>9</b>', consumo: 1, pagado: 0, resto: 1 }] }));
     t('⑥ quater il numero di mesa e escapato (nessun HTML dal bordo)', !/<b>9<\/b>/.test(m.ev.render[0]) && /&lt;b&gt;9/.test(m.ev.render[0]), m.ev.render[0]); }
   // ⑦ cablaggio
-  t('⑦ la leva del vetro nasce spenta e si legge da /salud (corte_saldo_on)', /var CORTE_SALDO_ON = false;/.test(SRC) && /CORTE_SALDO_ON = String\(cercaK\(j, 'corte_saldo_on'\)\) === '1';/.test(SRC));
+  t('⑦ la leva del vetro nasce spenta e si legge da /salud (saldo_sin_padron_on)', /var SALDO_SIN_PADRON_ON = false;/.test(SRC) && /SALDO_SIN_PADRON_ON = String\(cercaK\(j, 'saldo_sin_padron_on'\)\) === '1';/.test(SRC));
   t('versione >= 3.228.0', /sala v3\.(228\.\d|22[9]\.\d|2[3-9]\d\.\d)/.test(SRC));
 }
 await banco(SRC0);
@@ -63,8 +63,8 @@ const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log
   t('mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
 await mut('il saldo del corte del bordo non ferma', "if (rb && rb.error === 'mesa_a_saldo') rbSaldo = rb;   // [AUT-0666] definitivo", "if (false) rbSaldo = rb;");
 await mut('il saldo non e definitivo: il GAS chiude', "if (rbSaldo) { _cieSaldo(rbSaldo); CIE.enviando = false; return; }", "if (rbSaldo) { _cieSaldo(rbSaldo); CIE.enviando = false; }");
-await mut('il passa-mesas non aspetta il bordo', "} else if (CORTE_SALDO_ON) {", "} else if (false) {");
-await mut('il passa-mesas aspetta anche a leva spenta', "} else if (CORTE_SALDO_ON) {", "} else if (true) {");
+await mut('il passa-mesas non aspetta il bordo', "} else if (SALDO_SIN_PADRON_ON) {", "} else if (false) {");
+await mut('il passa-mesas aspetta anche a leva spenta', "} else if (SALDO_SIN_PADRON_ON) {", "} else if (true) {");
 await mut('un errore qualunque ferma il corte', "if (rb2 && rb2.error === 'mesa_a_saldo') rbSaldo = rb2;", "if (rb2) rbSaldo = rb2;");
 await mut('il bordo che lancia rompe il corte', "const rb2 = await _cerrarMeseroAlBorde(_cierreBody).catch(function () { return null; });", "const rb2 = await _cerrarMeseroAlBorde(_cierreBody);");
 await mut('il bottone resta spento', "if (rbSaldo) { _cieSaldo(rbSaldo); CIE.enviando = false; return; }", "if (rbSaldo) { _cieSaldo(rbSaldo); return; }");
@@ -73,6 +73,6 @@ await mut('manca il totale', "con ' + esc(fmtPrice(tot)) + ' por cerrar", "por c
 await mut('manca l uscita del JL', "si el cliente <b>se fue sin pagar</b>, díselo al JL: él lo firma.", "");
 await mut('manca il testimone', "bordeHecho('corte_rechazado_saldo'", "void ('corte_rechazado_saldo'");
 await mut('mesa non escapata', "<span>Mesa ' + esc(m.mesa) + ' <small>pagado", "<span>Mesa ' + m.mesa + ' <small>pagado");
-await mut('la leva non si legge', "CORTE_SALDO_ON = String(cercaK(j, 'corte_saldo_on')) === '1';", "");
-await mut('la leva nasce accesa', "var CORTE_SALDO_ON = false;", "var CORTE_SALDO_ON = true;");
+await mut('la leva non si legge', "SALDO_SIN_PADRON_ON = String(cercaK(j, 'saldo_sin_padron_on')) === '1';", "");
+await mut('la leva nasce accesa', "var SALDO_SIN_PADRON_ON = false;", "var SALDO_SIN_PADRON_ON = true;");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
