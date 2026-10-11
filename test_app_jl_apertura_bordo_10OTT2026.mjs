@@ -13,7 +13,7 @@ function mondo(SRC, o) {
   const toasts = [], fetches = [], gas = []; let giro = 0, uidN = 0;
   const ctx = { JSON, Math, Date, String, Number, Object, Array, Promise, console, encodeURIComponent, AbortController, setTimeout, clearTimeout,
     CFG: { BORDE: 'https://b.test', T: 'tok', LOCAL: 'BKS' }, LOC_PG: { BKS: 'BKS', RIESCO: 'RSC' }, STATE: { pin: '4321', user: 'Pedro' },
-    confirm: () => o.confirm !== false, toast: (k, m) => toasts.push([k, m]), giroTurno: () => { giro++; }, _uidGesto: () => 'uid-' + (++uidN),
+    cjSaldosGate: async () => ({ bloquea: false, nosabe: false, mesas: [] }), cjSaldosAviso: () => {}, confirm: () => o.confirm !== false, toast: (k, m) => toasts.push([k, m]), giroTurno: () => { giro++; }, _uidGesto: () => 'uid-' + (++uidN),
     gasPost: async (a, b) => { gas.push([a, b]); return o.gas || { ok: true, codigo: '9999' }; },
     fetch: async (url, opt) => { fetches.push([url, opt]); const r = o.fetch; if (r instanceof Error) throw r; return { status: r.status || 200, ok: (r.status || 200) < 400, json: async () => { if (r.illeggibile) throw new Error('x'); return r.body; } }; } };
   vm.createContext(ctx);

@@ -11,7 +11,7 @@ vero('los scripts inline compilan (' + comp + '/' + scripts.length + ')', comp =
 vero('la versión es 1.36.0 o posterior (la 1.37.0 añade «¿Quién entrega?», banco propio)', /id="ver">app_jl v1\.(3[6-9]|[4-9]\d)\.\d</.test(H));
 const fx = (nome, async_) => { const m = H.match(new RegExp((async_ ? 'async ' : '') + 'function ' + nome + '\\([^)]*\\) \\{[\\s\\S]*?\\n\\}')); if (!m) throw new Error('falta ' + nome); return m[0]; };
 const one = (nome) => { const m = H.match(new RegExp('function ' + nome + '\\([^)]*\\) \\{[^\\n]*\\}')); if (!m) throw new Error('falta ' + nome); return m[0]; };
-const src = [one('cjFlag'), one('cjRetOtra'), fx('cjRetTodo', true), fx('cjSobAuto', true), one('cjCieIgualAbrir'), one('cjCieIgualCerrar'), one('cjCieSet'), fx('cjCieIgualEnviar', true),
+const src = [one('cjFlag'), one('cjSaldoOn'), fx('cjSaldosGate', true), fx('cjSaldosAviso'), fx('cjSaldosHtml'), one('cjRetOtra'), fx('cjRetTodo', true), fx('cjSobAuto', true), one('cjCieIgualAbrir'), one('cjCieIgualCerrar'), one('cjCieSet'), fx('cjCieIgualEnviar', true),
   fx('_cjPendientes'), one('_cjRiga'), one('_cjMmSs'), one('_cjArg'), one('_cjEntregaOn'), fx('_cjEntrega'), fx('_cjEnManoDe'), fx('_cjEntregaSel'), fx('_cjReparto'), fx('cjAtto1Html')].join('\n');
 function mundo(salud, CJ1, extra) {
   const W = { posts: [], toasts: [], pinta: 0, risposta: null };
