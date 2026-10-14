@@ -1108,7 +1108,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.226.2 · vetro</span>
+      <span class="ver" id="ver">sala v3.226.3 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -8513,7 +8513,7 @@ async function vPrecuentaImprimir(mesa, btn, parte, pinJl) {
            sessione» è un fatto che spegne l'avviso di giornata, e vale quanto
            il suo contrario. Senza questa riga la guardia resta cieca. */
         STATE.pcYaPag = STATE.pcYaPag || {};
-        STATE.pcYaPag[mesa] = r.ya_pagado || { n: 0, monto: 0, pagos: [] };
+        _yaPagRicorda(mesa, r.ya_pagado);   // [AUT-0674] assente non è zero
       }
       vhojaCerrar();
       toast('ok', '🧾 ' + (r.folio || '') + (parte ? ' · parte de ' + parte.titulo : '') +
@@ -9187,6 +9187,7 @@ function _salaMuertaPinta(edadMs) {
       CORTE_BORDE_ON = String(cercaK(j, 'corte_borde_on')) === '1';         // [08-ott · 1.6]
       CAJA_ATTO3_ON = String(cercaK(j, 'caja_atto3_on')) === '1';           // [03-ott · ATTO III]
       JL_TODO_ON = String(cercaK(j, 'jl_todo_on')) === '1';                 // [10-ott · decisione ⓐ]
+      YAPAGV_SRV = String(cercaK(j, 'sala_yapag_vuoto_on')) === '1';        // [14-ott · AUT-0674]
       UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';   // [10-ott · 1.4]
       CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
@@ -12130,6 +12131,28 @@ function _pagadaDeMesa(mesa) {
       dichiarato come tale nella fascia, non spacciato per un fatto.
    🧯 `?yapag=0` → la domanda di ieri, di giornata.                          */
 const YAPAG_ON = QS.get('yapag') !== '0';
+/* [AUT-0674 · 14-ott · 🖐 TERZA V30] VUOTO ≠ ZERO su `ya_pagado` (`TERZA QUATTRO LETTURE AL BORDO ESISTE GIA` ①).
+   La precuenta passa dal bordo, e la risposta del bordo NON porta `ya_pagado` (borde v0.191.0 r.6919): la riga di sempre
+   `r.ya_pagado || {n:0}` registrava «zero pagos in questa sessione» come un FATTO, e `_pagadaAviso` non ricadeva più
+   sull'indizio di giornata (`mesas_pagadas`) ⇒ la fascia contro il doppio cobro taceva su ogni mesa con precuenta del bordo.
+   Con la leva: si ricorda solo un `ya_pagado` che c'è; assente ⇒ la mesa torna a «non so» (si cancella il ricordo, anche uno
+   vecchio) e la guardia usa l'indizio di giornata, come prima del bordo. Leva: `sala_yapag_vuoto_on` dal /salud (nasce assente
+   = spenta) · per telefono `?yapagv=1` (prova) / `?yapagv=0` (freno, vince su tutto). Spenta = la riga di sempre. */
+let YAPAGV_SRV = false;
+const YAPAGV_QS = (function () {
+  const q = QS.get('yapagv');
+  try {
+    if (q === '1' || q === '0') localStorage.setItem('sala_yapagv', q);
+    return localStorage.getItem('sala_yapagv') || '';
+  } catch (e) { return (q === '1' || q === '0') ? q : ''; }
+})();
+function yapagVuotoOn() { return YAPAGV_QS === '0' ? false : (YAPAGV_QS === '1' || YAPAGV_SRV); }
+function _yaPagRicorda(mesa, yp) {
+  STATE.pcYaPag = STATE.pcYaPag || {};
+  if (!yapagVuotoOn()) { STATE.pcYaPag[mesa] = yp || { n: 0, monto: 0, pagos: [] }; return; }
+  if (yp && typeof yp === 'object') STATE.pcYaPag[mesa] = yp;
+  else delete STATE.pcYaPag[mesa];
+}
 function _pagadaEnSesion(mesa) {
   if (!YAPAG_ON) return null;
   const s = (STATE.pcYaPag || {})[mesa];
@@ -12720,7 +12743,7 @@ function abrirPago(mesa, parte) {
     fetchYaPagado(mesa).then(function (r) {
       if (STATE.pago && STATE.pago.mesa === mesa && STATE.pago.uid === uidApertura) {
         STATE.pcYaPag = STATE.pcYaPag || {};
-        STATE.pcYaPag[mesa] = (r && r.ya_pagado) || { n: 0, monto: 0, pagos: [] };
+        _yaPagRicorda(mesa, r && r.ya_pagado);   // [AUT-0674] assente non è zero
         STATE.pago.ya = _pagadaAviso(mesa);
         renderPago();
       }
