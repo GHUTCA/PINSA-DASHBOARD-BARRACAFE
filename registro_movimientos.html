@@ -558,7 +558,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v97 · SKU siempre visible · AUT-0677 · 14oct</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v98 · Control de inventarios (apagado) · AUT-0685 · 14oct</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -6356,6 +6356,240 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
   gid('movClose').addEventListener('click', function(){ gid('movModal').classList.remove('on'); });
   gid('movGo').addEventListener('click', ver);
   gid('movQ').addEventListener('keydown', function(e){ if(e.key==='Enter') ver(); });
+})();
+</script>
+
+<!-- ═══════ CONTROL DE INVENTARIOS · v98 · 14-oct · AUT-0685 · 🏭 OPERACIONES V30 ═══════════════════════════════════════════
+     Alberto, 14-oct: «el control de que el inventario se haga». Dos píldoras (Giro, Bodega) arriba del Registro + la sección «Control» (cuadraditos por día,
+     un local por vez en el teléfono, el consolidado en escritorio). SOLO LECTURA: GET /inventario/<LOC>/cumplimiento del borde (vista inventario_cumplimiento).
+     El vetro NO interpreta (N7): el borde manda hechos; aquí solo se compara con la hora límite del local y con el total del giro.
+     INTERRUPTOR: apagado por defecto. Se prueba con ?control=1. Sin la ruta en el borde (404) o sin libro nuevo, todo queda oculto.
+     Estados (Alberto): gris = aún no · verde = completo · amarilla = incompleto / en curso (un giro iniciado cuenta como acción) · roja = pasó la hora límite del local
+     sin ninguna acción, y se queda hasta que se haga. Horas: RSC 21 · CDL 20 · EXO 24 · BKS 24. Colores y tamaños: verdicto de DESIGN (14-oct). -->
+<style>
+  .ctl [hidden],.ctl[hidden]{display:none!important}
+  .ctl{--c-ok:#2C784C;--c-okbg:#E4F1E8;--c-wn:#966319;--c-wnbg:#FBF0D9;--c-bad:#B3321F;--c-badbg:#F9E1DC;--c-ink2:#676156;--c-line:#E3DDD0}
+  .ctl-pills{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 8px}
+  .ctl-pill{flex:1 1 150px;display:flex;align-items:center;gap:8px;border-radius:14px;padding:10px 12px;min-height:44px;font-weight:700;font-size:15px;border:0;cursor:pointer;text-align:left;font-family:inherit}
+  .ctl-pill small{display:block;font-weight:500;font-size:12px}
+  .ctl-pill i{font-style:normal;font-size:20px}
+  .ctl-pill.off{background:var(--c-line);color:var(--c-ink2)} .ctl-pill.ok{background:var(--c-okbg);color:var(--c-ok)}
+  .ctl-pill.wn{background:var(--c-wnbg);color:var(--c-wn)} .ctl-pill.bad{background:var(--c-badbg);color:var(--c-bad)}
+  .ctl-tip{flex:1 1 100%;font-size:12.5px;color:var(--c-ink2);display:flex;gap:8px}
+  .ctl-tip span.n{margin-left:auto;font-size:11px;white-space:nowrap}
+  .ctl-spia{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--c-bad);margin-left:6px;vertical-align:middle}
+  #ctlModal{align-items:stretch}
+  #ctlModal .cmsheet{max-width:780px;max-height:none;height:100dvh;border-radius:0;display:flex;flex-direction:column}
+  @supports not (height:100dvh){ #ctlModal .cmsheet{height:100vh} }
+  #ctlModal .ctl-body{flex:1 1 auto;min-height:0;overflow:auto;padding-bottom:24px}
+  .ctl-chips{display:flex;gap:6px;margin:4px 0 12px}
+  .ctl-chips button{flex:1;min-height:44px;border:1px solid var(--line);background:var(--panel);color:var(--t1);border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit}
+  .ctl-chips button.on{background:var(--acc,#2B5FA8);color:#fff;border-color:var(--acc,#2B5FA8)}
+  .ctl-row{margin-bottom:14px} .ctl-row h4{margin:0 0 6px;font-size:13px}
+  .ctl-sqr{display:flex;gap:4px}
+  .ctl-sqr .c{width:44px;text-align:center}
+  .ctl-sqr .c small{display:block;font-size:11px;color:var(--c-ink2);line-height:1.15;margin-top:3px}
+  .ctl-sqr .c small.hoy{color:var(--t1);font-weight:800;text-decoration:underline}
+  .ctl-sq{width:44px;height:44px;border-radius:8px;border:2px solid transparent;font-size:18px;font-weight:800;color:#fff;cursor:pointer;padding:0;font-family:inherit}
+  .ctl-sq.o{background:var(--c-ok)} .ctl-sq.w{background:var(--c-wn)} .ctl-sq.x{background:var(--c-bad)}
+  .ctl-sq.p{background:transparent;border:2px solid var(--c-ink2);color:var(--c-ink2)}
+  .ctl-sq.n{background:transparent;border:2px dashed var(--c-ink2);color:var(--c-ink2);cursor:default}
+  .ctl-desk{display:none}
+  .ctl-desk table{width:100%;border-collapse:collapse}
+  .ctl-desk th{font-size:11px;color:var(--c-ink2);font-weight:600;text-align:left;padding:6px 4px;border-bottom:1px solid var(--line)}
+  .ctl-desk td{padding:8px 4px;vertical-align:top}
+  .ctl-desk .ctl-sq{width:28px;height:28px;font-size:14px;border-radius:6px} .ctl-desk .ctl-sqr{gap:3px} .ctl-desk .ctl-sqr .c{width:28px} .ctl-desk .ctl-sqr .c small{font-size:10px}
+  @media (min-width:720px){ .ctl-phone{display:none} .ctl-desk{display:block} }
+  .ctl-drawer{border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:12px;background:var(--panel)}
+  .ctl-drawer h3{margin:0 0 4px;font-size:15px}
+  .ctl-li{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .ctl-note{font-size:12.5px;color:var(--c-ink2)}
+</style>
+<div class="cmodal ctl" id="ctlModal" hidden>
+  <div class="cmsheet">
+    <div class="top-row" style="margin-bottom:6px">
+      <div class="cm-v" style="margin:0">✅ Control</div>
+      <button class="inv-close-btn" id="ctlClose">✕ Cerrar</button>
+    </div>
+    <div class="ctl-body" id="ctlBody"></div>
+  </div>
+</div>
+<script>
+(function(){
+  var ON = /[?&]control=1/.test(location.search);   // INTERRUPTOR del vetro: apagado por defecto
+  var CTL = (typeof window!=='undefined') ? (window.CTL_TEST = {}) : {};
+  /* ── funciones puras (se prueban fuera del navegador) ─────────────────────────────────────────────── */
+  var LIM = { rsc:21, cdl:20, exo:24, bks:24 };   // hora límite por local (Alberto, 14-oct). 24 = medianoche (el día operativo corta a las 06:00)
+  function partesSantiago(ms){
+    var f = new Intl.DateTimeFormat('en-CA',{ timeZone:'America/Santiago', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', hourCycle:'h23' });
+    var o = {}; f.formatToParts(new Date(ms)).forEach(function(p){ o[p.type]=p.value; });
+    return { fecha:o.year+'-'+o.month+'-'+o.day, hora:parseInt(o.hour,10) };
+  }
+  function sumaDias(d,n){ return new Date(Date.parse(d+'T12:00:00Z')+n*86400000).toISOString().slice(0,10); }
+  function diaOperativo(ms){ var p=partesSantiago(ms); return p.hora<6 ? sumaDias(p.fecha,-1) : p.fecha; }
+  function horaOperativa(ms){ var p=partesSantiago(ms); return p.hora<6 ? p.hora+24 : p.hora; }
+  function dow(d){ return new Date(Date.parse(d+'T12:00:00Z')).getUTCDay(); }   // 0 dom … 1 lun
+  function ultimoLunes(d){ var k=dow(d); return sumaDias(d, -((k+6)%7)); }
+  /* estado de UNA obligación del giro. s = fila del borde para ese día (o null); total = productos del giro (o null);
+     enCurso = hay un giro empezado en este aparato; esHoy = el día evaluado es el día operativo en curso. */
+  function estadoGiro(o){
+    var skus = (o.fila && o.fila.giro && o.fila.giro.skus) || 0;
+    if(skus>0){
+      if(o.total && skus < o.total) return { e:'w', txt:'incompleto', sin: o.total-skus };
+      return { e:'o', txt:'completo' };
+    }
+    if(o.esHoy && o.enCurso) return { e:'w', txt:'en curso' };   // un giro iniciado cuenta como acción
+    if(!o.esHoy) return { e:'x', txt:'no se hizo' };
+    return (o.horaOp >= o.lim) ? { e:'x', txt:'no se hizo' } : { e:'p', txt:'aún no' };
+  }
+  function estadoBodega(o){
+    var b = o.fila && o.fila.bodega;
+    if(b && b.general) return { e:'o', txt:'general' };
+    if(b && b.skus>0)  return { e:'x', txt:'solo lo contado' };   // un lunes, «solo lo contado» no cumple (Alberto)
+    if(o.esHoy && o.horaOp < o.lim) return { e:'p', txt:'aún no' };
+    return { e:'x', txt:'no se hizo' };
+  }
+  function estadoMov(o){
+    var n = (o.fila && o.fila.movs) || 0;
+    if(n>0) return { e:'o', txt:n+' registros' };
+    if(o.esHoy && o.horaOp < o.lim) return { e:'p', txt:'aún no' };
+    return { e:'x', txt:'sin registros' };
+  }
+  CTL.partesSantiago=partesSantiago; CTL.diaOperativo=diaOperativo; CTL.horaOperativa=horaOperativa; CTL.ultimoLunes=ultimoLunes; CTL.sumaDias=sumaDias;
+  CTL.estadoGiro=estadoGiro; CTL.estadoBodega=estadoBodega; CTL.estadoMov=estadoMov; CTL.LIM=LIM;
+  if(!ON || typeof document==='undefined' || typeof BORDE_REG==='undefined') return;
+
+  /* ── vetro ──────────────────────────────────────────────────────────────────────────────────────────── */
+  function gid(x){ return document.getElementById(x); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  var SIGN = { o:'✓', w:'!', x:'✗', p:'○', n:'·' };
+  var LOCNOM = { rsc:'Riesco', cdl:'Candelaria', exo:'EXO', bks:'BKS' };
+  var DOW = ['dom','lun','mar','mié','jue','vie','sáb'];
+  var DATOS = {};          // code -> { ok:bool, dias:{ 'YYYY-MM-DD': fila } }
+  var DISPONIBLE = null;   // null = aún no se sabe · false = el borde no tiene la ruta / apagado
+
+  function visibles(){ return CTX_ADMIN ? ['rsc','cdl','exo','bks'] : [CTX_CODE]; }   // alcance por cargo: el JB ve todos, el local solo el suyo
+  function tieneGiro(code){ return !!(typeof GIROS_POR_LOCAL!=='undefined' && GIROS_POR_LOCAL[code] && GIROS_POR_LOCAL[code].length); }
+  function totalGiro(code){
+    if(code!==CTX_CODE) return null;   // el total del giro de otro local no se conoce desde aquí: no se pinta «incompleto» a ciegas
+    try{ var t=mapaStatsGiro().total; return t>0 ? t : null; }catch(e){ return null; }
+  }
+  function giroEnCurso(){
+    try{ return (typeof MAPA_CONTEO!=='undefined' && Object.keys(MAPA_CONTEO||{}).length>0) || (typeof MAPA_POSTO!=='undefined' && Object.keys(MAPA_POSTO||{}).length>0); }catch(e){ return false; }
+  }
+  async function traer(code, desde, hasta){
+    try{
+      var r = await fetch(BORDE_REG.URL+'/inventario/'+encodeURIComponent(code)+'/cumplimiento?desde='+desde+'&hasta='+hasta,
+                          { headers:{ 'X-Borde-Token': BORDE_REG.T }, cache:'no-store' });
+      var j=null; try{ j=await r.json(); }catch(e){}
+      if(!j || !j.ok){ if(r.status===404 || (j && (j.error==='ruta_desconocida' || j.error==='leva_spenta'))) DISPONIBLE=false; return null; }
+      var dias={}; (j.dias||[]).forEach(function(d){ dias[d.dia]=d; });
+      DATOS[code]={ ok:true, dias:dias }; DISPONIBLE=true; return DATOS[code];
+    }catch(e){ return null; }
+  }
+  async function cargar(){
+    var hoy=diaOperativo(Date.now()), desde=sumaDias(hoy,-7), cods=visibles();
+    await Promise.all(cods.map(function(c){ return traer(c, desde, hoy); }));
+  }
+  function ctxEval(code){
+    var ahora=Date.now(); return { esHoyDe:function(d){ return d===diaOperativo(ahora); }, horaOp:horaOperativa(ahora), lim:LIM[code]||24, hoy:diaOperativo(ahora) };
+  }
+  function celdas(code){
+    var c=ctxEval(code), dat=(DATOS[code]&&DATOS[code].dias)||{}, hoy=c.hoy, out={ giro:[], mov:[], bod:[] };
+    for(var i=6;i>=0;i--){
+      var d=sumaDias(hoy,-i), fila=dat[d]||null, esHoy=(d===hoy);
+      out.giro.push({ d:d, st: tieneGiro(code) ? estadoGiro({ fila:fila, total:totalGiro(code), enCurso: code===CTX_CODE && esHoy && giroEnCurso(), esHoy:esHoy, horaOp:c.horaOp, lim:c.lim }) : { e:'n', txt:'en desarrollo' } });
+      out.mov.push({ d:d, st: estadoMov({ fila:fila, esHoy:esHoy, horaOp:c.horaOp, lim:c.lim }) });
+    }
+    var lun=ultimoLunes(hoy);
+    out.bod.push({ d:lun, st: estadoBodega({ fila:dat[lun]||null, esHoy:(lun===hoy), horaOp:c.horaOp, lim:c.lim }) });
+    return out;
+  }
+  function fd(d){ var p=d.split('-'); return DOW[dow(d)]+' '+parseInt(p[2],10); }
+
+  /* píldoras */
+  function pintarPildoras(){
+    var host=gid('ctlPills'); if(!host) return;
+    if(DISPONIBLE!==true){ host.hidden=true; return; }
+    var code=CTX_CODE, c=celdas(code), g=c.giro[6].st, b=c.bod[0].st, h='';
+    function pill(k, etiqueta, st, sub){
+      var cls = st.e==='o'?'ok': st.e==='w'?'wn': st.e==='x'?'bad':'off';
+      return '<button class="ctl-pill '+cls+'" data-k="'+k+'" aria-label="'+esc(etiqueta+': '+st.txt)+'"><i aria-hidden="true">'+SIGN[st.e==='p'?'p':st.e]+'</i><span>'+etiqueta+'<small>'+esc(sub)+'</small></span></button>';
+    }
+    if(tieneGiro(code)){
+      var sin = (g.sin ? ' · '+g.sin+' sin contar' : '');
+      h+=pill('giro','Giro',g,g.txt+sin);
+    }
+    h+=pill('bod','Bodega',b, b.txt+' · lun '+parseInt(c.bod[0].d.split('-')[2],10));
+    var n=0; try{ n=parseInt(localStorage.getItem('ctl_tip_n')||'0',10)||0; }catch(e){}
+    if(n<10) h+='<div class="ctl-tip"><span>Toca la píldora para hacer lo que falta.</span><span class="n">'+(n+1)+' de 10</span></div>';
+    host.innerHTML=h; host.hidden=false;
+    if(!pintarPildoras._contado){ pintarPildoras._contado=true; try{ localStorage.setItem('ctl_tip_n', String(n+1)); }catch(e){} }
+    host.querySelectorAll('.ctl-pill').forEach(function(bn){ bn.onclick=function(){
+      if(bn.dataset.k==='giro' && typeof abrirMapa==='function'){ abrirMapa(); }
+      else if(typeof bivioInventario==='function'){ bivioInventario(); }
+    }; });
+  }
+  function hayRojo(){
+    return visibles().some(function(code){ var c=celdas(code); return c.giro.concat(c.bod,c.mov).some(function(x){ return x.st.e==='x'; }); });
+  }
+  function pintarSpia(){ var b=gid('ctlBtn'); if(!b) return; b.hidden=(DISPONIBLE!==true); var s=b.querySelector('.ctl-spia'); if(s) s.hidden=!hayRojo(); }
+
+  /* sección Control */
+  var cur=null;
+  function fila(code, kind, arr){
+    var h='<div class="ctl-sqr">';
+    arr.forEach(function(x,i){
+      var hoy = (kind!=='bod' && i===arr.length-1), p=x.d.split('-');
+      var lab = LOCNOM[code]+' · '+({giro:'Giro',mov:'Movimientos',bod:'Bodega'})[kind]+' · '+fd(x.d)+' · '+x.st.txt;
+      h+='<div class="c"><button class="ctl-sq '+x.st.e+'" aria-label="'+esc(lab)+'" '+(x.st.e==='n'?'disabled':'data-l="'+code+'" data-k="'+kind+'" data-d="'+x.d+'"')+'>'+SIGN[x.st.e]+'</button>'+
+         '<small class="'+(hoy?'hoy':'')+'">'+(hoy?'hoy ':'')+esc(fd(x.d))+'</small></div>';
+    });
+    return h+'</div>';
+  }
+  function pintarControl(){
+    var cods=visibles(); if(!cur || cods.indexOf(cur)<0) cur=cods[0];
+    var h='';
+    if(cods.length>1) h+='<div class="ctl-chips ctl-phone" role="group" aria-label="Local">'+cods.map(function(c){ return '<button data-loc="'+c+'" class="'+(c===cur?'on':'')+'" aria-pressed="'+(c===cur)+'">'+LOCNOM[c]+'</button>'; }).join('')+'</div>';
+    var c=celdas(cur);
+    h+='<div class="ctl-phone"><div class="ctl-row"><h4>Giro</h4>'+fila(cur,'giro',c.giro)+'</div><div class="ctl-row"><h4>Movimientos</h4>'+fila(cur,'mov',c.mov)+'</div><div class="ctl-row"><h4>Bodega · lunes</h4>'+fila(cur,'bod',c.bod)+'</div></div>';
+    h+='<div class="ctl-desk"><table><tr><th>Local</th><th>Giro</th><th>Movimientos</th><th>Bodega · lun</th></tr>'+
+       cods.map(function(code){ var x=celdas(code); return '<tr><td><b>'+LOCNOM[code]+'</b></td><td>'+fila(code,'giro',x.giro)+'</td><td>'+fila(code,'mov',x.mov)+'</td><td>'+fila(code,'bod',x.bod)+'</td></tr>'; }).join('')+'</table></div>';
+    h+='<div id="ctlDrawer"></div>';
+    gid('ctlBody').innerHTML=h;
+    gid('ctlBody').querySelectorAll('.ctl-chips button').forEach(function(b){ b.onclick=function(){ cur=b.dataset.loc; pintarControl(); }; });
+    gid('ctlBody').querySelectorAll('.ctl-sq[data-l]').forEach(function(b){ b.onclick=function(){ abrirDia(b.dataset.l,b.dataset.k,b.dataset.d); }; });
+  }
+  var VERBOS_INV={ 'Inventario Secc':1, 'Conteo Fisico':1 };
+  async function abrirDia(code, kind, dia){
+    var dr=gid('ctlDrawer'); dr.className='ctl-drawer'; dr.innerHTML='<div class="ctl-note">Buscando…</div>';
+    try{
+      var r=await fetch(BORDE_REG.URL+'/inventario/'+encodeURIComponent(code)+'/movimientos?todo=1&desde='+dia+'&hasta='+dia, { headers:{ 'X-Borde-Token': BORDE_REG.T }, cache:'no-store' });
+      var j=null; try{ j=await r.json(); }catch(e){}
+      if(!j || !j.ok) throw new Error((j&&j.error)||('sin respuesta ('+r.status+')'));
+      var F=(j.filas||[]).filter(function(f){
+        return kind==='giro' ? f.verbo==='Inventario Secc' : kind==='bod' ? f.verbo==='Conteo Fisico' : !VERBOS_INV[f.verbo];
+      });
+      var h='<h3>'+esc(LOCNOM[code])+' · '+({giro:'Giro',mov:'Movimientos',bod:'Bodega'})[kind]+' · '+esc(fd(dia))+'</h3>';
+      if(!F.length) h+='<div class="ctl-note">No se registró nada.</div>';
+      else{
+        h+='<div class="ctl-note">'+F.length+' registro'+(F.length>1?'s':'')+(F[0].responsable?' · '+esc(F[0].responsable):'')+'</div>';
+        h+=F.slice(0,40).map(function(f){ var q=(f.contado!=null)?('contó '+f.contado):(f.q_utm!=null?f.q_utm:''); return '<div class="ctl-li"><span>'+esc(String(f.hora||'').slice(11,16))+' · '+esc(f.desc||f.sku)+' <small style="color:var(--t3)">#'+esc(f.sku)+'</small></span><span>'+esc(q)+'</span></div>'; }).join('');
+        if(F.length>40) h+='<div class="ctl-note" style="margin-top:6px">… '+(F.length-40)+' más (están en la pestaña Movimientos)</div>';
+      }
+      dr.innerHTML=h; dr.scrollIntoView({block:'nearest'});
+    }catch(e){ dr.innerHTML='<div class="ctl-note">⚠ '+esc(e.message)+'</div>'; }
+  }
+  function abrirModal(){ var m=gid('ctlModal'); m.hidden=false; m.classList.add('on'); cargar().then(function(){ pintarControl(); pintarPildoras(); pintarSpia(); }); pintarControl(); }
+
+  /* montaje */
+  var wrap=document.querySelector('.verbo-wrap'), movBtn=gid('movBtn');
+  if(wrap){ var ph=document.createElement('div'); ph.id='ctlPills'; ph.className='ctl ctl-pills'; ph.hidden=true; wrap.parentNode.insertBefore(ph,wrap); }
+  if(movBtn){ var cb=document.createElement('button'); cb.className='invbtn ctl'; cb.id='ctlBtn'; cb.hidden=true; cb.title='Control de inventarios'; cb.innerHTML='✅ Control<i class="ctl-spia" hidden aria-label="hay algo en rojo" role="img"></i>'; movBtn.parentNode.insertBefore(cb, movBtn.nextSibling); cb.onclick=abrirModal; }
+  gid('ctlClose').onclick=function(){ var m=gid('ctlModal'); m.classList.remove('on'); m.hidden=true; };
+  function refrescar(){ cargar().then(function(){ pintarPildoras(); pintarSpia(); }); }
+  refrescar(); setInterval(refrescar, 5*60*1000);
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) setTimeout(refrescar, 1200); });
 })();
 </script>
 
