@@ -1110,7 +1110,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.226.4 · vetro</span>
+      <span class="ver" id="ver">sala v3.226.5 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1428,6 +1428,17 @@ const ENVMESA_QS = (function () {
   } catch (e) { return (q === '1' || q === '0') ? q : ''; }
 })();
 function envMesaOn() { return ENVMESA_QS === '0' ? false : (ENVMESA_QS === '1' || ENVMESA_SRV); }
+/* [AUT-0676 · 14-ott · 🖐 TERZA V30] il corte completa dal BORDO (`estado_mesero`) invece che da `getCierreMesero` (Google).
+   Leva: `sala_corte_estado_on` dal /salud (nasce assente = spenta) · `?cortest=1` per telefono (prova) / `?cortest=0` freno che vince. */
+let CORTEST_SRV = false;
+const CORTEST_QS = (function () {
+  const q = QS.get('cortest');
+  try {
+    if (q === '1' || q === '0') localStorage.setItem('sala_cortest', q);
+    return localStorage.getItem('sala_cortest') || '';
+  } catch (e) { return (q === '1' || q === '0') ? q : ''; }
+})();
+function corteEstadoOn() { return CORTEST_QS === '0' ? false : (CORTEST_QS === '1' || CORTEST_SRV); }
 const PEDIR2_ON = (function () {
   const q = QS.get('pedir2');
   try {
@@ -3854,12 +3865,25 @@ async function cierreAbrir() {
        se arriva mentre il mesero è ancora qui, il primo schermo si ridisegna.
        Se non arriva, non si mostra nessun errore: il corte va avanti. */
     const _uidFlusso = _CIE_INTENTO;
-    gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre }).then(function (r) {
+    const _cieCompleta = function (r) {
       if (!r || !r.ok || _uidFlusso !== _CIE_INTENTO || !CIE.data || !CIE.data._local) return;
       CIE.data.turno = r.turno; CIE.data.regimen = r.regimen; CIE.data.ya_cerrado = r.ya_cerrado;
       CIE.tol = r.tolerancia || 2000;
       if (CIE.paso === 1) _ciePaso1();
-    }).catch(function () {});
+    };
+    const _cieDalLibro = function () {
+      gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre }).then(_cieCompleta).catch(function () {});
+    };
+    /* [AUT-0676 · 14-ott · 🖐 TERZA V30] con la leva il completamento chiede al BORDO (`estado_mesero`, ⚙️ ARQ `0aa6e24`): turno ·
+       régimen · cierre previo · tolerancia con cui decide il CORTE DEL BORDO. Si usa solo una risposta che lo dice (`corte_fuente:'borde'`)
+       e che porta la chiave `ya_cerrado` (null = «non hai chiuso»; ASSENTE = il corte non passa dal bordo, «non so»). Tutto il resto
+       (leva del bordo spenta, chiave assente, rete) ⇒ il libro di sempre. Il fatto dice da dove è venuto: è la misura dell'efficacia. */
+    if (corteEstadoOn()) {
+      _cajaMesero({ verbo: 'estado_mesero' }).then(function (r) {
+        if (r && r.ok && r.corte_fuente === 'borde' && ('ya_cerrado' in r)) { bordeHecho('corte_estado', { fuente: 'borde', ya: !!r.ya_cerrado }); _cieCompleta(r); }
+        else { bordeHecho('corte_estado', { fuente: 'gas', motivo: !r ? 'red' : (r.corte_fuente !== 'borde' ? 'leva' : 'sin_clave') }); _cieDalLibro(); }
+      });
+    } else _cieDalLibro();
     return;
   }
   try {
@@ -9230,6 +9254,7 @@ function _salaMuertaPinta(edadMs) {
       CAJA_ATTO3_ON = String(cercaK(j, 'caja_atto3_on')) === '1';           // [03-ott · ATTO III]
       JL_TODO_ON = String(cercaK(j, 'jl_todo_on')) === '1';                 // [10-ott · decisione ⓐ]
       YAPAGV_SRV = String(cercaK(j, 'sala_yapag_vuoto_on')) === '1';        // [14-ott · AUT-0674]
+      CORTEST_SRV = String(cercaK(j, 'sala_corte_estado_on')) === '1';      // [14-ott · AUT-0676]
       ENVMESA_SRV = String(cercaK(j, 'sala_envmesa_on')) === '1';           // [14-ott · AUT-0672]
       UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';   // [10-ott · 1.4]
       CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
