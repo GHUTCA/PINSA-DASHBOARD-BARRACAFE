@@ -8555,7 +8555,7 @@ async function vPrecuentaImprimir(mesa, btn, parte, pinJl) {
            sessione» è un fatto che spegne l'avviso di giornata, e vale quanto
            il suo contrario. Senza questa riga la guardia resta cieca. */
         STATE.pcYaPag = STATE.pcYaPag || {};
-        _yaPagRicorda(mesa, r.ya_pagado);   // [AUT-0674] assente non è zero
+        _yaPagRicorda(mesa, r);   // [AUT-0674] assente non è zero: decide la CHIAVE, dentro la funzione
       }
       vhojaCerrar();
       toast('ok', '🧾 ' + (r.folio || '') + (parte ? ' · parte de ' + parte.titulo : '') +
@@ -12190,10 +12190,15 @@ const YAPAGV_QS = (function () {
   } catch (e) { return (q === '1' || q === '0') ? q : ''; }
 })();
 function yapagVuotoOn() { return YAPAGV_QS === '0' ? false : (YAPAGV_QS === '1' || YAPAGV_SRV); }
-function _yaPagRicorda(mesa, yp) {
+/* riceve la RISPOSTA intera, non il valore: [💵 EL GIRO, `EL GIRO 0674 2FD6F3D ROSSO`] la differenza fra «zero» e «non so» sta nella
+   PRESENZA della chiave, non nel valore. Il GAS manda SEMPRE `ya_pagado`, `null` per lo zero vero (MENU_GAS r.15395/16036); il bordo
+   non lo manda mai; `fetchYaPagado` oggi risponde `{ok:false, Unknown action}`. ⇒ chiave in una risposta non fallita = fatto
+   (null = zero); chiave assente o risposta fallita = «non so». */
+function _yaPagRicorda(mesa, r) {
   STATE.pcYaPag = STATE.pcYaPag || {};
+  const yp = r ? r.ya_pagado : undefined;
   if (!yapagVuotoOn()) { STATE.pcYaPag[mesa] = yp || { n: 0, monto: 0, pagos: [] }; return; }
-  if (yp && typeof yp === 'object') STATE.pcYaPag[mesa] = yp;
+  if (r && typeof r === 'object' && r.ok !== false && ('ya_pagado' in r)) STATE.pcYaPag[mesa] = yp || { n: 0, monto: 0, pagos: [] };
   else delete STATE.pcYaPag[mesa];
 }
 function _pagadaEnSesion(mesa) {
@@ -12786,7 +12791,7 @@ function abrirPago(mesa, parte) {
     fetchYaPagado(mesa).then(function (r) {
       if (STATE.pago && STATE.pago.mesa === mesa && STATE.pago.uid === uidApertura) {
         STATE.pcYaPag = STATE.pcYaPag || {};
-        _yaPagRicorda(mesa, r && r.ya_pagado);   // [AUT-0674] assente non è zero
+        _yaPagRicorda(mesa, r);   // [AUT-0674] oggi `{ok:false, Unknown action}` ⇒ «non so», mai «zero»
         STATE.pago.ya = _pagadaAviso(mesa);
         renderPago();
       }
