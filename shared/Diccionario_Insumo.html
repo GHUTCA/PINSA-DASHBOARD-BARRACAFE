@@ -580,6 +580,15 @@
       </label>
     </div>
 
+    <div class="sec" id="ev-rend-wrap" style="display:none">
+      <h3><span class="secnum">7</span>Rendimiento <span class="hint">cuánto sale limpio · vacío = 100%</span></h3>
+      <div class="field">
+        <label class="fl">Rendimiento (%)</label>
+        <input type="number" id="ev-rend" min="1" max="100" step="any" placeholder="100" inputmode="decimal" oninput="evRendCosto()">
+      </div>
+      <div class="hint" id="ev-rend-hint" style="margin-top:6px"></div>
+    </div>
+
     <div class="sec">
       <h3><span class="secnum">6</span>Alias <span class="hint">cómo lo dicen en el local</span></h3>
       <div class="alias" id="ev-aliasbox" style="margin-top:0"></div>
@@ -1441,6 +1450,7 @@ function openEdit(sku){
   // nombre
   E.nombreOrig=trimC(p[CFG.COL.DESC]);
   $('ev-name').value=E.nombreOrig;
+  evRendPoner();   // rendimiento · AUT-0685
   // 01-oct · la familia viva (el error de tipeo conocido aparece ya corregido: guardar la corrige en el libro)
   if($('ev-cat')){ const fc=famCanon(p[CFG.COL.CAT]);
     if(fc && ![...$('ev-cat').options].some(o=>o.value===fc)){ const o=document.createElement('option'); o.textContent=fc; $('ev-cat').appendChild(o); }
@@ -1590,6 +1600,7 @@ function buildEditPayload(){
 
 async function guardarEdit(){
   if($('ev-alias-new') && trimC($('ev-alias-new').value)){ evAliasAdd(); if(trimC($('ev-alias-new').value)) return; }   // C2A4 · el escrito sin Enter cuenta (o se para con su aviso)
+  const rv=evRendLeer(); if(rv.error){ banner('err','⚠️ '+rv.error); return; }   // rendimiento · AUT-0685
   const payload=buildEditPayload();
   if(!CFG.GAS_URL){
     $('m-title').textContent='Route GAS sin configurar — esto editaría (no escribí nada)';
@@ -1612,7 +1623,8 @@ async function guardarEdit(){
       p['Empresa_EXO']=E.emp.has('EXO')?'SI':'NO';
       p['Empresa_BKS']=E.emp.has('BKS')?'SI':'NO';
       if(E.aliasNew.size){ ALIAS_MAP[E.sku]=(ALIAS_MAP[E.sku]||[]).concat([...E.aliasNew]); E.aliasNew.clear(); }   // C2A4
-      banner('okk','✓ SKU '+j.sku+' actualizado · fila '+(j.fila||'?')+(j.audit_nome?' · nombre auditado':'')+' · '+(j.route||''));
+      const _rok=await guardarRendimiento(rv);   // rendimiento · AUT-0685
+      banner(_rok?'okk':'err',(_rok?'':'⚠️ El rendimiento NO se guardó (vuelve a guardar). ')+'✓ SKU '+j.sku+' actualizado · fila '+(j.fila||'?')+(j.audit_nome?' · nombre auditado':'')+' · '+(j.route||''));
       backToGate();$('q').value='';$('hits').innerHTML='';$('gatewarn').style.display='none';$('createbar').style.display='none';
     } else throw new Error(j&&j.error?j.error:'respuesta inesperada del GAS');
   }catch(e){
@@ -1622,6 +1634,51 @@ async function guardarEdit(){
   }
 }
 
+/* ═══ RENDIMIENTO · 14-oct-2026 · AUT-0685 · 🏭 OPERACIONES V30 ═══════════════════════════════════════════════
+   Alberto: «si el filete cuesta $20.000 el kg, el costo no es $20 el gramo: se limpia, y de 20 kg salen 10-13 limpios».
+   Costo del gramo ÚTIL = precio ÷ rendimiento. Vive en una tabla aparte del bordo (GET/POST /catalogo/rendimiento): el catálogo y el foglio NO se tocan.
+   Solo cuenta para el costo de las recetas (Taller): el stock y el costo de los movimientos siguen en unidades compradas.
+   Sin la ruta en el bordo (404) la casilla no aparece. ═══════════════════════════════════════════════════════════ */
+const RENDIM={ ok:false, map:{} };
+const _rendUid={};   // un uid por GESTO hasta que sale bien (idempotencia desde el lado que repite)
+function rendCostoUtil(precio,rend){ precio=Number(precio); rend=Number(rend); return (precio>0 && rend>0 && rend<=100) ? precio/(rend/100) : null; }
+async function rendCargar(){
+  try{ const r=await fetch(DICC_BORDE.URL+'/catalogo/rendimiento',{headers:{'X-Borde-Token':DICC_BORDE.T},cache:'no-store'});
+    const j=await r.json().catch(()=>null);
+    if(j&&j.ok&&j.rend&&typeof j.rend==='object'){ RENDIM.ok=true; RENDIM.map=j.rend; } }catch(e){}
+  const w=$('ev-rend-wrap'); if(w) w.style.display=RENDIM.ok?'':'none';
+}
+function evRendPoner(){ const i=$('ev-rend'); if(!i) return; const v=RENDIM.map[E.sku]; i.value=(v==null?'':String(v)); E.rendOrig=(v==null?null:Number(v)); evRendCosto(); }
+function evRendLeer(){
+  const i=$('ev-rend'); if(!i || !RENDIM.ok) return { valor:E.rendOrig==null?null:E.rendOrig, cambio:false };
+  const t=String(i.value||'').trim().replace(',','.');
+  if(t==='') return { valor:null, cambio:E.rendOrig!=null };
+  const n=Number(t);
+  if(!(n>0 && n<=100)) return { error:'El rendimiento debe estar entre 1 y 100 (%). Déjalo vacío si no hay merma.' };
+  return { valor:n, cambio:n!==E.rendOrig };
+}
+function evRendCosto(){
+  const h=$('ev-rend-hint'); if(!h) return; const v=evRendLeer();
+  const precio=numC(E.row && E.row['Precio por Gr CC UN Neto']);
+  const u=trimC(E.row && E.row[CFG.COL.UTM])||'UTM';
+  if(v.error){ h.textContent=''; return; }
+  const cu=(v.valor!=null)?rendCostoUtil(precio,v.valor):null;
+  h.textContent=(cu!=null)?('Costo por '+u+': '+clp(precio)+' → útil '+clp(cu)):'';
+}
+async function guardarRendimiento(rv){
+  if(!RENDIM.ok || !rv || rv.error || !rv.cambio) return true;
+  const payload={ sku:E.sku, rendimiento:rv.valor, operador:(typeof OPERADOR!=='undefined' && OPERADOR ? OPERADOR : 'scheda_edit_v1') };
+  const k=E.sku+'|'+rv.valor;
+  if(!_rendUid[k]) _rendUid[k]='rend-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
+  try{
+    const r=await fetch(DICC_BORDE.URL+'/catalogo/rendimiento',{ method:'POST', headers:{'X-Borde-Token':DICC_BORDE.T,'Content-Type':'text/plain'}, body:JSON.stringify(Object.assign({uid:_rendUid[k]},payload)) });
+    const j=await r.json().catch(()=>null);
+    if(!(j&&j.ok)) throw new Error((j&&j.error)||('sin respuesta ('+r.status+')'));
+    if(rv.valor==null) delete RENDIM.map[E.sku]; else RENDIM.map[E.sku]=rv.valor;
+    E.rendOrig=rv.valor; delete _rendUid[k]; return true;
+  }catch(e){ banner('err','⚠️ El resto se guardó, pero el rendimiento no: '+e.message+'. Vuelve a guardar para reintentar.'); return false; }
+}
+rendCargar();
 boot();update();
 </script>
 <!-- ── SCHEDA-AUTH-001 · 12-jun · stesso innesto del panel BC (bcentral_operaciones) ──
