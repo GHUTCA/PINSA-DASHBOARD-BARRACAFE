@@ -425,6 +425,8 @@
   .cm-cta{display:block;width:100%;border:0;border-radius:13px;padding:16px;margin-top:8px;font-size:17px;
     font-weight:900;color:var(--cm-acc-t);background:var(--cm-acc);cursor:pointer;font-variant-numeric:tabular-nums}
   .cm-cta:disabled{opacity:.4;cursor:default}
+  .cm-cta-mesa{font-size:1.55em;font-weight:900;letter-spacing:.02em;vertical-align:-2px}   /* [AUT-0672] */
+  .cpp-mesa{font-size:30px;font-weight:900;margin:4px 0 2px;letter-spacing:.02em}   /* [AUT-0672] */
   /* EL CAJÓN · el catálogo a página entera (sin cabecera: ya sabes dónde estás) */
   .cm-cajon{position:absolute;inset:0;z-index:90;background:var(--cm-bg);display:flex;flex-direction:column}
   .cm-fams{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:calc(11px + env(safe-area-inset-top,0)) 14px 7px;flex:none}
@@ -1108,7 +1110,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.226.2 · vetro</span>
+      <span class="ver" id="ver">sala v3.226.3 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1411,6 +1413,21 @@ const PEDIR1_ON = (function () {
    «Confirmar pedido» e apre un modal al centro dello schermo con l'elenco
    SKU/cantidad prima di spedire davvero — «così evitiamo [errori verso] la
    barra e/o la cocina». Nasce SPENTA, stesso idioma degli altri (?pedir2=1). */
+/* [AUT-0672 · 14-ott · 🖐 TERZA V30] ENVIAR A MESA <n> — cura ① del caso 123→125 (notte 13, Jurley: `BKP 123 125 LA RADICE SONO DUE`).
+   La mesa del pedido è quella del pannello aperto, e al momento di «Enviar» niente la metteva davanti agli occhi: 8 casi dal 25-set, quasi tutti
+   fra mesas vicine. Con la leva: ① il bottone dice «ENVIAR A MESA <n>» col numero grande, e quel numero è ESATTAMENTE quello che parte (una fonte
+   sola, `n.mesa`); ② un reinvio della stessa libreta verso un'altra mesa non riusa l'uuid del primo intento (il dedup lo rimetteva sulla mesa vecchia
+   mentre il toast diceva la nuova): si chiede, e se si va avanti è un pedido nuovo; ③ se il server dice dove è finito (`r.mesa`), il toast dice quello.
+   Leva: `sala_envmesa_on` dal /salud (nasce assente = spenta) · per telefono `?envmesa=1` (prova) / `?envmesa=0` (freno, vince su tutto). */
+let ENVMESA_SRV = false;
+const ENVMESA_QS = (function () {
+  const q = QS.get('envmesa');
+  try {
+    if (q === '1' || q === '0') localStorage.setItem('sala_envmesa', q);
+    return localStorage.getItem('sala_envmesa') || '';
+  } catch (e) { return (q === '1' || q === '0') ? q : ''; }
+})();
+function envMesaOn() { return ENVMESA_QS === '0' ? false : (ENVMESA_QS === '1' || ENVMESA_SRV); }
 const PEDIR2_ON = (function () {
   const q = QS.get('pedir2');
   try {
@@ -6103,8 +6120,9 @@ function _cmBancoHtml(){
        Alberto il 23-set guardando il pezzo 1. Leva spenta: byte a byte
        identico a oggi (stesso bottone, stesso nuevoEnviar diretto). */
     '<button class="cm-cta" '+((_cmN() && !n.enviando)?'':'disabled')+
-      ' onclick="'+(PEDIR2_ON?'nuevoConfirmarAbrir(this)':'nuevoEnviar(this)')+'">'+
-      (PEDIR2_ON?'👑 Confirmar pedido':'👑 Crear pedido')+
+      ' onclick="'+((envMesaOn() && !n.mesa)?'nuevoMesaPick()':(PEDIR2_ON?'nuevoConfirmarAbrir(this)':'nuevoEnviar(this)'))+'">'+
+      (envMesaOn() ? (n.mesa ? '👑 ENVIAR A MESA <span class="cm-cta-mesa">'+esc(n.mesa)+'</span>' : '👑 ¿A qué mesa?') :   // [AUT-0672] il numero che parte, grande
+      (PEDIR2_ON?'👑 Confirmar pedido':'👑 Crear pedido'))+
       (tot?' · '+fmtPrice(tot):'')+'</button></div>';
 }
 /* [AUT-0388] EL MODAL DEL CENTRO — «¿estás seguro que deseas enviar este
@@ -6120,7 +6138,8 @@ function nuevoConfirmarAbrir(btn){
   }).join('');
   $('cppBox').innerHTML =
     '<div class="cpp-h">¿Estás seguro que deseas enviar<br>este pedido a producción?</div>'+
-    '<div class="cpp-sub">Mesa '+esc(n.mesa)+' · revisa antes de mandar a barra/cocina</div>'+
+    (envMesaOn() ? '<div class="cpp-mesa">MESA '+esc(n.mesa)+'</div><div class="cpp-sub">revisa antes de mandar a barra/cocina</div>'   // [AUT-0672]
+      : '<div class="cpp-sub">Mesa '+esc(n.mesa)+' · revisa antes de mandar a barra/cocina</div>')+
     '<div class="cpp-lista">'+filas+'</div>'+
     '<div class="cpp-btns"><button class="btn sec" onclick="nuevoConfirmarCancelar()">No</button>'+
     '<button class="btn verde" onclick="nuevoConfirmarSi(this)">Sí</button></div>';
@@ -6155,14 +6174,23 @@ function _cmMesasPlaza(){
   out.sort(function(a,b){ return (parseInt(a.m,10)||0) - (parseInt(b.m,10)||0); });
   return out.slice(0, 24);
 }
+/* [AUT-0672] con la leva, quando la mesa cambia dal cajón, il bottone e il campo si rimettono al numero vero (il cajón ridisegna solo sé stesso). */
+function _envMesaEco(){
+  if (!envMesaOn()) return;
+  const n = STATE.nuevo; if (!n) return;
+  const i = $('nuevoMesa'); if (i) i.value = n.mesa || '';
+  const b = document.querySelector('.cm-banco'); if (b) b.outerHTML = _cmBancoHtml();
+}
 function csMesaChip(m){
   const n = STATE.nuevo; if(!n) return;
   n.mesa = (n.mesa === m) ? '' : m;
+  _envMesaEco();   // [AUT-0672]
   _cmRedibujar();
 }
 function csMesaInput(v){
   const n = STATE.nuevo; if(!n) return;
   n.mesa = (v || '').replace(/[^0-9]/g, '');
+  _envMesaEco();   // [AUT-0672]
   const b = document.querySelector('.cm-cajon .cm-sus'); if(b) b.outerHTML = _cmSusHtml();
 }
 function _cmCajonHtml(){
@@ -6720,7 +6748,9 @@ function f57Cerrar() { const w = $('f57Wrap'); if (w) w.innerHTML = ''; window._
 
 async function nuevoEnviar__in(btn) {
   const n = STATE.nuevo; if (!n) return;
-  const mesa = ($('nuevoMesa') ? $('nuevoMesa').value : n.mesa || '').replace(/[^0-9]/g, '');
+  /* [AUT-0672] con la leva la mesa che parte è `n.mesa`, la STESSA che il bottone mostra: il campo `#nuevoMesa` è solo uno specchio, e un chip
+     del cajón (`csMesaChip`) cambia `n.mesa` senza ridisegnarlo. Leva spenta: la riga di sempre. */
+  const mesa = (envMesaOn() ? (n.mesa || '') : ($('nuevoMesa') ? $('nuevoMesa').value : n.mesa || '')).toString().replace(/[^0-9]/g, '');
   if (!mesa) { toast('warn', '¿Qué mesa es? Pon el número'); return; }
   /* v3.2.1 · la cintura vera: una funzione che spedisce non si fida del solo
      vetro. Mesa fuori plaza → NON parte, e la libreta resta intatta. */
@@ -6750,7 +6780,13 @@ async function nuevoEnviar__in(btn) {
     }
   }
   // uuid FISSO dal primo intento: il retry non può mai duplicare (dedup GAS)
-  if (!n.uuid) n.uuid = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  /* [AUT-0672] l'uuid appartiene alla mesa del PRIMO intento. Se la stessa libreta riparte verso un'altra mesa, il dedup la rimetterebbe sulla
+     vecchia (e il toast direbbe la nuova): si chiede, e se si va avanti è un pedido NUOVO — chi lo manda sa che deve guardare la cuenta della vecchia. */
+  if (envMesaOn() && n.uuid && n.uuidMesa && n.uuidMesa !== mesa) {
+    if (!window.confirm('El envío anterior de este pedido fue a la mesa ' + n.uuidMesa + ' y no sé si entró.\n\n¿Mandarlo como pedido NUEVO a la mesa ' + mesa + '?\n\nDespués revisa la cuenta de la ' + n.uuidMesa + '.')) return;
+    n.uuid = '';
+  }
+  if (!n.uuid) { n.uuid = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); n.uuidMesa = mesa; }
   const items = n.lineas.map(function(l){
     // v3.11 · la pareja è GIÀ due righe: niente «llevar doble» (sarebbero 4)
     const es2 = l.promo === '2x1' && !l.dupla;
@@ -6808,7 +6844,13 @@ async function nuevoEnviar__in(btn) {
       /* [03-ott · caduta su Google] se è andato da Google la riga comincia da «Salió» e il chip resta */
       const _caida = _cadutaDichiara(r, n.uuid, mesa);
       if (_caida) toast('sig', _caida, 6000);
-      else toast('ok', '✓ ' + (r.id_pedido || 'Pedido') + ' — Mesa ' + mesa + (r.plaza ? ' · ' + r.plaza : '') + ' · en tus MÍOS');
+      else {
+        /* [AUT-0672] la mesa la dice il SERVER quando la porta (`r.mesa`); se è un'altra, si grida. Senza `r.mesa` (oggi il bordo non la manda)
+           resta la mesa di questa libreta — che con la leva è quella del bottone e dell'uuid. */
+        const _mSrv = (envMesaOn() && r.mesa != null) ? String(r.mesa).replace(/[^0-9]/g, '') : '';
+        if (_mSrv && _mSrv !== mesa) toast('err', '⚠️ El pedido quedó en la MESA ' + _mSrv + ', no en la ' + mesa + ' — revisa las dos cuentas', 12000);
+        else toast('ok', '✓ ' + (r.id_pedido || 'Pedido') + ' — Mesa ' + (_mSrv || mesa) + (r.plaza ? ' · ' + r.plaza : '') + ' · en tus MÍOS');
+      }
       STATE.nuevo = null; renderNuevo();
       refrescar(false);
       return;
@@ -9187,6 +9229,7 @@ function _salaMuertaPinta(edadMs) {
       CORTE_BORDE_ON = String(cercaK(j, 'corte_borde_on')) === '1';         // [08-ott · 1.6]
       CAJA_ATTO3_ON = String(cercaK(j, 'caja_atto3_on')) === '1';           // [03-ott · ATTO III]
       JL_TODO_ON = String(cercaK(j, 'jl_todo_on')) === '1';                 // [10-ott · decisione ⓐ]
+      ENVMESA_SRV = String(cercaK(j, 'sala_envmesa_on')) === '1';           // [14-ott · AUT-0672]
       UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';   // [10-ott · 1.4]
       CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
