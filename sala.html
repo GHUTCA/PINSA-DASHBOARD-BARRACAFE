@@ -1110,7 +1110,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.226.5 · vetro</span>
+      <span class="ver" id="ver">sala v3.226.6 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9191,7 +9191,20 @@ var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propi
 /* [10-ott · decisione ⓐ di Alberto · 🎛 V28 `JL FA TUTTO DALLA SUA APP COBRAR`] il JL fa tutto dalla sua app: PEDIR · COBRAR · MOVER tornano nel `?jl=1`.
    Leva del bordo (/salud → jl_todo_on). NASCE SPENTA: spenta, `VJ` filtra come ieri (solo PEDIDOS ed ELIMINAR). */
 var JL_TODO_ON = false;
-var UNIR_VIA_BORDE_ON = false;   // [10-ott · 1.4 · BKP `BKP 1 4 UNIR VA DIRITTO AL GAS`] /salud → unir_via_borde_on: l'UNIR passa dal bordo come mover e separar. Nasce spenta = il gasPost di ieri.
+/* [AUT-0687 · 14-ott · 🖐 TERZA V30 · `V30 AUT-0687 UNIR MAI A GOOGLE PER DEFAULT`] UNA LEVA NON LETTA NON È «SPENTA» (la stessa di FAMCOL_MOTIVO_ON qui
+   sotto, e della 0674). Prima nasceva `false`: il /salud si legge UNA volta all'avvio, e un telefono che non l'aveva letto (rete lenta, risposta
+   fallita, JSON d'errore) univa le mesas su GOOGLE per tutta la sessione — è chi crea ancora le juntas nel foglio (🚚 `MIGRACION V30 GRUPOS MESA
+   CHI LE CREA SU GOOGLE`). Ora: null = non letta ⇒ l'unir va al BORDO (staffPost, che ripiega da solo se il bordo non risponde); solo un «no»
+   detto da una risposta VERA del bordo lo manda al libro. Freno per telefono `?unirdef=0` = il default di ieri (non letta = libro). */
+var UNIR_VIA_BORDE_ON = null;   // [10-ott · 1.4 · BKP `BKP 1 4 UNIR VA DIRITTO AL GAS`] /salud → unir_via_borde_on · null = non ancora letta (AUT-0687)
+const UNIRDEF_QS = (function () {
+  const q = QS.get('unirdef');
+  try {
+    if (q === '1' || q === '0') localStorage.setItem('sala_unirdef', q);
+    return localStorage.getItem('sala_unirdef') || '';
+  } catch (e) { return (q === '1' || q === '0') ? q : ''; }
+})();
+function _unirAlBordo() { return UNIRDEF_QS === '0' ? UNIR_VIA_BORDE_ON === true : UNIR_VIA_BORDE_ON !== false; }
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
 /* ═══ [10-ott · 🎛 V28 AUT-0663 `FOTO SALVATA SENZA ETA CURA ALLA RADICE`] UNA SALA SALVATA PIU VECCHIA DEL TETTO NON SI DISEGNA MAI COME SE FOSSE VIVA ═══════════
    IL FATTO (mesa 100, telefono di Ary, 10-ott): il catch del poll ridisegnava `sala_foto_v1` SENZA tetto d'eta («una sala di un'ora fa, dichiarata, batte il vuoto») e il ricarico non la toglie: Ary ha visto
@@ -9256,7 +9269,7 @@ function _salaMuertaPinta(edadMs) {
       YAPAGV_SRV = String(cercaK(j, 'sala_yapag_vuoto_on')) === '1';        // [14-ott · AUT-0674]
       CORTEST_SRV = String(cercaK(j, 'sala_corte_estado_on')) === '1';      // [14-ott · AUT-0676]
       ENVMESA_SRV = String(cercaK(j, 'sala_envmesa_on')) === '1';           // [14-ott · AUT-0672]
-      UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';   // [10-ott · 1.4]
+      if (!(j && j.ok === false)) UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';   // [10-ott · 1.4] · [AUT-0687] un JSON d'errore non è «spenta»: resta null
       CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
       FOTO_VIVA_LEIDA = true;                                               // [EL GIRO ⑥⑦] il bordo ha risposto: da qui vale la leva (assente = spenta)
@@ -11459,7 +11472,8 @@ function juntaCrear() {
          Leva spenta = il `gasPost` di ieri, riga per riga. */
       const _corpoUnir = { codigo: STATE.codigo, nombre: STATE.nombre, mesas: _mesasOrden, gid: gid };
       if (gidRotti.length) _corpoUnir.gid_rotti = gidRotti;
-      (UNIR_VIA_BORDE_ON ? staffPost('unirMesas', _corpoUnir) : gasPost('unirMesas', _corpoUnir))
+      (UNIR_VIA_BORDE_ON === null && bordeHecho('unir_leva_non_letta', { mesas: _mesasOrden.length }),   // [AUT-0687] la misura: quante volte la leva non era ancora letta
+       _unirAlBordo() ? staffPost('unirMesas', _corpoUnir) : gasPost('unirMesas', _corpoUnir))
         .then(function (r) {
           /* [26-set] se il libro adotta `payload.gid` (② del piano, non
              ancora fatta), `r.grupo_id` sarà il NOSTRO gid — riscriverlo è
