@@ -558,7 +558,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v98 · Control de inventarios (apagado) · AUT-0685 · 14oct</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v99 · Control de inventarios (apagado) · cierres de EXO · AUT-0685 · 14oct</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -6430,6 +6430,12 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
   function horaOperativa(ms){ var p=partesSantiago(ms); return p.hora<6 ? p.hora+24 : p.hora; }
   function dow(d){ return new Date(Date.parse(d+'T12:00:00Z')).getUTCDay(); }   // 0 dom … 1 lun
   function ultimoLunes(d){ var k=dow(d); return sumaDias(d, -((k+6)%7)); }
+  /* días de cierre por local (Alberto, 14-oct): todos abren 7 de 7, EXO cierra domingo y lunes. 0 = dom, 1 = lun. */
+  var CERRADO = { exo:[0,1] };
+  function cerrado(code,d){ return (CERRADO[code]||[]).indexOf(dow(d))>=0; }
+  /* día del inventario general de la bodega de esta semana: el lunes, o el primer día abierto después (EXO: martes). Si ese día aún no llegó, vale el de la semana anterior. */
+  function diaBodega(code,hoy){ var l=ultimoLunes(hoy); while(cerrado(code,l)) l=sumaDias(l,1);
+    if(l>hoy){ l=ultimoLunes(sumaDias(ultimoLunes(hoy),-7)); while(cerrado(code,l)) l=sumaDias(l,1); } return l; }
   /* estado de UNA obligación del giro. s = fila del borde para ese día (o null); total = productos del giro (o null);
      enCurso = hay un giro empezado en este aparato; esHoy = el día evaluado es el día operativo en curso. */
   function estadoGiro(o){
@@ -6456,7 +6462,7 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
     return { e:'x', txt:'sin registros' };
   }
   CTL.partesSantiago=partesSantiago; CTL.diaOperativo=diaOperativo; CTL.horaOperativa=horaOperativa; CTL.ultimoLunes=ultimoLunes; CTL.sumaDias=sumaDias;
-  CTL.estadoGiro=estadoGiro; CTL.estadoBodega=estadoBodega; CTL.estadoMov=estadoMov; CTL.LIM=LIM;
+  CTL.cerrado=cerrado; CTL.diaBodega=diaBodega; CTL.CERRADO=CERRADO; CTL.estadoGiro=estadoGiro; CTL.estadoBodega=estadoBodega; CTL.estadoMov=estadoMov; CTL.LIM=LIM;
   if(!ON || typeof document==='undefined' || typeof BORDE_REG==='undefined') return;
 
   /* ── vetro ──────────────────────────────────────────────────────────────────────────────────────────── */
@@ -6498,10 +6504,11 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
     var c=ctxEval(code), dat=(DATOS[code]&&DATOS[code].dias)||{}, hoy=c.hoy, out={ giro:[], mov:[], bod:[] };
     for(var i=6;i>=0;i--){
       var d=sumaDias(hoy,-i), fila=dat[d]||null, esHoy=(d===hoy);
-      out.giro.push({ d:d, st: tieneGiro(code) ? estadoGiro({ fila:fila, total:totalGiro(code), enCurso: code===CTX_CODE && esHoy && giroEnCurso(), esHoy:esHoy, horaOp:c.horaOp, lim:c.lim }) : { e:'n', txt:'en desarrollo' } });
-      out.mov.push({ d:d, st: estadoMov({ fila:fila, esHoy:esHoy, horaOp:c.horaOp, lim:c.lim }) });
+      var cer=cerrado(code,d);
+      out.giro.push({ d:d, st: cer ? { e:'n', txt:'cerrado' } : tieneGiro(code) ? estadoGiro({ fila:fila, total:totalGiro(code), enCurso: code===CTX_CODE && esHoy && giroEnCurso(), esHoy:esHoy, horaOp:c.horaOp, lim:c.lim }) : { e:'n', txt:'en desarrollo' } });
+      out.mov.push({ d:d, st: cer ? { e:'n', txt:'cerrado' } : estadoMov({ fila:fila, esHoy:esHoy, horaOp:c.horaOp, lim:c.lim }) });
     }
-    var lun=ultimoLunes(hoy);
+    var lun=diaBodega(code,hoy);
     out.bod.push({ d:lun, st: estadoBodega({ fila:dat[lun]||null, esHoy:(lun===hoy), horaOp:c.horaOp, lim:c.lim }) });
     return out;
   }
@@ -6520,7 +6527,7 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
       var sin = (g.sin ? ' · '+g.sin+' sin contar' : '');
       h+=pill('giro','Giro',g,g.txt+sin);
     }
-    h+=pill('bod','Bodega',b, b.txt+' · lun '+parseInt(c.bod[0].d.split('-')[2],10));
+    h+=pill('bod','Bodega',b, b.txt+' · '+fd(c.bod[0].d));
     var n=0; try{ n=parseInt(localStorage.getItem('ctl_tip_n')||'0',10)||0; }catch(e){}
     if(n<10) h+='<div class="ctl-tip"><span>Toca la píldora para hacer lo que falta.</span><span class="n">'+(n+1)+' de 10</span></div>';
     host.innerHTML=h; host.hidden=false;
