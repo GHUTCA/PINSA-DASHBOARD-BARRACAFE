@@ -55,7 +55,7 @@ async function banco(SRC) {
     t('⑥ quater il numero di mesa e escapato (nessun HTML dal bordo)', !/<b>9<\/b>/.test(m.ev.render[0]) && /&lt;b&gt;9/.test(m.ev.render[0]), m.ev.render[0]); }
   // ⑦ cablaggio
   t('⑦ la leva del vetro nasce spenta e si legge da /salud (saldo_sin_padron_on)', /var SALDO_SIN_PADRON_ON = false;/.test(SRC) && /SALDO_SIN_PADRON_ON = String\(cercaK\(j, 'saldo_sin_padron_on'\)\) === '1';/.test(SRC));
-  t('versione >= 3.228.0', /sala v3\.(228\.\d|22[9]\.\d|2[3-9]\d\.\d)/.test(SRC));
+  t('il vetro porta la 0666 (legge saldo_sin_padron_on dal /salud) — per contenuto, non per numero: rifatta sopra main e\' v3.226.7', SRC.includes("SALDO_SIN_PADRON_ON = String(cercaK(j, 'saldo_sin_padron_on'))"));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }
