@@ -184,7 +184,7 @@
     <button id="nav-precios" onclick="vista('precios')" style="display:none">Precios</button>
   </nav>
   <span class="userchip" id="userchip">—</span>
-  <span class="ver" id="ver">v2.6 · 30-set</span>
+  <span class="ver" id="ver">v2.7 · rendimiento · 14-oct</span>
 </header>
 
 <main>
@@ -2802,6 +2802,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const empQ = (new URLSearchParams(location.search).get('emp') || '').toUpperCase();
     setEmp(EMP_ALLOWED.indexOf(empQ) >= 0 ? empQ : EMP_ALLOWED[0]);
     cargar();
+    cargarRendimiento();
   }, 300);
 });
 
@@ -3023,7 +3024,7 @@ function markSugg(){
 function addIng(n){
   const i = suggItems[n];
   if (!i) return;
-  S.ings.push({ sku:i.sku, nombre:i.nombre, q:0, um:i.um, precio:i.precio, esSub:i.esBase }); // q=0: la cantidad la decide el chef, no el default
+  S.ings.push({ sku:i.sku, nombre:i.nombre, q:0, um:i.um, precio:precioUtil(i.sku, i.precio), esSub:i.esBase }); // q=0: la cantidad la decide el chef, no el default
   document.getElementById('f-inga').value = '';
   document.getElementById('sugg').style.display = 'none';
   render();
@@ -3392,14 +3393,29 @@ function renderList(){
 // v1.3: prezzo VIVO da BD_INSUMOS (col O, già in INSUMOS) agganciato per nome;
 // il Precio_actual del Detalle è il FOSSILE (fallback + segnalino se diverge).
 let _MAPI = null;
+/* ═══ RENDIMIENTO · 14-oct-2026 · AUT-0685 · 🏭 OPERACIONES V30 ═══════════════════════════════════════════════
+   Alberto: «si el filete cuesta $20.000 el kg, el costo no es $20 el gramo: se limpia, y de 20 kg salen 10-13 limpios».
+   Costo del gramo ÚTIL = precio ÷ rendimiento. El rendimiento (%) lo escribe el Diccionario en una tabla aparte del bordo
+   (GET /catalogo/rendimiento). Sin la ruta o sin dato = 100%: el costo queda como siempre. Solo toca el COSTO de la receta:
+   el stock y el costo de los movimientos siguen en unidades compradas. ═══════════════════════════════════════════ */
+const REND = { ok:false, map:{} };
+function rendDe(sku){ const r = (sku!=null) ? Number(REND.map[String(sku)]) : NaN; return (r>0 && r<=100) ? r : null; }
+function precioUtil(sku, precio){ const r = rendDe(sku); return r ? precio / (r/100) : precio; }
+async function cargarRendimiento(){
+  try{ const r = await fetch(TALLER_BORDE.URL + '/catalogo/rendimiento', { headers:{ 'X-Borde-Token':TALLER_BORDE.T }, cache:'no-store' });
+    const j = await r.json().catch(() => null);
+    if (j && j.ok && j.rend && typeof j.rend === 'object'){ REND.ok = true; REND.map = j.rend; } }catch(e){}
+  if (REND.ok){ try{ renderList(); if (selId) verReceta(selId); }catch(e){} }   // el costo se repinta con el rendimiento
+}
 function insumoVivo(nombre){
   if (!_MAPI) { _MAPI = {}; INSUMOS.forEach(i => _MAPI[i.nombre.trim().toUpperCase()] = i); }
   return _MAPI[String(nombre).trim().toUpperCase()] || null;
 }
 function lineaCosto(i){
   const v = insumoVivo(i.descripcion);
-  const precio = v ? v.precio : i.precio;
-  return { precio, stale: v ? Math.abs(v.precio - i.precio) > 0.01 : false, fossil: i.precio };
+  const rend = v ? rendDe(v.sku) : null;
+  const precio = v ? precioUtil(v.sku, v.precio) : i.precio;
+  return { precio, rend, stale: v ? Math.abs(v.precio - i.precio) > 0.01 : false, fossil: i.precio };
 }
 // Costo VERO = Σ Detalle (q × precio VIVO) — mai la ARRAYFORMULA del Master (marcia
 // su molte ricette vecchie).
@@ -3458,7 +3474,7 @@ function verReceta(id){
         ${esCC ? `<button class="btn ghost" style="padding:3px 14px;font-size:12px;margin-left:8px" onclick="abrirPrint('${r.id}')">🖨 Imprimir lote</button>` : ''}</span>
       </div>
       <table><thead><tr><th>Ingrediente</th><th class="num">Cantidad</th><th class="num">Costo</th></tr></thead><tbody>
-      ${ings.map(i => { const lc = lineaCosto(i); return `<tr><td>${esc(i.descripcion)}${i.esSub?' <span class="subchip">base</span>':''}${lc.stale?` <span title="precio actualizado: guardado $${fmtN(lc.fossil,2)} → vivo $${fmtN(lc.precio,2)}" style="cursor:help;color:var(--amber)">⟳</span>`:''}${!insumoVivo(i.descripcion)?' <span title="no existe en BD_INSUMOS — precio congelado" style="cursor:help;color:var(--red)">∅</span>':''}</td>
+      ${ings.map(i => { const lc = lineaCosto(i); return `<tr><td>${esc(i.descripcion)}${i.esSub?' <span class="subchip">base</span>':''}${lc.rend?` <span class="subchip" title="rendimiento ${lc.rend}%: el precio ya es por unidad útil">rend. ${fmtN(lc.rend)}%</span>`:''}${lc.stale?` <span title="precio actualizado: guardado $${fmtN(lc.fossil,2)} → vivo $${fmtN(lc.precio,2)}" style="cursor:help;color:var(--amber)">⟳</span>`:''}${!insumoVivo(i.descripcion)?' <span title="no existe en BD_INSUMOS — precio congelado" style="cursor:help;color:var(--red)">∅</span>':''}</td>
         <td class="num">${fmtN(i.q)} ${i.um}</td><td class="num">${fmtN(i.q*lc.precio)}</td></tr>`; }).join('')}
       </tbody></table>
       ${r.proc ? `<h4 style="margin-top:16px">Cómo se hace</h4><ol class="pasos">${r.proc.split(' | ').map(p=>`<li><span>${esc(p)}</span></li>`).join('')}</ol>` : ''}
@@ -3526,7 +3542,7 @@ function editarReceta(id){
   S.ings = (DETALLE[id] || []).map(i => {
     const v = insumoVivo(i.descripcion);
     return { sku: v ? v.sku : '∅', nombre: i.descripcion, q: i.q, um: i.um,
-             precio: v ? v.precio : i.precio, esSub: v ? v.esBase : i.esSub };
+             precio: v ? precioUtil(v.sku, v.precio) : i.precio, esSub: v ? v.esBase : i.esSub };
   });
   S.pasos = r.proc ? r.proc.split(' | ').filter(Boolean) : [];
   document.getElementById('f-foto').value = r.foto || '';
