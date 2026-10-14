@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.37.3</span>
+<span class="ver" id="ver">app_jl v1.38.4</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -2092,9 +2092,36 @@ async function levaNoche(escalon) {
     else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
   } catch (e) { toast('err', 'Sin conexión — no cambió nada'); }
 }
+/* ═══ [10-ott · 1.2 · P2 · AUT-0662] «ABRIR TURNO» PASSA PRIMA DAL BORDO, il GAS resta il ripiego ═══════════════════════════════════════════════════════════
+   Contratto di 🎛 BKP (`BKP 1.2 P2 CONTRATTO TURNO APERTURA`, 10-ott 14:27): `POST /turno/apertura/<local>` {accion:'abrir', uid_gesto, nombre, pin_jl}. Il CODICE lo conia il bordo (4 cifre) e torna
+   SOLO in questa risposta, al JL col PIN. Stesso schema di `_asignarPorBordo` (6.3 fetta B): ripiego sul GAS SOLO se la leva e spenta (`gate_spento`) o la rotta non c'e (404/403) — mai su un timeout o un 5xx:
+   il bordo potrebbe aver aperto, e un secondo codice dal GAS lascerebbe il JL a dire a voce un codice che non vale (con GATE_DA_BORDE_ON vince quello del bordo). Aprire e idempotente per giorno (`ya_abierto` torna lo
+   STESSO codice), quindi su un dubbio il JL riprova e il bordo glielo rivede: non se ne crea un secondo. `cerrarT` non ha bottone (il turno si chiude aprendo il successivo): resta com'era. */
+const _ERR_APERTURA = { pin_invalido: 'PIN incorrecto', pin_jl_invalido: 'PIN incorrecto', pin_jl_requerido: 'Falta el PIN', pin_jl_no_configurado: 'Este local no tiene PIN de JL configurado: avisa a ADMIN', accion_invalida: 'Acción no válida', uid_gesto_mancante: 'Falta un dato del gesto: reintenta', nombre_mancante: 'Falta tu nombre: vuelve a entrar' };
+async function _aperturaPorBordo(uid) {
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 8000);
+  let r, j;
+  try {
+    r = await fetch(CFG.BORDE + '/turno/apertura/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T },
+      body: JSON.stringify({ accion: 'abrir', uid_gesto: uid, nombre: STATE.user || 'JL', pin_jl: STATE.pin }), signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    j = await r.json().catch(function () { return null; });
+  } catch (e) { clearTimeout(to); return { usado: true, ok: false, dudoso: true }; }   // timeout o rete caduta: NO si sa se ha aperto, NON si ripiega
+  if (r.status === 404 || r.status === 403) return { usado: false };                       // la rotta non c'e / il token non vale: il bordo non ha scritto niente
+  if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') return { usado: false };   // leva spenta per il locale
+  if (j && j.ok === false && j.error) return { usado: true, ok: false, err: _ERR_APERTURA[j.error] || j.error, bloqueado: /^pin(_jl)?_bloqueado/.test(String(j.error)) ? (j.faltan_s || 0) : 0 };   // [10-ott · EL GIRO] el freno de la casa dice pin_jl_bloqueado (y _apparecchio con el freno a dos pisos): los dos nombres
+  if (!r.ok || !j || j.ok !== true || !j.codigo) return { usado: true, ok: false, dudoso: true };   // 5xx o una risposta che non so leggere: il bordo potrebbe aver aperto
+  return { usado: true, ok: true, codigo: j.codigo, ya: !!j.ya_abierto, por: j.abierto_por || '' };
+}
 async function abrirT() {
   if (!confirm('¿Abrir el turno de hoy?')) return;
   try {
+    const bd = await _aperturaPorBordo(_uidGesto());
+    if (bd.usado) {
+      if (bd.ok) { toast('ok', '🔑 Turno abierto · código ' + bd.codigo + (bd.ya ? ' (ya estaba' + (bd.por ? ' · abierto por ' + bd.por : '') + ')' : '')); giroTurno(); return; }
+      if (bd.dudoso) { toast('warn', '⏳ El sistema está lento: puede que el turno SÍ se haya abierto. Toca «Abrir turno» otra vez: si ya estaba, te muestra el mismo código.'); return; }
+      toast('err', '✋ ' + (bd.bloqueado ? 'Demasiados intentos con el PIN, espera ' + Math.ceil(bd.bloqueado / 60) + ' min' : bd.err)); return;
+    }
     const r = await gasPost('abrirTurno', { pin: STATE.pin });
     if (r && r.ok) { toast('ok', '🔑 Turno abierto · código ' + r.codigo + (r.ya_abierto ? ' (ya estaba)' : '')); giroTurno(); }
     else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
@@ -2229,17 +2256,17 @@ function _uidGesto() { try { return 'g' + Date.now().toString(36) + '-' + crypto
 const _ERR_TURNO = { pin_jl_invalido: 'PIN incorrecto', pin_jl_requerido: 'Falta el PIN', persona_fuera_del_locale: 'Esa persona no está asignada a este local', sustituida_fuera_del_locale: 'La persona que sale no está asignada a este local',
   motivo_requerido: 'Falta el motivo del cambio', franja_invalida: 'La franja no tiene el formato HH:MM-HH:MM', plaza_missing: 'Falta la plaza', persona_id_invalido: 'Persona no válida' };
 async function _asignarPorBordo(m, p, f, agregar) {
-  if (_STAFF_JL_FONTE !== 'bordo') return { usado: false };                                    // la lista no viene de Postgres: no hay persona_id
-  if (!/^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]|24):[0-5][0-9]$/.test(f)) return { usado: false };   // franjas «viejas» («19–cierre»): las gestiona el GAS
+  if (_STAFF_JL_FONTE !== 'bordo') return { usado: false, por: 'lista_gas' };                                    // la lista no viene de Postgres: no hay persona_id
+  if (!/^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]|24):[0-5][0-9]$/.test(f)) return { usado: false, por: 'franja_vieja' };   // franjas «viejas» («19–cierre»): las gestiona el GAS
   const porNombre = function (n) { const k = (n || '').toString().trim().toLowerCase(); return (_STAFF_JL || []).find(function (s) { return s && s.persona_id && (s.nombre || '').toString().trim().toLowerCase() === k; }); };
   const nuevo = porNombre(m);
-  if (!nuevo) return { usado: false };
+  if (!nuevo) return { usado: false, por: 'nombre_no_resuelto' };
   const previos = [];
   ((STATE.turno && STATE.turno.asignaciones) || []).forEach(function (a) {
     if (a && !a._pendiente && a.plaza === p && (a.franja || '') === f && a.mesero) a.mesero.toString().split(',').forEach(function (n) { n = n.trim(); if (n) previos.push(n); });
   });
   const aQuitar = [];
-  if (!agregar) { for (const n of previos) { const pp = porNombre(n); if (!pp) return { usado: false }; if (pp.persona_id !== nuevo.persona_id) aQuitar.push(pp); } }   // un nombre que no sé resolver: lo reemplaza el GAS
+  if (!agregar) { for (const n of previos) { const pp = porNombre(n); if (!pp) return { usado: false, por: 'nombre_no_resuelto' }; if (pp.persona_id !== nuevo.persona_id) aQuitar.push(pp); } }   // un nombre que no sé resolver: lo reemplaza el GAS
   const gestos = [];
   if (aQuitar.length) {
     gestos.push({ accion: 'asignar', persona_id: nuevo.persona_id, sustituye_persona_id: aQuitar[0].persona_id, motivo: 'cambio de plaza (JL)' });
@@ -2255,10 +2282,30 @@ async function _asignarPorBordo(m, p, f, agregar) {
       clearTimeout(to);
       j = await r.json().catch(function () { return null; });
     } catch (e) { clearTimeout(to); return { usado: true, ok: false, timeout: true, hechos: i }; }   // NO se sabe si escribió: no se ripiega
-    if (!r.ok || !j || (j.ok === true && j.scritto === false && j.motivo === 'gate_spento')) { if (i === 0) return { usado: false }; return { usado: true, ok: false, err: 'se cortó a la mitad (' + i + ' de ' + gestos.length + ')', hechos: i }; }
-    if (j.ok === false) return { usado: true, ok: false, err: _ERR_TURNO[j.error] || j.error || 'no', bloqueado: j.error === 'pin_jl_bloqueado' ? (j.faltan_s || 0) : 0, hechos: i };
+    if (!r.ok || !j || (j.ok === true && j.scritto === false && j.motivo === 'gate_spento')) { if (i === 0) return { usado: false, por: 'bordo_no_responde' }; return { usado: true, ok: false, err: 'se cortó a la mitad (' + i + ' de ' + gestos.length + ')', hechos: i }; }
+    if (j.ok === false) return { usado: true, ok: false, err: _ERR_TURNO[j.error] || j.error || 'no', bloqueado: /^pin_jl_bloqueado/.test(String(j.error)) ? (j.faltan_s || 0) : 0, hechos: i };   // [10-ott · EL GIRO] anche _apparecchio (freno a due piani)
   }
   return { usado: true, ok: true };
+}
+/* ═══ [10-ott · 1.2 · P4 · V28 `V28 P4 JL ASSEGNA SOLO DAL VETRO NUOVO`] CON LA LEVA ACCESA LA STRADA DEL GAS SPARISCE ════════════════════════════════════════════════
+   Regola di Alberto: il JL fa tutto dalla sua app. Un piano scritto nel pannello GAS (`asignarPlaza`) non entra in `hechos_turno` e bucherebbe P5 («asig da Postgres») in silenzio. Quindi, quando il /salud dice che
+   `turno_escribe_pg_on` copre questo locale, `asignar()` NON ripiega piu sul GAS: se il sistema nuovo non puo (franja vecchia, persona non risolta, bordo che non risponde) lo DICE e non scrive da nessuna parte.
+   La leva si legge dal /salud come le altre (cjFlag); stessa semantica di `levaTurnoEscribe` del bordo: '1' = tutti, o una lista CSV di locali. Senza /salud ⇒ spenta: il vetro e quello di ieri. */
+function turnoEscribeOn() {
+  try {
+    const m = /"turno_escribe_pg_on"\s*:\s*"([^"]*)"/.exec(JSON.stringify(STATE.salud || {}));
+    const v = (m ? m[1] : '0').trim().toUpperCase();
+    if (v === '' || v === '0' || v === 'FALSE') return false;
+    if (v === '1' || v === 'TRUE') return true;
+    const loc = String(LOC_PG[CFG.LOCAL] || CFG.LOCAL || '').toUpperCase();
+    return v.split(',').map(function (x) { return x.trim(); }).filter(Boolean).indexOf(loc) >= 0;
+  } catch (e) { return false; }
+}
+function _porQueNoBordo(por, franja) {
+  if (por === 'franja_vieja') return 'La franja «' + franja + '» está en un formato antiguo: avisa a RRHH, hay que corregirla. No se escribió nada';
+  if (por === 'bordo_no_responde') return 'El sistema nuevo no respondió. Reintenta en un minuto. No se escribió nada';
+  if (por === 'lista_gas') return 'La lista de personas todavía viene del sistema viejo (el nuevo no respondió o no está activo): recarga la lista; si sigue igual, avisa a RRHH. No se escribió nada';   // [10-ott · EL GIRO] la causa vera, no «no encuentro»
+  return 'No encuentro a esa persona en el sistema nuevo: recarga la lista o avisa a RRHH. No se escribió nada';
 }
 async function asignar() {
   const m = ($('asMesero').value || '').trim(), p = ($('asPlaza').value || '').trim(), f = (($('asFranja') || {}).value || '').trim();
@@ -2278,6 +2325,7 @@ async function asignar() {
       if (bd.timeout) { ott._verificando = true; pintaTab(); toast('warn', '⏳ El sistema está lento: puede que SÍ se haya guardado. Reviso en 30 s — no lo repitas todavía.'); setTimeout(function () { togli(); giroTurno(); }, 30000); return; }
       togli(); toast('err', '✋ No se guardó: ' + (bd.bloqueado ? 'demasiados intentos con el PIN, espera ' + Math.ceil(bd.bloqueado / 60) + ' min' : bd.err) + (_prima ? ' · ' + p + ' sigue con ' + _prima : '')); return;
     }
+    if (turnoEscribeOn()) { togli(); toast('err', '✋ ' + _porQueNoBordo(bd.por, f) + (_prima ? ' · ' + p + ' sigue con ' + _prima : '')); return; }   // [P4] leva accesa: la strada del GAS e chiusa
     const r = await gasPost('asignarPlaza', { pin: STATE.pin, mesero: m, plaza: p, franja: f });
     if (r && r.ok) { ['asMesero', 'asPlaza'].forEach(function (id) { const e = $(id); if (e) e.value = ''; }); toast('ok', '✓ ' + p + ' ahora es de ' + m); giroTurno(); tab(1); }
     else { togli(); toast('err', '✋ No se guardó: ' + ((r && (r.mensaje || r.error)) || 'el sistema dijo que no') + (_prima ? ' · ' + p + ' sigue con ' + _prima : '')); }
