@@ -12151,6 +12151,16 @@ function yapagVuotoOn() { return YAPAGV_QS === '0' ? false : (YAPAGV_QS === '1' 
    PRESENZA della chiave, non nel valore. Il GAS manda SEMPRE `ya_pagado`, `null` per lo zero vero (MENU_GAS r.15395/16036); il bordo
    non lo manda mai; `fetchYaPagado` oggi risponde `{ok:false, Unknown action}`. ⇒ chiave in una risposta non fallita = fatto
    (null = zero); chiave assente o risposta fallita = «non so». */
+/* [AUT-0674 · 🎛 V30 `V30 0675 B 0673B DRY OPERACIONES 0677`] un pago a $0 (FAM, colación, cortesía, sin pago) NON si scrive «ya pagó $0»:
+   si dice il medio. Il GAS non manda il medio nei pagos di `ya_pagado` (MENU_GAS r.15263: hora · monto · boleta) ⇒ senza medio si dice
+   cosa può essere, non un numero. Con la leva spenta: `fmtPrice` come sempre. */
+const _YA_MEDIO_TXT = { fam: 'FAM', familia: 'FAM', colacion: 'colación', 'colación': 'colación', cortesia: 'cortesía', 'cortesía': 'cortesía', sin_pago: 'sin pago' };
+function _yaMontoTxt(ya) {
+  const m = Number(ya && ya.monto) || 0;
+  if (!yapagVuotoOn() || m > 0) return fmtPrice(m);
+  const md = String((ya && ya.medio) || '').trim().toLowerCase();
+  return _YA_MEDIO_TXT[md] ? 'sin cobro (' + _YA_MEDIO_TXT[md] + ')' : 'sin cobro (FAM, colación o cortesía)';
+}
 function _yaPagRicorda(mesa, r) {
   STATE.pcYaPag = STATE.pcYaPag || {};
   const yp = r ? r.ya_pagado : undefined;
@@ -12164,7 +12174,7 @@ function _pagadaEnSesion(mesa) {
   if (!s || !s.n) return null;                      // «so, ed è zero» → non è un avviso
   const ult = (s.pagos && s.pagos.length) ? s.pagos[s.pagos.length - 1] : null;
   return { hora: (ult && ult.hora) || '', monto: s.monto || 0,
-           medio: '', quien: '', boleta: (ult && ult.boleta) || '',
+           medio: (yapagVuotoOn() && ult && ult.medio) || '', quien: '', boleta: (ult && ult.boleta) || '',   // [AUT-0674] il medio, se la fonte lo porta (bordo 0675 sì, GAS no)
            n: s.n, sesion: true };
 }
 /* 🔴 «ESISTE?» e «COSA C'ERA» sono DUE domande (lezione 09-ago, pagata sul
@@ -13629,7 +13639,7 @@ function bMedio(w, pg) {
     /* il contesto del doppio cobro, versione DEBOLE (v3.39: grigio, non muro) */
     ((pg.ya && !pg.ya.sesion)
       ? '<div style="text-align:center;font-size:11.5px;color:var(--cs-mut);margin-top:6px">esta mesa cobró a las ' +
-        esc(pg.ya.hora) + ' · ' + fmtPrice(pg.ya.monto) + '</div>' : '') +
+        esc(pg.ya.hora) + ' · ' + _yaMontoTxt(pg.ya) + '</div>' : '') +
     '<div class="c4lab">Medio de pago</div>' +
     /* 🏦 NIENTE Fintoc qui — correzione di Alberto sul vetro (2-set): «fintoc
        non lo avevamo definito solo per la via express?». Sì: il registro
@@ -13704,7 +13714,7 @@ function bMedio(w, pg) {
        (`PAGO_BLOQUEA_ON`, nasce SPENTA): il bordo ha la guardia gemella
        (`conto_cerrado`), per questo un vetro vecchio resta comunque coperto. */
     f = '<div style="text-align:center;font-size:12.5px;color:#ff9c9c;margin-bottom:8px">✋ Esta mesa YA está paga por completo: ' +
-        fmtPrice(pg.ya.monto) + ' a las ' + esc(pg.ya.hora) + '<br>Para cobrar de nuevo, primero tiene que haber un pedido nuevo.</div>' +
+        _yaMontoTxt(pg.ya) + ' a las ' + esc(pg.ya.hora) + '<br>Para cobrar de nuevo, primero tiene que haber un pedido nuevo.</div>' +
       '<button class="c4cta sec" onclick="pagoCerrar()">Cerrar</button>';
   } else if (pg.ya && pg.ya.sesion && !pg.okDoble) {
     /* il muro FORTE del doppio cobro — stessa soglia del pannello vecchio.
@@ -13712,7 +13722,7 @@ function bMedio(w, pg) {
        di sempre: un avviso forte, ma con un'uscita per il caso vero
        (mesa 36 aveva 34 pagos VERI su 29 mese lo stesso giorno). */
     f = '<div style="text-align:center;font-size:12.5px;color:#ff9c9c;margin-bottom:8px">✋ Esta mesa YA cobró en esta sesión: ' +
-        fmtPrice(pg.ya.monto) + ' a las ' + esc(pg.ya.hora) + '</div>' +
+        _yaMontoTxt(pg.ya) + ' a las ' + esc(pg.ya.hora) + '</div>' +
       '<button class="c4cta" style="background:#e24b4a;color:#fff" onclick="pagoSet(\'okDoble\',true)">Lo vi — es otro cliente, cobrar igual</button>';
   } else if (pg.dudoso && !pg.okDoble) {
     /* [AUT-0403] la verifica no pudo CONFIRMAR que no llegó — mismo botón,
@@ -14434,7 +14444,7 @@ function renderPago() {
      Col flag acceso resta come CONTESTO grigio, non come muro rosso. */
   const avisoDebil = (PAGO_V3_ON && ya && !ya.sesion && !esCort)
     ? '<div style="margin:8px 0 2px;font-size:11.5px;color:var(--cs-mut);text-align:center">' +
-        'esta mesa cobró a las ' + esc(ya.hora) + ' · ' + fmtPrice(ya.monto) + '</div>'
+        'esta mesa cobró a las ' + esc(ya.hora) + ' · ' + _yaMontoTxt(ya) + '</div>'
     : '';
   /* 🔴 v3.40.0 · TOLTO DEL TUTTO, tutte e due le versioni (Alberto, 27-ago).
      Il ragionamento, non la sensazione:
@@ -14467,7 +14477,7 @@ function renderPago() {
         (ya.sesion
           ? '<b>⚠️ Esta cuenta ya se cobró</b> <span style="opacity:.8">— en esta misma sesión</span><br>'
           : '<b>⚠️ Esta mesa ya cobró hoy</b> <span style="opacity:.8">— puede ser el turno anterior</span><br>') +
-        esc(ya.hora) + ' · <b>' + fmtPrice(ya.monto) + '</b>' +
+        esc(ya.hora) + ' · <b>' + _yaMontoTxt(ya) + '</b>' +
         (ya.medio ? ' · ' + esc(ya.medio) : '') + (ya.quien ? ' · ' + esc(ya.quien) : '') +
         (ya.boleta ? '<br>🧾 boleta <b>' + esc(ya.boleta) + '</b> — ya está en el SII' : '') +
         (ya.n > 1 ? '<br><b>' + ya.n + ' veces</b>' + (ya.sesion ? ' en esta sesión' : ' hoy') : '') +
