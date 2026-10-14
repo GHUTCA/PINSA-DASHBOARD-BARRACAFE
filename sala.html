@@ -425,6 +425,8 @@
   .cm-cta{display:block;width:100%;border:0;border-radius:13px;padding:16px;margin-top:8px;font-size:17px;
     font-weight:900;color:var(--cm-acc-t);background:var(--cm-acc);cursor:pointer;font-variant-numeric:tabular-nums}
   .cm-cta:disabled{opacity:.4;cursor:default}
+  .cm-cta-mesa{font-size:1.55em;font-weight:900;letter-spacing:.02em;vertical-align:-2px}   /* [AUT-0672] */
+  .cpp-mesa{font-size:30px;font-weight:900;margin:4px 0 2px;letter-spacing:.02em}   /* [AUT-0672] */
   /* EL CAJÓN · el catálogo a página entera (sin cabecera: ya sabes dónde estás) */
   .cm-cajon{position:absolute;inset:0;z-index:90;background:var(--cm-bg);display:flex;flex-direction:column}
   .cm-fams{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:calc(11px + env(safe-area-inset-top,0)) 14px 7px;flex:none}
@@ -1108,7 +1110,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.226.2 · vetro</span>
+      <span class="ver" id="ver">sala v3.226.6 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1411,6 +1413,32 @@ const PEDIR1_ON = (function () {
    «Confirmar pedido» e apre un modal al centro dello schermo con l'elenco
    SKU/cantidad prima di spedire davvero — «così evitiamo [errori verso] la
    barra e/o la cocina». Nasce SPENTA, stesso idioma degli altri (?pedir2=1). */
+/* [AUT-0672 · 14-ott · 🖐 TERZA V30] ENVIAR A MESA <n> — cura ① del caso 123→125 (notte 13, Jurley: `BKP 123 125 LA RADICE SONO DUE`).
+   La mesa del pedido è quella del pannello aperto, e al momento di «Enviar» niente la metteva davanti agli occhi: 8 casi dal 25-set, quasi tutti
+   fra mesas vicine. Con la leva: ① il bottone dice «ENVIAR A MESA <n>» col numero grande, e quel numero è ESATTAMENTE quello che parte (una fonte
+   sola, `n.mesa`); ② un reinvio della stessa libreta verso un'altra mesa non riusa l'uuid del primo intento (il dedup lo rimetteva sulla mesa vecchia
+   mentre il toast diceva la nuova): si chiede, e se si va avanti è un pedido nuovo; ③ se il server dice dove è finito (`r.mesa`), il toast dice quello.
+   Leva: `sala_envmesa_on` dal /salud (nasce assente = spenta) · per telefono `?envmesa=1` (prova) / `?envmesa=0` (freno, vince su tutto). */
+let ENVMESA_SRV = false;
+const ENVMESA_QS = (function () {
+  const q = QS.get('envmesa');
+  try {
+    if (q === '1' || q === '0') localStorage.setItem('sala_envmesa', q);
+    return localStorage.getItem('sala_envmesa') || '';
+  } catch (e) { return (q === '1' || q === '0') ? q : ''; }
+})();
+function envMesaOn() { return ENVMESA_QS === '0' ? false : (ENVMESA_QS === '1' || ENVMESA_SRV); }
+/* [AUT-0676 · 14-ott · 🖐 TERZA V30] il corte completa dal BORDO (`estado_mesero`) invece che da `getCierreMesero` (Google).
+   Leva: `sala_corte_estado_on` dal /salud (nasce assente = spenta) · `?cortest=1` per telefono (prova) / `?cortest=0` freno che vince. */
+let CORTEST_SRV = false;
+const CORTEST_QS = (function () {
+  const q = QS.get('cortest');
+  try {
+    if (q === '1' || q === '0') localStorage.setItem('sala_cortest', q);
+    return localStorage.getItem('sala_cortest') || '';
+  } catch (e) { return (q === '1' || q === '0') ? q : ''; }
+})();
+function corteEstadoOn() { return CORTEST_QS === '0' ? false : (CORTEST_QS === '1' || CORTEST_SRV); }
 const PEDIR2_ON = (function () {
   const q = QS.get('pedir2');
   try {
@@ -3837,12 +3865,25 @@ async function cierreAbrir() {
        se arriva mentre il mesero è ancora qui, il primo schermo si ridisegna.
        Se non arriva, non si mostra nessun errore: il corte va avanti. */
     const _uidFlusso = _CIE_INTENTO;
-    gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre }).then(function (r) {
+    const _cieCompleta = function (r) {
       if (!r || !r.ok || _uidFlusso !== _CIE_INTENTO || !CIE.data || !CIE.data._local) return;
       CIE.data.turno = r.turno; CIE.data.regimen = r.regimen; CIE.data.ya_cerrado = r.ya_cerrado;
       CIE.tol = r.tolerancia || 2000;
       if (CIE.paso === 1) _ciePaso1();
-    }).catch(function () {});
+    };
+    const _cieDalLibro = function () {
+      gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre }).then(_cieCompleta).catch(function () {});
+    };
+    /* [AUT-0676 · 14-ott · 🖐 TERZA V30] con la leva il completamento chiede al BORDO (`estado_mesero`, ⚙️ ARQ `0aa6e24`): turno ·
+       régimen · cierre previo · tolerancia con cui decide il CORTE DEL BORDO. Si usa solo una risposta che lo dice (`corte_fuente:'borde'`)
+       e che porta la chiave `ya_cerrado` (null = «non hai chiuso»; ASSENTE = il corte non passa dal bordo, «non so»). Tutto il resto
+       (leva del bordo spenta, chiave assente, rete) ⇒ il libro di sempre. Il fatto dice da dove è venuto: è la misura dell'efficacia. */
+    if (corteEstadoOn()) {
+      _cajaMesero({ verbo: 'estado_mesero' }).then(function (r) {
+        if (r && r.ok && r.corte_fuente === 'borde' && ('ya_cerrado' in r)) { bordeHecho('corte_estado', { fuente: 'borde', ya: !!r.ya_cerrado }); _cieCompleta(r); }
+        else { bordeHecho('corte_estado', { fuente: 'gas', motivo: !r ? 'red' : (r.corte_fuente !== 'borde' ? 'leva' : 'sin_clave') }); _cieDalLibro(); }
+      });
+    } else _cieDalLibro();
     return;
   }
   try {
@@ -6103,8 +6144,9 @@ function _cmBancoHtml(){
        Alberto il 23-set guardando il pezzo 1. Leva spenta: byte a byte
        identico a oggi (stesso bottone, stesso nuevoEnviar diretto). */
     '<button class="cm-cta" '+((_cmN() && !n.enviando)?'':'disabled')+
-      ' onclick="'+(PEDIR2_ON?'nuevoConfirmarAbrir(this)':'nuevoEnviar(this)')+'">'+
-      (PEDIR2_ON?'👑 Confirmar pedido':'👑 Crear pedido')+
+      ' onclick="'+((envMesaOn() && !n.mesa)?'nuevoMesaPick()':(PEDIR2_ON?'nuevoConfirmarAbrir(this)':'nuevoEnviar(this)'))+'">'+
+      (envMesaOn() ? (n.mesa ? '👑 ENVIAR A MESA <span class="cm-cta-mesa">'+esc(n.mesa)+'</span>' : '👑 ¿A qué mesa?') :   // [AUT-0672] il numero che parte, grande
+      (PEDIR2_ON?'👑 Confirmar pedido':'👑 Crear pedido'))+
       (tot?' · '+fmtPrice(tot):'')+'</button></div>';
 }
 /* [AUT-0388] EL MODAL DEL CENTRO — «¿estás seguro que deseas enviar este
@@ -6120,7 +6162,8 @@ function nuevoConfirmarAbrir(btn){
   }).join('');
   $('cppBox').innerHTML =
     '<div class="cpp-h">¿Estás seguro que deseas enviar<br>este pedido a producción?</div>'+
-    '<div class="cpp-sub">Mesa '+esc(n.mesa)+' · revisa antes de mandar a barra/cocina</div>'+
+    (envMesaOn() ? '<div class="cpp-mesa">MESA '+esc(n.mesa)+'</div><div class="cpp-sub">revisa antes de mandar a barra/cocina</div>'   // [AUT-0672]
+      : '<div class="cpp-sub">Mesa '+esc(n.mesa)+' · revisa antes de mandar a barra/cocina</div>')+
     '<div class="cpp-lista">'+filas+'</div>'+
     '<div class="cpp-btns"><button class="btn sec" onclick="nuevoConfirmarCancelar()">No</button>'+
     '<button class="btn verde" onclick="nuevoConfirmarSi(this)">Sí</button></div>';
@@ -6155,14 +6198,23 @@ function _cmMesasPlaza(){
   out.sort(function(a,b){ return (parseInt(a.m,10)||0) - (parseInt(b.m,10)||0); });
   return out.slice(0, 24);
 }
+/* [AUT-0672] con la leva, quando la mesa cambia dal cajón, il bottone e il campo si rimettono al numero vero (il cajón ridisegna solo sé stesso). */
+function _envMesaEco(){
+  if (!envMesaOn()) return;
+  const n = STATE.nuevo; if (!n) return;
+  const i = $('nuevoMesa'); if (i) i.value = n.mesa || '';
+  const b = document.querySelector('.cm-banco'); if (b) b.outerHTML = _cmBancoHtml();
+}
 function csMesaChip(m){
   const n = STATE.nuevo; if(!n) return;
   n.mesa = (n.mesa === m) ? '' : m;
+  _envMesaEco();   // [AUT-0672]
   _cmRedibujar();
 }
 function csMesaInput(v){
   const n = STATE.nuevo; if(!n) return;
   n.mesa = (v || '').replace(/[^0-9]/g, '');
+  _envMesaEco();   // [AUT-0672]
   const b = document.querySelector('.cm-cajon .cm-sus'); if(b) b.outerHTML = _cmSusHtml();
 }
 function _cmCajonHtml(){
@@ -6720,7 +6772,9 @@ function f57Cerrar() { const w = $('f57Wrap'); if (w) w.innerHTML = ''; window._
 
 async function nuevoEnviar__in(btn) {
   const n = STATE.nuevo; if (!n) return;
-  const mesa = ($('nuevoMesa') ? $('nuevoMesa').value : n.mesa || '').replace(/[^0-9]/g, '');
+  /* [AUT-0672] con la leva la mesa che parte è `n.mesa`, la STESSA che il bottone mostra: il campo `#nuevoMesa` è solo uno specchio, e un chip
+     del cajón (`csMesaChip`) cambia `n.mesa` senza ridisegnarlo. Leva spenta: la riga di sempre. */
+  const mesa = (envMesaOn() ? (n.mesa || '') : ($('nuevoMesa') ? $('nuevoMesa').value : n.mesa || '')).toString().replace(/[^0-9]/g, '');
   if (!mesa) { toast('warn', '¿Qué mesa es? Pon el número'); return; }
   /* v3.2.1 · la cintura vera: una funzione che spedisce non si fida del solo
      vetro. Mesa fuori plaza → NON parte, e la libreta resta intatta. */
@@ -6750,7 +6804,13 @@ async function nuevoEnviar__in(btn) {
     }
   }
   // uuid FISSO dal primo intento: il retry non può mai duplicare (dedup GAS)
-  if (!n.uuid) n.uuid = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  /* [AUT-0672] l'uuid appartiene alla mesa del PRIMO intento. Se la stessa libreta riparte verso un'altra mesa, il dedup la rimetterebbe sulla
+     vecchia (e il toast direbbe la nuova): si chiede, e se si va avanti è un pedido NUOVO — chi lo manda sa che deve guardare la cuenta della vecchia. */
+  if (envMesaOn() && n.uuid && n.uuidMesa && n.uuidMesa !== mesa) {
+    if (!window.confirm('El envío anterior de este pedido fue a la mesa ' + n.uuidMesa + ' y no sé si entró.\n\n¿Mandarlo como pedido NUEVO a la mesa ' + mesa + '?\n\nDespués revisa la cuenta de la ' + n.uuidMesa + '.')) return;
+    n.uuid = '';
+  }
+  if (!n.uuid) { n.uuid = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); n.uuidMesa = mesa; }
   const items = n.lineas.map(function(l){
     // v3.11 · la pareja è GIÀ due righe: niente «llevar doble» (sarebbero 4)
     const es2 = l.promo === '2x1' && !l.dupla;
@@ -6808,7 +6868,13 @@ async function nuevoEnviar__in(btn) {
       /* [03-ott · caduta su Google] se è andato da Google la riga comincia da «Salió» e il chip resta */
       const _caida = _cadutaDichiara(r, n.uuid, mesa);
       if (_caida) toast('sig', _caida, 6000);
-      else toast('ok', '✓ ' + (r.id_pedido || 'Pedido') + ' — Mesa ' + mesa + (r.plaza ? ' · ' + r.plaza : '') + ' · en tus MÍOS');
+      else {
+        /* [AUT-0672] la mesa la dice il SERVER quando la porta (`r.mesa`); se è un'altra, si grida. Senza `r.mesa` (oggi il bordo non la manda)
+           resta la mesa di questa libreta — che con la leva è quella del bottone e dell'uuid. */
+        const _mSrv = (envMesaOn() && r.mesa != null) ? String(r.mesa).replace(/[^0-9]/g, '') : '';
+        if (_mSrv && _mSrv !== mesa) toast('err', '⚠️ El pedido quedó en la MESA ' + _mSrv + ', no en la ' + mesa + ' — revisa las dos cuentas', 12000);
+        else toast('ok', '✓ ' + (r.id_pedido || 'Pedido') + ' — Mesa ' + (_mSrv || mesa) + (r.plaza ? ' · ' + r.plaza : '') + ' · en tus MÍOS');
+      }
       STATE.nuevo = null; renderNuevo();
       refrescar(false);
       return;
@@ -8513,7 +8579,7 @@ async function vPrecuentaImprimir(mesa, btn, parte, pinJl) {
            sessione» è un fatto che spegne l'avviso di giornata, e vale quanto
            il suo contrario. Senza questa riga la guardia resta cieca. */
         STATE.pcYaPag = STATE.pcYaPag || {};
-        STATE.pcYaPag[mesa] = r.ya_pagado || { n: 0, monto: 0, pagos: [] };
+        _yaPagRicorda(mesa, r);   // [AUT-0674] assente non è zero: decide la CHIAVE, dentro la funzione
       }
       vhojaCerrar();
       toast('ok', '🧾 ' + (r.folio || '') + (parte ? ' · parte de ' + parte.titulo : '') +
@@ -9125,7 +9191,20 @@ var CAJA_ATTO3_ON = false;   // [03-ott · ATTO III] il «Recibido» della propi
 /* [10-ott · decisione ⓐ di Alberto · 🎛 V28 `JL FA TUTTO DALLA SUA APP COBRAR`] il JL fa tutto dalla sua app: PEDIR · COBRAR · MOVER tornano nel `?jl=1`.
    Leva del bordo (/salud → jl_todo_on). NASCE SPENTA: spenta, `VJ` filtra come ieri (solo PEDIDOS ed ELIMINAR). */
 var JL_TODO_ON = false;
-var UNIR_VIA_BORDE_ON = false;   // [10-ott · 1.4 · BKP `BKP 1 4 UNIR VA DIRITTO AL GAS`] /salud → unir_via_borde_on: l'UNIR passa dal bordo come mover e separar. Nasce spenta = il gasPost di ieri.
+/* [AUT-0687 · 14-ott · 🖐 TERZA V30 · `V30 AUT-0687 UNIR MAI A GOOGLE PER DEFAULT`] UNA LEVA NON LETTA NON È «SPENTA» (la stessa di FAMCOL_MOTIVO_ON qui
+   sotto, e della 0674). Prima nasceva `false`: il /salud si legge UNA volta all'avvio, e un telefono che non l'aveva letto (rete lenta, risposta
+   fallita, JSON d'errore) univa le mesas su GOOGLE per tutta la sessione — è chi crea ancora le juntas nel foglio (🚚 `MIGRACION V30 GRUPOS MESA
+   CHI LE CREA SU GOOGLE`). Ora: null = non letta ⇒ l'unir va al BORDO (staffPost, che ripiega da solo se il bordo non risponde); solo un «no»
+   detto da una risposta VERA del bordo lo manda al libro. Freno per telefono `?unirdef=0` = il default di ieri (non letta = libro). */
+var UNIR_VIA_BORDE_ON = null;   // [10-ott · 1.4 · BKP `BKP 1 4 UNIR VA DIRITTO AL GAS`] /salud → unir_via_borde_on · null = non ancora letta (AUT-0687)
+const UNIRDEF_QS = (function () {
+  const q = QS.get('unirdef');
+  try {
+    if (q === '1' || q === '0') localStorage.setItem('sala_unirdef', q);
+    return localStorage.getItem('sala_unirdef') || '';
+  } catch (e) { return (q === '1' || q === '0') ? q : ''; }
+})();
+function _unirAlBordo() { return UNIRDEF_QS === '0' ? UNIR_VIA_BORDE_ON === true : UNIR_VIA_BORDE_ON !== false; }
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
 /* ═══ [10-ott · 🎛 V28 AUT-0663 `FOTO SALVATA SENZA ETA CURA ALLA RADICE`] UNA SALA SALVATA PIU VECCHIA DEL TETTO NON SI DISEGNA MAI COME SE FOSSE VIVA ═══════════
    IL FATTO (mesa 100, telefono di Ary, 10-ott): il catch del poll ridisegnava `sala_foto_v1` SENZA tetto d'eta («una sala di un'ora fa, dichiarata, batte il vuoto») e il ricarico non la toglie: Ary ha visto
@@ -9187,7 +9266,10 @@ function _salaMuertaPinta(edadMs) {
       CORTE_BORDE_ON = String(cercaK(j, 'corte_borde_on')) === '1';         // [08-ott · 1.6]
       CAJA_ATTO3_ON = String(cercaK(j, 'caja_atto3_on')) === '1';           // [03-ott · ATTO III]
       JL_TODO_ON = String(cercaK(j, 'jl_todo_on')) === '1';                 // [10-ott · decisione ⓐ]
-      UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';   // [10-ott · 1.4]
+      YAPAGV_SRV = String(cercaK(j, 'sala_yapag_vuoto_on')) === '1';        // [14-ott · AUT-0674]
+      CORTEST_SRV = String(cercaK(j, 'sala_corte_estado_on')) === '1';      // [14-ott · AUT-0676]
+      ENVMESA_SRV = String(cercaK(j, 'sala_envmesa_on')) === '1';           // [14-ott · AUT-0672]
+      if (!(j && j.ok === false)) UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';   // [10-ott · 1.4] · [AUT-0687] un JSON d'errore non è «spenta»: resta null
       CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
       FOTO_VIVA_LEIDA = true;                                               // [EL GIRO ⑥⑦] il bordo ha risposto: da qui vale la leva (assente = spenta)
@@ -11390,7 +11472,8 @@ function juntaCrear() {
          Leva spenta = il `gasPost` di ieri, riga per riga. */
       const _corpoUnir = { codigo: STATE.codigo, nombre: STATE.nombre, mesas: _mesasOrden, gid: gid };
       if (gidRotti.length) _corpoUnir.gid_rotti = gidRotti;
-      (UNIR_VIA_BORDE_ON ? staffPost('unirMesas', _corpoUnir) : gasPost('unirMesas', _corpoUnir))
+      (UNIR_VIA_BORDE_ON === null && bordeHecho('unir_leva_non_letta', { mesas: _mesasOrden.length }),   // [AUT-0687] la misura: quante volte la leva non era ancora letta
+       _unirAlBordo() ? staffPost('unirMesas', _corpoUnir) : gasPost('unirMesas', _corpoUnir))
         .then(function (r) {
           /* [26-set] se il libro adotta `payload.gid` (② del piano, non
              ancora fatta), `r.grupo_id` sarà il NOSTRO gid — riscriverlo è
@@ -12130,13 +12213,50 @@ function _pagadaDeMesa(mesa) {
       dichiarato come tale nella fascia, non spacciato per un fatto.
    🧯 `?yapag=0` → la domanda di ieri, di giornata.                          */
 const YAPAG_ON = QS.get('yapag') !== '0';
+/* [AUT-0674 · 14-ott · 🖐 TERZA V30] VUOTO ≠ ZERO su `ya_pagado` (`TERZA QUATTRO LETTURE AL BORDO ESISTE GIA` ①).
+   La precuenta passa dal bordo, e la risposta del bordo NON porta `ya_pagado` (borde v0.191.0 r.6919): la riga di sempre
+   `r.ya_pagado || {n:0}` registrava «zero pagos in questa sessione» come un FATTO, e `_pagadaAviso` non ricadeva più
+   sull'indizio di giornata (`mesas_pagadas`) ⇒ la fascia contro il doppio cobro taceva su ogni mesa con precuenta del bordo.
+   Con la leva: si ricorda solo un `ya_pagado` che c'è; assente ⇒ la mesa torna a «non so» (si cancella il ricordo, anche uno
+   vecchio) e la guardia usa l'indizio di giornata, come prima del bordo. Leva: `sala_yapag_vuoto_on` dal /salud (nasce assente
+   = spenta) · per telefono `?yapagv=1` (prova) / `?yapagv=0` (freno, vince su tutto). Spenta = la riga di sempre. */
+let YAPAGV_SRV = false;
+const YAPAGV_QS = (function () {
+  const q = QS.get('yapagv');
+  try {
+    if (q === '1' || q === '0') localStorage.setItem('sala_yapagv', q);
+    return localStorage.getItem('sala_yapagv') || '';
+  } catch (e) { return (q === '1' || q === '0') ? q : ''; }
+})();
+function yapagVuotoOn() { return YAPAGV_QS === '0' ? false : (YAPAGV_QS === '1' || YAPAGV_SRV); }
+/* riceve la RISPOSTA intera, non il valore: [💵 EL GIRO, `EL GIRO 0674 2FD6F3D ROSSO`] la differenza fra «zero» e «non so» sta nella
+   PRESENZA della chiave, non nel valore. Il GAS manda SEMPRE `ya_pagado`, `null` per lo zero vero (MENU_GAS r.15395/16036); il bordo
+   non lo manda mai; `fetchYaPagado` oggi risponde `{ok:false, Unknown action}`. ⇒ chiave in una risposta non fallita = fatto
+   (null = zero); chiave assente o risposta fallita = «non so». */
+/* [AUT-0674 · 🎛 V30 `V30 0675 B 0673B DRY OPERACIONES 0677`] un pago a $0 (FAM, colación, cortesía, sin pago) NON si scrive «ya pagó $0»:
+   si dice il medio. Il GAS non manda il medio nei pagos di `ya_pagado` (MENU_GAS r.15263: hora · monto · boleta) ⇒ senza medio si dice
+   cosa può essere, non un numero. Con la leva spenta: `fmtPrice` come sempre. */
+const _YA_MEDIO_TXT = { fam: 'FAM', familia: 'FAM', colacion: 'colación', 'colación': 'colación', cortesia: 'cortesía', 'cortesía': 'cortesía', sin_pago: 'sin pago' };
+function _yaMontoTxt(ya) {
+  const m = Number(ya && ya.monto) || 0;
+  if (!yapagVuotoOn() || m > 0) return fmtPrice(m);
+  const md = String((ya && ya.medio) || '').trim().toLowerCase();
+  return _YA_MEDIO_TXT[md] ? 'sin cobro (' + _YA_MEDIO_TXT[md] + ')' : 'sin cobro (FAM, colación o cortesía)';
+}
+function _yaPagRicorda(mesa, r) {
+  STATE.pcYaPag = STATE.pcYaPag || {};
+  const yp = r ? r.ya_pagado : undefined;
+  if (!yapagVuotoOn()) { STATE.pcYaPag[mesa] = yp || { n: 0, monto: 0, pagos: [] }; return; }
+  if (r && typeof r === 'object' && r.ok !== false && ('ya_pagado' in r)) STATE.pcYaPag[mesa] = yp || { n: 0, monto: 0, pagos: [] };
+  else delete STATE.pcYaPag[mesa];
+}
 function _pagadaEnSesion(mesa) {
   if (!YAPAG_ON) return null;
   const s = (STATE.pcYaPag || {})[mesa];
   if (!s || !s.n) return null;                      // «so, ed è zero» → non è un avviso
   const ult = (s.pagos && s.pagos.length) ? s.pagos[s.pagos.length - 1] : null;
   return { hora: (ult && ult.hora) || '', monto: s.monto || 0,
-           medio: '', quien: '', boleta: (ult && ult.boleta) || '',
+           medio: (yapagVuotoOn() && ult && ult.medio) || '', quien: '', boleta: (ult && ult.boleta) || '',   // [AUT-0674] il medio, se la fonte lo porta (bordo 0675 sì, GAS no)
            n: s.n, sesion: true };
 }
 /* 🔴 «ESISTE?» e «COSA C'ERA» sono DUE domande (lezione 09-ago, pagata sul
@@ -12720,7 +12840,7 @@ function abrirPago(mesa, parte) {
     fetchYaPagado(mesa).then(function (r) {
       if (STATE.pago && STATE.pago.mesa === mesa && STATE.pago.uid === uidApertura) {
         STATE.pcYaPag = STATE.pcYaPag || {};
-        STATE.pcYaPag[mesa] = (r && r.ya_pagado) || { n: 0, monto: 0, pagos: [] };
+        _yaPagRicorda(mesa, r);   // [AUT-0674] oggi `{ok:false, Unknown action}` ⇒ «non so», mai «zero»
         STATE.pago.ya = _pagadaAviso(mesa);
         renderPago();
       }
@@ -13601,7 +13721,7 @@ function bMedio(w, pg) {
     /* il contesto del doppio cobro, versione DEBOLE (v3.39: grigio, non muro) */
     ((pg.ya && !pg.ya.sesion)
       ? '<div style="text-align:center;font-size:11.5px;color:var(--cs-mut);margin-top:6px">esta mesa cobró a las ' +
-        esc(pg.ya.hora) + ' · ' + fmtPrice(pg.ya.monto) + '</div>' : '') +
+        esc(pg.ya.hora) + ' · ' + _yaMontoTxt(pg.ya) + '</div>' : '') +
     '<div class="c4lab">Medio de pago</div>' +
     /* 🏦 NIENTE Fintoc qui — correzione di Alberto sul vetro (2-set): «fintoc
        non lo avevamo definito solo per la via express?». Sì: il registro
@@ -13676,7 +13796,7 @@ function bMedio(w, pg) {
        (`PAGO_BLOQUEA_ON`, nasce SPENTA): il bordo ha la guardia gemella
        (`conto_cerrado`), per questo un vetro vecchio resta comunque coperto. */
     f = '<div style="text-align:center;font-size:12.5px;color:#ff9c9c;margin-bottom:8px">✋ Esta mesa YA está paga por completo: ' +
-        fmtPrice(pg.ya.monto) + ' a las ' + esc(pg.ya.hora) + '<br>Para cobrar de nuevo, primero tiene que haber un pedido nuevo.</div>' +
+        _yaMontoTxt(pg.ya) + ' a las ' + esc(pg.ya.hora) + '<br>Para cobrar de nuevo, primero tiene que haber un pedido nuevo.</div>' +
       '<button class="c4cta sec" onclick="pagoCerrar()">Cerrar</button>';
   } else if (pg.ya && pg.ya.sesion && !pg.okDoble) {
     /* il muro FORTE del doppio cobro — stessa soglia del pannello vecchio.
@@ -13684,7 +13804,7 @@ function bMedio(w, pg) {
        di sempre: un avviso forte, ma con un'uscita per il caso vero
        (mesa 36 aveva 34 pagos VERI su 29 mese lo stesso giorno). */
     f = '<div style="text-align:center;font-size:12.5px;color:#ff9c9c;margin-bottom:8px">✋ Esta mesa YA cobró en esta sesión: ' +
-        fmtPrice(pg.ya.monto) + ' a las ' + esc(pg.ya.hora) + '</div>' +
+        _yaMontoTxt(pg.ya) + ' a las ' + esc(pg.ya.hora) + '</div>' +
       '<button class="c4cta" style="background:#e24b4a;color:#fff" onclick="pagoSet(\'okDoble\',true)">Lo vi — es otro cliente, cobrar igual</button>';
   } else if (pg.dudoso && !pg.okDoble) {
     /* [AUT-0403] la verifica no pudo CONFIRMAR que no llegó — mismo botón,
@@ -14406,7 +14526,7 @@ function renderPago() {
      Col flag acceso resta come CONTESTO grigio, non come muro rosso. */
   const avisoDebil = (PAGO_V3_ON && ya && !ya.sesion && !esCort)
     ? '<div style="margin:8px 0 2px;font-size:11.5px;color:var(--cs-mut);text-align:center">' +
-        'esta mesa cobró a las ' + esc(ya.hora) + ' · ' + fmtPrice(ya.monto) + '</div>'
+        'esta mesa cobró a las ' + esc(ya.hora) + ' · ' + _yaMontoTxt(ya) + '</div>'
     : '';
   /* 🔴 v3.40.0 · TOLTO DEL TUTTO, tutte e due le versioni (Alberto, 27-ago).
      Il ragionamento, non la sensazione:
@@ -14439,7 +14559,7 @@ function renderPago() {
         (ya.sesion
           ? '<b>⚠️ Esta cuenta ya se cobró</b> <span style="opacity:.8">— en esta misma sesión</span><br>'
           : '<b>⚠️ Esta mesa ya cobró hoy</b> <span style="opacity:.8">— puede ser el turno anterior</span><br>') +
-        esc(ya.hora) + ' · <b>' + fmtPrice(ya.monto) + '</b>' +
+        esc(ya.hora) + ' · <b>' + _yaMontoTxt(ya) + '</b>' +
         (ya.medio ? ' · ' + esc(ya.medio) : '') + (ya.quien ? ' · ' + esc(ya.quien) : '') +
         (ya.boleta ? '<br>🧾 boleta <b>' + esc(ya.boleta) + '</b> — ya está en el SII' : '') +
         (ya.n > 1 ? '<br><b>' + ya.n + ' veces</b>' + (ya.sesion ? ' en esta sesión' : ' hoy') : '') +
