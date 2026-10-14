@@ -16,7 +16,7 @@ const a = HTML.indexOf('/* ═══ [08-ott · 👥 RRHH · 6.3 fetta A]'), b =
 const A = HTML.slice(a, b);
 const c = HTML.indexOf('const _ERR_TURNO'); const d0 = HTML.indexOf('async function _asignarPorBordo');
 if (a < 0 || c < 0 || d0 < 0) { console.log('ROSSO 0.00 i blocchi 6.3 non ci sono in app_jl.html'); process.exit(1); }
-const CODICE = A + '\n' + fn('_uidGesto') + '\n' + HTML.slice(c, HTML.indexOf('\n', HTML.indexOf('};', c)) + 1) + '\n' + fn('_asignarPorBordo', true) + '\n' + fn('asignar', true);
+const CODICE = A + '\n' + fn('_uidGesto') + '\n' + HTML.slice(c, HTML.indexOf('\n', HTML.indexOf('};', c)) + 1) + '\n' + fn('_asignarPorBordo', true) + '\n' + fn('turnoEscribeOn') + '\n' + fn('_porQueNoBordo') + '\n' + fn('asignar', true);   // [10-ott · P4] asignar() ora conosce la leva
 let ko = 0, n = 0; const rossi = [];
 const chk = (id, ok, msg) => { n++; if (!ok) { ko++; rossi.push(id); console.log('  ROSSO', id, msg || ''); } };
 
