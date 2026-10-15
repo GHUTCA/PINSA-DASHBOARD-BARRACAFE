@@ -42,21 +42,55 @@ function banco(SRC) {
     t('F · parte a dedo del JL (senza c4): resta aperta, nessun numero inventato', !has(l, 'cierre') && /sigue abierta/.test(txt(l)) && !/FALTA/.test(txt(l)), txt(l)); }
   { const l = gira(SRC, { pg: { mesa: '997', tot: 6080, c4: { _resta: 2190 } }, body: { parcial: '1', monto: 3890 }, rB: { ok: true, borde: true, monto: 3890 } });
     t('G · parcial come stringa "1" ⇒ stessa cosa di 1', !has(l, 'cierre'), l); }
-  // ③ (banco di EL GIRO): la parte a dedo del JL è PARTE solo se lascia un resto — il blocco VERO del payload
-  const pay = (pg) => { const testa = '    if (pg.parte && !pg.montoOn) {'; const a = SRC.indexOf(testa); if (a < 0) throw new Error('blocco parte');
-    let d = 0, i = a + testa.length - 1; for (; i < SRC.length; i++) { if (SRC[i] === '{') d++; else if (SRC[i] === '}') { d--; if (d === 0) break; } }
-    const ctx = { pg, body: {}, Math, _pagoMonto: () => pg.tot }; vm.createContext(ctx); vm.runInContext(SRC.slice(a, i + 1), ctx); return ctx.body; };
-  { const b = pay({ parte: { monto: 6080 }, tot: 6080, restoAbrir: 6080 });
-    t('③ dedo 6.080 su resto 6.080: NON è una parte (niente parcial, niente monto ⇒ es_total)', b.parcial === undefined && b.monto === undefined, b); }
-  { const b = pay({ parte: { monto: 3000 }, tot: 3000, restoAbrir: 6080 });
-    t('③ dedo 3.000 su resto 6.080: è una parte (parcial 1, monto 3.000)', b.parcial === 1 && b.monto === 3000, b); }
-  { const b = pay({ parte: { monto: 3000 }, tot: 3000, restoAbrir: 0 });
+  { const l = gira(SRC, { pg: { mesa: '997', tot: 2190, c4: { _resta: 0 } }, body: { parcial: 1, monto: 2190, es_total: true }, rB: { ok: true, borde: true, monto: 2190 } });
+    t('H · l ultima parte che CHIUDE (parcial + es_total) dal bordo senza mesa_abierta ⇒ chiude, con ricevuta', has(l, 'cierre') && has(l, 'recibo') && !has(l, 'parcial'), l); }
+  // ③ + il pezzo unico (⚙️ ARQ, 🎛 V30 UN PEZZO SOLO DOMATTINA): il blocco VERO del payload, con le funzioni VERE di c4 e _yaPagadoSesion
+  const fnV = (nome) => { const i = SRC.indexOf('function ' + nome + '('); if (i < 0) throw new Error(nome); return SRC.slice(i, SRC.indexOf('\n}\n', i) + 3); };
+  const fnR = (nome) => { const i = SRC.indexOf('function ' + nome + '('); if (i < 0) throw new Error(nome); return SRC.slice(i, SRC.indexOf('\n', i) + 1); };
+  const pay = (pg) => {
+    const a = SRC.indexOf('    const _yaPag = _yaPagadoSesion(pg);'); if (a < 0) throw new Error('blocco _yaPag');
+    const fine = 'body.monto = Math.round(pg.tot); body.parcial = 1; _cierraConParte = true;\n    }'; const b = SRC.indexOf(fine, a); if (b < 0) throw new Error('fine blocco');
+    const esT = SRC.slice(SRC.indexOf('  body.es_total = '), SRC.indexOf('\n', SRC.indexOf('  body.es_total = ')));
+    const ctx = { pg, body: {}, Math, isFinite, _pagoMonto: () => pg.tot }; vm.createContext(ctx);
+    vm.runInContext(['c4Falta', 'c4Parte', 'c4Resta', 'c4Cierra'].map(fnR).join('') + fnV('c4Bruto') + fnV('_yaPagadoSesion') +
+      'let _cierraConParte = false;\n' + SRC.slice(a, b + fine.length) + '\n' + esT + ';\n', ctx);
+    return ctx.body; };
+  const c4todo = () => ({ paso: 'medio', modo: 'todo', sel: {}, partes: 0, pagadoAntes: 0 });
+  { const b = pay({ parte: { monto: 6080 }, tot: 6080, restoAbrir: 6080, consumoAbrir: 6080 });
+    t('③ dedo 6.080 su resto 6.080, niente pagato prima: pago INTERO (niente parcial, niente monto, es_total)', b.parcial === undefined && b.monto === undefined && b.es_total === true, b); }
+  { const b = pay({ parte: { monto: 3000 }, tot: 3000, restoAbrir: 6080, consumoAbrir: 6080 });
+    t('③ dedo 3.000 su resto 6.080: parte (parcial, monto 3.000, es_total falso)', b.parcial === 1 && b.monto === 3000 && b.es_total === false, b); }
+  { const b = pay({ parte: { monto: 3000 }, tot: 3000, restoAbrir: 0, consumoAbrir: 0 });
     t('③ resto ignoto (0): resta parte, il verso sicuro', b.parcial === 1 && b.monto === 3000, b); }
-  { const b = pay({ parte: { monto: 3000 }, tot: 3000, restoAbrir: 6080, montoOn: true });
+  { const b = pay({ parte: { monto: 3000 }, tot: 3000, restoAbrir: 6080, consumoAbrir: 6080, montoOn: true });
     t('③ col monto ritoccato a mano comanda la sua porta: questo blocco non scrive niente', b.parcial === undefined, b); }
+  { const b = pay({ parte: { monto: 2190 }, tot: 2190, restoAbrir: 2190, consumoAbrir: 6080 });
+    t('U1 · dedo che copre il resto 2.190 DOPO 3.890 già pagati: parcial + monto 2.190 + es_total (il libro sottrae, non scrive 6.080)', b.parcial === 1 && b.monto === 2190 && b.es_total === true, b); }
+  { const b = pay({ c4: c4todo(), tot: 2190, restoAbrir: 2190, consumoAbrir: 6080 });
+    t('U2 · CASO COMUNE: c4 «pago todo» del resto 2.190 dopo una parte (pagadoAntes 0, il già pagato dentro pg.tot) ⇒ parcial + monto 2.190 + es_total', b.parcial === 1 && b.monto === 2190 && b.es_total === true, b); }
+  { const b = pay({ c4: Object.assign(c4todo(), { pagadoAntes: 3890 }), tot: 6080, restoAbrir: 6080, consumoAbrir: 6080 });
+    t('U3 · c4 che chiude con pagadoAntes 3.890 (yapag2/ritentativo) ⇒ parcial + monto 2.190 (c4Falta) + es_total', b.parcial === 1 && b.monto === 2190 && b.es_total === true, b); }
+  { const b = pay({ c4: c4todo(), tot: 6080, restoAbrir: 6080, consumoAbrir: 6080 });
+    t('U4 · c4 «pago todo» di colpo solo, niente pagato prima: pago intero come oggi (niente monto)', b.parcial === undefined && b.monto === undefined && b.es_total === true, b); }
+  { const b = pay({ c4: Object.assign(c4todo(), { modo: 'iguales', partes: 2 }), tot: 6080, restoAbrir: 6080, consumoAbrir: 6080 });
+    t('U5 · c4 a metà (3.040 su 6.080): parte come oggi, es_total falso', b.parcial === 1 && b.monto === 3040 && b.es_total === false, b); }
+  { const b = pay({ tot: 2190, restoAbrir: 2190, consumoAbrir: 6080 });
+    t('U6 · pago senza c4 né parte (un altro telefono) del resto 2.190 dopo 3.890 ⇒ parcial + monto 2.190 + es_total', b.parcial === 1 && b.monto === 2190 && b.es_total === true, b); }
+  { const b = pay({ tot: 6080, restoAbrir: 6080, consumoAbrir: 6080 });
+    t('U7 · pago senza c4 né parte, niente pagato prima: come oggi', b.parcial === undefined && b.monto === undefined, b); }
+  // _vpTot: il già pagato = MASSIMO fra server e memoria locale (mai la somma), nel ramo uuids
+  const vp = ({ res, sed, loc, serverOn = true }) => { const ctx = { Math, Number, isFinite, PAGO_UUIDS_VETRO_ON: true, MARCA_TS_ON: true, RESTO_SERVER_ON: serverOn,
+      STATE: { mesasModel: [], pagadoParcial: loc ? { '997': loc } : {} }, _resDe: () => (res ? { total: res } : null), _pagadoSedutaDeMesa: () => (sed === undefined ? null : sed) };
+    const i0 = SRC.indexOf('function _vpTot('), i1 = SRC.indexOf('    return Math.max(0, baseU - pagU);', i0);
+    vm.createContext(ctx); vm.runInContext(fnV('_vpBase') + SRC.slice(i0, i1) + '    return Math.max(0, baseU - pagU);\n  }\n}\nthis.r = _vpTot("997");', ctx); return ctx.r; };
+  t('V1 · telefono B (nessuna memoria), il server sa 3.890 ⇒ resto 2.190 (prima: 6.080)', vp({ res: 6080, sed: 3890 }) === 2190, vp({ res: 6080, sed: 3890 }));
+  t('V2 · telefono A, server stantio (0) e memoria 3.890 ⇒ 2.190 (il massimo, non il server secco)', vp({ res: 6080, sed: 0, loc: 3890 }) === 2190, vp({ res: 6080, sed: 0, loc: 3890 }));
+  t('V3 · server 4.890 (A 3.890 + B 1.000), memoria A 3.890 ⇒ 1.190: mai la somma (che darebbe 0)', vp({ res: 6080, sed: 4890, loc: 3890 }) === 1190, vp({ res: 6080, sed: 4890, loc: 3890 }));
+  t('V4 · server spento per apparecchio, memoria 3.890 ⇒ 2.190 come ieri', vp({ res: 6080, sed: 4890, loc: 3890, serverOn: false }) === 2190);
+  t('V5 · nessun pagato da nessuna parte ⇒ consumo intero', vp({ res: 6080 }) === 6080);
   { const ab = SRC.slice(SRC.indexOf('function abrirPago('), SRC.indexOf('function abrirPago(') + 20000);
-    t('③ abrirPago salva il resto PRIMA che la parte prenda il posto del totale, e lo porta in STATE.pago',
-      ab.indexOf('const _restoAbrir = tot;') > 0 && ab.indexOf('const _restoAbrir = tot;') < ab.indexOf('if (_pt) tot = _pt;') && /restoAbrir: _restoAbrir/.test(ab)); }
+    t('③ abrirPago salva resto E consumo PRIMA che la parte prenda il posto del totale, e li porta in STATE.pago',
+      ab.indexOf('const _restoAbrir = tot;') > 0 && ab.indexOf('_consAbrir += _vpBase(mm)') > 0 && ab.indexOf('_consAbrir += _vpBase(mm)') < ab.indexOf('if (_pt) tot = _pt;') && /restoAbrir: _restoAbrir, consumoAbrir: _consAbrir/.test(ab)); }
   return ko - k0;
 }
 banco(SRC0);
@@ -67,5 +101,10 @@ mut('la guardia della parte tolta (il difetto della 997)', '      if (_abiertaB)
 mut('il bordo non vince su mesa_abierta', "(rB.mesa_abierta === true || rB.mesa_abierta === false) ? rB.mesa_abierta", "false ? rB.mesa_abierta");
 mut('③ la parte a dedo torna parcial sempre', "if (!(pg.restoAbrir > 0) || _mParte < Math.round(pg.restoAbrir)) {", "if (true) {");
 mut('③ il resto ignoto diventa intero', "if (!(pg.restoAbrir > 0) || _mParte < Math.round(pg.restoAbrir)) {", "if (_mParte < Math.round(pg.restoAbrir)) {");
+mut("U il caso comune dimenticato (solo pagadoAntes)", "const dif = (pg.consumoAbrir > 0", "const dif = 0 && (pg.consumoAbrir > 0");
+mut("U la c4 che chiude esce intera", "else if (pg.c4 && !pg.montoOn && _yaPag > 0) {", "else if (false) {");
+mut("U l ultima parte senza es_total", "body.es_total = !body.parcial || _cierraConParte;", "body.es_total = !body.parcial;");
+mut("V il server torna ignorato", "const sedU = RESTO_SERVER_ON ? _pagadoSedutaDeMesa(mesa) : null;", "const sedU = null;");
+mut("V server e memoria sommati", "const pagU = Math.max((sedU != null && isFinite(Number(sedU))) ? Number(sedU) : 0, parcU || 0);", "const pagU = ((sedU != null) ? Number(sedU) : 0) + (parcU || 0);");
 mut('parcial solo numerico', "(body.parcial === 1 || body.parcial === '1')", "(body.parcial === 1)");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exitCode = ko ? 1 : 0;

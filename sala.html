@@ -11014,14 +11014,30 @@ const PAGO_UUIDS_VETRO_ON = (function () {
     return localStorage.getItem('sala_pagouuids') !== '0';   // [27-set 10:5x] ACCESA di flotta dopo il collaudo con Alberto (50 · 52 · junta · trasloco verdi)
   } catch (e) { return q === '1'; }
 })();
+/* [15-ott · AUT-0696] il CONSUMO della mesa, prima di togliere il già pagato: la stessa base del ramo `uuids` di
+   `_vpTot`, detta una volta sola. `abrirPago` la salva accanto al resto: la differenza è il già pagato della sessione. */
+function _vpBase(mesa) {
+  const res = _resDe(mesa);
+  const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
+  const visto = m ? m.pend.concat(m.mios, m.limpiar).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0) : 0;
+  return res ? Math.max(res.total || 0, visto) : visto;
+}
 function _vpTot(mesa) {
   const res = _resDe(mesa);
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
   const visto = m ? m.pend.concat(m.mios, m.limpiar).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0) : 0;
   if (PAGO_UUIDS_VETRO_ON) {
-    const baseU = res ? Math.max(res.total || 0, visto) : visto;
+    const baseU = _vpBase(mesa);
     const parcU = (MARCA_TS_ON && STATE.pagadoParcial[mesa]) ? STATE.pagadoParcial[mesa] : 0;
-    return Math.max(0, baseU - parcU);
+    /* [15-ott · AUT-0696 · `TERZA 997 IL FALTA NON LEGGE IL SERVER`] qui c'era `baseU − parcU` e `return`: la
+       memoria di QUESTO telefono e basta. Il ramo AUT-0428 («il server vince», `pagado_seduta`) sta più sotto e dal
+       27-set non girava mai ⇒ telefono B, o A dopo una ricarica: «falta» = consumo intero con la parte già pagata.
+       Adesso il già pagato è il MASSIMO fra server e memoria locale — mai la somma (sono lo stesso denaro visto da due
+       lati). Il massimo, non «il server vince secco»: subito dopo una parte il server può non averla ancora
+       (`pagado_seduta` stantio) e la memoria sì; un secondo telefono che ha cobrado altro lo sa solo il server. */
+    const sedU = RESTO_SERVER_ON ? _pagadoSedutaDeMesa(mesa) : null;
+    const pagU = Math.max((sedU != null && isFinite(Number(sedU))) ? Number(sedU) : 0, parcU || 0);
+    return Math.max(0, baseU - pagU);
   }
   /* [AUT-0428] il server vince SEMPRE quando `pagado_seduta` è noto — prima
      di ogni altro segnale, anche del locale di 0422ⓑ (che resta il fallback
@@ -12801,6 +12817,10 @@ function abrirPago(mesa, parte) {
      `_vpTot` è già consumo − pagato (server se noto, AUT-0428). Serve al submit per sapere se la parte a dedo
      copre TUTTO (allora non è una parte: esce come pago intero, come fa la c4 con `!c4Cierra`). */
   const _restoAbrir = tot;
+  /* e il CONSUMO, perché «consumo − resto» è il già pagato della sessione: se è > 0, il pago che chiude NON è un
+     pago intero (il libro scriverebbe il consumo intero) — vedi `_yaPagadoSesion` e il submit. */
+  let _consAbrir = 0;
+  mesasPago.forEach(function (mm) { _consAbrir += _vpBase(mm); });
   if (_pt) tot = _pt;
   /* [26-set · contratto MENU, bacheca `PAGO MESAS PAYLOAD PRONTO`] `mesasPago`
      qui sopra ESISTE da sempre — sommava solo il totale mostrato e poi
@@ -12830,7 +12850,7 @@ function abrirPago(mesa, parte) {
     });
     if (lU.length && !parcU && Math.abs(Math.round(vistoU) - Math.round(tot)) <= 1) uuidsPago = lU;
   }
-  STATE.pago = { mesa: mesa, mesas: mesasPago.slice(), gid: gidPago, uuids: uuidsPago, tot: tot, restoAbrir: _restoAbrir, parte: _pt ? { titulo: (parte.titulo || 'parte'), monto: _pt } : null,
+  STATE.pago = { mesa: mesa, mesas: mesasPago.slice(), gid: gidPago, uuids: uuidsPago, tot: tot, restoAbrir: _restoAbrir, consumoAbrir: _consAbrir, parte: _pt ? { titulo: (parte.titulo || 'parte'), monto: _pt } : null,
     prop: 'sug', medio: '',
     otro: '', correo: '', celular: '', nombre: '', enviando: false,
     /* v3.31.0 · [AUT-0113] · `cliente:true` = el teléfono está en manos del
@@ -13391,6 +13411,16 @@ function c4Bruto(pg) {
 function c4Parte(pg) { return Math.min(c4Bruto(pg), c4Falta(pg)); }
 function c4Resta(pg) { return Math.max(0, c4Falta(pg) - c4Parte(pg)); }
 function c4Cierra(pg) { return c4Resta(pg) <= 0; }
+/* [15-ott · AUT-0696 · ⚙️ `ARQ ULTIMA PARTE SCRITTA INTERA` + `TERZA ULTIMA PARTE LA CONDIZIONE GIUSTA`] quanto la
+   SESSIONE ha già pagato, visto dal pannello. Due posti, e solo due: `pagadoAntes` (yapag2 o il ritentativo dopo
+   `parte_mayor_que_resto`) e la differenza consumo − resto all'apertura (il già pagato che `_vpTot` ha già tolto
+   da `pg.tot`). Il secondo è il caso COMUNE: `pagadoAntes` resta 0 quasi sempre. Ignoto ⇒ 0, cioè il pago di ieri. */
+function _yaPagadoSesion(pg) {
+  if (!pg) return 0;
+  const ante = (pg.c4 && pg.c4.pagadoAntes) ? Math.round(pg.c4.pagadoAntes) : 0;
+  const dif = (pg.consumoAbrir > 0 && pg.restoAbrir >= 0) ? Math.max(0, Math.round(pg.consumoAbrir - pg.restoAbrir)) : 0;
+  return ante + dif;
+}
 
 /* ═══ 🔴 LA CORREZIONE PIÙ IMPORTANTE DI QUESTO PEZZO ════════════════════════
    La prima stesura scriveva la parte in `montoOn`+`montoCustom`, «i campi che
@@ -15182,6 +15212,7 @@ async function pagoConfirmar(btn) {
   /* v1.4 · le mosse del JL viaggiano DICHIARATE + col PIN (GAS v3.75.0):
      cortesía → cortesia:1 (il server forza $0 e non emette) · otro monto →
      monto_manual:1 + monto (la boleta esce dal cobrado, riga unica). */
+  let _cierraConParte = false;   // [AUT-0696] una parte col suo monto che però CHIUDE la sessione (es_total vero)
   if (esCort) { body.cortesia = 1; body.pin_jl = (pg.pinJL || '').trim(); }
   else {
     /* v3.5.4 · LA PARTE: `monto` più piccolo del consumo SENZA `monto_manual`
@@ -15194,9 +15225,14 @@ async function pagoConfirmar(btn) {
        usciva `parcial:1` + `es_total:false`, e il libro la scriveva NON totale ⇒ mesa aperta pagata in tutti i
        libri. Copre tutto ⇒ esce come pago intero (niente `parcial`, niente `monto`: si usa il consumo, come la c4
        con `!c4Cierra`). Resto ignoto (0) ⇒ resta parte: il verso sicuro. */
+    /* [AUT-0696, il pezzo unico] … e se la sessione ha GIÀ pagato qualcosa, anche la parte che copre tutto resta
+       `parcial` + `monto`: è il ramo `esParcial` del libro quello che sottrae il già pagato e chiude con la boleta
+       giusta. Senza `monto` il libro scriverebbe il consumo INTERO (⚙️ `ARQ ULTIMA PARTE SCRITTA INTERA`). */
+    const _yaPag = _yaPagadoSesion(pg);
     if (pg.parte && !pg.montoOn) {
       const _mParte = _pagoMonto();
       if (!(pg.restoAbrir > 0) || _mParte < Math.round(pg.restoAbrir)) { body.parcial = 1; body.monto = _mParte; }
+      else if (_yaPag > 0) { body.parcial = 1; body.monto = _mParte; _cierraConParte = true; }
     }
     /* v3.47.0 · COBRAR v4 · LA PARTE DEL CLIENTE ESCE DALLA PORTA DELLA PARTE.
        Il flusso `pg.parte` qui sopra è il cobro a dedo del JL: nasce all'APERTURA
@@ -15241,6 +15277,15 @@ async function pagoConfirmar(btn) {
        non lo ha mai portato. Il bordo/GAS usano il consumo, come fanno già. */
     else if (pg.c4 && !pg.montoOn && !c4Cierra(pg)) {
       body.monto = c4Parte(pg); body.parcial = 1;
+    }
+    /* [AUT-0696] la parte c4 che CHIUDE dopo altre parti: `monto` = quello che manca (`c4Parte` = `c4Falta` quando chiude) */
+    else if (pg.c4 && !pg.montoOn && _yaPag > 0) {
+      body.monto = c4Parte(pg); body.parcial = 1; _cierraConParte = true;
+    }
+    /* [AUT-0696] il pago «intero» senza c4 né parte (un altro telefono, o il mesero che apre COBRAR dopo una parte):
+       se la sessione ha già pagato, il resto esce col suo monto, non come consumo intero */
+    else if (!pg.c4 && !pg.parte && !pg.montoOn && _yaPag > 0 && pg.tot > 0) {
+      body.monto = Math.round(pg.tot); body.parcial = 1; _cierraConParte = true;
     }
     if (pg.montoOn && _pagoMonto() !== pg.tot) {
       body.monto = _pagoMonto(); body.monto_manual = 1; body.pin_jl = (pg.pinJL || '').trim();
@@ -15300,7 +15345,9 @@ async function pagoConfirmar(btn) {
      monto manuale lo accendono, nient'altro) — non una nuova deduzione:
      la sua negazione è altrettanto un fatto. `cortesía` non tocca mai
      `parcial` ⇒ resta `es_total:true`, corretto: chiude la mesa intera. */
-  body.es_total = !body.parcial;
+  /* [AUT-0696] l'ultima parte che chiude è `parcial` (per il libro: sottrae il già pagato) MA `es_total` vero (per il
+     bordo e per PG: chiude il conto; e l'ACK di 🎛 BKP `8402f38` non dice `mesa_abierta`). Il GAS non legge `es_total`. */
+  body.es_total = !body.parcial || _cierraConParte;
   /* [24-set · AUT-0433-bis, reperto MIGRACION FIGLIA `TRENTASEI SU TRENTASEI
      DALLA PORTA PARCIAL`] 36/36 pagos di oggi (tutti PRE-cura, 16:58:53)
      sono entrati dalla porta `parcial` — anche 23 mese che hanno pagato una
@@ -15342,7 +15389,7 @@ async function pagoConfirmar(btn) {
             NON pulisce e NON marca il cierre. Se il bordo dice `mesa_abierta` (metà 🎛 BKP di AUT-0696) vince lui,
             nei due versi. Il resto vero lo ridà il server al poll (AUT-0428): qui solo il numero per il toast. */
       const _abiertaB = (rB.mesa_abierta === true || rB.mesa_abierta === false) ? rB.mesa_abierta
-        : (body.parcial === 1 || body.parcial === '1');
+        : ((body.parcial === 1 || body.parcial === '1') && body.es_total !== true);   // l'ultima parte che chiude (es_total) chiude
       if (_abiertaB) {
         const _mesaP = pg.mesa, _montoP = (rB.monto != null ? rB.monto : body.monto);
         let _falta = (rB.falta != null && isFinite(Number(rB.falta))) ? Math.round(Number(rB.falta)) : null;
