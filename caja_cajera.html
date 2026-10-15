@@ -311,7 +311,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return senzaEsitoHtml() + (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.10.8</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.10.9</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -1115,7 +1115,11 @@ async function rPrimaOn() {
 function rPrimaLeer(clave) { try { var f = JSON.parse(localStorage.getItem(RPRIMA_KEY) || 'null'); return (f && f.clave === clave) ? f : null; } catch (e) { return null; } }
 function rPrimaGuardar(f) { try { localStorage.setItem(RPRIMA_KEY, JSON.stringify(f)); } catch (e) {} }
 function rPrimaLimpiar() { try { localStorage.removeItem(RPRIMA_KEY); } catch (e) {} }
-function rPrimaSiguiente(f) { for (var i = 0; i < f.lista.length; i++) { var d = f.lista[i].dia; if (!f.hechas[d] && !f.cubiertas[d]) return i; } return -1; }
+function rPrimaSiguiente(f) { var sin = f.sin || {}; for (var i = 0; i < f.lista.length; i++) { var d = f.lista[i].dia; if (!f.hechas[d] && !f.cubiertas[d] && !sin[d]) return i; } return -1; }
+/* [15-ott · AUT-0694 · Alberto, caja del 14] IL FATTO È CIÒ CHE STA NELLA BUSTA: con le monete la cifra esatta non ci sta (calcolato 22.575,
+   nella busta 22.350). La cajera scrive l'importo REALE (precompilato col calcolo); la busta nasce con quello, e la salida — che viene DOPO —
+   porta a_depositar = contado − R reale. 0 = nessuna busta (il bordo non accetta una busta a zero, DESIGN ①): si chiede conferma. */
+function rRealeLeggi() { var el = document.getElementById('rReal'); var v = el && el.value != null ? String(el.value).replace(/[^0-9]/g, '') : ''; return v === '' ? null : Number(v); }
 /* le buste, una per tocco; poi la salida */
 function pantallaReservaAntes(f) {
   rPrimaGuardar(f);
@@ -1124,11 +1128,20 @@ function pantallaReservaAntes(f) {
   var it = f.lista[i];
   app.innerHTML = barra(true) +
     '<div class="kick">La reserva · antes de salir' + (f.lista.length > 1 ? ' · sobre ' + (i + 1) + ' de ' + f.lista.length : '') + '</div><h1>A la caja fuerte ROJA</h1>' +
-    (f.lista.length > 1 ? '<p class="sd">Noche ' + esc(fechaCorta(it.dia)) + '</p>' : '') + '<p class="big acc">' + fmt(it.importo) + '</p>' +
+    (f.lista.length > 1 ? '<p class="sd">Noche ' + esc(fechaCorta(it.dia)) + '</p>' : '') +
+    '<p class="sd">El sistema calcula <b>' + fmt(it.importo) + '</b></p>' +
     (it.sinCuota ? '<div class="note">Sin cuota de ADMIN para esta noche: se usa el cálculo del sistema.</div>' : '') +
+    '<p class="lb">Lo que pones en el sobre rojo (si con las monedas no calza, escribe lo que de verdad pones)</p>' +
+    '<input class="inp" id="rReal" inputmode="numeric" value="' + esc(String(it.importo)) + '">' +
     '<button class="btn acc" id="sellarRoja">A la caja fuerte ROJA</button>';
   unTocoUnHecho(document.getElementById('sellarRoja'), async function(){
-    var r = await postCaja({ verbo:'reserva_sobre', uid_gesto: it.uid, dia_op: it.dia, monto: it.importo, referencia_uid: f.dep,
+    var real = rRealeLeggi();
+    if (real === null) { toast('Escribe cuánto pones en el sobre rojo', 'bad'); return; }
+    if (real === 0) {
+      if (!confirm('¿Sin sobre rojo para esta noche? Toda esa plata va al banco.')) return;
+      f.sin = f.sin || {}; f.sin[it.dia] = true; pantallaReservaAntes(f); return;
+    }
+    var r = await postCaja({ verbo:'reserva_sobre', uid_gesto: it.uid, dia_op: it.dia, monto: real, referencia_uid: f.dep,
       firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
     if (!r.ok && r.motivo === 'reserva_doppione_o_forma') {
       /* un NO definitivo: la noche ya tiene su busta R. No se reintenta (cada intento quemaba un número): esa plata va al banco */
@@ -1141,10 +1154,11 @@ function pantallaReservaAntes(f) {
       return;
     }
     if (!r.ok) { toast('No se guardó: ' + r.motivo + ' — no salgas todavía, vuelve a tocar', 'bad'); return; }
-    f.hechas[it.dia] = { nro: r.sobre_nro || '—', importo: it.importo }; rPrimaGuardar(f);
+    f.hechas[it.dia] = { nro: r.sobre_nro || '—', importo: real, calculado: it.importo }; rPrimaGuardar(f);
     app.innerHTML = barra(true) +
       '<div class="kick">La reserva · antes de salir</div><h1>A la caja fuerte ROJA</h1>' +
-      '<p class="big acc">' + fmt(it.importo) + '</p>' +
+      '<p class="big acc">' + fmt(real) + '</p>' +
+      (real !== it.importo ? '<p class="sd">Calculado ' + fmt(it.importo) + ' · diferencia ' + (real > it.importo ? '+' : '−') + fmt(Math.abs(real - it.importo)) + '</p>' : '') +
       '<div class="rows"><div class="r tot"><span class="n">Sobre</span><span class="v">' + esc(r.sobre_nro || '—') + '</span></div></div>' +
       '<button class="btn acc" id="sigRoja">' + (rPrimaSiguiente(f) >= 0 ? 'Siguiente sobre' : 'Seguir al banco') + '</button>';
     unTocoUnHecho(document.getElementById('sigRoja'), async function(){ pantallaReservaAntes(f); });
@@ -1337,7 +1351,7 @@ async function pantalla9() {
         var listaRP = ROJA
           ? RESERVA.aSellar.map(function (x) { return { dia: x.dia, importo: x.importo, sinCuota: !!x.sinCuota, uid: 'res-' + depositoUid + '-' + x.dia }; })
           : (ultimo.reserva > 0 ? [{ dia: diaR, importo: ultimo.reserva, uid: 'res-' + depositoUid }] : []);
-        fRP = { clave: claveRP, dep: depositoUid, cuerpo: cuerpoSalida, lista: listaRP, hechas: {}, cubiertas: {},
+        fRP = { clave: claveRP, dep: depositoUid, cuerpo: cuerpoSalida, lista: listaRP, hechas: {}, cubiertas: {}, sin: {},
           sueltas: ROJA ? (Number(ROJA.sueltas_total) || 0) : 0, caja_dia: CAJA_DIA || null };
       }
       pantallaReservaAntes(fRP);
