@@ -1110,7 +1110,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.226.7 · vetro</span>
+      <span class="ver" id="ver">sala v3.226.8 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -15322,6 +15322,31 @@ async function pagoConfirmar(btn) {
     }
     if (rB && rB.ok !== false) {
       _pagoEsito(pg, 'ok', 'bordo');
+      /* ═══ [15-ott · AUT-0696 · prova 997 con Alberto] LA PARTE CHE NON COPRE NON CHIUDE NIENTE — ANCHE AL BORDO ═══
+         🩸 Il fatto: «su parte» $3.890 su $6.080 ⇒ COBRADO, e la 997 tornava LIBRE «$6.080 · sin consumo» su QUEL
+            telefono. Il bordo la teneva, PG la teneva: era la mano ottimistica qui sotto, che puliva SEMPRE e
+            scriveva `tsPagoCierre` (non scade mai) anche su una parte. La guardia `mesa_abierta` (v3.5.4) viveva
+            solo nel ramo del GAS, più giù: è traslocata la PARTE al bordo (`PARCIAL_BORDE_ON`), non la sua guardia.
+         🔑 Regola: una parte che lascia un resto (`parcial:1` lo dichiara il vetro solo se resta qualcosa, r.~15231)
+            NON pulisce e NON marca il cierre. Se il bordo dice `mesa_abierta` (metà 🎛 BKP di AUT-0696) vince lui,
+            nei due versi. Il resto vero lo ridà il server al poll (AUT-0428): qui solo il numero per il toast. */
+      const _abiertaB = (rB.mesa_abierta === true || rB.mesa_abierta === false) ? rB.mesa_abierta
+        : (body.parcial === 1 || body.parcial === '1');
+      if (_abiertaB) {
+        const _mesaP = pg.mesa, _montoP = (rB.monto != null ? rB.monto : body.monto);
+        let _falta = (rB.falta != null && isFinite(Number(rB.falta))) ? Math.round(Number(rB.falta)) : null;
+        if (_falta === null && pg.c4) { try { _falta = Math.round(c4Resta(pg)); } catch (e) { _falta = null; } }
+        _marcarPagoParcial(_mesaP, _montoP);   // [AUT-0422 ⓑ] come il ramo GAS: il resto vero = locale − incassato
+        toast('ok', '💳 Parte cobrada · ' + fmtPrice(_montoP) + (propina ? ' + propina ' + fmtPrice(propina) : '') +
+          (_falta > 0 ? ' — FALTA ' + fmtPrice(_falta) : '') + ' · la mesa sigue abierta');
+        STATE.pago = null; renderPago();
+        cerrarMesa(); refrescar(false);
+        /* l'ultima parola è «quanto manca» (v3.5.4); la boleta la chiede il bordo, come per ogni pago al bordo */
+        setTimeout(function () {
+          toast('ok', '🪑 Mesa ' + _mesaP + ' sigue abierta' + (_falta > 0 ? ' — falta ' + fmtPrice(_falta) : ''));
+        }, 2600);
+        return;
+      }
       /* la mesa si chiude ottimisticamente come sempre (v1.13): il GAS chiude
          TUTTA la mesa al pago, e lo farà anche stavolta — solo, lo fa dietro,
          chiamato dal bordo. La mano che fa sparire i pedidos è la stessa. */
