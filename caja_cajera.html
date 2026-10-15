@@ -310,7 +310,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return senzaEsitoHtml() + (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.9.7</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.10.7</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -444,7 +444,133 @@ function noEncBind() {
   });
 }
 
+/* ═══ [11-ott · AUT-0667 · ORDEN DE ALBERTO «UNA CAJA POR DÍA, NUNCA SUMADA»] ═══════════════════════════════════════════════════════════════════════════
+   🩸 Domenica 11, 16:53: una salida con la somma di tre notti (reserva 126.626, il 09 doppio, l 11 ancora aperto). Alberto: «una caja per giorno: se ci sono cajas da dichiarare devono vedersi separate, Caja del 9/10,
+   Caja del 10/10, e il procedimento si fa in forma separata, una alla volta». ⇒ con la leva del bordo `caja_una_per_giorno_on`:
+   ① all apertura, UNA LISTA di cajas pendientes (una riga per notte CHIUSA con sobres; mai un totale, mai un importo dichiarato: si conta alla cieca) ② si apre UNA caja e si fa tutto il suo giro — conteo de SUS sobres ·
+   cortes de SU dia · roja de SU noche · salida con `caja_dia` — e si torna alla lista ③ el deposito en el banco puede ser UNO: ella escribe el N° UNA vez y se guarda una vuelta POR salida (mismo N°); cada caja queda como
+   un hecho separado ④ la noche en curso NO aparece. El freno VERDADERO esta en el bordo (salida_somma_notti): este vetro solo no ofrece lo que el bordo rechazaria. Leva apagada = la pantalla de ayer, byte por byte. */
+var UNA_ON = null, UNA_TS = 0;
+async function unaOn() {
+  if (UNA_ON !== null && Date.now() - UNA_TS < 60000) return UNA_ON;
+  UNA_TS = Date.now();
+  try {
+    var r = await fetch(BORDE[LOCAL] + '/salud', { cache: 'no-store' });
+    var j = await r.json();
+    UNA_ON = !!(j && j.flags && String(j.flags.caja_una_per_giorno_on) === '1');
+  } catch (e) { UNA_ON = false; }   // /salud mudo = apagado: ninguna pantalla nueva sin que el bordo lo diga
+  return UNA_ON;
+}
+var CAJA_DIA = null;   // la noche de la caja abierta (null = la lista, o el vetro de ayer)
+/* las salidas escritas por ESTE telefono que todavia no tienen su vuelta: sobreviven a cerrar la app, y cubren el retraso con que el bordo las lista (10 min) */
+var EN_CAMINO_KEY = 'caja_en_camino_v1';
+function enCaminoLocal() { try { var l = JSON.parse(localStorage.getItem(EN_CAMINO_KEY) || '[]'); return Array.isArray(l) ? l : []; } catch (e) { return []; } }
+function enCaminoGuardar(l) { try { localStorage.setItem(EN_CAMINO_KEY, JSON.stringify(l)); } catch (e) {} }
+function enCaminoAgregar(x) { var l = enCaminoLocal().filter(function(y){ return y.uid !== x.uid; }); l.push(x); enCaminoGuardar(l); }
+function enCaminoQuitar(uid) { enCaminoGuardar(enCaminoLocal().filter(function(y){ return y.uid !== uid; })); }
+/* LAS SALIDAS EN CAMINO = las del bordo (`depositos_en_camino`: todas las del local sin vuelta, de cualquier telefono) + las de este telefono de hace menos de 10 min (el bordo tarda en verlas).
+   Si el bordo no tiene la lectura (404 lettura_sconosciuta), manda la lista local. Una salida anulada no se queda para siempre: pasados 10 min solo vale lo que el bordo dice. */
+async function enCaminoTodas() {
+  var r = await getCaja('depositos_en_camino?dia=' + DIA_HOY);   // con `dia`: el bordo valida siempre el dia, sin el responderia 400 a cada apertura
+  var srv = (r && r.ok && Array.isArray(r.depositos)) ? r.depositos : null;
+  var out = [], vistos = {};
+  (srv || []).forEach(function(x){ if (x && x.uid && !vistos[x.uid]) { vistos[x.uid] = 1; out.push({ uid: x.uid, dia: String(x.dia || x.caja_dia || '').slice(0, 10), a_depositar: Number(x.a_depositar) || 0 }); } });
+  enCaminoLocal().forEach(function(x){
+    if (!x || !x.uid || vistos[x.uid]) return;
+    if (srv !== null && !(Date.now() - (x.ts || 0) < 600000)) return;
+    vistos[x.uid] = 1; out.push({ uid: x.uid, dia: String(x.dia || '').slice(0, 10), a_depositar: Number(x.a_depositar) || 0 });
+  });
+  out.sort(function(a, b){ return a.dia < b.dia ? -1 : a.dia > b.dia ? 1 : 0; });
+  return out;
+}
+async function pantallaCajas() {
+  CAJA_DIA = null; DIA_CORTE = null; PASO = 1;
+  app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando las cajas…</p>';
+  /* si ella cerro la app entre la salida y la ULTIMA busta R, la secuencia se retoma antes que la lista */
+  var rpC = rojaPendLeer();
+  if (rpC && rpC.lista && rojaSiguiente(rpC) >= 0) { pantallaRojaNotte(rpC.dep, rpC.lista, rpC.hechas); return; }
+  var PENDC = await getCaja('pendientes?dia=' + DIA_HOY);
+  if (PENDC.pin) { renderError('Las cajas', PENDC.error); return; }
+  if (!PENDC.ok || !Array.isArray(PENDC.cajas_pendientes)) { renderError('Las cajas', PENDC.ok ? 'sin_lista_de_cajas' : PENDC.error); return; }
+  var enc = await enCaminoTodas();
+  /* una caja con su salida ya escrita NO se reabre: el bordo tarda unos segundos (a veces minutos) en sacar sus sobres de la lista, y una segunda salida con otro contado seria otro hecho para los mismos sobres */
+  var cajas = PENDC.cajas_pendientes.filter(function(c){ return !enc.some(function(e){ return e.dia === String(c.dia || '').slice(0, 10); }); });
+  var filasC = cajas.map(function(c, i){
+    var falta = (c.n_sobres || 0) - (c.n_contados || 0);
+    return '<button class="btn ' + (falta > 0 ? 'acc' : 'gh') + '" id="caja' + i + '" style="text-align:left;margin-top:8px">Caja del ' + esc(fechaCorta(c.dia)) +
+      '<small style="display:block;font-weight:500;opacity:.85">' + (c.n_sobres || 0) + ((c.n_sobres || 0) === 1 ? ' sobre' : ' sobres') + ' · ' + (falta > 0 ? falta + ' por contar' : 'todos contados') + '</small></button>';
+  }).join('');
+  var encHtml = enc.length
+    ? '<div class="note"><b>En camino al banco</b><br>' + enc.map(function(x){ return 'Caja del ' + esc(fechaCorta(x.dia)) + ' · Por depositar ' + fmt(x.a_depositar); }).join('<br>') + '</div>' +
+      '<button class="btn acc" id="yaVolvi">Ya volví del banco</button>'
+    : '';
+  app.innerHTML = barra(true) +
+    '<div class="kick">Las cajas</div><h1>' + (cajas.length ? (cajas.length === 1 ? 'Una caja por contar' : cajas.length + ' cajas por contar') : 'Nada por contar') + '</h1>' +
+    '<p class="sd">' + (cajas.length ? 'Cada día es una caja aparte: abre una y hazla entera' : 'No hay cajas pendientes') + '</p>' +
+    filasC + encHtml +
+    (PENDC.nascosti && PENDC.nascosti.length ? '<div class="note">La noche de hoy sigue abierta: no aparece hasta que cierre.</div>' : '');
+  cajas.forEach(function(c, i){ document.getElementById('caja' + i).onclick = function(){ abrirCaja(c.dia); }; });
+  if (enc.length) document.getElementById('yaVolvi').onclick = function(){ pantallaEnCamino(); };
+}
+function abrirCaja(dia) { CAJA_DIA = dia; DIA_CORTE = dia; PASO = 1; pantalla6(); }
+/* terminada la salida (y sus busta R): en el vetro de ayer sigue «En camino al banco»; con una caja por dia se vuelve a la lista, donde esa caja ya no esta y la salida aparece «En camino» */
+function trasSalida() { if (UNA_ON === true) { CAJA_DIA = null; pantallaCajas(); } else pantalla9(); }
+/* [11-ott · 💵 EL GIRO «LA CAJA NON SI DEPOSITA DUE VOLTE» 🟡] los rechazos de la SALIDA, con palabras: el bordo ya no deja depositar dos veces una caja ni mezclar noches, pero la cajera solo veia «No se guardó: <codigo>» o nada. */
+function salidaErrorTxt(m) {
+  if (m === 'sobre_ya_depositado_o_ignoto') return 'Esta caja ya salió al banco (o uno de sus sobres no existe). No se deposita dos veces: el sistema la está registrando, vuelve a mirar en unos minutos';
+  if (m === 'salida_somma_notti') return 'Esta salida mezcla noches: una caja es un solo día. Avisa a Alberto';
+  if (m === 'caja_dia_no_cerrado') return 'Esa noche todavía no se cierra: no se puede depositar aún';
+  if (m === 'roja_di_altro_giorno') return 'Una busta roja no es de esta noche. Avisa a MIGRACIÓN';
+  return 'No se guardó: ' + m;
+}
+function vueltaErrorTxt(m) {
+  if (m === 'salida_en_camino') return 'El depósito todavía está llegando al sistema. Espera un minuto y guarda el número otra vez';
+  if (m === 'salida_no_llego') return 'El depósito NO llegó al sistema. No escribas el número: avisa a MIGRACIÓN';
+  return 'No se guardó: ' + m;
+}
+/* UN depósito en el banco, UN número: se guarda una vuelta POR salida, todas con el mismo N°. Cada caja sigue siendo un hecho separado. */
+async function pantallaEnCamino() {
+  app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando el depósito…</p>';
+  var enc = await enCaminoTodas();
+  if (!enc.length) { pantallaCajas(); return; }
+  app.innerHTML = barra(true) +
+    /* [11-ott · 💵 EL GIRO «PACCHETTO 9BF5A6B» 🟡] una salida de OTRO telefono (o de otro viaje al banco) tomaba el mismo N° que las demas y lo hacia falso: ahora ella MARCA las cajas que cubre ESTE papel del banco (por defecto todas) y el N° se guarda solo en las marcadas; las otras siguen «En camino». El total de las marcadas es para comparar con el papel del banco. */
+    '<div class="kick">El depósito</div><h1>En camino al banco</h1><p class="sd">Un depósito en el banco = un número. Marca las cajas que van en ese papel</p>' +
+    '<div class="rows">' + enc.map(function(x, i){ return '<label class="r" style="cursor:pointer"><span class="n"><input type="checkbox" id="chk' + i + '" checked style="margin-right:8px">Caja del ' + esc(fechaCorta(x.dia)) + '</span><span class="v">Por depositar ' + fmt(x.a_depositar) + '</span></label>'; }).join('') + '</div>' +
+    '<div class="note" id="totalSel"></div>' +
+    '<p class="lb">N° de depósito</p><input class="inp" id="nro" placeholder="Lo escribes cuando vuelves">' +
+    '<button class="btn acc" id="cerrarEnCamino">Guardar número de depósito</button>' +
+    '<button class="btn gh" id="volverCajas2">‹ Las cajas</button>';
+  document.getElementById('volverCajas2').onclick = function(){ pantallaCajas(); };
+  function marcadasEnCamino() { return enc.map(function(x, i){ return !!document.getElementById('chk' + i).checked; }); }
+  function pintaTotalSel() {
+    var m = marcadasEnCamino(), tot = 0, n = 0;
+    enc.forEach(function(x, i){ if (m[i]) { tot += x.a_depositar; n++; } });
+    document.getElementById('totalSel').innerHTML = n ? 'Comprobante del banco: <b>' + fmt(tot) + '</b> <small>(' + n + (n === 1 ? ' caja marcada' : ' cajas marcadas') + ' · debe coincidir con el papel del banco)</small>' : 'No hay ninguna caja marcada.';
+    document.getElementById('cerrarEnCamino').disabled = !n;
+  }
+  enc.forEach(function(x, i){ document.getElementById('chk' + i).addEventListener('change', pintaTotalSel); });
+  pintaTotalSel();
+  unTocoUnHecho(document.getElementById('cerrarEnCamino'), async function(){
+    var nro = document.getElementById('nro').value.trim();
+    if (!nro) { toast('Escribe el número de depósito', 'bad'); return; }
+    var marcadas = marcadasEnCamino();
+    if (!marcadas.some(Boolean)) { toast('Marca al menos una caja', 'bad'); return; }
+    for (var i = 0; i < enc.length; i++) {
+      var x = enc[i];
+      if (!marcadas[i]) continue;   // las no marcadas siguen «En camino»: ese N° no es de ellas
+      var r = await postCaja({ verbo:'deposito', uid_gesto: uidGestoEstable('depv|' + x.uid + '|' + nro, 'dep'), evento:'vuelta', referencia_uid: x.uid, nro_deposito: nro, caja_dia: x.dia,
+        firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+      if (!r.ok) { toast(vueltaErrorTxt(r.motivo), 'bad'); return; }
+      enCaminoQuitar(x.uid);   // cada vuelta guardada sale de la lista: un reintento no la repite
+    }
+    toast('Depositado · N° ' + nro, 'ok');
+    pantallaCajas();
+  });
+}
+
 async function pantalla6() {
+  if (!CAJA_DIA && await unaOn()) { pantallaCajas(); return; }   // [AUT-0667] con la leva: primero la lista de cajas, nunca todo sumado
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando la caja fuerte…</p>';
   var NOTA_UNA_NOCHE = '';
   var PEND = await getCaja('pendientes?dia=' + DIA_HOY);
@@ -454,6 +580,7 @@ async function pantalla6() {
     /* el aviso sin respuesta es de ANOCHE: se pide aparte y, si falla, no importa (no es el motivo de esta pantalla) */
     var mAnoche = await getCaja('manana?dia=' + DIA_NOCHE);
     MANANA = { ok: true, sobres: PEND.sobres, aviso_sin_respuesta: (mAnoche.ok ? mAnoche.aviso_sin_respuesta : null) || null };
+    if (CAJA_DIA) { MANANA.sobres = MANANA.sobres.filter(function(s){ return String(s.dia || '').slice(0, 10) === CAJA_DIA; }); NOCHES = [CAJA_DIA]; }   // [AUT-0667] UNA caja: solo SUS sobres y SU noche
   } else {
     MULTI = false; NOCHES = [];
     /* [08-ott · EL GIRO `DEPOSITO MULTIGIORNO IL VETRO DA SOLO NON BASTA`] el ripiego a una noche es voluto, pero NO puede ser mudo: si el bordo no entrega la lista de todas las noches, ella lo ve. */
@@ -511,13 +638,14 @@ async function pantalla6() {
       new Date(MANANA.aviso_sin_respuesta.ts).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) + ' · no hubo retiro.</div>'
     : '';
   app.innerHTML = barra(true) +
-    '<div class="kick">Sobres en Caja Verde</div><h1>' + (MULTI ? (NOCHES.length > 1 ? NOCHES.length + ' noches' : fechaCorta(NOCHES[0] || DIA_NOCHE)) : fechaCorta(DIA_NOCHE)) + '</h1><p class="sd">' + (MULTI && NOCHES.length > 1 ? 'acumulado sin depositar' : 'turno noche') + '</p>' +
+    '<div class="kick">Sobres en Caja Verde</div><h1>' + (CAJA_DIA ? 'Caja del ' + fechaCorta(CAJA_DIA) : MULTI ? (NOCHES.length > 1 ? NOCHES.length + ' noches' : fechaCorta(NOCHES[0] || DIA_NOCHE)) : fechaCorta(DIA_NOCHE)) + '</h1><p class="sd">' + (MULTI && NOCHES.length > 1 ? 'acumulado sin depositar' : 'turno noche') + '</p>' +
     /* [08-ott · AUT-EMERG · `EMERG CAJERA TUTTE CONTATE RIPARTE DA CAPO` · 🎛 BKP V29] con todos contados NO se vuelve al primero:
        el número dice cuántos FALTAN, y si no falta ninguno se sigue a los cortes (paso 3). */
     '<p class="big acc">' + (faltan ? faltan : sobres.length) + '</p><p class="blab">' + (faltan ? (faltan === 1 ? 'sobre que tienes que contar' : 'sobres que tienes que contar') : (sobres.length === 1 ? 'ya contaste el sobre' : 'ya contaste los ' + sobres.length + ' sobres')) + '</p>' +
     '<div class="rows"><div class="r hd"><span>sobre</span><span>estado</span></div>' + filas + '</div>' +
     dejadasHtml() + noEncHtml() + avisoHtml + NOTA_UNA_NOCHE +
-    '<button class="btn acc" id="abrir">' + (faltan ? 'Abrir y contar' : 'Seguir') + '</button>';
+    '<button class="btn acc" id="abrir">' + (faltan ? 'Abrir y contar' : 'Seguir') + '</button>' + (CAJA_DIA ? '<button class="btn gh" id="volverCajas">‹ Las cajas</button>' : '');
+  if (CAJA_DIA) document.getElementById('volverCajas').onclick = function(){ pantallaCajas(); };
   noEncBind(); dejadasBind();
   document.getElementById('abrir').onclick = function(){ SOBRE_IDX = sobres.findIndex(function(s){return !s.conteo;}); if (SOBRE_IDX < 0) { PASO = 3; pantalla8(); return; } PASO = 2; pantalla7(); };
 }
@@ -684,7 +812,7 @@ function fechaHoraCorta(iso) {
 async function leerLibroVentana(desde, hasta) {
   return getCaja('libro_ventana?dia=' + encodeURIComponent(DIA_CORTE || DIA_NOCHE) + '&desde=' + encodeURIComponent(desde) + '&hasta=' + encodeURIComponent(hasta));
 }
-function diasDeCorte() { return [DIA_NOCHE, diaAnterior(DIA_NOCHE), DIA_HOY]; }
+function diasDeCorte() { return CAJA_DIA ? [CAJA_DIA] : [DIA_NOCHE, diaAnterior(DIA_NOCHE), DIA_HOY]; }   // [AUT-0667] los cortes de UNA caja son los de SU dia
 /* ═══ [10-ott · Alberto via V28 + DDL 16f6858f13] FORNITORE Y PIU' CORTES PER MACCHINA ═══════════════════════════════════════════════════════
    ② ogni corte dice DI CHI e la macchina (MPago · Transbank · ANDCO · Otro, scritto a mano) ③ una macchina puo avere DUE cortes nello stesso giorno (uno AM e uno PM, ognuno con la sua finestra del ticket):
    «+ otro corte de esta máquina». 🔴 La vista vigente del DB tiene UN corte per (macchina, giorno, FINESTRA): senza finestra il secondo SOSTITUIREBBE il primo — per questo, con piu di un corte per macchina,
@@ -882,15 +1010,15 @@ async function pantalla8() {
    PURA: no calcula nada nuevo (el contado de cada sobre y la retencion de cada noche ya se leian); solo los agrupa por dia. */
 function desgloseDeposito(sobres, porNoche, noches, contadoTotal, sueltas) {
   var dias = (noches || []).slice().sort();
-  /* [10-ott · AUT-0659] las buste R ya selladas (la R-0001) pertenecen a su noche: su monto es parte del contado BRUTO de esa noche y de su reserva — 09: 982.000 + 99.500 − 99.500 = 982.000 */
+  /* [10-ott · AUT-0659 · CORREGIDO 11-ott por ADMIN] las buste R ya selladas (la R-0001) pertenecen a su noche y salen DE SU CONTADO (no se suman): 09: contado 1.081.500 − reserva 99.500 = 982.000 */
   var sPorDia = {}, sFuera = [];
   (sueltas || []).forEach(function(r){ if (dias.indexOf(r.dia) >= 0) sPorDia[r.dia] = (sPorDia[r.dia] || 0) + r.importo; else sFuera.push(r); });
   var filas = dias.map(function(d){
     var mios = (sobres || []).filter(function(x){ return (x.dia || '') === d; });
-    var contado = mios.reduce(function(a, x){ return a + (x.conteo ? (x.conteo.contado || 0) : (x.declarado || 0)); }, 0) + (sPorDia[d] || 0);
+    var contado = mios.reduce(function(a, x){ return a + (x.conteo ? (x.conteo.contado || 0) : (x.declarado || 0)); }, 0);   // [AUT-0667] la roja ya sellada esta DENTRO de este contado
     var reserva = ((porNoche && porNoche[d]) || 0) + (sPorDia[d] || 0);
     return { dia: d, n: mios.length, contado: contado, reserva: reserva, neto: contado - reserva };
-  }).concat(sFuera.map(function(r){ return { dia: r.dia, n: 0, contado: r.importo, reserva: r.importo, neto: 0, roja: r.numero }; }));
+  }).concat(sFuera.map(function(r){ return { dia: r.dia, n: 0, contado: 0, reserva: r.importo, neto: -r.importo, roja: r.numero }; }));
   var sumaContado = filas.reduce(function(a, x){ return a + x.contado; }, 0);
   return { filas: filas, ajuste: (Number(contadoTotal) || 0) - sumaContado };
 }
@@ -941,7 +1069,7 @@ function pantallaRojaNotte(depositoUid, lista, hechas) {
   var p = { dep: depositoUid, lista: lista, hechas: hechas || {} };
   rojaPendGuardar(p);
   var i = rojaSiguiente(p);
-  if (i < 0) { rojaPendLimpiar(); toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok'); pantalla9(); return; }
+  if (i < 0) { rojaPendLimpiar(); toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok'); trasSalida(); return; }
   var it = lista[i];
   app.innerHTML = barra(true) +
     '<div class="kick">La reserva · sobre ' + (i + 1) + ' de ' + lista.length + '</div><h1>A la caja fuerte ROJA</h1>' +
@@ -964,10 +1092,11 @@ function pantallaRojaNotte(depositoUid, lista, hechas) {
   });
 }
 async function pantalla9() {
+  if (UNA_ON === true && !CAJA_DIA) { pantallaCajas(); return; }   // [AUT-0667] con la leva, el depósito se hace desde una caja de la lista
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando el depósito…</p>';
-  var pend = await getCaja('deposito_pendiente?dia=' + DIA_HOY);
+  var pend = CAJA_DIA ? { ok: true, salida_pendiente: null } : await getCaja('deposito_pendiente?dia=' + DIA_HOY);   // [AUT-0667] las salidas en camino viven en la lista, no aqui
   DEPOSITO_PENDIENTE = pend.ok ? pend.salida_pendiente : null;
-  /* [10-ott · AUT-0659] si ella cerró la app entre la salida y la ÚLTIMA busta R, la secuencia se retoma antes de «De vuelta del banco» (las ya selladas no se repiten: quedan marcadas) */
+  /* [10-ott · AUT-0659] si ella cerró la app entre la salida y la ÚLTIMA busta R, la secuencia se retoma antes de «En camino al banco» (las ya selladas no se repiten: quedan marcadas) */
   if (DEPOSITO_PENDIENTE) {
     var rpR = rojaPendLeer();
     if (rpR && rpR.dep === DEPOSITO_PENDIENTE.uid_gesto && rpR.lista && rojaSiguiente(rpR) >= 0) { pantallaRojaNotte(rpR.dep, rpR.lista, rpR.hechas); return; }
@@ -975,14 +1104,14 @@ async function pantalla9() {
 
   /* 🔴 LIMITE DICHIARATO, non nascosto: si ella cierra la app entre la
      salida (ya escrita) y el sello de la reserva (reserva_sobre), al volver
-     esta pantalla la manda directo a "De vuelta del banco" — la busta R
+     esta pantalla la manda directo a "En camino al banco" — la busta R
      queda pendiente y nadie lo avisa. Arreglarlo pide que
      /deposito_pendiente diga también si la reserva_sobre de esa salida ya
      existe. Lo declaro en vez de fingir que no puede pasar. */
   if (DEPOSITO_PENDIENTE) {
     app.innerHTML = barra(true) +
-      '<div class="kick">El depósito</div><h1>De vuelta del banco</h1><p class="sd">Escribe el número cuando lo tengas</p>' +
-      '<div class="rows"><div class="r tot"><span class="n">Depositaste</span><span class="v">' + fmt(DEPOSITO_PENDIENTE.a_depositar) + '</span></div></div>' +
+      '<div class="kick">El depósito</div><h1>En camino al banco</h1><p class="sd">Cuando vuelvas, escribe el número del depósito</p>' +
+      '<div class="rows"><div class="r tot"><span class="n">Por depositar</span><span class="v">' + fmt(DEPOSITO_PENDIENTE.a_depositar) + '</span></div></div>' +
       (DEPOSITO_PENDIENTE.en_cola ? '<div class="note">El depósito todavía está llegando al sistema. Si el número no se guarda, espera un minuto y vuelve a intentar.</div>' : '') +
       '<p class="lb">N° de depósito</p><input class="inp" id="nro" placeholder="Lo escribes cuando vuelves">' +
       '<button class="btn acc" id="cerrar">Guardar número de depósito</button>';
@@ -996,7 +1125,7 @@ async function pantalla9() {
       if (!r.ok && r.motivo === 'salida_en_camino') { toast('El depósito todavía está llegando al sistema. Espera un minuto y guarda el número otra vez', 'bad'); return; }
       if (!r.ok && r.motivo === 'salida_no_llego') { toast('El depósito NO llegó al sistema. No escribas el número: avisa a MIGRACIÓN', 'bad'); return; }
       if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
-      toast('Depósito cerrado', 'ok');
+      toast('Depositado · N° ' + nro, 'ok');
       PASO = 1; pantalla6();
     });
     return;
@@ -1068,26 +1197,34 @@ async function pantalla9() {
     document.getElementById('finSinSobres').onclick = function(){ PASO = 1; pantalla6(); };
     return;
   }
+  /* ═══ [11-ott · AUT-0667 · ADMIN «DENTRO O A PARTE: DIPENDE DA QUANDO» + 🎛 V28 «fai il campo a DUE numeri»] CON UNA CAJA: LOS DOS NUMEROS, SEPARADOS ═══════════════════════════════════
+     Un campo «contado» que se puede escribir de dos maneras (el lordo con la roja adentro, o lo que queda en la mano) toca por quitar la R DOS veces. En el 09 la R se selló ANTES del reconteo (a parte), en el 10 DESPUES del conteo
+     (adentro): la regla que no depende del orden es «a banco = el contante que ella pone en la bolsa del banco; la R no entra nunca». ① «Contante para el banco» (editable) ② la busta R (la pone el sistema: ya sellada + nuevas, NO se
+     escribe). contado lordo = ① + ② (solo para el libro); a banco = ①. Por defecto ① = lo contado − la roja. Sin la leva (una caja) el campo es el de ayer. */
+  var esUna = !!CAJA_DIA;
   app.innerHTML = barra(true) +
     '<div class="kick">El depósito</div><h1>Antes de salir</h1><p class="sd">Los dos números se escriben ahora</p>' +
-    '<p class="lb">' + (ROJA && ROJA.sueltas_total > 0 ? 'Contado de los sobres (editable si hace falta)' : 'Contado (editable si hace falta)') + '</p><input class="inp" id="contado" inputmode="numeric" value="' + contadoTotal + '">' +
+    '<p class="lb">' + (esUna ? 'Contante para el banco · lo que pones en la bolsa (editable si hace falta)' : ROJA && ROJA.sueltas_total > 0 ? 'Contado de los sobres, con la roja adentro (editable si hace falta)' : 'Contado (editable si hace falta)') + '</p><input class="inp" id="contado" inputmode="numeric" value="' + (esUna ? contadoTotal - RESERVA.reserva : contadoTotal) + '">' +
     '<div id="calc"></div>' + legamiHtml(ROJA) +
     ((((MANANA.noEnc || []).length + (MANANA.dejadas || []).length) > 0) ? '<div class="note bad"><b>' + ((MANANA.noEnc || []).length + (MANANA.dejadas || []).length) + ' sobre(s) NO van en este depósito</b><br>No encontrados o dejados para después. Si en realidad los llevas, vuelve y cuéntalos.</div>' : '') +
     '<div class="note">El camino al banco es el único tramo sin testigo. Por eso los números quedan escritos <b>antes</b> de que salgas.</div>' +
     '<button class="btn acc" id="salir">Salir al banco</button>';
   function recalc() {
     var S = ROJA ? ROJA.sueltas_total : 0;
-    var c = (Number(document.getElementById('contado').value || '') || 0) + S;   // [AUT-0659] BRUTO = lo contado + la roja ya sellada (que sale del mismo contante)
+    var inp = Number(document.getElementById('contado').value || '') || 0;   // [AUT-0667] con una caja: el CONTANTE PARA EL BANCO; sin ella: el contado de ayer (la roja ADENTRO, ADMIN dom 11)
     /* la retención es un PESO FIJO (de la propina no efectivo de anoche), no
        un porcentaje del contado: si ella ajusta el contado, cambia cuánto
        deposita, nunca cuánto se retiene. */
     var reserva = RESERVA.reserva;
-    var aDep = c - reserva;
+    var c = esUna ? inp + reserva : inp;   // [AUT-0667] contado lordo = lo que va al banco + la busta R (solo para el libro)
+    var aDep = c - reserva;   // = inp con una caja: a banco es SIEMPRE el primer numero, nunca ① + ②
+    var esperado = contadoTotal - reserva;
     document.getElementById('calc').innerHTML =
-      '<div class="rows">' + (MULTI ? '<div class="r"><span class="n">Sobres que lleva</span><span class="v">' + (MANANA.sobres || []).length + ' · ' + NOCHES.length + (NOCHES.length === 1 ? ' noche' : ' noches') + '</span></div>' : '') +
-      (S > 0 ? '<div class="r"><span class="n">Roja ya sellada (' + esc(ROJA.sueltas.map(function(x){ return x.numero; }).join(', ')) + ')</span><span class="v">+ ' + fmt(S) + '</span></div>' : '') +
+      '<div class="rows">' + (esUna ? '<div class="r"><span class="n">Contado de los sobres <small>(con la roja adentro)</small></span><span class="v">' + fmt(c) + '</span></div>' : '') + (MULTI ? '<div class="r"><span class="n">Sobres que lleva</span><span class="v">' + (MANANA.sobres || []).length + ' · ' + NOCHES.length + (NOCHES.length === 1 ? ' noche' : ' noches') + '</span></div>' : '') +
+      (S > 0 ? '<div class="r"><span class="n">Roja ya sellada (' + esc(ROJA.sueltas.map(function(x){ return x.numero; }).join(', ')) + ') <small>· sale de este contado</small></span><span class="v">' + fmt(S) + '</span></div>' : '') +
       '<div class="r"><span class="n">' + (ROJA ? 'Reserva: roja ya sellada + ' + RESERVA.aSellar.length + (RESERVA.aSellar.length === 1 ? ' sobre nuevo' : ' sobres nuevos') : 'A la reserva (' + RESERVA.reserva_pct + '% de la propina no efectivo' + (MULTI && NOCHES.length > 1 ? ' de esas noches' : '') + ')') + '</span><span class="v">' + fmt(reserva) + '</span></div>' +
       '<div class="r tot"><span class="n">Vas a depositar</span><span class="v">' + fmt(aDep) + '</span></div></div>' +
+      (esUna && inp !== esperado ? '<div class="note ambar"><b>Lo contado menos la roja es ' + fmt(esperado) + '</b><br>Pones ' + fmt(inp) + ' para el banco: es una diferencia de ' + (inp > esperado ? '+' : '−') + fmt(Math.abs(inp - esperado)) + ' con lo esperado.</div>' : '') +
       (ROJA && RESERVA.sinCuota.length ? '<div class="note">Sin cuota de ADMIN para ' + esc(RESERVA.sinCuota.map(fechaCorta).join(', ')) + ': se usa el cálculo del sistema.</div>' : '') +
       (MULTI && NOCHES.length > 1 ? desgloseHtml(desgloseDeposito(MANANA.sobres, RESERVA.porNoche, NOCHES, c, ROJA ? ROJA.sueltas : null)) : '');
     /* [06-ott · pregunta de EL GIRO `ATTO II A MERCOLEDÌ 06:00`] un depósito NEGATIVO no existe: si el contado no cubre la
@@ -1101,27 +1238,33 @@ async function pantalla9() {
   var ultimo = recalc();
   document.getElementById('contado').addEventListener('input', function(){ ultimo = recalc(); });
   unTocoUnHecho(document.getElementById('salir'), async function(){
-    var depositoUid = uidGestoEstable('deps|' + DIA_HOY + '|' + ultimo.c + '|' + ultimo.reserva + '|' + ultimo.aDep, 'dep');
+    var depositoUid = uidGestoEstable('deps|' + (CAJA_DIA || DIA_HOY) + '|' + ultimo.c + '|' + ultimo.reserva + '|' + ultimo.aDep, 'dep');
     var cuerpoSalida = { verbo:'deposito', uid_gesto: depositoUid, evento:'salida',
       contado: ultimo.c, reserva: ultimo.reserva, a_depositar: ultimo.aDep,
       firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' };
     /* en MULTI el depósito DICE qué sobres lleva (el bordo rechaza uno que ya está en otro depósito) */
     if (MULTI) cuerpoSalida.sobres = (MANANA.sobres || []).map(function (x) { return { nro: x.sobre_nro, dia: x.dia }; });
+    if (CAJA_DIA) cuerpoSalida.caja_dia = CAJA_DIA;   // [AUT-0667] la salida es de UNA caja: el bordo escribe la fila con SU noche y rechaza una que sume noches
     /* [10-ott · AUT-0659 · 🚚 `MIGRACION ROJA LEGAME ALLA VUELTA DAL BORDO`] las buste R ya selladas que ESTA salida cuenta (la R-0001): el bordo las liga a la salida cuando ella escribe el N° de deposito */
     if (ROJA && ROJA.sueltas && ROJA.sueltas.length) cuerpoSalida.rojas = ROJA.sueltas.map(function (x) { return { uid: x.uid, numero: x.numero, importo: x.importo }; });
     var r = await postCaja(cuerpoSalida);
-    if (!r.ok) { toast('No se guardó: ' + r.motivo, 'bad'); return; }
+    if (!r.ok) {
+      toast(salidaErrorTxt(r.motivo), 'bad');
+      if (r.motivo === 'sobre_ya_depositado_o_ignoto' && CAJA_DIA) pantallaCajas();   // esa caja ya salió: a la lista (antes de la vuelta esta oculta o «En camino»; despues de la vuelta, mientras PG la registra, puede verse unos minutos)
+      return;
+    }
+    if (CAJA_DIA) enCaminoAgregar({ uid: depositoUid, dia: CAJA_DIA, a_depositar: ultimo.aDep, ts: Date.now() });   // [AUT-0667] «En camino al banco» hasta que ella escriba el N°
     /* ✏️ 03-ott · bacheca SPECIFICA BUSTA R-nnnn CAJA ROJA (DESIGN, orden de
        Alberto): si reserva === 0 la pantalla NO aparece — una busta vacía
        es peor que ninguna busta. Si hay reserva, se confirma AQUÍ, antes de
        salir, y pantalla9() se llama recién DESPUÉS de confirmada. */
     if (ROJA) {
-      /* [AUT-0659] una busta por noche con debito: las cubiertas (R-0001) no se rehacen; sin nada que sellar, directo a «De vuelta del banco» */
+      /* [AUT-0659] una busta por noche con debito: las cubiertas (R-0001) no se rehacen; sin nada que sellar, directo a «En camino al banco» */
       if (RESERVA.aSellar.length) pantallaRojaNotte(depositoUid, RESERVA.aSellar, {});
-      else { toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok'); pantalla9(); }
+      else { toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok'); trasSalida(); }
     }
     else if (ultimo.reserva > 0) pantallaReservaSobre(depositoUid, ultimo.reserva);
-    else { toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok'); pantalla9(); }
+    else { toast('Registrado. Escribe el N° de depósito cuando vuelvas', 'ok'); trasSalida(); }
   });
 }
 
@@ -1154,7 +1297,7 @@ function pantallaReservaSobre(depositoUid, monto) {
       '<p class="big acc">' + fmt(monto) + '</p>' +
       '<div class="rows"><div class="r tot"><span class="n">Sobre</span><span class="v">' + esc(r.sobre_nro || '—') + '</span></div></div>' +
       '<button class="btn acc" id="listo">Listo</button>';
-    unTocoUnHecho(document.getElementById('listo'), async function(){ pantalla9(); });
+    unTocoUnHecho(document.getElementById('listo'), async function(){ trasSalida(); });
   });
 }
 
