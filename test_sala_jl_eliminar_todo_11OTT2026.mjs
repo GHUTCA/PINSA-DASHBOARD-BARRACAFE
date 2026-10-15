@@ -22,7 +22,11 @@ function banco(SRC) {
   const off = F._dtPuertasJL(false), on = F._dtPuertasJL(true);
   t('① leva SPENTA: una sola porta, «Un producto»', tipos(off).join() === 'prod', tipos(off));
   t('① bis leva SPENTA: la frase di ieri sul telefono del mesero resta', /Descuentos, convenios y colación se hacen desde el teléfono del mesero\./.test(off) && /firmas tú/.test(off));
-  t('② leva ACCESA: Convenio · Familia · Colación · Un producto, in quest ordine', tipos(on).join() === 'conv,fam,coln,prod', tipos(on));
+  t('② leva ACCESA: Convenio · Familia · Un producto, in quest ordine — la Colación NON c è (15-ott, S2 di Alberto: non si usa più per eliminar)', tipos(on).join() === 'conv,fam,prod', tipos(on));
+  // ⑦ la cortesía non esiste più (15-ott, S2 · 🎛 V30 `V30 0665 SENZA COLACION E CORTESIA FUORI`)
+  t('⑦ nessun bottone apre la cortesía (l ultima porta era il foglio Descontar con ?desc2=0)', SRC.indexOf('onclick="_dtoCortesia(') < 0);
+  { const i = SRC.indexOf('function _dtoCortesia('); const corpo = i >= 0 ? SRC.slice(i, SRC.indexOf('\n}\n', i)) : '';
+    t('⑦ bis _dtoCortesia (link vecchio, cache) non apre il pago e non imposta il medio cortesia', i >= 0 && !/medio = 'cortesia'/.test(corpo) && !/abrirPago\(/.test(corpo) && /ya no existe/.test(corpo), corpo.slice(0, 120)); }
   t('② bis NON Descuento, Franquicia ne «Cobré otro monto» (si fanno al cobrar)', !/_dtTipo\('(dto|franq|otro)'\)/.test(on));
   t('② ter la frase vecchia sparisce e dice dove stanno i descuentos', !/se hacen desde el teléfono del mesero/.test(on) && /se hacen al cobrar/.test(on));
   t('② quater Familia dice che il codice lo scrive la famiglia (il JL non lo conosce)', /el código lo escribe la familia/.test(on));
@@ -49,7 +53,9 @@ mut('la leva non apre le porte', "if (!todo) return prod +", "if (true) return p
 mut('le porte si aprono a leva spenta', "if (!todo) return prod +", "if (false) return prod +");
 mut('manca Convenio', "onclick=\"_dtTipo(\\'conv\\')\">' +\n      '<span class=\"c4nm\">🤝 Convenio", "onclick=\"_dtTipo(\\'xconv\\')\">' +\n      '<span class=\"c4nm\">🤝 Convenio");
 mut('manca Familia', "onclick=\"_dtTipo(\\'fam\\')\">' +\n      '<span class=\"c4nm\">👨‍👩‍👧 Familia<small style=\"display:block;font-size:12.5px;font-weight:400;' +\n      'color:var(--cs-ink2)\">deja en $0 · el código lo escribe la familia", "onclick=\"_dtTipo(\\'xfam\\')\">' +\n      '<span class=\"c4nm\">👨‍👩‍👧 Familia<small style=\"display:block;font-size:12.5px;font-weight:400;' +\n      'color:var(--cs-ink2)\">deja en $0 · el código lo escribe la familia");
-mut('manca Colación', "onclick=\"_dtTipo(\\'coln\\')\">' +\n      '<span class=\"c4nm\">🍱 Colación<small style=\"display:block;font-size:12.5px;font-weight:400;' +\n      'color:var(--cs-ink2)\">comida del personal", "onclick=\"_dtTipo(\\'xcoln\\')\">' +\n      '<span class=\"c4nm\">🍱 Colación<small style=\"display:block;font-size:12.5px;font-weight:400;' +\n      'color:var(--cs-ink2)\">comida del personal");
+mut('la Colación torna nell ELIMINAR del JL', "       eliminar: diventa un pezzo a sé (una persona, un prodotto definito, una al giorno). Qui non c'è la sua porta. */\n    prod +", "       eliminar: diventa un pezzo a sé (una persona, un prodotto definito, una al giorno). Qui non c'è la sua porta. */\n    '<button class=\"c4pick\" onclick=\"_dtTipo(\\'coln\\')\">c</button>' + prod +");
+mut('la cortesía torna nel foglio Descontar', "    '<button class=\"opt2\" onclick=\"_dtoProducto(", "    '<button class=\"opt2\" onclick=\"_dtoCortesia(\\'' + esc(mesa) + '\\')\">c</button>' +\n    '<button class=\"opt2\" onclick=\"_dtoProducto(");
+mut('_dtoCortesia riapre il pago', "  toast('warn', 'La cortesía ya no existe.", "  abrirPago(mesa); STATE.pago.medio = 'cortesia';\n  toast('warn', 'La cortesía ya no existe.");
 mut('compare Descuento', "'<div class=\"c4expl\" style=\"font-size:12.5px;margin-top:8px\">Los descuentos y «cobré otro monto» se hacen al cobrar.</div>';", "'<button onclick=\"_dtTipo(\\'dto\\')\">d</button>';");
 mut('il PIN del JL non e la sessione', "function _dtPinJL(d) { return JL ? JL.pin : String((d && d.pin) || '').trim(); }", "function _dtPinJL(d) { return String((d && d.pin) || '').trim(); }");
 mut('fuori dal JL il PIN e la sessione', "function _dtPinJL(d) { return JL ? JL.pin : String((d && d.pin) || '').trim(); }", "function _dtPinJL(d) { return JL ? JL.pin : (JL && JL.pin); }");
