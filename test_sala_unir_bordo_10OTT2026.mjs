@@ -4,13 +4,22 @@
 // Criteri: ① leva SPENTA => gasPost (il vetro di ieri) e MAI staffPost ② ACCESA => staffPost('unirMesas') con gid, mesas e, se il gesto scioglie junte, gid_rotti
 //          ③ la risposta con grupo_id aggiorna la junta come prima (gidSrv) ④ nessuna junta sciolta => nessun gid_rotti (la chiave non nasce) ⑤ il testimone (eco) parte comunque
 //          ⑥ la leva nasce spenta e si legge da /salud ⑦ mutanti.
+// ✏️ [14-ott · 💵 EL GIRO V30 · `V30 TEST UNIR A EL GIRO`] RISCRITTO AL CONTRATTO DELLA 0687 (`ee18da1`, sala v3.226.6): «una leva non letta non è spenta».
+//    PERCHÉ ERA ROSSO (13 su 38) e non per un difetto del vetro: dalla 0687 `juntaCrear` sceglie la strada con `_unirAlBordo()`, e il banco estraeva SOLO
+//    `juntaCrear` in un vm che non la conosce ⇒ ReferenceError su ogni caso che arriva alla scelta. In più ⑥ pretendeva «nasce false» e i mutanti
+//    cercavano l'espressione di prima. ⇒ ora il vm riceve le righe VERE di `UNIRDEF_QS` (con QS e localStorage finti) e di `_unirAlBordo`; la leva ha
+//    TRE stati (null = non letta · true · false); ⑥ legge il contratto nuovo e ⑥bis ESEGUE la riga del /salud (un JSON d'errore la lascia null).
+//    Criteri nuovi: ①bis leva NON LETTA ⇒ staffPost + evento `unir_leva_non_letta` · ①ter `?unirdef=0` ⇒ il default di ieri (non letta = GAS).
 import fs from 'node:fs'; import vm from 'node:vm'; import path from 'node:path';
 const AQUI = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 const SRC0 = fs.readFileSync(process.argv[2] || path.join(AQUI, 'sala.html'), 'utf8').replace(/\r\n/g, '\n');
 let ok = 0, ko = 0, muto = false; const t = (n, c, i) => { c ? ok++ : (ko++, muto || console.log('✗', n, i === undefined ? '' : JSON.stringify(i).slice(0, 300))); };
 const fnDe = (SRC, nome) => { const i = SRC.indexOf('function ' + nome + '('); if (i < 0) throw new Error(nome); return SRC.slice(i, SRC.indexOf('\n}\n', i) + 3); };
+// [0687] le righe vere della scelta: il freno per telefono (IIFE) e la funzione d'una riga
+const unirDe = (SRC) => { const i = SRC.indexOf('const UNIRDEF_QS = (function () {'), k = SRC.indexOf('})();', i); const r = SRC.split('\n').find((l) => /^function _unirAlBordo\(\)/.test(l));
+  if (i < 0 || k < 0 || !r) throw new Error('UNIRDEF_QS/_unirAlBordo'); return SRC.slice(i, k + 5) + '\n' + r + '\n'; };
 
-function mondo(SRC, { leva, previas = [], seleccion, staffRisp, gasRisp }) {
+function mondo(SRC, { leva, previas = [], seleccion, staffRisp, gasRisp, unirdef = null }) {
   const chiamate = []; const hechos = []; const toasts = [];
   let juntas = previas.map((j) => ({ ...j }));
   const ctx = { UNIR_VIA_BORDE_ON: leva, STATE: { selMesas: seleccion.slice(), codigo: 'C1', nombre: 'Wilbert' }, _mapStart: '',
@@ -18,9 +27,10 @@ function mondo(SRC, { leva, previas = [], seleccion, staffRisp, gasRisp }) {
     toast: (k, m) => toasts.push([k, m]), refrescarMapa: () => {}, bordeHecho: (g, d) => hechos.push([g, d]),
     gasPost: async (a, b) => { chiamate.push(['gas', a, b]); return gasRisp || { ok: true }; },
     staffPost: async (a, b) => { chiamate.push(['staff', a, b]); return staffRisp || { ok: true, borde: true }; },
-    Date, Math, parseInt, JSON, Object, Array, String };
+    Date, Math, parseInt, JSON, Object, Array, String,
+    QS: new Map(unirdef === null ? [] : [['unirdef', unirdef]]), localStorage: (() => { const m = {}; return { getItem: (k) => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); } }; })() };
   vm.createContext(ctx);
-  vm.runInContext(fnDe(SRC, 'juntaCrear') + '\nthis.crea = juntaCrear;', ctx);
+  vm.runInContext(unirDe(SRC) + fnDe(SRC, 'juntaCrear') + '\nthis.crea = juntaCrear;', ctx);
   return { ctx, chiamate, hechos, toasts, juntas: () => juntas };
 }
 const JV = (n, mesas, gid) => ({ n, principal: mesas[0], ts: 1, gid, gidPg: gid, mesas });   // junta nata dal bordo: la chiave della riga di PG e gidPg
@@ -37,7 +47,15 @@ function mondoSep(SRC, junta) {
 async function banco(SRC) {
   const k0 = ko;
   { const m = mondo(SRC, { leva: false, seleccion: ['200', '199'] }); m.ctx.crea(); await tick();
-    t('① leva SPENTA: l unir va dritto al GAS (gasPost) e NON al bordo — il vetro di ieri', m.chiamate.length === 1 && m.chiamate[0][0] === 'gas' && m.chiamate[0][1] === 'unirMesas', m.chiamate); }
+    t('① leva SPENTA (letta «0» dal /salud): l unir va dritto al GAS (gasPost) e NON al bordo — il vetro di ieri', m.chiamate.length === 1 && m.chiamate[0][0] === 'gas' && m.chiamate[0][1] === 'unirMesas', m.chiamate);
+    t('① spenta e letta: nessun evento di leva non letta', !m.hechos.some((h) => h[0] === 'unir_leva_non_letta'), m.hechos); }
+  { const m = mondo(SRC, { leva: null, seleccion: ['200', '199'] }); m.ctx.crea(); await tick();
+    t('①bis [0687] leva NON LETTA (null): l unir va al BORDO (staffPost) — mai a Google per default', m.chiamate.length === 1 && m.chiamate[0][0] === 'staff' && m.chiamate[0][1] === 'unirMesas', m.chiamate);
+    t('①bis la leva non letta si CONTA: evento unir_leva_non_letta', m.hechos.some((h) => h[0] === 'unir_leva_non_letta'), m.hechos); }
+  { const m = mondo(SRC, { leva: null, seleccion: ['200', '199'], unirdef: '0' }); m.ctx.crea(); await tick();
+    t('①ter [0687] freno ?unirdef=0: leva non letta ⇒ GAS, il default di ieri', m.chiamate.length === 1 && m.chiamate[0][0] === 'gas', m.chiamate); }
+  { const m = mondo(SRC, { leva: true, seleccion: ['200', '199'], unirdef: '0' }); m.ctx.crea(); await tick();
+    t('①ter bis ?unirdef=0 con la leva letta «1» ⇒ bordo (il freno tocca solo il non letto)', m.chiamate.length === 1 && m.chiamate[0][0] === 'staff', m.chiamate); }
   { const m = mondo(SRC, { leva: true, seleccion: ['200', '199'] }); m.ctx.crea(); await tick();
     const c = m.chiamate[0] || [];
     t('② leva ACCESA: l unir passa da staffPost (prima il bordo) e NON dal gasPost diretto', m.chiamate.length === 1 && c[0] === 'staff' && c[1] === 'unirMesas', m.chiamate);
@@ -96,15 +114,26 @@ async function banco(SRC) {
     ctx.sync({ grupos: [{ principal: '200', mesas: ['199'], gid: 'G-2026-10-10-3' }], _ts_datos: Date.now() });
     const out = (salvate[0] || [])[0] || {};
     t('1.4b septies il sync del poll riscrive gid/gidSrv col gid del GAS ma CONSERVA gidPg', out.gid === 'G-2026-10-10-3' && out.gidSrv === 'G-2026-10-10-3' && out.gidPg === 'un-vetro', out); }
-  t('⑥ UNIR_VIA_BORDE_ON nasce false e si accende SOLO da /salud → unir_via_borde_on === "1"', /var UNIR_VIA_BORDE_ON = false;/.test(SRC) && SRC.includes("UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1'"));
+  t('⑥ [0687] UNIR_VIA_BORDE_ON nasce null (= non letta, NON «spenta») e si legge SOLO da /salud → unir_via_borde_on === "1"', /var UNIR_VIA_BORDE_ON = null;/.test(SRC) && SRC.includes("UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1'"));
+  { // ⑥bis la riga VERA del /salud, eseguita: risposta vera ⇒ true/false · JSON d'errore ⇒ resta null
+    const riga = (SRC.split('\n').find((l) => l.includes("UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1'")) || '').trim().replace(/\/\/.*$/, '');
+    const cercaK = (o, k) => (o && typeof o === 'object' ? (k in o ? o[k] : Object.values(o).map((v) => cercaK(v, k)).find((v) => v !== undefined)) : undefined);
+    const prova = (j) => { const c = { UNIR_VIA_BORDE_ON: null, j, cercaK }; vm.createContext(c); vm.runInContext(riga, c); return c.UNIR_VIA_BORDE_ON; };
+    const p1 = prova({ ok: true, leve: { unir_via_borde_on: '1' } }), p0 = prova({ ok: true, leve: { unir_via_borde_on: '0' } }), pe = prova({ ok: false, error: 'x' });
+    t('⑥bis /salud vero «1» ⇒ true · «0» ⇒ false · JSON d errore {ok:false} ⇒ resta null', p1 === true && p0 === false && pe === null, [p1, p0, pe]); }
   return ko - k0;
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }
   const k0 = ko, o0 = ok; muto = true; const k1 = ko; await banco(SRC0.replace(da, () => a)); muto = false; const rossi = ko - k1; ko = k0; ok = o0;
   t('⑦ mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
-await mut('la leva e ignorata (sempre gas)', "(UNIR_VIA_BORDE_ON ? staffPost('unirMesas', _corpoUnir) : gasPost('unirMesas', _corpoUnir))", "gasPost('unirMesas', _corpoUnir)");
-await mut('la leva e ignorata (sempre bordo)', "(UNIR_VIA_BORDE_ON ? staffPost('unirMesas', _corpoUnir) : gasPost('unirMesas', _corpoUnir))", "staffPost('unirMesas', _corpoUnir)");
+await mut('la leva e ignorata (sempre gas)', "_unirAlBordo() ? staffPost('unirMesas', _corpoUnir) : gasPost('unirMesas', _corpoUnir))", "gasPost('unirMesas', _corpoUnir))");
+await mut('la leva e ignorata (sempre bordo)', "_unirAlBordo() ? staffPost('unirMesas', _corpoUnir) : gasPost('unirMesas', _corpoUnir))", "staffPost('unirMesas', _corpoUnir))");
+await mut('[0687] non letta = spenta (il difetto di ieri)', "return UNIRDEF_QS === '0' ? UNIR_VIA_BORDE_ON === true : UNIR_VIA_BORDE_ON !== false;", "return UNIR_VIA_BORDE_ON === true;");
+await mut('[0687] il freno ?unirdef=0 ignorato', "return UNIRDEF_QS === '0' ? UNIR_VIA_BORDE_ON === true : UNIR_VIA_BORDE_ON !== false;", "return UNIR_VIA_BORDE_ON !== false;");
+await mut('[0687] la leva non letta non si conta', "(UNIR_VIA_BORDE_ON === null && bordeHecho('unir_leva_non_letta', { mesas: _mesasOrden.length }),", "(false,");
+await mut('[0687] un JSON d errore spegne la leva', "if (!(j && j.ok === false)) UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';", "UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';");
+await mut('[0687] la leva nasce false', "var UNIR_VIA_BORDE_ON = null;", "var UNIR_VIA_BORDE_ON = false;");
 await mut('gid_rotti non parte', "if (gidRotti.length) _corpoUnir.gid_rotti = gidRotti;", "");
 await mut('gid_rotti parte sempre (anche vuoto)', "if (gidRotti.length) _corpoUnir.gid_rotti = gidRotti;", "_corpoUnir.gid_rotti = gidRotti;");
 await mut('gid_rotti nomina tutte le junte', "const gidRotti = prima.filter(function (j) { return j.mesas.some(function (m) { return sel.indexOf(m) >= 0; }); })", "const gidRotti = prima.filter(function (j) { return true; })");
@@ -118,5 +147,5 @@ await mut('l unir nomina il gid del GAS', "return j.gidPg; }).filter(Boolean);",
 await mut('gidPg si fissa anche con la risposta del GAS', "if (r.borde === true) x.gidPg = r.grupo_id;", "x.gidPg = r.grupo_id;");
 await mut('gidPg non si fissa mai', "if (r.borde === true) x.gidPg = r.grupo_id;", "");
 await mut('il sync perde gidPg', "Object.assign({ n: n, principal: principal, mesas: mesas, gid: g.gid || '', gidSrv: g.gid || '', srv: true }, _conPg ? { gidPg: _conPg.gidPg } : {})", "{ n: n, principal: principal, mesas: mesas, gid: g.gid || '', gidSrv: g.gid || '', srv: true }");
-await mut('la leva non si legge da /salud', "UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';", "UNIR_VIA_BORDE_ON = false;");
+await mut('la leva non si legge da /salud', "if (!(j && j.ok === false)) UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';", "if (!(j && j.ok === false)) UNIR_VIA_BORDE_ON = false;");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
