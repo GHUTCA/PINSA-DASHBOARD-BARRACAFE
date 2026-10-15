@@ -1093,6 +1093,84 @@ function pantallaRojaNotte(depositoUid, lista, hechas) {
     unTocoUnHecho(document.getElementById('sigRoja'), async function(){ pantallaRojaNotte(depositoUid, lista, p.hechas); });
   });
 }
+/* ═══ [15-ott · 🖐 TERZA V30 · 🎛 `V30 CAJA 12 DENARO E LEVA ROJA`] PRIMA LA BUSTA R, POI LA SALIDA ══════════════════════════════════════════════
+   IL FATTO (caja del 12, 15-ott 12:22): la salida si scriveva PRIMA della busta R. La busta è stata rifiutata (la notte 12 aveva già la R-0003),
+   ma la salida era già nel libro con 16.785 di riserva che non esistevano, e ogni tocco su «A la caja fuerte ROJA» bruciava un numero
+   (R-0005…R-0009 in quarantena). LA CURA: le buste R si chiedono PRIMA; una busta rifiutata come doppione = quella notte ha già la sua R
+   ⇒ niente busta nuova e quell'importo va in banca; SOLO DOPO la salida, con lo STESSO uid e la riserva vera. Il flusso si RICORDA sul
+   telefono (uid della salida, buste fatte, notti coperte): se la app si chiude a metà, si riprende senza coniare un uid nuovo — che il
+   bordo rifiuterebbe come doppione della busta appena fatta, e la riserva verrebbe contata due volte. Un «no» definitivo NON si ritenta.
+   Leva: /salud → flags.caja_r_prima_on (nasce assente = spenta: il flusso di ieri) · ?rprima=1 per telefono (prova) / ?rprima=0 freno. */
+var RPRIMA_KEY = 'caja_rprima_v1', RPRIMA_ON = null, RPRIMA_TS = 0;
+var RPRIMA_QS = (function () { try { var q = qp.get('rprima'); if (q === '1' || q === '0') localStorage.setItem('caja_rprima', q); return localStorage.getItem('caja_rprima') || ''; } catch (e) { return ''; } })();
+async function rPrimaOn() {
+  if (RPRIMA_QS === '0') return false;
+  if (RPRIMA_QS === '1') return true;
+  if (RPRIMA_ON !== null && Date.now() - RPRIMA_TS < 60000) return RPRIMA_ON;
+  RPRIMA_TS = Date.now();
+  try { var r = await fetch(BORDE[LOCAL] + '/salud', { cache: 'no-store' }); var j = await r.json(); RPRIMA_ON = !!(j && j.flags && String(j.flags.caja_r_prima_on) === '1'); }
+  catch (e) { RPRIMA_ON = false; }   // /salud mudo = el flujo de ayer
+  return RPRIMA_ON;
+}
+function rPrimaLeer(clave) { try { var f = JSON.parse(localStorage.getItem(RPRIMA_KEY) || 'null'); return (f && f.clave === clave) ? f : null; } catch (e) { return null; } }
+function rPrimaGuardar(f) { try { localStorage.setItem(RPRIMA_KEY, JSON.stringify(f)); } catch (e) {} }
+function rPrimaLimpiar() { try { localStorage.removeItem(RPRIMA_KEY); } catch (e) {} }
+function rPrimaSiguiente(f) { for (var i = 0; i < f.lista.length; i++) { var d = f.lista[i].dia; if (!f.hechas[d] && !f.cubiertas[d]) return i; } return -1; }
+/* le buste, una per tocco; poi la salida */
+function pantallaReservaAntes(f) {
+  rPrimaGuardar(f);
+  var i = rPrimaSiguiente(f);
+  if (i < 0) { rPrimaSalida(f); return; }
+  var it = f.lista[i];
+  app.innerHTML = barra(true) +
+    '<div class="kick">La reserva · antes de salir' + (f.lista.length > 1 ? ' · sobre ' + (i + 1) + ' de ' + f.lista.length : '') + '</div><h1>A la caja fuerte ROJA</h1>' +
+    (f.lista.length > 1 ? '<p class="sd">Noche ' + esc(fechaCorta(it.dia)) + '</p>' : '') + '<p class="big acc">' + fmt(it.importo) + '</p>' +
+    (it.sinCuota ? '<div class="note">Sin cuota de ADMIN para esta noche: se usa el cálculo del sistema.</div>' : '') +
+    '<button class="btn acc" id="sellarRoja">A la caja fuerte ROJA</button>';
+  unTocoUnHecho(document.getElementById('sellarRoja'), async function(){
+    var r = await postCaja({ verbo:'reserva_sobre', uid_gesto: it.uid, dia_op: it.dia, monto: it.importo, referencia_uid: f.dep,
+      firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
+    if (!r.ok && r.motivo === 'reserva_doppione_o_forma') {
+      /* un NO definitivo: la noche ya tiene su busta R. No se reintenta (cada intento quemaba un número): esa plata va al banco */
+      f.cubiertas[it.dia] = it.importo; rPrimaGuardar(f);
+      app.innerHTML = barra(true) +
+        '<div class="kick">La reserva · antes de salir</div><h1>Esta noche ya tiene su sobre rojo</h1>' +
+        '<div class="note">No hagas otro sobre. Si ya preparaste la plata (' + esc(fmt(it.importo)) + '), va a la bolsa del banco.</div>' +
+        '<button class="btn acc" id="sigRoja">Seguir</button>';
+      unTocoUnHecho(document.getElementById('sigRoja'), async function(){ pantallaReservaAntes(f); });
+      return;
+    }
+    if (!r.ok) { toast('No se guardó: ' + r.motivo + ' — no salgas todavía, vuelve a tocar', 'bad'); return; }
+    f.hechas[it.dia] = { nro: r.sobre_nro || '—', importo: it.importo }; rPrimaGuardar(f);
+    app.innerHTML = barra(true) +
+      '<div class="kick">La reserva · antes de salir</div><h1>A la caja fuerte ROJA</h1>' +
+      '<p class="big acc">' + fmt(it.importo) + '</p>' +
+      '<div class="rows"><div class="r tot"><span class="n">Sobre</span><span class="v">' + esc(r.sobre_nro || '—') + '</span></div></div>' +
+      '<button class="btn acc" id="sigRoja">' + (rPrimaSiguiente(f) >= 0 ? 'Siguiente sobre' : 'Seguir al banco') + '</button>';
+    unTocoUnHecho(document.getElementById('sigRoja'), async function(){ pantallaReservaAntes(f); });
+  });
+}
+/* la salida, con la reserva VERA (solo las buste aceptadas + las ya selladas que esta salida cuenta) y el MISMO uid */
+async function rPrimaSalida(f) {
+  var reserva = f.sueltas || 0;
+  Object.keys(f.hechas).forEach(function (d) { reserva += Number(f.hechas[d].importo) || 0; });
+  var cuerpo = Object.assign({}, f.cuerpo, { reserva: reserva, a_depositar: f.cuerpo.contado - reserva });
+  app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Registrando la salida…</p>';
+  var r = await postCaja(cuerpo);
+  if (!r.ok) {
+    app.innerHTML = barra(true) +
+      '<div class="kick bad">La salida</div><h1>No se guardó todavía</h1>' +
+      '<div class="note bad">' + esc(salidaErrorTxt(r.motivo)) + '<br>La reserva ya está guardada: no se repite.</div>' +
+      '<button class="btn acc" id="retrySalida">Volver a intentar la salida</button>';
+    unTocoUnHecho(document.getElementById('retrySalida'), async function(){ rPrimaSalida(f); });
+    if (r.motivo === 'sobre_ya_depositado_o_ignoto' && CAJA_DIA) { rPrimaLimpiar(); pantallaCajas(); }
+    return;
+  }
+  rPrimaLimpiar();
+  if (f.caja_dia) enCaminoAgregar({ uid: f.dep, dia: f.caja_dia, a_depositar: cuerpo.a_depositar, ts: Date.now() });
+  toast('Registrado · al banco ' + fmt(cuerpo.a_depositar) + '. Escribe el N° de depósito cuando vuelvas', 'ok');
+  trasSalida();
+}
 async function pantalla9() {
   if (UNA_ON === true && !CAJA_DIA) { pantallaCajas(); return; }   // [AUT-0667] con la leva, el depósito se hace desde una caja de la lista
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando el depósito…</p>';
@@ -1249,6 +1327,22 @@ async function pantalla9() {
     if (CAJA_DIA) cuerpoSalida.caja_dia = CAJA_DIA;   // [AUT-0667] la salida es de UNA caja: el bordo escribe la fila con SU noche y rechaza una que sume noches
     /* [10-ott · AUT-0659 · 🚚 `MIGRACION ROJA LEGAME ALLA VUELTA DAL BORDO`] las buste R ya selladas que ESTA salida cuenta (la R-0001): el bordo las liga a la salida cuando ella escribe el N° de deposito */
     if (ROJA && ROJA.sueltas && ROJA.sueltas.length) cuerpoSalida.rojas = ROJA.sueltas.map(function (x) { return { uid: x.uid, numero: x.numero, importo: x.importo }; });
+    /* [15-ott · TERZA V30] con la leva: PRIMA le buste R, POI la salida (vedi `pantallaReservaAntes`). Un flusso iniziato e interrotto si riprende con lo STESSO uid. */
+    if (await rPrimaOn()) {
+      var claveRP = 'deps|' + (CAJA_DIA || DIA_HOY) + '|' + ultimo.c + '|' + ultimo.reserva + '|' + ultimo.aDep;
+      var fRP = rPrimaLeer(claveRP);
+      if (fRP) UIDS_GESTO[claveRP] = fRP.dep;
+      else {
+        var diaR = (MULTI && NOCHES.length ? NOCHES[NOCHES.length - 1] : DIA_NOCHE);
+        var listaRP = ROJA
+          ? RESERVA.aSellar.map(function (x) { return { dia: x.dia, importo: x.importo, sinCuota: !!x.sinCuota, uid: 'res-' + depositoUid + '-' + x.dia }; })
+          : (ultimo.reserva > 0 ? [{ dia: diaR, importo: ultimo.reserva, uid: 'res-' + depositoUid }] : []);
+        fRP = { clave: claveRP, dep: depositoUid, cuerpo: cuerpoSalida, lista: listaRP, hechas: {}, cubiertas: {},
+          sueltas: ROJA ? (Number(ROJA.sueltas_total) || 0) : 0, caja_dia: CAJA_DIA || null };
+      }
+      pantallaReservaAntes(fRP);
+      return;
+    }
     var r = await postCaja(cuerpoSalida);
     if (!r.ok) {
       toast(salidaErrorTxt(r.motivo), 'bad');

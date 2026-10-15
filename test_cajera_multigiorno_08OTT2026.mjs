@@ -22,7 +22,8 @@ function mundo(respuestas, init) {
       querySelector: () => el('q'), querySelectorAll: () => [] } }, init || {});
   vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx);
   vm.runInContext(PRE_NUEVAS + SRC.slice(SRC.indexOf('var UIDS_GESTO'), SRC.indexOf('function toast(')), ctx);   // el helper REAL del uid estable
-  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'pantalla6', 'pantalla7', 'pantalla9', 'pantallaReservaSobre'].map((n) => fn(n, n !== 'pantalla7' && n !== 'pantallaReservaSobre' && n !== 'desgloseDeposito' && n !== 'desgloseHtml')).join('\n') + '\n;this.API = { pantalla6, pantalla7, pantalla9, pantallaReservaSobre };', ctx);
+  // [15-ott · TERZA] + rPrimaOn con la leva «R prima della salida» spenta: questo banco prova il cammino di ieri
+  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'pantalla6', 'pantalla7', 'pantalla9', 'pantallaReservaSobre', 'rPrimaOn'].map((n) => fn(n, n !== 'pantalla7' && n !== 'pantallaReservaSobre' && n !== 'desgloseDeposito' && n !== 'desgloseHtml')).join('\n') + '\nvar RPRIMA_QS = "", RPRIMA_ON = false, RPRIMA_TS = Date.now();\n;this.API = { pantalla6, pantalla7, pantalla9, pantallaReservaSobre };', ctx);
   return { ctx, el, llamadas, posts };
 }
 const S = (nro, dia, decl, conteo) => ({ sobre_nro: nro, dia, declarado: decl, firma_jl: 'Pedro', origen: 'jl', ts_hecho: '2026-10-08T05:00:00Z', conteo: conteo || null });

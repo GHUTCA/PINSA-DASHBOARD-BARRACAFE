@@ -34,8 +34,9 @@ function mondo(SRC, o) {
   vm.createContext(ctx);
   vm.runInContext("var CAJA_DIA = null, UNA_ON = null, UNA_TS = 0, DIA_CORTE = null, UIDS_GESTO = {}, DEJADAS = {}, SENZA_ESITO = [], EN_CAMINO_KEY = 'caja_en_camino_v1', ROJA_PEND_KEY = 'caja_roja_pend_v1'; async function noEncOn() { return false; } function dejadasHtml() { return ''; } function dejadasBind() {} function noEncHtml() { return ''; } function noEncBind() {} function senzaEsitoHtml() { return ''; } async function ventanaOn() { return false; } function claveSobre(x) { return (x.dia || DIA_NOCHE) + ':' + x.sobre_nro; }", ctx);
   const NOMI = ['unaOn', 'enCaminoLocal', 'enCaminoGuardar', 'enCaminoAgregar', 'enCaminoQuitar', 'enCaminoTodas', 'pantallaCajas', 'abrirCaja', 'trasSalida', 'vueltaErrorTxt', 'salidaErrorTxt', 'pantallaEnCamino', 'pantalla6', 'pantalla9', 'diasDeCorte', 'desgloseDeposito', 'desgloseHtml', 'legamiHtml',
-    'diaAnterior', 'pantallaRojaError', 'rojaPendLeer', 'rojaPendGuardar', 'rojaPendLimpiar', 'rojaSiguiente', 'pantallaRojaNotte', 'pantallaReservaSobre', 'uidGestoEstable', 'uidGesto2'].filter((n) => n !== 'uidGesto2');
-  vm.runInContext(NOMI.map((n) => fnDe(SRC, n)).join('\n') + '\nthis.F = { ' + NOMI.join(', ') + ' };', ctx);
+    'diaAnterior', 'pantallaRojaError', 'rojaPendLeer', 'rojaPendGuardar', 'rojaPendLimpiar', 'rojaSiguiente', 'pantallaRojaNotte', 'pantallaReservaSobre', 'uidGestoEstable', 'rPrimaOn', 'uidGesto2'].filter((n) => n !== 'uidGesto2');
+  // [15-ott · TERZA] la leva «R prima della salida» spenta: questo banco prova il cammino di ieri
+  vm.runInContext(NOMI.map((n) => fnDe(SRC, n)).join('\n') + '\nvar RPRIMA_QS = "", RPRIMA_ON = false, RPRIMA_TS = Date.now();\nthis.F = { ' + NOMI.join(', ') + ' };', ctx);
   return { ctx, mk, toasts, posts, llamadas, app, ls };
 }
 const click = async (m, id) => { await m.mk(id).onclick(); };

@@ -35,7 +35,7 @@ function mondo(SRC, o) {
       return { ok: false, error: 'lettura_sconosciuta' }; },
     document: { getElementById: mk, querySelector: mk } };
   vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx);
-  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'legamiHtml', 'pantallaRojaError', 'rojaPendLeer', 'rojaPendGuardar', 'rojaPendLimpiar', 'rojaSiguiente', 'pantallaRojaNotte', 'pantalla9', 'uidGestoEstable'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "caja_roja_pend_v1";\nthis.F = { pantalla9, pantallaRojaNotte, desgloseDeposito };', ctx);
+  vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'legamiHtml', 'pantallaRojaError', 'rojaPendLeer', 'rojaPendGuardar', 'rojaPendLimpiar', 'rojaSiguiente', 'pantallaRojaNotte', 'pantalla9', 'uidGestoEstable', 'rPrimaOn'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar ROJA_PEND_KEY = "caja_roja_pend_v1";\nvar RPRIMA_QS = "", RPRIMA_ON = false, RPRIMA_TS = Date.now();\nthis.F = { pantalla9, pantallaRojaNotte, desgloseDeposito };', ctx);
   return { ctx, mk, handlers, toasts, posts, app, ls };
 }
 const calc = (m) => m.mk('calc').innerHTML;
