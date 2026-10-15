@@ -20,7 +20,7 @@ function mundo(respuestas, init) {
     unTocoUnHecho: (b, f) => { b._f = f; }, uidGesto: (p) => p + '-' + Math.random().toString(36).slice(2, 8), postCaja: async (b) => { posts.push(b); return { ok: true, sobre_nro: 'R-1' }; }, Number, Math, String, Object, Array, Date,
     document: { getElementById: (id) => { const e = el(id); if (id === 'contado' && !e._set) { const m = /id="contado"[^>]*value="([^"]*)"/.exec(ctx.app.innerHTML); if (m) e.value = m[1]; } return e; },
       querySelector: () => el('q'), querySelectorAll: () => [] } }, init || {});
-  vm.createContext(ctx);
+  vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx);
   vm.runInContext(PRE_NUEVAS + SRC.slice(SRC.indexOf('var UIDS_GESTO'), SRC.indexOf('function toast(')), ctx);   // el helper REAL del uid estable
   vm.runInContext(['desgloseDeposito', 'desgloseHtml', 'pantalla6', 'pantalla7', 'pantalla9', 'pantallaReservaSobre'].map((n) => fn(n, n !== 'pantalla7' && n !== 'pantallaReservaSobre' && n !== 'desgloseDeposito' && n !== 'desgloseHtml')).join('\n') + '\n;this.API = { pantalla6, pantalla7, pantalla9, pantallaReservaSobre };', ctx);
   return { ctx, el, llamadas, posts };

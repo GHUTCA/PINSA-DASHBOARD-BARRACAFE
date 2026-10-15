@@ -19,7 +19,7 @@ function mundo(manana, respuestas) {
     // el DOM de mentira lee el `value` del input «contado» del HTML que la pantalla acaba de escribir (como haría el navegador)
     document: { getElementById: (id) => { const e = el(id); if (id === 'contado') { const m = /id="contado"[^>]*value="([^"]*)"/.exec(ctx.app.innerHTML); if (m) e.value = m[1]; } return e; },
       querySelector: () => el('q'), querySelectorAll: () => [] } };
-  vm.createContext(ctx);
+  vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx);
   vm.runInContext(PRE_NUEVAS + ['pantalla6', 'pantalla9'].map((n) => fn(n, true)).join('\n') + '\n;this.API = { pantalla6, pantalla9 };', ctx);
   return { ctx, el, llamadas };
 }
@@ -59,9 +59,9 @@ const conSobre = (contado) => ({ ok: true, sobres: [{ sobre_nro: '1001', conteo:
   t('contado = reserva: depósito $0 es válido, botón activo', m.el('salir').disabled === false); }
 
 // ── ④ lo que no cambia
-t('una salida pendiente (volvió del banco) sigue yendo a «De vuelta del banco»', await (async () => {
+t('una salida pendiente (volvió del banco) sigue yendo a «En camino al banco»', await (async () => {
   const m = mundo(sinSobres, R({ deposito_pendiente: { ok: true, salida_pendiente: { uid_gesto: 'dep-1', a_depositar: 43000 } } })); await m.ctx.API.pantalla9();
-  return /De vuelta del banco/.test(m.ctx.app.innerHTML) && !/Nada que depositar/.test(m.ctx.app.innerHTML); })());
+  return /En camino al banco/.test(m.ctx.app.innerHTML) && !/Nada que depositar/.test(m.ctx.app.innerHTML); })());
 t('sin el parámetro de la retención: «Falta un parámetro» (igual que antes)', await (async () => {
   const m = mundo(sinSobres, R({ reserva: { ok: false, error: 'x' } })); await m.ctx.API.pantalla9();
   return /Falta un parámetro/.test(m.ctx.app.innerHTML); })());

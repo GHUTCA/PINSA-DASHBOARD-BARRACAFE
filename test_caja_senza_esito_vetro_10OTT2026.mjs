@@ -60,8 +60,8 @@ async function banco(SRC) {
     t('⑤ bis un error del bordo tampoco la borra', /⚠/.test(m.ctx.F.barra(true))); }
   // ⑥ nada que decir
   { const m = mondo(SRC, { risp: { ok: true } }); await m.ctx.F.getCaja('x'); const h = m.ctx.F.barra(true);
-    t('⑥ sin nada: la barra es la de siempre (sin ⚠), con la hora y la version', !/⚠/.test(h) && /class="bar"/.test(h) && /caja 1\.[7-9]\.\d/.test(h), h.slice(0, 200)); }
-  t('⑦ version >= 1.7.0', /caja 1\.[7-9]\.\d<\/small>/.test(SRC));
+    t('⑥ sin nada: la barra es la de siempre (sin ⚠), con la hora y la version', !/⚠/.test(h) && /class="bar"/.test(h) && /caja 1\.([7-9]\.\d|[1-9]\d\.\d)/.test(h), h.slice(0, 200)); }
+  t('⑦ version >= 1.7.0', /caja 1\.([7-9]\.\d|[1-9]\d\.\d)<\/small>/.test(SRC));
 }
 await banco(SRC0);
 const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }

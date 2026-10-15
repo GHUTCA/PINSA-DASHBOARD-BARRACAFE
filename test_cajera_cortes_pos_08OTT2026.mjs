@@ -16,7 +16,7 @@ function mundo(corTes, respuestaPost) {
     postCaja: async (b) => { posts.push(b); return respuestaPost ? respuestaPost(b) : { ok: true, accodato: true }; },
     uidGestoEstable: (k, p) => p + '|' + k, pantalla9: () => log.push('→pantalla9'), unTocoUnHecho: (b, f) => { b._hecho = f; },
     document: { getElementById: (id) => el('id:' + id), querySelector: (sel) => el('q:' + sel) } };
-  vm.createContext(ctx); vm.runInContext(dcSrc + '\n' + fnSrc + '\n;this.p8 = pantalla8; this.getDia = () => DIA_CORTE;', ctx);
+  vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx); vm.runInContext(dcSrc + '\n' + fnSrc + '\n;this.p8 = pantalla8; this.getDia = () => DIA_CORTE;', ctx);
   return { ctx, el, posts, log };
 }
 const PUNTOS = [1, 2, 3, 4, 5, 6].map((n) => ({ caja_n: n, nombre: 'Caja ' + n, sn: 'SN' + n }));
@@ -26,7 +26,8 @@ const tipea = (m, n) => m.el('q:[data-maq-corte="' + (n - 1) + '"]').listeners.i
 
 // ① seis filas Caja 1..6 con S/N, y el dia por defecto es AYER
 { const m = mundo(C()); await m.ctx.p8(); const h = m.ctx.app.innerHTML;
-  t('seis filas «Caja 1 … Caja 6», cada una con su S/N', [1, 2, 3, 4, 5, 6].every((n) => h.includes('Caja ' + n) && h.includes('S/N SN' + n)), h.slice(0, 200));
+  t('seis filas «Caja 1 … Caja 6», cada una con su S/N', [1, 2, 3, 4, 5, 6].every((n) => h.includes('Caja ' + n) && h.replace(/<[^>]+>/g, '').includes('S/N SN' + n)), h.slice(0, 200));   // [15-ott · AUT-0693] il testo, non il markup: le ultime 4 cifre sono in <b>
+  t('[AUT-0693] le ultime 4 cifre del S/N in grande (<b class="sn4">)', [1, 2, 3, 4, 5, 6].every((n) => h.includes('<b class="sn4">SN' + n + '</b>')), h.slice(0, 200));
   t('NO hay «MPago/Getnet/Transbank/SumUp» ni «+ Otra máquina»', !/MPago|Getnet|Transbank|SumUp|otraMaq/.test(h));
   t('lee los cortes del dia de AYER por defecto (el dia que cierra)', m.ctx.lecturas[0] === 'cortes_pos?dia=2026-10-08' && m.ctx.getDia() === '2026-10-08', m.ctx.lecturas);
   t('la eleccion del dia es VISIBLE: ayer · anteayer · hoy', /id="diaCorte"/.test(h) && />Ayer · f08</.test(h) && />Hoy · f09</.test(h) && /f07/.test(h), h.slice(0, 500)); }
