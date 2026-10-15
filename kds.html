@@ -130,6 +130,11 @@
   .offline{background:rgba(224,82,82,.12);border:1px solid var(--bad);color:var(--bad);
     border-radius:10px;padding:8px 12px;font-size:13px;margin:8px 0;display:none;text-align:center}
   .offline.show{display:block}
+  /* v1.29 · [AUT-0688] la fascia del freno ?borde=0: rossa se il freno è acceso, ambra se è scaduto e ignorato */
+  .freno{display:none;margin:8px 12px 0;padding:8px 12px;border-radius:8px;font-weight:800;font-size:15px;
+    background:rgba(224,82,82,.15);border:1.5px solid var(--bad);color:var(--bad)}
+  .freno.show{display:block}
+  .freno.vencido{background:rgba(245,166,35,.12);border-color:var(--warn);color:var(--warn)}
 
   #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px;align-items:start}
   .vacio{grid-column:1/-1;text-align:center;color:var(--t3);padding:60px 0;font-size:17px}
@@ -300,7 +305,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.28</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.29</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -324,6 +329,7 @@
     <div class="reloj" id="tReloj">--:--</div>
     <button class="salir" onclick="salir()">cambiar</button>
   </div>
+  <div class="freno" id="freno"></div>
   <div class="offline" id="offline">⚠ Sin conexión — reintentando… la cola puede estar desactualizada</div>
   <div id="grid"></div>
   <div class="esp-title hide" id="espTitle">⏳ En espera</div>
@@ -343,6 +349,44 @@
 <script>
 /* ═════ CONFIG ═════ */
 const QS = new URLSearchParams(location.search);
+/* ═════ v1.29 · [AUT-0688 · 14-ott · ⚙️ ARQ V28] IL FRENO ?borde=0 SCADE ═════
+   🩸 Il tablet di CUCINA ha girato almeno una settimana con `&borde=0` in un link salvato: ogni tocco andava a Google
+      (`via=gas_borde_off`, 13 su 13 il 14-ott; la barra 50 su 50 `via=borde`). Era già successo ad agosto, curato riaprendo il
+      link pulito: una cura che vive in un gesto sul dispositivo torna al primo riavvio.
+   🔑 Il freno resta, ma porta la sua DATA: `?borde=0&dia=AAAA-MM-GG` frena solo se `dia` è il giorno operativo di oggi (taglio
+      06:00, Santiago). Un `?borde=0` SENZA data, o con una data passata, è ignorato: il tablet usa il bordo e la fascia ambra lo dice.
+      ✏️ [rosso G di 💵 EL GIRO, `EL GIRO 0688 26DD43A UN GIORNO IN PIU SUL TABLET VERO`] la prima stesura faceva valere un `?borde=0`
+      senza data per «il giorno in cui l'apparecchio l'ha visto la prima volta»: sul tablet vero quella memoria non esisteva, quindi il
+      primo giorno della v1.29 il freno vecchio valeva ancora, e la cucina passava al bordo solo il secondo. Senza memoria non c'è quel buco.
+   📌 Perché sta nel vetro e non in una leva del bordo: un tablet con `?borde=0` legge da Google, quindi una leva spinta dal bordo
+      non gli arriverebbe mai. Il ripiego sul GAS dopo 3 fallimenti resta com'era.
+   🧯 Per apparecchio: `?frenoscad=0` (si ricorda) = il freno di ieri, senza scadenza. `?frenoscad=1` lo toglie. */
+function kdsDiaOp(ms) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date(ms - 6 * 3600 * 1000));
+}
+const FRENO = (function () {
+  const ls = function (k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} return null; };
+  const fs0 = (QS.get('frenoscad') || '').trim();
+  if (fs0 === '0' || fs0 === '1') ls('kds_frenoscad', fs0 === '0' ? '0' : null);
+  const senzaScadenza = ls('kds_frenoscad') === '0';
+  const hoy = kdsDiaOp(Date.now());
+  if (QS.get('borde') !== '0') return { attivo: false, scaduto: false, dia: hoy };
+  if (senzaScadenza) return { attivo: true, scaduto: false, dia: null, senza: true };
+  const qDia = (QS.get('dia') || '').trim();
+  return { attivo: qDia === hoy, scaduto: qDia !== hoy, dia: qDia || null };
+})();
+function pintaFreno() {
+  const el = document.getElementById('freno'); if (!el) return;
+  el.classList.remove('show', 'vencido');
+  if (FRENO.attivo) {
+    el.textContent = '🔴 BORDE APAGADO (?borde=0)' + (FRENO.senza ? ' · sin vencimiento' : ' · vence a las 06:00') + ' — el KDS va a Google.';
+    el.classList.add('show');
+  } else if (FRENO.scaduto) {
+    el.textContent = '🟡 ?borde=0 ' + (FRENO.dia ? 'del ' + FRENO.dia + ' vencido' : 'sin fecha, ignorado') + ': el KDS usa el borde. Para frenar hoy: &dia=' + kdsDiaOp(Date.now()) + '.';
+    el.classList.add('show', 'vencido');
+  }
+}
 const CFG = {
   GAS_URL: 'https://script.google.com/macros/s/AKfycbzZkS3bBaYc34uJ6wXP9FG13i58-NT0FJp964vqkUYbRObUxryeRb9l_Fz24kb42f5t/exec',
   LOCAL: (QS.get('l') || localStorage.getItem('kds_local') || 'BKS').trim().toUpperCase(),
@@ -564,6 +608,7 @@ function salir(){
 
 /* ═════ TABLERO ═════ */
 function showTablero(){
+  pintaFreno();   // v1.29 · [AUT-0688]
   $('vEntrada').classList.add('hide');
   $('vTablero').classList.remove('hide');
   document.body.dataset.st = STATE.estacion;
@@ -588,7 +633,7 @@ function showTablero(){
 const BORDE = {
   URL: 'https://pinsita-borde.alberto-agostini.workers.dev',
   T: '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ',
-  ON: QS.get('borde') !== '0',
+  ON: !FRENO.attivo,   // v1.29 · [AUT-0688] il freno ?borde=0 scade (vedi FRENO)
   /* v1.24 · 14-ago · IL TETTO SEGUE L'ECO. Con 120s il tablet buttava la
      risposta del bordo proprio quando serviva: la foto base invecchia oltre
      i 2 min nelle raffiche di Google, ma l'ECO le fonde sopra gli eventi
@@ -646,7 +691,7 @@ function bordeWriteOn() {
    dall'assenza del marcatore (`via=?` diceva solo «vecchio», non QUANTO).
    Il GAS la scrive nella riga di audit accanto alla via (2 righe, stessa
    sanificazione). Client vecchio = campo assente = il GAS scrive `?`. */
-const KDS_VER = '1.27';
+const KDS_VER = '1.29';   // v1.29 · allineata alla targhetta: l'audit (`v=`) dice quale vetro ha toccato
 async function staffPost(action, body) {
   let via = 'gas_borde_off';
   if (BORDE.ON && bordeWriteOn()) {
