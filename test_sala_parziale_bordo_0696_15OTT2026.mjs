@@ -42,6 +42,21 @@ function banco(SRC) {
     t('F · parte a dedo del JL (senza c4): resta aperta, nessun numero inventato', !has(l, 'cierre') && /sigue abierta/.test(txt(l)) && !/FALTA/.test(txt(l)), txt(l)); }
   { const l = gira(SRC, { pg: { mesa: '997', tot: 6080, c4: { _resta: 2190 } }, body: { parcial: '1', monto: 3890 }, rB: { ok: true, borde: true, monto: 3890 } });
     t('G · parcial come stringa "1" ⇒ stessa cosa di 1', !has(l, 'cierre'), l); }
+  // ③ (banco di EL GIRO): la parte a dedo del JL è PARTE solo se lascia un resto — il blocco VERO del payload
+  const pay = (pg) => { const testa = '    if (pg.parte && !pg.montoOn) {'; const a = SRC.indexOf(testa); if (a < 0) throw new Error('blocco parte');
+    let d = 0, i = a + testa.length - 1; for (; i < SRC.length; i++) { if (SRC[i] === '{') d++; else if (SRC[i] === '}') { d--; if (d === 0) break; } }
+    const ctx = { pg, body: {}, Math, _pagoMonto: () => pg.tot }; vm.createContext(ctx); vm.runInContext(SRC.slice(a, i + 1), ctx); return ctx.body; };
+  { const b = pay({ parte: { monto: 6080 }, tot: 6080, restoAbrir: 6080 });
+    t('③ dedo 6.080 su resto 6.080: NON è una parte (niente parcial, niente monto ⇒ es_total)', b.parcial === undefined && b.monto === undefined, b); }
+  { const b = pay({ parte: { monto: 3000 }, tot: 3000, restoAbrir: 6080 });
+    t('③ dedo 3.000 su resto 6.080: è una parte (parcial 1, monto 3.000)', b.parcial === 1 && b.monto === 3000, b); }
+  { const b = pay({ parte: { monto: 3000 }, tot: 3000, restoAbrir: 0 });
+    t('③ resto ignoto (0): resta parte, il verso sicuro', b.parcial === 1 && b.monto === 3000, b); }
+  { const b = pay({ parte: { monto: 3000 }, tot: 3000, restoAbrir: 6080, montoOn: true });
+    t('③ col monto ritoccato a mano comanda la sua porta: questo blocco non scrive niente', b.parcial === undefined, b); }
+  { const ab = SRC.slice(SRC.indexOf('function abrirPago('), SRC.indexOf('function abrirPago(') + 20000);
+    t('③ abrirPago salva il resto PRIMA che la parte prenda il posto del totale, e lo porta in STATE.pago',
+      ab.indexOf('const _restoAbrir = tot;') > 0 && ab.indexOf('const _restoAbrir = tot;') < ab.indexOf('if (_pt) tot = _pt;') && /restoAbrir: _restoAbrir/.test(ab)); }
   return ko - k0;
 }
 banco(SRC0);
@@ -50,5 +65,7 @@ const mut = (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ 
   t('mutante «' + nome + '» ⇒ banco ROSSO', typeof rossi === 'number' && rossi > 0, rossi); };
 mut('la guardia della parte tolta (il difetto della 997)', '      if (_abiertaB) {', '      if (false) {');
 mut('il bordo non vince su mesa_abierta', "(rB.mesa_abierta === true || rB.mesa_abierta === false) ? rB.mesa_abierta", "false ? rB.mesa_abierta");
+mut('③ la parte a dedo torna parcial sempre', "if (!(pg.restoAbrir > 0) || _mParte < Math.round(pg.restoAbrir)) {", "if (true) {");
+mut('③ il resto ignoto diventa intero', "if (!(pg.restoAbrir > 0) || _mParte < Math.round(pg.restoAbrir)) {", "if (_mParte < Math.round(pg.restoAbrir)) {");
 mut('parcial solo numerico', "(body.parcial === 1 || body.parcial === '1')", "(body.parcial === 1)");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exitCode = ko ? 1 : 0;

@@ -12797,6 +12797,10 @@ function abrirPago(mesa, parte) {
      sbagliato (una riga spostata due volte, un poll in mezzo), si taglia qui
      e non si manda. Il server ha la sua guardia — questa è la prima. */
   const _pt = (parte && parte.monto > 0) ? Math.min(Math.round(parte.monto), tot || Math.round(parte.monto)) : 0;
+  /* [15-ott · AUT-0696 ③, banco di 💵 EL GIRO] il resto della mesa PRIMA che la parte prenda il posto del totale:
+     `_vpTot` è già consumo − pagato (server se noto, AUT-0428). Serve al submit per sapere se la parte a dedo
+     copre TUTTO (allora non è una parte: esce come pago intero, come fa la c4 con `!c4Cierra`). */
+  const _restoAbrir = tot;
   if (_pt) tot = _pt;
   /* [26-set · contratto MENU, bacheca `PAGO MESAS PAYLOAD PRONTO`] `mesasPago`
      qui sopra ESISTE da sempre — sommava solo il totale mostrato e poi
@@ -12826,7 +12830,7 @@ function abrirPago(mesa, parte) {
     });
     if (lU.length && !parcU && Math.abs(Math.round(vistoU) - Math.round(tot)) <= 1) uuidsPago = lU;
   }
-  STATE.pago = { mesa: mesa, mesas: mesasPago.slice(), gid: gidPago, uuids: uuidsPago, tot: tot, parte: _pt ? { titulo: (parte.titulo || 'parte'), monto: _pt } : null,
+  STATE.pago = { mesa: mesa, mesas: mesasPago.slice(), gid: gidPago, uuids: uuidsPago, tot: tot, restoAbrir: _restoAbrir, parte: _pt ? { titulo: (parte.titulo || 'parte'), monto: _pt } : null,
     prop: 'sug', medio: '',
     otro: '', correo: '', celular: '', nombre: '', enviando: false,
     /* v3.31.0 · [AUT-0113] · `cliente:true` = el teléfono está en manos del
@@ -15186,7 +15190,14 @@ async function pagoConfirmar(btn) {
        guardia sua (non oltre il residuo, e la mesa resta aperta finché non è
        coperta). Se il JL ha anche ritoccato il monto a mano, comanda la sua
        porta: le due non si sommano mai in silenzio. */
-    if (pg.parte && !pg.montoOn) { body.parcial = 1; body.monto = _pagoMonto(); }
+    /* [15-ott · AUT-0696 ③] la parte a dedo è una PARTE solo se lascia un resto: 6.080 su un resto di 6.080
+       usciva `parcial:1` + `es_total:false`, e il libro la scriveva NON totale ⇒ mesa aperta pagata in tutti i
+       libri. Copre tutto ⇒ esce come pago intero (niente `parcial`, niente `monto`: si usa il consumo, come la c4
+       con `!c4Cierra`). Resto ignoto (0) ⇒ resta parte: il verso sicuro. */
+    if (pg.parte && !pg.montoOn) {
+      const _mParte = _pagoMonto();
+      if (!(pg.restoAbrir > 0) || _mParte < Math.round(pg.restoAbrir)) { body.parcial = 1; body.monto = _mParte; }
+    }
     /* v3.47.0 · COBRAR v4 · LA PARTE DEL CLIENTE ESCE DALLA PORTA DELLA PARTE.
        Il flusso `pg.parte` qui sopra è il cobro a dedo del JL: nasce all'APERTURA
        del pannello, dove `pg.tot` viene già sostituito con l'importo della parte
