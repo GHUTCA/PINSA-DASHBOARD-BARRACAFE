@@ -173,6 +173,15 @@ for (const [nombre, o] of [['resta_ignota', { resta: null, pagado: null, resta_i
   const p = await apri(Q, rispondiPay(async () => ({ ok: false, error: 'cuenta_pagada', cerrada: true })));
   p.ctx.paga(); await new Promise((z) => setTimeout(z, 30));
   ok(/ya está cerrada/.test(p.els.body.innerHTML) && p.alerts.length === 0, 'cuenta_pagada ⇒ la página pasa a «ya está cerrada»');
+  const ec = await apri(Q, async () => ({ ok: false, reintenta: true, motivo: 'pago_en_curso' }));
+  await new Promise((z) => setTimeout(z, 60));
+  ok(/registrando un pago de tu mesa/.test(ec.els.body.innerHTML) && !/No pudimos cargar tu cuenta/.test(ec.els.body.innerHTML), '«reintenta · pago_en_curso» del bordo ⇒ «estamos registrando un pago de tu mesa» (nunca un importe)');
+  const ot = await apri(Q, async () => ({ ok: false, reintenta: true, motivo: 'otro_motivo' }));
+  await new Promise((z) => setTimeout(z, 60));
+  ok(/No pudimos cargar tu cuenta/.test(ot.els.body.innerHTML), 'cualquier otro «reintenta» sigue con el texto de siempre');
+  const ec2 = await apri(Q, rispondiPay(async () => ({ ok: false, error: 'reintenta', reintenta: true, motivo: 'pago_en_curso' })));
+  ec2.ctx.paga(); await new Promise((z) => setTimeout(z, 60));
+  ok(ec2.alerts.length === 1 && /registrando un pago de tu mesa/.test(ec2.alerts[0]), 'el checkout dice «reintenta · pago_en_curso» ⇒ el aviso lo nombra');
 }
 
 console.log('\n' + (rossi ? '🔴 ' + rossi + ' rossi su ' + n : '🟢 ' + n + ' controlli, tutti verdi'));

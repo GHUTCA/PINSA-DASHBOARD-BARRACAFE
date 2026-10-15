@@ -162,6 +162,7 @@ var T = {
         cerradoTxt:'Pídele al mesero que te muestre la cuenta. Puedes pagar con él como siempre.',
         cerradaTit:'Esta cuenta ya está cerrada', cerradaTxt:'Gracias por visitarnos. Si necesitas algo, pídeselo a tu mesero.',
         reintentaTit:'No pudimos cargar tu cuenta', reintentaTxt:'Inténtalo de nuevo en un momento, o pídele la cuenta a tu mesero.',
+        enCursoTit:'Estamos registrando un pago de tu mesa', enCursoTxt:'Estamos registrando un pago de tu mesa. Inténtalo de nuevo en un momento.',
         cambioTxt:'Tu cuenta cambió desde que se imprimió', cargando:'Cargando tu cuenta…',
         abriendo:'Abriendo el pago…', pagoNo:'No pudimos abrir el pago. Pídele al mesero que te ayude: puedes pagar con él como siempre.', pagoVuelve:'Estamos terminando de cargar tu cuenta. Inténtalo de nuevo en un momento.',
         vez2:'Gracias por visitarnos nuevamente' },
@@ -187,6 +188,7 @@ var T = {
         cerradoTxt:'Peça ao garçom para mostrar a conta. Você pode pagar com ele como sempre.',
         cerradaTit:'Esta conta já está fechada', cerradaTxt:'Obrigado pela visita. Se precisar de algo, peça ao seu garçom.',
         reintentaTit:'Não conseguimos carregar sua conta', reintentaTxt:'Tente novamente em instantes, ou peça a conta ao seu garçom.',
+        enCursoTit:'Estamos registrando um pagamento da sua mesa', enCursoTxt:'Estamos registrando um pagamento da sua mesa. Tente novamente em instantes.',
         cambioTxt:'Sua conta mudou desde que foi impressa', cargando:'Carregando sua conta…',
         abriendo:'Abrindo o pagamento…', pagoNo:'Não conseguimos abrir o pagamento. Peça ajuda ao garçom: você pode pagar com ele como sempre.', pagoVuelve:'Estamos terminando de carregar sua conta. Tente novamente em instantes.',
         vez2:'Obrigado por nos visitar novamente' },
@@ -212,6 +214,7 @@ var T = {
         cerradoTxt:'Ask your server to show you the bill. You can pay with them as always.',
         cerradaTit:'This bill is already closed', cerradaTxt:'Thanks for visiting. If you need anything, ask your server.',
         reintentaTit:'We could not load your bill', reintentaTxt:'Try again in a moment, or ask your server for the bill.',
+        enCursoTit:'We are recording a payment for your table', enCursoTxt:'We are recording a payment for your table. Try again in a moment.',
         cambioTxt:'Your bill changed since it was printed', cargando:'Loading your bill…',
         abriendo:'Opening payment…', pagoNo:'We could not open the payment. Ask your server for help: you can pay with them as always.', pagoVuelve:'We are still loading your bill. Try again in a moment.',
         vez2:'Thanks for coming back' }
@@ -235,6 +238,7 @@ function guardaYo(o) {
 }
 
 /* ─── stato della sesión ─────────────────────────────────────────────────── */
+var ENCURSO = false;       // [2.10 · TERZA] el bordo dijo «reintenta · pago_en_curso»: se está registrando un pago de la mesa
 var CUENTA = null;         // { items:[{n,q,pu}], total } — del servidor o del demo
 var CERRADO = '';          // motivo por el que no se puede mostrar nada
 var P = 0;                 // 0 cuenta · 1 lomio · 2 iguales · 3 propina · 4 datos · 5 pagar · 6 listo
@@ -362,6 +366,7 @@ function cargaCuenta(cb) {
           { headers: { 'X-Borde-Token': BORDE_TOKEN }, signal: ctrl.signal })
       .then(function (r) { clearTimeout(tid); return r.json(); })
       .then(function (j) {
+        ENCURSO = !!(j && j.reintenta === true && j.motivo === 'pago_en_curso');
         if (j && j.ok === true && j.cerrada === true) { CERRADO = 'cerrada'; return cb(); }
         if (j && j.ok === true && Array.isArray(j.items) && j.items.length) {
           CUENTA = { total: Number(j.total) || 0,
@@ -389,7 +394,7 @@ function pinta() {
 
   if (CERRADO) {
     var ct = CERRADO === 'cerrada' ? [ti.cerradaTit, ti.cerradaTxt]
-           : CERRADO === 'reintenta' ? [ti.reintentaTit, ti.reintentaTxt]
+           : CERRADO === 'reintenta' ? (ENCURSO ? [ti.enCursoTit, ti.enCursoTxt] : [ti.reintentaTit, ti.reintentaTxt])
            : [ti.cerradoTit, ti.cerradoTxt];
     b = '<div class="cerrado"><span class="ico">🙋</span>' +
         '<b style="color:var(--ink);font-size:17px">' + ct[0] + '</b><br>' +
@@ -682,7 +687,7 @@ function paga() {
         var j = x.j;
         if (j.ok === true && typeof j.redirect_url === 'string' && /^https:\/\//.test(j.redirect_url)) { location.href = j.redirect_url; return; }
         if (j.error === 'reintenta' && ++intentos < 3) { setTimeout(envia, 3000); return; }
-        if (j.error === 'reintenta') return falla(ti.pagoVuelve);
+        if (j.error === 'reintenta') return falla(j.motivo === 'pago_en_curso' ? ti.enCursoTxt : ti.pagoVuelve);
         if (j.error === 'resta_ignota' || j.error === 'resta_no_disponible' || j.error === 'resta_incoerente') {   // [2.10] el servidor no sabe lo que falta: se reintenta y luego se dice, NUNCA se cobra el consumo
           if (++intentos < 3) { setTimeout(envia, 3000); return; }
           return falla(ti.restaIgnota);
