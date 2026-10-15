@@ -1126,20 +1126,33 @@ function pantallaReservaAntes(f) {
   var i = rPrimaSiguiente(f);
   if (i < 0) { rPrimaSalida(f); return; }
   var it = f.lista[i];
+  var enviadoR = (f.enviado || {})[it.dia];
   app.innerHTML = barra(true) +
     '<div class="kick">La reserva · antes de salir' + (f.lista.length > 1 ? ' · sobre ' + (i + 1) + ' de ' + f.lista.length : '') + '</div><h1>A la caja fuerte ROJA</h1>' +
     (f.lista.length > 1 ? '<p class="sd">Noche ' + esc(fechaCorta(it.dia)) + '</p>' : '') +
     '<p class="sd">El sistema calcula <b>' + fmt(it.importo) + '</b></p>' +
     (it.sinCuota ? '<div class="note">Sin cuota de ADMIN para esta noche: se usa el cálculo del sistema.</div>' : '') +
     '<p class="lb">Lo que pones en el sobre rojo (si con las monedas no calza, escribe lo que de verdad pones)</p>' +
-    '<input class="inp" id="rReal" inputmode="numeric" value="' + esc(String(it.importo)) + '">' +
+    /* [K · 💵 EL GIRO, 🎛 `V30 CAJA 1.10.9 SOGLIA E CURE`] dopo il primo invio l'importo è FISSO finché non arriva un sì o un no definitivo:
+       se la risposta si perde e lei corregge, il bordo risponde `ya` con la busta del PRIMO importo, e la salida ne conterebbe un altro */
+    '<input class="inp" id="rReal" inputmode="numeric" value="' + esc(String(enviadoR != null ? enviadoR : it.importo)) + '"' + (enviadoR != null ? ' disabled' : '') + '>' +
+    (enviadoR != null ? '<div class="note">Ya se envió ' + esc(fmt(enviadoR)) + ': si no llegó la respuesta, vuelve a tocar. El importe no cambia.</div>' : '') +
     '<button class="btn acc" id="sellarRoja">A la caja fuerte ROJA</button>';
   unTocoUnHecho(document.getElementById('sellarRoja'), async function(){
-    var real = rRealeLeggi();
-    if (real === null) { toast('Escribe cuánto pones en el sobre rojo', 'bad'); return; }
-    if (real === 0) {
-      if (!confirm('¿Sin sobre rojo para esta noche? Toda esa plata va al banco.')) return;
-      f.sin = f.sin || {}; f.sin[it.dia] = true; pantallaReservaAntes(f); return;
+    var real = enviadoR != null ? enviadoR : rRealeLeggi();
+    if (enviadoR == null) {
+      if (real === null) { toast('Escribe cuánto pones en el sobre rojo', 'bad'); return; }
+      if (real === 0) {
+        if (!confirm('¿Sin sobre rojo para esta noche? Toda esa plata va al banco.')) return;
+        f.sin = f.sin || {}; f.sin[it.dia] = true; pantallaReservaAntes(f); return;
+      }
+      /* [J2] la R non può superare il contado: il bordo rifiuterebbe la salida (a_depositar negativo) DOPO aver scritto la busta,
+         e la caja resterebbe bloccata con una busta sbagliata nel libro. Si ferma QUI, prima di scrivere. */
+      var giaR = f.sueltas || 0; Object.keys(f.hechas).forEach(function (d) { giaR += Number(f.hechas[d].importo) || 0; });
+      if (giaR + real > f.cuerpo.contado) { toast('El sobre rojo no puede llevar más que lo contado: como máximo ' + fmt(Math.max(0, f.cuerpo.contado - giaR)) + '. Revisa el importe.', 'bad'); return; }
+      /* [J1 · soglia del 🎛: $1.000] le monete spostano di poche centinaia; più di 1.000 dal calcolo è un dito di troppo finché lei non dice di sì */
+      if (Math.abs(real - it.importo) > 1000 && !confirm('¿Seguro? El sistema calcula ' + fmt(it.importo) + ' y escribiste ' + fmt(real) + '.')) return;
+      f.enviado = f.enviado || {}; f.enviado[it.dia] = real; rPrimaGuardar(f);
     }
     var r = await postCaja({ verbo:'reserva_sobre', uid_gesto: it.uid, dia_op: it.dia, monto: real, referencia_uid: f.dep,
       firma_caja: SES.user, firma_caja_tipo:'pin', fuente:'app_caja' });
@@ -1153,12 +1166,20 @@ function pantallaReservaAntes(f) {
       unTocoUnHecho(document.getElementById('sigRoja'), async function(){ pantallaReservaAntes(f); });
       return;
     }
-    if (!r.ok) { toast('No se guardó: ' + r.motivo + ' — no salgas todavía, vuelve a tocar', 'bad'); return; }
-    f.hechas[it.dia] = { nro: r.sobre_nro || '—', importo: real, calculado: it.importo }; rPrimaGuardar(f);
+    if (!r.ok) {
+      /* un rifiuto di FORMA (sicuramente non scritto) libera il campo; ogni altro errore (5xx, esito ignoto) può aver scritto: l'importo resta fisso */
+      if (/^(monto_|dia_op|uid_gesto|referencia_uid|firma_)/.test(String(r.motivo || ''))) {
+        if (f.enviado) delete f.enviado[it.dia]; rPrimaGuardar(f); toast('No se guardó: ' + r.motivo + ' — corrige y vuelve a tocar', 'bad'); pantallaReservaAntes(f); return;
+      }
+      toast('No se guardó: ' + r.motivo + ' — no salgas todavía, vuelve a tocar', 'bad'); pantallaReservaAntes(f); return;
+    }
+    /* [K] su `ya` (busta già scritta da un tocco prima) vale l'importo della busta, se il bordo lo dice */
+    var vero = (r.ya && r.importo != null && isFinite(Number(r.importo))) ? Number(r.importo) : real;
+    f.hechas[it.dia] = { nro: r.sobre_nro || '—', importo: vero, calculado: it.importo }; if (f.enviado) delete f.enviado[it.dia]; rPrimaGuardar(f);
     app.innerHTML = barra(true) +
       '<div class="kick">La reserva · antes de salir</div><h1>A la caja fuerte ROJA</h1>' +
-      '<p class="big acc">' + fmt(real) + '</p>' +
-      (real !== it.importo ? '<p class="sd">Calculado ' + fmt(it.importo) + ' · diferencia ' + (real > it.importo ? '+' : '−') + fmt(Math.abs(real - it.importo)) + '</p>' : '') +
+      '<p class="big acc">' + fmt(vero) + '</p>' +
+      (vero !== it.importo ? '<p class="sd">Calculado ' + fmt(it.importo) + ' · diferencia ' + (vero > it.importo ? '+' : '−') + fmt(Math.abs(vero - it.importo)) + '</p>' : '') +
       '<div class="rows"><div class="r tot"><span class="n">Sobre</span><span class="v">' + esc(r.sobre_nro || '—') + '</span></div></div>' +
       '<button class="btn acc" id="sigRoja">' + (rPrimaSiguiente(f) >= 0 ? 'Siguiente sobre' : 'Seguir al banco') + '</button>';
     unTocoUnHecho(document.getElementById('sigRoja'), async function(){ pantallaReservaAntes(f); });
