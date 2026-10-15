@@ -34,7 +34,7 @@ async function apri(query, rispondi, opz) {
   await new Promise((r) => setTimeout(r, 30));   // lascia girare le promise
   return { body: (els.body && els.body.innerHTML) || '', foot: (els.foot && els.foot.innerHTML) || '', chiamate, ctx, alerts, els };
 }
-const OK = { ok: true, mesa: '12', folio: 'PC-B-261008-ABC123', total: 20000, pedidos: 1,
+const OK = { ok: true, mesa: '12', folio: 'PC-B-261008-ABC123', total: 20000, pedidos: 1, pagado: 0, resta: 20000, resta_ignota: false,
   items: [{ n: 'Pinsa Diavola', q: 1, pu: 13200 }, { n: 'Negroni', q: 1, pu: 6800 }], cambio_dopo_carta: null };
 const Q = '?l=bks&pc=pc-b-261008-abc123';
 
@@ -136,7 +136,43 @@ const post = (r) => r.chiamate.find((c) => c.url.includes('/checkout-cuenta'));
   ok(!/ponModo\('lomio'\)|ponModo\('iguales'\)/.test(cl.body) && /ponModo\('todo'\)/.test(cl.body), 'fuori dal demo la pagina offre SOLO «pago todo» (il parcial non esiste)');
   const dm = await apri('?demo=1', async () => OK);
   ok(/ponModo\('lomio'\)/.test(dm.body), 'nel demo le tre opzioni ci sono ancora');
-  ok(/var VER = 'pago v0\.3';/.test(html.replace(/\r\n/g, '\n')), 'la targhetta è pago v0.3');
+  ok(/var VER = 'pago v0\.4';/.test(html.replace(/\r\n/g, '\n')), 'la targhetta è pago v0.4');
+}
+
+
+console.log('\n⑥ SI PAGA EL RESTO, NO EL CONSUMO (TERZA 15-ott: tras una parte pagada, el cliente pagaria dos veces)');
+const R = (o) => Object.assign({}, OK, o || {});
+{
+  const a = await apri(Q, rispondiPay(async () => PAYOK), {});
+  ok(!/Ya pagado/.test(a.body) && /\$20\.000/.test(a.body), 'nada pagado: no aparece «Ya pagado», se ve el consumo');
+  const b = await apri(Q, async (u) => (u.includes('/checkout-cuenta') ? PAYOK : R({ pagado: 5000, resta: 15000 })));
+  ok(/Ya pagado/.test(b.body) && /−\$5\.000/.test(b.body) && /Falta por pagar/.test(b.body) && /\$15\.000/.test(b.body), 'pagado 5.000 de 20.000: se ve «Ya pagado −$5.000» y «Falta por pagar $15.000»', b.body.slice(0, 400));
+  ok(/ponModo\('todo'\)[^<]*<small>\$15\.000<\/small>/.test(b.body), 'el botón «pago todo» muestra lo que FALTA ($15.000), no el consumo');
+  b.ctx.MODO = 'todo';
+  ok(b.ctx.parte() === 15000 && b.ctx.lblConsumo() === 'Falta por pagar' && a.ctx.lblConsumo() === 'Consumo', 'parte() de «pago todo» = lo que FALTA ($15.000, no $20.000); la etiqueta dice «Falta por pagar» solo si ya hay una parte pagada');
+  b.ctx.PROP = 'otro'; b.ctx.PROP_OTRO = 1500; b.ctx.paga(); await new Promise((x) => setTimeout(x, 30));
+  const pp = post(b);
+  ok(pp && JSON.parse(pp.init.body).propina_pct === 10, 'la propina «otro» en pesos se convierte a % sobre lo que FALTA (1.500 de 15.000 = 10%), no sobre el consumo', pp && pp.init.body);
+  ok(pp && Object.keys(JSON.parse(pp.init.body)).sort().join() === ['l', 'pc', 'propina_pct'].join(), 'el cuerpo sigue siendo solo l · pc · propina_pct (el resto lo decide el servidor)');
+}
+for (const [nombre, o] of [['resta_ignota', { resta: null, pagado: null, resta_ignota: true }], ['bordo viejo sin el campo resta', { resta: undefined, pagado: undefined, resta_ignota: undefined }], ['resta no numérica', { resta: 'abc' }]]) {
+  const x = await apri(Q, async (u) => (u.includes('/checkout-cuenta') ? PAYOK : R(o)));
+  ok(!/onclick="paga\(\)"/.test(x.foot) && /Todavía no podemos calcular/.test(x.foot + x.body), nombre + ' ⇒ NO hay botón de pago y la página lo dice');
+  ok(!/onclick="paga\(\)"/.test(x.ctx.botonesPago()) && /Todavía no podemos calcular/.test(x.ctx.botonesPago()), nombre + ' ⇒ botonesPago() (la pantalla del segundo pago y el paso final) tampoco ofrece pagar');
+  x.ctx.paga(); await new Promise((z) => setTimeout(z, 30));
+  ok(post(x) === undefined && x.alerts.length === 1 && /Todavía no podemos calcular/.test(x.alerts[0]), nombre + ' ⇒ paga() no llama a /checkout-cuenta (defensa): nunca se cobra el consumo', x.alerts.join('|'));
+}
+{
+  const x = await apri(Q, async (u) => (u.includes('/checkout-cuenta') ? PAYOK : R({ pagado: 20000, resta: 0 })));
+  ok(!/onclick="paga\(\)"/.test(x.foot), 'resta 0 (todo pagado) ⇒ sin botón de pago');
+  for (const err of ['resta_ignota', 'resta_no_disponible', 'resta_incoerente']) {
+    const e = await apri(Q, rispondiPay(async () => ({ ok: false, error: err, reintenta: true })));
+    e.ctx.paga(); await new Promise((z) => setTimeout(z, 60));
+    ok(e.chiamate.filter((c) => c.url.includes('/checkout-cuenta')).length === 3 && e.alerts.length === 1 && /Todavía no podemos calcular/.test(e.alerts[0]), 'el servidor dice «' + err + '» ⇒ 3 intentos y un aviso honesto, sin redirect', e.alerts.join('|'));
+  }
+  const p = await apri(Q, rispondiPay(async () => ({ ok: false, error: 'cuenta_pagada', cerrada: true })));
+  p.ctx.paga(); await new Promise((z) => setTimeout(z, 30));
+  ok(/ya está cerrada/.test(p.els.body.innerHTML) && p.alerts.length === 0, 'cuenta_pagada ⇒ la página pasa a «ya está cerrada»');
 }
 
 console.log('\n' + (rossi ? '🔴 ' + rossi + ' rossi su ' + n : '🟢 ' + n + ' controlli, tutti verdi'));

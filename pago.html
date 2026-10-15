@@ -109,7 +109,7 @@ h1{font-size:24px;font-weight:700;line-height:1.15;margin:0}
 <script>
 /* la targhetta di versione: SOLO «nome vX.Y», niente altro. Serve a sapere se
    quello che si sta guardando è quello che abbiamo appena mandato. */
-var VER = 'pago v0.3';
+var VER = 'pago v0.4';
 
 var QS = new URLSearchParams(location.search);
 var LOC = (QS.get('l') || '').trim().toUpperCase();
@@ -152,6 +152,8 @@ var T = {
         comoPagas:'¿Cómo pagas?', banco:'Paga con tu banco', bancoSub:'transferencia · un toque',
         tarjeta:'Paga con tarjeta', tarjetaSub:'débito o crédito',
         totalPagar:'Total a pagar', consumo:'Consumo',
+        consumoTotal:'Consumo total', pagadoYa:'Ya pagado', faltaPagar:'Falta por pagar',
+        restaIgnota:'Todavía no podemos calcular lo que falta por pagar. Inténtalo de nuevo en un momento o pídele al mesero que te ayude.',
         listo:'Listo', pagaste:'Pagaste', boleta:'Tu boleta te llega', wa:'por WhatsApp',
         graciasV:'Gracias por visitarnos nuevamente', holaCon:'Hola',
         confirma:'¿Confirmas este número?', cambiar:'Cambiar', ok:'Listo',
@@ -175,6 +177,8 @@ var T = {
         comoPagas:'Como você paga?', banco:'Pague com seu banco', bancoSub:'transferência · um toque',
         tarjeta:'Pague com cartão', tarjetaSub:'débito ou crédito',
         totalPagar:'Total a pagar', consumo:'Consumo',
+        consumoTotal:'Consumo total', pagadoYa:'Já pago', faltaPagar:'Falta pagar',
+        restaIgnota:'Ainda não conseguimos calcular o que falta pagar. Tente de novo em um momento ou peça ajuda ao garçom.',
         listo:'Pronto', pagaste:'Você pagou', boleta:'Sua nota chega', wa:'pelo WhatsApp',
         graciasV:'Obrigado por nos visitar novamente', holaCon:'Olá',
         confirma:'Confirma este número?', cambiar:'Alterar', ok:'Pronto',
@@ -198,6 +202,8 @@ var T = {
         comoPagas:'How are you paying?', banco:'Pay with your bank', bancoSub:'transfer · one tap',
         tarjeta:'Pay by card', tarjetaSub:'debit or credit',
         totalPagar:'Total to pay', consumo:'Order',
+        consumoTotal:'Total order', pagadoYa:'Already paid', faltaPagar:'Left to pay',
+        restaIgnota:'We cannot work out what is left to pay yet. Try again in a moment or ask your server for help.',
         listo:'Done', pagaste:'You paid', boleta:'Your receipt is on its way', wa:'by WhatsApp',
         graciasV:'Thanks for coming back', holaCon:'Hi',
         confirma:'Is this number right?', cambiar:'Change', ok:'Done',
@@ -283,6 +289,21 @@ function clp(n){ return '$'+Math.round(n||0).toLocaleString('es-CL'); }
 /* ─── los números ────────────────────────────────────────────────────────── */
 function items(){ return (CUENTA && CUENTA.items) || []; }
 function total(){ return (CUENTA && CUENTA.total) || 0; }
+/* [2.10 · TERZA 15-ott] lo que se PAGA es lo que FALTA, no el consumo: tras una parte pagada, cobrar el consumo entero es cobrar dos veces.
+   Sin dato del resto NO se cobra (nunca se cae al consumo). En el demo no hay servidor: se paga el total. */
+function elResto(){ if (DEMO) return total(); return (CUENTA && typeof CUENTA.resta === 'number' && !CUENTA.restaIgnota) ? CUENTA.resta : 0; }
+function restaOk(){ return DEMO || elResto() > 0; }
+function pagadoYa(){ return (!DEMO && CUENTA && CUENTA.pagado > 0) ? CUENTA.pagado : 0; }
+function lblConsumo(){ return pagadoYa() > 0 ? t().faltaPagar : t().consumo; }
+/* lo ya pagado y lo que falta, a la vista (o el aviso de que no se puede calcular) */
+function avisoResto() {
+  if (DEMO) return '';
+  if (!restaOk()) return '<div class="res" style="background:rgba(224,169,74,.13);border-color:var(--am)"><div class="r"><span>' + t().restaIgnota + '</span></div></div>';
+  if (!pagadoYa()) return '';
+  return '<div class="res"><div class="r"><span>' + t().consumoTotal + '</span><b>' + clp(total()) + '</b></div>' +
+         '<div class="r"><span>' + t().pagadoYa + '</span><b>−' + clp(pagadoYa()) + '</b></div>' +
+         '<div class="fin"><span>' + t().faltaPagar + '</span><b>' + clp(elResto()) + '</b></div></div>';
+}
 /* [2.10] si la cuenta cambio despues de imprimir la carta, SE DICE (nunca en silencio): lo que ve el cliente es lo vigente */
 function avisoCambio() {
   if (!CAMBIO || DEMO) return '';
@@ -296,7 +317,7 @@ function mio(){
 function parte(){
   if (MODO==='lomio')   return mio();
   if (MODO==='iguales') return PARTES ? Math.round(total()/PARTES) : 0;
-  return total();
+  return elResto();
 }
 function propina(){
   if (PROP===0)  return 0;
@@ -344,6 +365,9 @@ function cargaCuenta(cb) {
         if (j && j.ok === true && j.cerrada === true) { CERRADO = 'cerrada'; return cb(); }
         if (j && j.ok === true && Array.isArray(j.items) && j.items.length) {
           CUENTA = { total: Number(j.total) || 0,
+                     pagado: Number(j.pagado) || 0,
+                     resta: (j.resta === null || j.resta === undefined || j.resta === '' || isNaN(Number(j.resta))) ? null : Number(j.resta),
+                     restaIgnota: j.resta_ignota === true,
                      items: j.items.map(function (it, i) { return { kk: 'i' + i, n: String(it.n || '?'), q: parseInt(it.q, 10) || 1, pu: Number(it.pu) || 0 }; }) };
           CAMBIO = j.cambio_dopo_carta || null;
           CERRADO = '';
@@ -378,14 +402,14 @@ function pinta() {
      por el número · pagar. Sin ninguna frase que diga que lo reconocimos: el
      reconocimiento se ve en los campos ya llenos, no se anuncia. */
   if (YO && YO.tel && P === 0) {
-    var cons = total(), pr = Math.round(cons * 0.10);
+    var cons = elResto(), pr = Math.round(cons * 0.10);
     b = '<h1>' + (YO.nom ? ti.holaCon + ' ' + esc(YO.nom) : ti.graciasV) + '</h1>' +
         (YO.nom ? '<div class="sub" style="margin-top:4px">' + ti.graciasV + '</div>'
                 : '<input class="inp" id="nom2" autocapitalize="words" autocomplete="given-name" ' +
                   'placeholder="' + ti.nomPh + '" onchange="dejaNombre(this.value)">') +
         '<div class="res">' +
           '<div class="lab" style="margin:0 0 6px">' + ti.cuenta + '</div>' +
-          '<div class="r"><span>' + ti.consumo + '</span><b>' + clp(cons) + '</b></div>' +
+          '<div class="r"><span>' + lblConsumo() + '</span><b>' + clp(cons) + '</b></div>' +
           '<div class="r"><span>' + ti.propina + ' · 10%</span><b>' + clp(pr) + '</b></div>' +
           '<div class="fin"><span>' + ti.totalPagar + '</span><b>' + clp(cons + pr) + '</b></div>' +
         '</div>' +
@@ -403,7 +427,7 @@ function pinta() {
                 '<b><button class="mini" onclick="editTel()">' + ti.cambiar + '</button></b></div>') +
         '</div>';
     f = botonesPago();
-    b = avisoCambio() + b;
+    b = avisoCambio() + avisoResto() + b;
     $('body').innerHTML = b; $('foot').innerHTML = f; pintaIdi();
     if (EDIT_TEL) { var e0 = $('telIn'); if (e0) { e0.focus(); } }
     return;
@@ -415,10 +439,10 @@ function pinta() {
           return '<div class="row"><span>' + (it.q > 1 ? it.q + 'x ' : '') + esc(it.n) +
                  '</span><span class="p">' + clp((it.pu||0)*(it.q||1)) + '</span></div>';
         }).join('') + '</div>' +
-        '<div class="gran">' + clp(total()) + '</div>' +
+        '<div class="gran">' + clp(total()) + '</div>' + avisoResto() +
         '<div class="lab">' + ti.quePagas + '</div><div class="chips">' +
         '<button class="chip" onclick="ponModo(\'todo\')">' + ti.todo +
-          '<small>' + clp(total()) + '</small></button>' +
+          '<small>' + clp(elResto()) + '</small></button>' +
         (DEMO ? '<button class="chip" onclick="ponModo(\'lomio\')">' + ti.lomio +
           '<small>' + ti.lomioSub + '</small></button>' +
         '<button class="chip" onclick="ponModo(\'iguales\')">' + ti.iguales +
@@ -554,6 +578,7 @@ function botonesPago() {
      ⚠️ Hoy NINGUNA de las dos cobra: Fintoc no está conectado. El botón lo dice
      en vez de fingir — *un botón que no hace nada enseña que la función no
      sirve, y esa lección no se borra después.* */
+  if (!restaOk()) return '<div class="sub" style="text-align:center;padding:14px">' + ti.restaIgnota + '</div>';   // [2.10] sin el resto no hay botón de pago
   var banco = (PAIS === 'cl' || PAIS === 'ot');
   return '<button class="cta" onclick="paga()">' +
            (banco ? ti.banco + '<small>' + ti.bancoSub + '</small>'
@@ -635,11 +660,12 @@ function paga() {
     P = 6; pinta(); return;
   }
   if (PAGANDO) return;
+  if (!restaOk()) { alert(t().restaIgnota); return; }   // defensa: aunque algo llame a paga() sin botón
   /* [2.10] POST /checkout-cuenta de pinsita-pay (contrato de 🖐 TERZA). Lo que decide el SERVIDOR: el consumo (lo lee del bordo) y la
      cifra de la propina; el telefono manda solo el PORCENTAJE (0-25). Un 'otro' en pesos se convierte a % entero (la cifra la fija
      el servidor: el total que ve el cliente en Fintoc es el vigente). Solo «pago todo». */
   var pct = (PROP === 0) ? 0
-          : (PROP === 'otro') ? Math.min(25, Math.max(0, Math.round((PROP_OTRO || 0) * 100 / Math.max(1, total()))))
+          : (PROP === 'otro') ? Math.min(25, Math.max(0, Math.round((PROP_OTRO || 0) * 100 / Math.max(1, elResto()))))
           : 10;
   PAGANDO = true;
   var ti = t(), intentos = 0;
@@ -657,7 +683,11 @@ function paga() {
         if (j.ok === true && typeof j.redirect_url === 'string' && /^https:\/\//.test(j.redirect_url)) { location.href = j.redirect_url; return; }
         if (j.error === 'reintenta' && ++intentos < 3) { setTimeout(envia, 3000); return; }
         if (j.error === 'reintenta') return falla(ti.pagoVuelve);
-        if (j.error === 'cuenta_cerrada' || j.error === 'monto_cero') { PAGANDO = false; CERRADO = 'cerrada'; pinta(); return; }
+        if (j.error === 'resta_ignota' || j.error === 'resta_no_disponible' || j.error === 'resta_incoerente') {   // [2.10] el servidor no sabe lo que falta: se reintenta y luego se dice, NUNCA se cobra el consumo
+          if (++intentos < 3) { setTimeout(envia, 3000); return; }
+          return falla(ti.restaIgnota);
+        }
+        if (j.error === 'cuenta_cerrada' || j.error === 'monto_cero' || j.error === 'cuenta_pagada') { PAGANDO = false; CERRADO = 'cerrada'; pinta(); return; }
         falla(ti.pagoNo);
       })
       .catch(function () { clearTimeout(tid); falla(ti.pagoNo); });
