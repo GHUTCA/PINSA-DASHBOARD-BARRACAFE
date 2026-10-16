@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.40.3</span>
+<span class="ver" id="ver">app_jl v1.40.4</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1367,7 +1367,17 @@ function _cajaVista() {
     base.abiertas_bordo = _cjMesasAbiertas().length;
   }
   base.por_mesero = pm; base.venta = +sv.venta || 0; base.cuentas = +sv.cuentas || 0; base.fuente_bordo = true;
+  base.propinas_bordo = +sv.propinas || 0;   // [16-ott · AUT-0703] la propina del giorno dai pagos del bordo (il totale; lo split tarjeta/efectivo resta di Google)
   return base;
+}
+/* [16-ott · AUT-0703 · 🎛 V30 `V30 AUT-0703 LA VENTA DEL JL DAL BORDO OGGI` · N4] DA DOVE viene la cifra e QUANTO è vecchia, in ogni riquadro della
+   venta: «del bordo hace X» se `servicio` è fresco, altrimenti «de Google hace X» — e Google oltre 3 minuti (o in errore) si colora: un numero fermo
+   non deve più sembrare vivo (Alberto, 16-ott: «l'app del JL dopo mezzanotte si blocca»). */
+function _cajaFuenteHtml() {
+  if (_servFresco()) return '<span class="pill on">📷 del bordo ' + edadTxt('serv') + '</span>';
+  const vecchia = !STATE.ts.caja || (Date.now() - STATE.ts.caja) > 180000 || !!STATE.cajaErr;
+  return '<span class="pill ' + (vecchia ? 'amb' : 'off') + '">📷 de Google ' + (STATE.ts.caja ? edadTxt('caja') : 'sin dato') +
+    (STATE.cajaErr ? ' · ' + esc(STATE.cajaErr === 'timeout' ? 'Google no responde' : STATE.cajaErr) : '') + '</span>';
 }
 async function giroCaja() {
   if (DEMO || !STATE.pin) return;
@@ -2445,15 +2455,16 @@ async function asignar() {
 
 /* ═════ SCHEDA CAJA — materia di 💰 DINERO, letta dal ferro (getCaja) ═════ */
 function vCaja() {
-  const c = STATE.caja;
+  const c = _cajaVista();   // [16-ott · AUT-0703] la venta dal bordo se fresca; Google solo come ripiego, con la sua età
   if (!c) {
     /* [v1.33.0] la caja della notte NON aspetta Google: è tutta al bordo */
     if (cjAtto1On()) { if (Date.now() - Math.max(CJ1.ts || 0, CJ1.tryTs || 0) > 20000) setTimeout(cjAtto1Giro, 0); return cjAtto1Html(); }
     return '<div class="card"><h4>💰 Caja</h4><p>Cargando detrás… (getCaja es de los verbos lentos — la pantalla no espera).</p></div>';
   }
-  let h = '<div class="card"><h4>💰 El día <span class="pill off">📷 ' + edadTxt('caja') + '</span></h4>' +
+  let h = '<div class="card"><h4>💰 El día ' + _cajaFuenteHtml() + '</h4>' +
     '<div class="pers" style="border:0;padding:4px 0"><span class="nb"><b>Venta</b></span><span class="val"><b>' + fmt(c.venta || 0) + '</b></span></div>' +
-    '<div class="pers" style="border:0;padding:4px 0"><span class="nb"><b>Boletas</b></span><span class="val"><b>' + (c.boletas || 0) + '</b></span></div></div>';
+    '<div class="pers" style="border:0;padding:4px 0"><span class="nb"><b>Boletas</b>' + (c.fuente_bordo ? '<small>de Google ' + (STATE.ts.caja ? edadTxt('caja') : 'sin dato') + '</small>' : '') +
+    '</span><span class="val"><b>' + (STATE.caja ? (c.boletas || 0) : '—') + '</b></span></div></div>';
   const ma = c.mesas_abiertas || [];
   if (ma.length) {
     h += '<div class="card rossa"><h4>💸 Mesas abiertas <span class="pill off">' + ma.length + '</span></h4>';
@@ -2520,14 +2531,14 @@ const TURNI = { AM: ['DÍA', 'HH'], PM: ['NOCHE', 'TRASNOCHE'] };
 let VTAB = 'general';
 function vtab(x) { VTAB = x; pintaTab(); }
 function vVentas() {
-  const c = STATE.caja;
+  const c = _cajaVista();   // [16-ott · AUT-0703] venta e cuentas dal bordo se fresche; boletas e franjas restano di Google, con la loro età
   let h = '<div class="row2" style="margin-bottom:10px">' +
     '<button class="btn' + (VTAB === 'general' ? '' : ' gh') + '" onclick="vtab(\'general\')">General</button>' +
     '<button class="btn' + (VTAB === 'mesero' ? '' : ' gh') + '" onclick="vtab(\'mesero\')">Por mesero</button></div>';
   if (VTAB === 'general') {
     const venta = c ? (c.venta || 0) : 0, bol = c ? (c.boletas || 0) : 0, ctas = c ? (c.cuentas || 0) : 0;
     const pr = (c && c.propinas) || {};
-    const propTot = (pr.tarjeta || 0) + (pr.efectivo || 0);
+    const propTot = (c && c.fuente_bordo) ? (c.propinas_bordo || 0) : (pr.tarjeta || 0) + (pr.efectivo || 0);
     const F = [
       ['Venta',   fmt(venta), '—', '—', '—'],
       ['Cuentas', ctas || '—', '—', '—', '—'],
@@ -2539,7 +2550,7 @@ function vVentas() {
          sempre la stessa. Una cifra in più su una riga che si legge di corsa
          è rumore, non informazione. */
       ['Propina', propTot ? fmt(propTot) : '—', '—', '—', '—']];
-    h += '<div class="card"><h4>📊 General <span class="pill off">📷 ' + edadTxt('caja') + '</span></h4>' +
+    h += '<div class="card"><h4>📊 General ' + _cajaFuenteHtml() + '</h4>' +
       '<div style="overflow-x:auto"><table class="rep" style="min-width:430px">' +
       '<tr><th>&nbsp;</th><th>HOY</th><th>AYER</th><th>SEM. PASADA</th><th>MAÑANA*</th></tr>' +
       F.map(r => '<tr><td>' + r[0] + '</td><td><b>' + r[1] + '</b></td><td class="mid">' + r[2] + '</td><td class="mid">' + r[3] + '</td><td class="mid">' + r[4] + '</td></tr>').join('') +
@@ -2551,7 +2562,9 @@ function vVentas() {
   return h + _ventasMeseros();
 }
 function _ventasFranjas(c) {
-  let h = '<div class="card"><h4>📊 Por turno y franja</h4>';
+  /* [16-ott · AUT-0703] le franjas restano di Google (il bordo non le calcola ancora): si dice di chi sono e quanto sono vecchie */
+  let h = '<div class="card"><h4>📊 Por turno y franja <span class="pill ' + ((!STATE.ts.caja || (Date.now() - STATE.ts.caja) > 180000) ? 'amb' : 'off') +
+    '">📷 de Google ' + (STATE.ts.caja ? edadTxt('caja') : 'sin dato') + '</span></h4>';
   const fr = (c && c.por_franja) || null;
   if (fr) {
     let gv = 0, gc = 0;
@@ -2783,7 +2796,7 @@ function boot() {
   pintaTesta(); tab(0);
   giroVeloce(); giroCaja(); giroProds();
   setInterval(giroVeloce, CFG.POLL_MS);
-  setInterval(() => { if (TAB === 2 || TAB === 0) giroCaja(); }, 60000);
+  setInterval(() => { if (TAB === 2 || TAB === 0) giroCaja(); else if (TAB === 3) giroServicio(); }, 60000);   // [16-ott · AUT-0703] con Ventas davanti la venta del bordo non invecchia (Google no: solo con Sala/Caja, come prima)
   setInterval(giroTurno, 300000);
   let _cjTick = 0;
   setInterval(() => { if (!cjAtto1On()) return; _cjTick++; if (TAB === 2 || _cjTick % 3 === 0) cjAtto1Giro(); }, 20000);   // [v1.33.0] Caja davanti ogni 20 s, altrimenti ogni minuto: l'aviso deve arrivare anche in sala
