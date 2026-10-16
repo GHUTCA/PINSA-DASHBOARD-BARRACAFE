@@ -50,6 +50,8 @@ function banco(SRC) {
   t('① vCaja legge _cajaVista, non STATE.caja', /^function vCaja\(\) \{\n  const c = _cajaVista\(\);/.test(vC));
   t('① vVentas legge _cajaVista, non STATE.caja', /^function vVentas\(\) \{\n  const c = _cajaVista\(\);/.test(vV));
   t('① la pillola di vCaja e di vVentas e _cajaFuenteHtml', /El día ' \+ _cajaFuenteHtml\(\)/.test(vC) && /General ' \+ _cajaFuenteHtml\(\)/.test(vV));
+  t('🟡 EL GIRO · senza Google e col bordo fresco le Mesas abiertas vengono dalla vista del bordo (_cjMesasDetalle), non spariscono',
+    /const maB = \(!STATE\.caja && c\.fuente_bordo\) \? _cjMesasDetalle\(\)\.map\(/.test(vC) && /const ma = maB \|\| c\.mesas_abiertas \|\| \[\];/.test(vC));
   t('⑤ con Ventas davanti (TAB 3) gira giroServicio, Google no', /if \(TAB === 2 \|\| TAB === 0\) giroCaja\(\); else if \(TAB === 3\) giroServicio\(\);/.test(SRC));
   t('versione >= 1.40.4', /app_jl v1\.(40\.[4-9]|4[1-9]\.\d|[5-9]\d\.\d)/.test(SRC));
   return ko - k0;
