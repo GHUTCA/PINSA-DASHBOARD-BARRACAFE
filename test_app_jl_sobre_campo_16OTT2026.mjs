@@ -39,6 +39,7 @@ async function banco(SRC) {
   // ⑦ AUT-0705 · le tre fasce (Alberto): verde ≤100 · ambra 100-1.000 · rojo >1.000 dopo tre conteos
   { const ctx = { String, Number, isFinite, Math }; vm.createContext(ctx); vm.runInContext(fnDe(SRC, '_cjFascia') + fnDe(SRC, '_cjNum'), ctx);
     t('⑦ la fascia del bordo vince: verde · ambra · rojo', ctx._cjFascia({ fascia: 'verde', con_diferencia: true }) === 'verde' && ctx._cjFascia({ fascia: 'ambra' }) === 'ambra' && ctx._cjFascia({ fascia: 'ROJO' }) === 'rojo');
+    t('⑦ senza fascia, busta nata dopo tre conteos (cuadra:false + con_diferencia) ⇒ rojo, non ambra (giallo di ⚙️ ARQ)', ctx._cjFascia({ sobre_nro: '1040', cuadra: false, con_diferencia: true }) === 'rojo');
     t('⑦ senza fascia (bordo di oggi): con_diferencia ⇒ ambra, altrimenti verde', ctx._cjFascia({ con_diferencia: true }) === 'ambra' && ctx._cjFascia({}) === 'verde' && ctx._cjFascia({ fascia: 'boh', con_diferencia: false }) === 'verde');
     t('⑦ la differenza: numero o null, mai 0 inventato', ctx._cjNum(122) === 122 && ctx._cjNum(-1500.4) === -1500 && ctx._cjNum(null) === null && ctx._cjNum('') === null && ctx._cjNum(undefined) === null); }
   { const C = (sob) => { const ctx = { CJ1: { st: { meseros: [], da_imbustare: { n: 0 } }, sob: sob, enviando: false }, cjFlag: () => false, fmt: (n) => '$' + Number(n).toLocaleString('es-CL'), esc: String,
