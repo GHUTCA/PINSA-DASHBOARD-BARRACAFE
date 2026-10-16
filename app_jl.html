@@ -830,6 +830,9 @@ let CJ1 = { st: null, ts: 0, err: '', ret: null, enviando: false };
 function _cjFine() { CJ1.enviando = false; CJ1.enviandoTs = 0; try { const ae = document.activeElement; if (ae && ae.blur) ae.blur(); } catch (e) {} pintaTab(); }
 /* il campo dell'importo si legge come DENARO, non come un codice: i punti delle migliaia mentre si scrive ($26.500). La lettura toglie tutto
    ciò che non è una cifra (cjSobEnviar), quindi i punti non cambiano il numero che parte. */
+/* [16-ott · AUT-0705] la fascia del sobre: quella del bordo se la manda (`fascia`: verde · ambra · rojo); altrimenti il `con_diferencia` di oggi (= ambra) */
+function _cjFascia(r) { const f = String((r && r.fascia) || '').toLowerCase(); if (f === 'verde' || f === 'ambra' || f === 'rojo') return f; return (r && r.con_diferencia) ? 'ambra' : 'verde'; }
+function _cjNum(v) { const n = Number(v); return (v != null && v !== '' && isFinite(n)) ? Math.round(n) : null; }
 function cjMilesIn(e) { const d = String((e && e.value) || '').replace(/[^0-9]/g, ''); e.value = d ? Number(d).toLocaleString('es-CL') : ''; }
 async function cjAtto1Giro() {
   if (!cjAtto1On() || !STATE.pin) return;
@@ -1059,7 +1062,7 @@ async function cjSobEnviar(btn) {
   CJ1.enviando = true; CJ1.enviandoTs = Date.now();
   try {
     const r = await cajaPost1({ verbo: 'sobre', pin_jl: STATE.pin, contado: contado, uid_gesto: CJ1.sobUid });
-    if (r && r.ok && r.sobre_nro) { CJ1.sob = { nro: r.sobre_nro, dif: !!r.con_diferencia }; CJ1.sobUid = null; }
+    if (r && r.ok && r.sobre_nro) { CJ1.sob = { nro: r.sobre_nro, dif: !!r.con_diferencia, fascia: _cjFascia(r), diferencia: _cjNum(r.diferencia) }; CJ1.sobUid = null; }
     else if (r && r.ok && r.cuadra === false) { CJ1.sob = { intento: r.intento, de: r.de }; CJ1.sobUid = null; /* [08-ott · EMERG BUSTA CONTEO RIPETUTO] un conteo UMANO nuevo es un gesto nuevo: con el uid viejo el bordo lo toma por un retry de red y no avanza al 3º intento */ const e = $('cj1SobContado'); if (e) e.value = ''; }
     else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
     else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
@@ -1169,9 +1172,17 @@ function cjAtto1Html() {
       '<p class="mini" style="text-align:center;font-size:15px"><b>escribe este número en el sobre</b></p>' +
       '<button class="btn acc" onclick="cjSobListo()">Listo, lo escribí</button></div>';
   } else if (sob && sob.nro) {
-    h += '<div class="card' + (sob.dif ? ' ambra' : '') + '"><h4>Detalle retiro efectivo</h4>' +
-      '<p style="font-size:34px;font-weight:900;text-align:center;letter-spacing:4px;margin:6px 0;color:' + (sob.dif ? '#FFB547' : '#3ddc84') + '">' + esc(sob.nro) + '</p>' +
-      '<p class="mini" style="text-align:center">número del sobre' + (sob.dif ? ' · con diferencia' : '') + '</p>' +
+    /* [16-ott · AUT-0705 · Alberto: il conteggio a TRE FASCE] verde ≤ $100 (cuadra) · ambra $100-1.000 (cuadra con diferencia, al primo colpo)
+       · rojo > $1.000 dopo i tre conteos. La differenza si SCRIVE solo qui, a sobre nato: prima, durante i conteos, direbbe la cifra attesa e il
+       conteggio non sarebbe più cieco. */
+    const _fc = sob.fascia || (sob.dif ? 'ambra' : 'verde');
+    const _col = _fc === 'rojo' ? '#ff6b6b' : _fc === 'ambra' ? '#FFB547' : '#3ddc84';
+    const _txt = _fc === 'rojo' ? 'No cuadró en 3 conteos' : _fc === 'ambra' ? 'Cuadra con diferencia' : 'Cuadra';
+    h += '<div class="card' + (_fc === 'rojo' ? ' rossa' : _fc === 'ambra' ? ' ambra' : '') + '"><h4>Detalle retiro efectivo</h4>' +
+      '<p style="font-size:34px;font-weight:900;text-align:center;letter-spacing:4px;margin:6px 0;color:' + _col + '">' + esc(sob.nro) + '</p>' +
+      '<p style="text-align:center;font-weight:800;color:' + _col + ';margin:0 0 4px">' + _txt +
+        (sob.diferencia != null && sob.diferencia !== 0 ? ' · ' + (sob.diferencia > 0 ? '+' : '−') + fmt(Math.abs(sob.diferencia)) : '') + '</p>' +
+      '<p class="mini" style="text-align:center">número del sobre — escríbelo en el sobre</p>' +
       '<button class="btn acc" onclick="cjSobListo()">A la caja fuerte</button></div>';
   } else if (di.n && sobAuto) {
     h += '<div class="card"><h4>Retiros sin sobre</h4>' + _cjRiga(di.n + ' retiro' + (di.n === 1 ? '' : 's') + ' del turno', '<b>' + fmt(di.suma_riferimento || 0) + '</b>') +
@@ -1184,7 +1195,7 @@ function cjAtto1Html() {
       '<p style="font-size:15px;font-weight:800;margin:10px 0 4px">¿Cuánto contaste?</p>' +
       '<div style="display:flex;align-items:center;gap:6px"><span style="font-size:24px;font-weight:900">$</span>' +
       '<input class="busca" id="cj1SobContado" type="text" inputmode="numeric" placeholder="0" autocomplete="off" style="font-size:22px;font-weight:800;text-align:center;flex:1" oninput="cjMilesIn(this)"></div>' +
-      (sob && sob.intento ? '<p class="mini" style="text-align:center;color:#FFB547;font-weight:700">No cuadró: cuenta de nuevo · conteo ' + (sob.intento + 1) + ' de ' + (sob.de || 3) + '</p>' : '') +
+      (sob && sob.intento ? '<p class="mini" style="text-align:center;color:#ff6b6b;font-weight:700">No cuadró: cuenta de nuevo · conteo ' + (sob.intento + 1) + ' de ' + (sob.de || 3) + '</p>' : '') +   // [AUT-0705] rojo: oltre $1.000, e senza la differenza (il conteggio resta cieco)
       '<button class="btn acc" onclick="cjSobEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Confirmar') + '</button>' +
       '<p class="mini" style="text-align:center;margin-top:12px">número del sobre — lo da el sistema cuando el conteo cuadra</p>' +
       '<p style="font-size:22px;font-weight:900;text-align:center;letter-spacing:6px;margin:2px 0;color:#6b6676">— — — —</p></div>';

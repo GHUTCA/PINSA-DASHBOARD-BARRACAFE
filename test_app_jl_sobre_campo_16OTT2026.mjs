@@ -36,6 +36,20 @@ async function banco(SRC) {
       _cjFine() { ctx.CJ1.enviando = false; } };
     vm.createContext(ctx); vm.runInContext(fnDe(SRC, 'cjSobEnviar'), ctx); await ctx.cjSobEnviar(null);
     t('⑤ «26.500» parte come contado 26500', posts.length === 1 && posts[0].contado === 26500, posts); }
+  // ⑦ AUT-0705 · le tre fasce (Alberto): verde ≤100 · ambra 100-1.000 · rojo >1.000 dopo tre conteos
+  { const ctx = { String, Number, isFinite, Math }; vm.createContext(ctx); vm.runInContext(fnDe(SRC, '_cjFascia') + fnDe(SRC, '_cjNum'), ctx);
+    t('⑦ la fascia del bordo vince: verde · ambra · rojo', ctx._cjFascia({ fascia: 'verde', con_diferencia: true }) === 'verde' && ctx._cjFascia({ fascia: 'ambra' }) === 'ambra' && ctx._cjFascia({ fascia: 'ROJO' }) === 'rojo');
+    t('⑦ senza fascia (bordo di oggi): con_diferencia ⇒ ambra, altrimenti verde', ctx._cjFascia({ con_diferencia: true }) === 'ambra' && ctx._cjFascia({}) === 'verde' && ctx._cjFascia({ fascia: 'boh', con_diferencia: false }) === 'verde');
+    t('⑦ la differenza: numero o null, mai 0 inventato', ctx._cjNum(122) === 122 && ctx._cjNum(-1500.4) === -1500 && ctx._cjNum(null) === null && ctx._cjNum('') === null && ctx._cjNum(undefined) === null); }
+  { const C = (sob) => { const ctx = { CJ1: { st: { meseros: [], da_imbustare: { n: 0 } }, sob: sob, enviando: false }, cjFlag: () => false, fmt: (n) => '$' + Number(n).toLocaleString('es-CL'), esc: String,
+        _cjFascia: null, Date, Math, String, Number, cjSaldosHtml: () => '', _cjMesasDetalle: () => [], _cjHace: () => '', CJ1_ERR: {} };
+      vm.createContext(ctx); vm.runInContext(['_cjRiga', '_cjMmSs', '_cjArg'].map((n) => fnDe(SRC, n)).join('') + fnDe(SRC, 'cjAtto1Html'), ctx);
+      try { return ctx.cjAtto1Html(); } catch (e) { return 'ERR ' + e.message; } };
+    const g = C({ nro: '1035', fascia: 'ambra', diferencia: 122 }), v = C({ nro: '1036', fascia: 'verde', diferencia: 2 }), r = C({ nro: '1037', fascia: 'rojo', diferencia: -1500 });
+    t('⑦ ambra: «Cuadra con diferencia · +$122», card ambra', /card ambra/.test(g) && /Cuadra con diferencia · \+\$122/.test(g), g.slice(0, 400));
+    t('⑦ verde: «Cuadra · +$2»', /Cuadra · \+\$2</.test(v) && !/card ambra|card rossa/.test(v.split('Detalle retiro efectivo')[0].slice(-40)), v.slice(0, 300));
+    t('⑦ rojo: «No cuadró en 3 conteos · −$1.500», card rossa', /card rossa/.test(r) && /No cuadró en 3 conteos · −\$1\.500/.test(r), r.slice(0, 300)); }
+  t('⑦ durante i conteos (cuadra:false) NON si mostra la differenza: il conteggio resta cieco', /No cuadró: cuenta de nuevo · conteo ' \+ \(sob\.intento \+ 1\)/.test(SRC) && !/cuenta de nuevo[^\n]*diferencia/.test(SRC));
   t('versione >= 1.40.5', /app_jl v1\.(40\.[5-9]|4[1-9]\.\d)/.test(SRC));
   return ko - k0;
 }
