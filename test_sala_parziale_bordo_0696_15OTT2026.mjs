@@ -88,6 +88,7 @@ function banco(SRC) {
   t('V3 · server 4.890 (A 3.890 + B 1.000), memoria A 3.890 ⇒ 1.190: mai la somma (che darebbe 0)', vp({ res: 6080, sed: 4890, loc: 3890 }) === 1190, vp({ res: 6080, sed: 4890, loc: 3890 }));
   t('V4 · server spento per apparecchio, memoria 3.890 ⇒ 2.190 come ieri', vp({ res: 6080, sed: 4890, loc: 3890, serverOn: false }) === 2190);
   t('V5 · nessun pagato da nessuna parte ⇒ consumo intero', vp({ res: 6080 }) === 6080);
+  t('FRENO 16-ott · RESTO_SERVER_ON spenta di flotta (default), accesa solo con ?restoserver=1', SRC.includes("return localStorage.getItem('sala_restoserver') === '1';   // default SPENTA") && SRC.includes("} catch (e) { return q === '1'; }"));
   { const ab = SRC.slice(SRC.indexOf('function abrirPago('), SRC.indexOf('function abrirPago(') + 20000);
     t('③ abrirPago salva resto E consumo PRIMA che la parte prenda il posto del totale, e li porta in STATE.pago',
       ab.indexOf('const _restoAbrir = tot;') > 0 && ab.indexOf('_consAbrir += _vpBase(mm)') > 0 && ab.indexOf('_consAbrir += _vpBase(mm)') < ab.indexOf('if (_pt) tot = _pt;') && /restoAbrir: _restoAbrir, consumoAbrir: _consAbrir/.test(ab)); }
