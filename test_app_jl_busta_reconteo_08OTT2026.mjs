@@ -6,13 +6,15 @@ import fs from 'node:fs'; import vm from 'node:vm';
 const H = fs.readFileSync(new URL('./app_jl.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : (ko++, console.log('✗', n, i === undefined ? '' : JSON.stringify(i).slice(0, 260))); };
 const i = H.indexOf('async function cjSobEnviar('); if (i < 0) throw new Error('cjSobEnviar');
-const fnSrc = H.slice(i, H.indexOf('\n}\n', i) + 3);
+const fnSrc = H.slice(i, H.indexOf('\n}\n', i) + 3) +
+  // [16-ott · app_jl v1.40.5] la fine del gesto vive in _cjFine (blur + ridisegno): la si prende VERA dal sorgente, se c'e'
+  (H.indexOf('function _cjFine(') >= 0 ? '\n' + H.slice(H.indexOf('function _cjFine('), H.indexOf('\n', H.indexOf('function _cjFine('))) + '\n' : '');
 
 function mundo(esperado) {
   let n = 0; const posts = []; let ultimo = null; let intentos = 0;
   const el = { value: '' };
   const ctx = { CJ1: { enviando: false, sobUid: null }, STATE: { pin: '2222' }, CJ1_ERR: {}, posts, toasts: [],
-    $: () => el, toast: (k, m) => ctx.toasts.push(k + ':' + m), pintaTab: () => {}, cjMotivoTxt: (m) => String(m), parseInt, Number, String,
+    $: () => el, toast: (k, m) => ctx.toasts.push(k + ':' + m), pintaTab: () => {}, cjMotivoTxt: (m) => String(m), parseInt, Number, String, document: { activeElement: null },
     cajaNuevoUid: (p) => p + '-' + (++n),
     cajaPost1: async (b) => {
       posts.push(b);

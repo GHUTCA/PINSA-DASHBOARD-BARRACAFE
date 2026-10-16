@@ -182,7 +182,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.40.4</span>
+<span class="ver" id="ver">app_jl v1.40.5</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -804,8 +804,8 @@ async function cajaPost1(payload) {
     const r = await fetch(CFG.BORDE + '/caja/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T),
       { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload), signal: ctrl.signal, cache: 'no-store' });
+    let j = null; try { j = await r.json(); } catch (e) { if (e && e.name === 'AbortError') throw e; j = null; }   // [v1.40.5] il timeout copre anche il corpo
     clearTimeout(to);
-    let j = null; try { j = await r.json(); } catch (e) { j = null; }
     if (!j) throw new Error('http_' + r.status);
     return j;   // anche un 401/429/400 ha un corpo che dice perché
   } catch (e) { clearTimeout(to); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
@@ -823,6 +823,14 @@ const CJ1_ERR = {
   sin_conexion: 'Sin conexión — reintento solo.',
 };
 let CJ1 = { st: null, ts: 0, err: '', ret: null, enviando: false };
+/* [16-ott · app_jl v1.40.5 · 🎛 V30 `V30 IL SOBRE DI JL2 BLOCCATO A 26500`] LA FINE DI UN GESTO DEL JL, IN UN POSTO SOLO.
+   Il sobre di JL2 è rimasto su «…» in servizio. `pintaTab` non ridisegna finché un campo ha il fuoco (r.~2758), e su iOS il campo del
+   conteggio lo tiene anche dopo il tocco del bottone: la cura c'era solo nel ritiro (r.~1010), non nel sobre né negli altri quattro.
+   Qui per tutti e sei: `enviando` torna falso, il fuoco si toglie, la scheda si ridisegna. */
+function _cjFine() { CJ1.enviando = false; CJ1.enviandoTs = 0; try { const ae = document.activeElement; if (ae && ae.blur) ae.blur(); } catch (e) {} pintaTab(); }
+/* il campo dell'importo si legge come DENARO, non come un codice: i punti delle migliaia mentre si scrive ($26.500). La lettura toglie tutto
+   ciò che non è una cifra (cjSobEnviar), quindi i punti non cambiano il numero che parte. */
+function cjMilesIn(e) { const d = String((e && e.value) || '').replace(/[^0-9]/g, ''); e.value = d ? Number(d).toLocaleString('es-CL') : ''; }
 async function cjAtto1Giro() {
   if (!cjAtto1On() || !STATE.pin) return;
   if (CJ1.inVolo) return;
@@ -914,7 +922,7 @@ function cjRetOtra() { if (!CJ1.ret) return; CJ1.ret.otra = true; CJ1.ret.conf =
 async function cjRetTodo(btn) {
   if (CJ1.enviando || !CJ1.ret) return;
   if (btn) btn.disabled = true;   // un tocco = un fatto
-  CJ1.enviando = true;
+  CJ1.enviando = true; CJ1.enviandoTs = Date.now();
   const ret = CJ1.ret;
   try {
     const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, recibi: 'todo', visto: _cjEnManoDe(ret), uid_gesto: ret.uid, ..._cjEntrega(ret) });   // la firma es sulla cifra che il JL HA VISTO sul bottone (revisione BKP): se il bordo ne sa un'altra, non scrive
@@ -936,14 +944,14 @@ async function cjRetTodo(btn) {
   } catch (e) {
     CJ1.retDubbio = CJ1.retDubbio || {}; CJ1.retDubbio[ret.mesero] = ret.uid;   // la clave NO muere: reintentar es el MISMO retiro
     toast('err', '⏳ ' + (e && e.message === 'timeout' ? 'El sistema tardó: puede que SÍ se haya registrado. Reintenta: no se duplica.' : 'Sin conexión: reintenta, no se duplica.'));
-  } finally { CJ1.enviando = false; pintaTab(); }
+  } finally { _cjFine(); }
 }
 /* [v1.36.0 · AUT-0613 ②] «Hacer el sobre ahora»: el sistema suma los retiros sin sobre y crea el sobre. El JL no cuenta: copia el NÚMERO. `dia` = la noche de los retiros
    (si quedaron de anoche, despues de las 06:00, la noche vieja se sigue pudiendo cerrar). */
 async function cjSobAuto(btn, dia) {
   if (CJ1.enviando) return;
   if (btn) btn.disabled = true;
-  CJ1.enviando = true;
+  CJ1.enviando = true; CJ1.enviandoTs = Date.now();
   try {
     const r = await cajaPost1(Object.assign({ verbo: 'sobre_auto', pin_jl: STATE.pin }, dia ? { dia_op: dia } : {}));
     if (r && r.ok && r.sobre_nro) { CJ1.sob = { nro: r.sobre_nro, suma: r.suma, auto: true, dia: r.dia }; }
@@ -951,7 +959,7 @@ async function cjSobAuto(btn, dia) {
     else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
     else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
   } catch (e) { toast('err', '⏳ No sé si llegó: toca de nuevo, no se duplica.'); }
-  finally { CJ1.enviando = false; pintaTab(); }
+  finally { _cjFine(); }
 }
 /* [v1.36.0 · AUT-0613 ③] «Cerrar igual — diré por qué»: SOLO existe con pendientes (nunca un cierre limpio con un toque de mas), pide el PIN otra vez y el MOTIVO escrito. Alberto lo lee la noche misma. */
 function cjCieIgualAbrir() { CJ1.cie = { abierto: true, motivo: '', pin: '', uid: cajaNuevoUid('CJ-CIE') }; pintaTab(); }
@@ -965,7 +973,7 @@ async function cjCieIgualEnviar(btn) {
   if (!pin) { toast('warn', 'Escribe tu PIN'); return; }
   if (btn) btn.disabled = true;   // [AUT-0666] prima del gate (vedi cjCieEnviar)
   const sgI = await cjSaldosGate(); if (sgI.bloquea || sgI.nosabe) { cjSaldosAviso(sgI); if (sgI.bloquea) { if (btn) btn.disabled = false; return; } }   // [AUT-0666] «cerrar igual» NO salta un saldo
-  CJ1.enviando = true;
+  CJ1.enviando = true; CJ1.enviandoTs = Date.now();
   const turno = (($('cj1CieTurno') || {}).value) || 'PM';
   const st = CJ1.st || {};
   let monto = 0; (st.sobres || []).forEach(function (x) { monto += (+x.suma_ritiros || +x.suma_ritiri || 0); });
@@ -976,7 +984,7 @@ async function cjCieIgualEnviar(btn) {
     else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
     else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
   } catch (e) { toast('err', '⏳ No sé si llegó: toca de nuevo, no se duplica.'); }
-  finally { CJ1.enviando = false; pintaTab(); }
+  finally { _cjFine(); }
 }
 function _cjPendientes() {
   /* los pendientes que el JL ve: lo mismo que el bordo mira al cerrar (ritiros sin sobre + garzones con dinero en la mano) */
@@ -1011,7 +1019,7 @@ async function cjRetEnviar(btn) {
     pintaTab(); return;
   }
   if (btn) btn.disabled = true;   // un tocco = un fatto
-  CJ1.enviando = true;
+  CJ1.enviando = true; CJ1.enviandoTs = Date.now();
   const ret = CJ1.ret;
   try {
     const r = await cajaPost1({ verbo: 'ritiro', pin_jl: STATE.pin, mesero: ret.mesero, monto: monto,
@@ -1036,7 +1044,7 @@ async function cjRetEnviar(btn) {
     /* la clave NO muere: el reintento con el MISMO uid_gesto es el MISMO retiro */
     CJ1.retDubbio = CJ1.retDubbio || {}; CJ1.retDubbio[ret.mesero] = ret.uid;
     toast('err', '⏳ ' + (e && e.message === 'timeout' ? 'El sistema tardó: puede que SÍ se haya registrado. Reintenta: no se duplica.' : 'Sin conexión: reintenta, no se duplica.'));
-  } finally { CJ1.enviando = false; pintaTab(); }
+  } finally { _cjFine(); }
 }
 /* ③ la busta: si manda SOLO il contato. Se quadra il bordo dà il numero; se no si riconta (al 3° il
    numero arriva «con diferencia»). L'uid della busta vive finché non arriva un numero. */
@@ -1048,7 +1056,7 @@ async function cjSobEnviar(btn) {
   if (!Number.isFinite(contado) || contado < 0) { toast('warn', 'Escribe lo que contaste'); return; }
   if (btn) btn.disabled = true;   // un tocco = un fatto: si spegne PRIMA della rete
   if (!CJ1.sobUid) CJ1.sobUid = cajaNuevoUid('CJ-SOB');
-  CJ1.enviando = true;
+  CJ1.enviando = true; CJ1.enviandoTs = Date.now();
   try {
     const r = await cajaPost1({ verbo: 'sobre', pin_jl: STATE.pin, contado: contado, uid_gesto: CJ1.sobUid });
     if (r && r.ok && r.sobre_nro) { CJ1.sob = { nro: r.sobre_nro, dif: !!r.con_diferencia }; CJ1.sobUid = null; }
@@ -1056,7 +1064,7 @@ async function cjSobEnviar(btn) {
     else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
     else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
   } catch (e) { toast('err', '⏳ No sé si llegó: toca de nuevo, no se duplica.'); }
-  finally { CJ1.enviando = false; pintaTab(); }
+  finally { _cjFine(); }
 }
 /* ④ el cierre: con mesas abiertas no se ofrece (se cierran una por una, «Cerrar sin pago»). El monto
    declarado es la SUMA de los sobres que el JL ya declaró esta noche: el total de la caja fuerte no se
@@ -1072,7 +1080,7 @@ async function cjCieEnviar(btn) {
   let monto = 0; (st.sobres || []).forEach(function (x) { monto += (+x.suma_ritiri || 0); });
   if (!CJ1.cieUid) CJ1.cieUid = cajaNuevoUid('CJ-CIE');
   const warnings = (!(st.sobres || []).length && !((st.da_imbustare || {}).n)) ? ['sin_ritiros'] : [];
-  CJ1.enviando = true;
+  CJ1.enviando = true; CJ1.enviandoTs = Date.now();
   try {
     const r = await cajaPost1({ verbo: 'cierre_turno', pin_jl: STATE.pin, turno: turno, monto_declarado: monto,
       mesas_abiertas: [], warnings: warnings, uid_gesto: CJ1.cieUid });
@@ -1080,7 +1088,7 @@ async function cjCieEnviar(btn) {
     else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
     else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
   } catch (e) { toast('err', '⏳ No sé si llegó: toca de nuevo, no se duplica.'); }
-  finally { CJ1.enviando = false; pintaTab(); }
+  finally { _cjFine(); }
 }
 /* [03-ott · i vetri di 🎨 DESIGN, `VETRI CONSEGNA SABATO 12`] ①-④ del JL nelle parole del mockup:
    nessuna frase dentro il telefono, «dinero» e mai «plata», nessun limite e nessun totale della
@@ -1089,6 +1097,7 @@ function _cjRiga(nb, val, x) { return '<div class="pers" style="border:0;padding
 function _cjMmSs(ms) { if (!(ms > 0)) return '00:00'; const t = Math.floor(ms / 1000); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); }
 function _cjArg(x) { return esc(x).replace(/'/g, "\\'"); }
 function cjAtto1Html() {
+  if (CJ1.enviando && CJ1.enviandoTs && Date.now() - CJ1.enviandoTs > 20000) CJ1.enviando = false;   // [v1.40.5] mai «…» per sempre: lo stesso uid rende il ritocco innocuo
   const st = CJ1.st;
   let h = '';
   if (CJ1.err) h += '<div class="card ' + (st ? 'ambra' : 'rossa') + '"><p>⚠️ ' + esc(CJ1_ERR[CJ1.err] || CJ1.err) + '</p>' +
@@ -1169,10 +1178,16 @@ function cjAtto1Html() {
       '<button class="btn acc" onclick="cjSobAuto(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Hacer el sobre ahora') + '</button></div>';
   } else if (di.n) {
     h += '<div class="card"><h4>Detalle retiro efectivo</h4>' + _cjRiga(di.n + ' retiro' + (di.n === 1 ? '' : 's') + ' del turno', '') +
-      '<input class="busca" id="cj1SobContado" type="text" inputmode="numeric" placeholder="$" autocomplete="off" style="font-size:22px;font-weight:800;text-align:center">' +
-      '<p style="font-size:26px;font-weight:900;text-align:center;letter-spacing:6px;margin:6px 0;color:#6b6676">— — — —</p>' +
-      '<p class="mini" style="text-align:center">número del sobre' + (sob && sob.intento ? ' · conteo ' + (sob.intento + 1) + ' de ' + (sob.de || 3) : '') + '</p>' +
-      '<button class="btn acc" onclick="cjSobEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Confirmar') + '</button></div>';
+      /* [16-ott · v1.40.5 · Alberto: «dovremmo mettere il segno $»] il JL leggeva 26500 come il numero del sobre: il placeholder «$» spariva
+         appena si scriveva e sotto il campo c'era subito «número del sobre». Ora la domanda sta SOPRA, il $ resta, e il numero del sobre è
+         staccato e detto per quello che è: lo dà il sistema dopo. */
+      '<p style="font-size:15px;font-weight:800;margin:10px 0 4px">¿Cuánto contaste?</p>' +
+      '<div style="display:flex;align-items:center;gap:6px"><span style="font-size:24px;font-weight:900">$</span>' +
+      '<input class="busca" id="cj1SobContado" type="text" inputmode="numeric" placeholder="0" autocomplete="off" style="font-size:22px;font-weight:800;text-align:center;flex:1" oninput="cjMilesIn(this)"></div>' +
+      (sob && sob.intento ? '<p class="mini" style="text-align:center;color:#FFB547;font-weight:700">No cuadró: cuenta de nuevo · conteo ' + (sob.intento + 1) + ' de ' + (sob.de || 3) + '</p>' : '') +
+      '<button class="btn acc" onclick="cjSobEnviar(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Confirmar') + '</button>' +
+      '<p class="mini" style="text-align:center;margin-top:12px">número del sobre — lo da el sistema cuando el conteo cuadra</p>' +
+      '<p style="font-size:22px;font-weight:900;text-align:center;letter-spacing:6px;margin:2px 0;color:#6b6676">— — — —</p></div>';
   }
   if (sobAuto && !(sob && sob.nro) && st.da_imbustare_prev && st.da_imbustare_prev.n) {
     const pv = st.da_imbustare_prev;
