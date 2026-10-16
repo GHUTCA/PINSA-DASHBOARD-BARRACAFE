@@ -558,7 +558,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v100 · recibo de conteo claro · Control apagado · AUT-0685 · 16oct</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v101 · Control: solo donde hay datos (RSC, CDL) · apagado salvo ?control=1 · AUT-0685 · 16oct</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:19px;cursor:pointer;line-height:1;touch-action:manipulation;transition:transform .1s">🧾</button>
@@ -6472,7 +6472,11 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
   var LOCNOM = { rsc:'Riesco', cdl:'Candelaria', exo:'EXO', bks:'BKS' };
   var DOW = ['dom','lun','mar','mié','jue','vie','sáb'];
   var DATOS = {};          // code -> { ok:bool, dias:{ 'YYYY-MM-DD': fila } }
-  var DISPONIBLE = null;   // null = aún no se sabe · false = el borde no tiene la ruta / apagado
+  /* v101 · solo se MIDE donde el libro nuevo ya tiene datos reales: RSC y CDL (14-oct: RSC 83-103 productos por giro, CDL 79-94). EXO: la ruta responde pero sin ningún
+     movimiento (0 en 7 días); BKS: leva_spenta. Pintar rojo ahí sería una alarma FALSA (un rojo que nace sin motivo enseña a ignorar el rojo): quedan «aún sin medir». */
+  var MEDIBLE = { rsc:1, cdl:1 };
+  var DISPONIBLE = null;   // null = aún no se sabe · false = el borde no tiene la ruta · true = al menos un local mide
+  var RUTA404 = false;
 
   function visibles(){ return CTX_ADMIN ? ['rsc','cdl','exo','bks'] : [CTX_CODE]; }   // alcance por cargo: el JB ve todos, el local solo el suyo
   function tieneGiro(code){ return !!(typeof GIROS_POR_LOCAL!=='undefined' && GIROS_POR_LOCAL[code] && GIROS_POR_LOCAL[code].length); }
@@ -6488,20 +6492,25 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
       var r = await fetch(BORDE_REG.URL+'/inventario/'+encodeURIComponent(code)+'/cumplimiento?desde='+desde+'&hasta='+hasta,
                           { headers:{ 'X-Borde-Token': BORDE_REG.T }, cache:'no-store' });
       var j=null; try{ j=await r.json(); }catch(e){}
-      if(!j || !j.ok){ if(r.status===404 || (j && (j.error==='ruta_desconocida' || j.error==='leva_spenta'))) DISPONIBLE=false; return null; }
+      if(!j || !j.ok){ if(r.status===404 || (j && j.error==='ruta_desconocida')) RUTA404=true; return null; }
       var dias={}; (j.dias||[]).forEach(function(d){ dias[d.dia]=d; });
-      DATOS[code]={ ok:true, dias:dias }; DISPONIBLE=true; return DATOS[code];
+      DATOS[code]={ ok:true, dias:dias }; return DATOS[code];
     }catch(e){ return null; }
   }
   async function cargar(){
     var hoy=diaOperativo(Date.now()), desde=sumaDias(hoy,-7), cods=visibles();
-    await Promise.all(cods.map(function(c){ return traer(c, desde, hoy); }));
+    await Promise.all(cods.filter(function(c){ return MEDIBLE[c]; }).map(function(c){ return traer(c, desde, hoy); }));
+    DISPONIBLE = cods.some(function(c){ return MEDIBLE[c] && DATOS[c]; }) ? true : (RUTA404 ? false : DISPONIBLE);
   }
   function ctxEval(code){
     var ahora=Date.now(); return { esHoyDe:function(d){ return d===diaOperativo(ahora); }, horaOp:horaOperativa(ahora), lim:LIM[code]||24, hoy:diaOperativo(ahora) };
   }
   function celdas(code){
     var c=ctxEval(code), dat=(DATOS[code]&&DATOS[code].dias)||{}, hoy=c.hoy, out={ giro:[], mov:[], bod:[] };
+    if(!MEDIBLE[code] || !DATOS[code]){   // sin libro nuevo con datos: ni verde ni rojo
+      for(var k=6;k>=0;k--){ var dd=sumaDias(hoy,-k); out.giro.push({ d:dd, st:{ e:'n', txt:'aún sin medir' } }); out.mov.push({ d:dd, st:{ e:'n', txt:'aún sin medir' } }); }
+      out.bod.push({ d:diaBodega(code,hoy), st:{ e:'n', txt:'aún sin medir' } }); return out;
+    }
     for(var i=6;i>=0;i--){
       var d=sumaDias(hoy,-i), fila=dat[d]||null, esHoy=(d===hoy);
       var cer=cerrado(code,d);
@@ -6517,7 +6526,7 @@ document.addEventListener('visibilitychange', function(){ if(!document.hidden) s
   /* píldoras */
   function pintarPildoras(){
     var host=gid('ctlPills'); if(!host) return;
-    if(DISPONIBLE!==true){ host.hidden=true; return; }
+    if(DISPONIBLE!==true || !MEDIBLE[CTX_CODE] || !DATOS[CTX_CODE]){ host.hidden=true; return; }
     var code=CTX_CODE, c=celdas(code), g=c.giro[6].st, b=c.bod[0].st, h='';
     function pill(k, etiqueta, st, sub){
       var cls = st.e==='o'?'ok': st.e==='w'?'wn': st.e==='x'?'bad':'off';
