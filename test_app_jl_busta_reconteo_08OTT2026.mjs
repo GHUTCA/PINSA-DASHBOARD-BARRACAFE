@@ -8,7 +8,10 @@ let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : (ko++, console.log('✗'
 const i = H.indexOf('async function cjSobEnviar('); if (i < 0) throw new Error('cjSobEnviar');
 const fnSrc = H.slice(i, H.indexOf('\n}\n', i) + 3) +
   // [16-ott · app_jl v1.40.5] la fine del gesto vive in _cjFine (blur + ridisegno): la si prende VERA dal sorgente, se c'e'
-  ['_cjFine', '_cjFascia', '_cjNum'].map(function (n) { const k = H.indexOf('function ' + n + '('); return k >= 0 ? '\n' + H.slice(k, H.indexOf('\n', k)) + '\n' : ''; }).join('');   // [16-ott · v1.40.5 · AUT-0705] le funzioni di una riga che cjSobEnviar chiama
+  ['_cjFine', '_cjFascia', '_cjNum'].map(function (n) {   // [16-ott · v1.40.5/6 · AUT-0705] le funzioni che cjSobEnviar chiama, estratte contando le graffe (una o piu' righe)
+    const k = H.indexOf('function ' + n + '('); if (k < 0) return '';
+    let d = 0, j = H.indexOf('{', k); for (; j < H.length; j++) { if (H[j] === '{') d++; else if (H[j] === '}') { d--; if (d === 0) break; } }
+    return '\n' + H.slice(k, j + 1) + '\n'; }).join('');
 
 function mundo(esperado) {
   let n = 0; const posts = []; let ultimo = null; let intentos = 0;
