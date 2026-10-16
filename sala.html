@@ -1110,7 +1110,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.226.9 · vetro</span>
+      <span class="ver" id="ver">sala v3.226.10 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -8666,7 +8666,7 @@ function vCobrarSala(mesa) {
    pannello del pago; iguales e a-dedo sono le stesse viste, su una mesa. */
 function _cobrarMesaSola(mesa) {
   const tot = _vpTot(mesa);
-  if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
+  if (!tot) { _sinConsumo(mesa); return; }
   /* ═══ v3.38.0 · [AUT-0113] · UN TAP IN MENO SU OGNI TAVOLO ════════════════
      Tolte «Por partes iguales» e «A dedo» (sotto), a una mesa sola resta UNA
      opzione: «Todo lo que queda». Una schermata che offre una scelta sola non
@@ -8772,7 +8772,7 @@ function _cobrarADedo(nJ) {
    resta per il caso raro: una ristampa entro 5 min si conferma guardando. */
 function vPrecuentaDirecta(mesa) {
   const tot = _vpTot(mesa);
-  if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
+  if (!tot) { _sinConsumo(mesa); return; }
   const ult = (STATE.pcUlt || {})[mesa] || 0;
   if (ult && Date.now() - ult < 300000) { vPrecuentaSala(mesa); return; }   // anti doble papel
   vPrecuentaImprimir(mesa, null);
@@ -9524,7 +9524,7 @@ function _dtFalta() {
 function vDescontar3(mesa) {
   muroT0('eliminar');   // ⏱ [AUT-0159]
   var tot = _vpTot(mesa);
-  if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
+  if (!tot) { _sinConsumo(mesa); return; }
   _dt = { mesa: mesa, tot: tot, promo: _dtPromo(mesa), tipo: '',
           conv: '', mot: '', txt: '', fam: '', col: '', cob: 0, pin: '' };
   _dtPinta();
@@ -10467,7 +10467,7 @@ function _dtGo() {
 function vDescontarSala(mesa) {
   if (DESCONTAR_V2_ON) return vDescontar3(mesa);
   const tot = _vpTot(mesa);
-  if (!tot) { toast('warn', 'Mesa ' + mesa + ' sin consumo'); return; }
+  if (!tot) { _sinConsumo(mesa); return; }
   vhoja('<h3>Descontar · Mesa ' + esc(mesa) + '</h3>' +
     '<div class="cs-psub">Consumo <b>' + fmtPrice(tot) + '</b>. Todo queda en el libro: ' +
     'qué, cuánto, por qué y quién lo autorizó.</div>' +
@@ -11016,6 +11016,13 @@ const PAGO_UUIDS_VETRO_ON = (function () {
 })();
 /* [15-ott · AUT-0696] il CONSUMO della mesa, prima di togliere il già pagato: la stessa base del ramo `uuids` di
    `_vpTot`, detta una volta sola. `abrirPago` la salva accanto al resto: la differenza è il già pagato della sessione. */
+/* [16-ott · mesa 50] «sin consumo» con LINEE VIVE è una contraddizione, non un'informazione: il mesero non deve leggerlo come «non c'è niente
+   da cobrar» e passare dal POS fuori dal sistema. Rosso, con la somma delle linee, e il JL. Senza linee resta il «sin consumo» di sempre. */
+function _sinConsumo(mesa) {
+  const b = Math.round(_vpBase(mesa) || 0);
+  if (b > 0) toast('err', '🔴 Mesa ' + mesa + ': las líneas suman ' + fmtPrice(b) + ' y el sistema dice $0. No cobres por fuera: avisa al JL.');
+  else toast('warn', 'Mesa ' + mesa + ' sin consumo');
+}
 function _vpBase(mesa) {
   const res = _resDe(mesa);
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
@@ -11035,8 +11042,16 @@ function _vpTot(mesa) {
        Adesso il già pagato è il MASSIMO fra server e memoria locale — mai la somma (sono lo stesso denaro visto da due
        lati). Il massimo, non «il server vince secco»: subito dopo una parte il server può non averla ancora
        (`pagado_seduta` stantio) e la memoria sì; un secondo telefono che ha cobrado altro lo sa solo il server. */
-    const sedU = RESTO_SERVER_ON ? _pagadoSedutaDeMesa(mesa) : null;
-    const pagU = Math.max((sedU != null && isFinite(Number(sedU))) ? Number(sedU) : 0, parcU || 0);
+    const sedU0 = RESTO_SERVER_ON ? _pagadoSedutaDeMesa(mesa) : null;
+    const sedN = (sedU0 != null && isFinite(Number(sedU0))) ? Number(sedU0) : null;
+    /* ═══ [16-ott 14:3x · 🎛 V30 `V30 MESA 50 DUE CONTI IL PANNELLO DICE 0`] TAMPONE DICHIARATO ═══
+       🩸 La 50: il bordo dà `pagado_seduta` per MESA (tutti i pagos dopo T0), non per CONTO. Sulla stessa mesa il conto morto di
+          Arianna (pagato 23.980) e il conto vivo di Isa (15.880): già pagato 23.980 su un consumo vivo di 15.880 ⇒ resto 0, «sin consumo».
+       🩹 Un «già pagato» del server PIÙ GRANDE del consumo vivo non è di questo conto: non si usa, vale la memoria locale (= ieri).
+       ⏳ Di quanto rimanda: NON chiude il caso in cui l'altro conto abbia pagato MENO del consumo vivo (resto troppo basso).
+          Cosa lo uccide: `pagado_seduta` per il CONTO vivo della mesa al bordo (🎛 BKP, `conto_obj_on` "1"). Data: con 🎛 BKP. */
+    const sedU = (sedN != null && sedN > baseU) ? null : sedN;
+    const pagU = Math.max(sedU != null ? sedU : 0, parcU || 0);
     return Math.max(0, baseU - pagU);
   }
   /* [AUT-0428] il server vince SEMPRE quando `pagado_seduta` è noto — prima

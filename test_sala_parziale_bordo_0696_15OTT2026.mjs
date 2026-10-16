@@ -88,6 +88,13 @@ function banco(SRC) {
   t('V3 · server 4.890 (A 3.890 + B 1.000), memoria A 3.890 ⇒ 1.190: mai la somma (che darebbe 0)', vp({ res: 6080, sed: 4890, loc: 3890 }) === 1190, vp({ res: 6080, sed: 4890, loc: 3890 }));
   t('V4 · server spento per apparecchio, memoria 3.890 ⇒ 2.190 come ieri', vp({ res: 6080, sed: 4890, loc: 3890, serverOn: false }) === 2190);
   t('V5 · nessun pagato da nessuna parte ⇒ consumo intero', vp({ res: 6080 }) === 6080);
+  t('V6 · MESA 50: il server dice 23.980 pagati (il conto MORTO di Arianna) su un consumo vivo di 15.880 ⇒ non è di questo conto: resto 15.880, non 0',
+    vp({ res: 15880, sed: 23980 }) === 15880, vp({ res: 15880, sed: 23980 }));
+  t('V7 · server più grande del consumo ma memoria locale 3.000 ⇒ vale la memoria (12.880)', vp({ res: 15880, sed: 23980, loc: 3000 }) === 12880, vp({ res: 15880, sed: 23980, loc: 3000 }));
+  t('V8 · server UGUALE al consumo (pagato tutto, morte non ancora arrivata) ⇒ resto 0, come prima', vp({ res: 6080, sed: 6080 }) === 0);
+  { const i = SRC.indexOf('function _sinConsumo('), corpo = i >= 0 ? SRC.slice(i, SRC.indexOf('\n}\n', i)) : '';
+    t('S1 · «sin consumo» con linee vive è ROSSO e dice la somma e il JL; i quattro punti lo usano',
+      /if \(b > 0\) toast\('err', '🔴 Mesa '/.test(corpo) && /avisa al JL/.test(corpo) && (SRC.match(/if \(!tot\) \{ _sinConsumo\(mesa\); return; \}/g) || []).length === 4 && !/if \(!tot\) \{ toast\('warn', 'Mesa ' \+ mesa \+ ' sin consumo'\); return; \}/.test(SRC)); }
   { const ab = SRC.slice(SRC.indexOf('function abrirPago('), SRC.indexOf('function abrirPago(') + 20000);
     t('③ abrirPago salva resto E consumo PRIMA che la parte prenda il posto del totale, e li porta in STATE.pago',
       ab.indexOf('const _restoAbrir = tot;') > 0 && ab.indexOf('_consAbrir += _vpBase(mm)') > 0 && ab.indexOf('_consAbrir += _vpBase(mm)') < ab.indexOf('if (_pt) tot = _pt;') && /restoAbrir: _restoAbrir, consumoAbrir: _consAbrir/.test(ab)); }
@@ -104,7 +111,8 @@ mut('③ il resto ignoto diventa intero', "if (!(pg.restoAbrir > 0) || _mParte <
 mut("U il caso comune dimenticato (solo pagadoAntes)", "const dif = (pg.consumoAbrir > 0", "const dif = 0 && (pg.consumoAbrir > 0");
 mut("U la c4 che chiude esce intera", "else if (pg.c4 && !pg.montoOn && _yaPag > 0) {", "else if (false) {");
 mut("U l ultima parte senza es_total", "body.es_total = !body.parcial || _cierraConParte;", "body.es_total = !body.parcial;");
-mut("V il server torna ignorato", "const sedU = RESTO_SERVER_ON ? _pagadoSedutaDeMesa(mesa) : null;", "const sedU = null;");
-mut("V server e memoria sommati", "const pagU = Math.max((sedU != null && isFinite(Number(sedU))) ? Number(sedU) : 0, parcU || 0);", "const pagU = ((sedU != null) ? Number(sedU) : 0) + (parcU || 0);");
+mut("V il server torna ignorato", "const sedU0 = RESTO_SERVER_ON ? _pagadoSedutaDeMesa(mesa) : null;", "const sedU0 = null;");
+mut("V server e memoria sommati", "const pagU = Math.max(sedU != null ? sedU : 0, parcU || 0);", "const pagU = (sedU != null ? sedU : 0) + (parcU || 0);");
+mut("V il conto di un altro torna a sottrarre (mesa 50)", "const sedU = (sedN != null && sedN > baseU) ? null : sedN;", "const sedU = sedN;");
 mut('parcial solo numerico', "(body.parcial === 1 || body.parcial === '1')", "(body.parcial === 1)");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exitCode = ko ? 1 : 0;
