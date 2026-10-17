@@ -920,6 +920,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
 .papel hr{border:0;border-top:1px dashed #b9b0a0;margin:8px 0}
 .papel .tt2{font-weight:800;font-size:14px}
 .papel .pro{color:#6a5a2a}
+.papel .pc-yapag{color:#1f7a3a}
 .papel .nota2{text-align:center;font-size:10px;color:#5a5a5a;margin-top:6px}
 /* ═════ v2.0 · EL MAPA (sala.html) ═════ */
 /* v2.0.1 · pan-y, NON none (reperto ROSSO: touch-action:none sulla plaza
@@ -1110,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.226.11 · vetro</span>
+      <span class="ver" id="ver">sala v3.226.12 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -8408,12 +8409,18 @@ function vPrecuentaSala(mesa, _seguir) {
      telefono ha in mano (le carte non si spostano: herencia solo sul quieto),
      ma ciò che manca si dichiara, non si nasconde.
      «Copia por mesa» resta per-mesa: è il papel di quella mesa, per disegno. */
-  const _refTot = pc.modo === 'toda'
-    ? det.mesas.reduce(function (s, mm) { return s + _vpTot(mm); }, 0)
-    : (pc.modo === 'mesa' ? _vpTot(pc.sub || det.mesas[0]) : 0);
+  /* [17-ott · AUT-0696 · Alberto su 997: «pagata una parte la precuenta non si aggiorna»] il metro era Σ `_vpTot`, cioè
+     il RESTO, confrontato con le righe che sono il CONSUMO: dopo una parte il resto è più piccolo, l'`if` non scattava
+     mai e il papel diceva il consumo intero ($7.080 col pannello a $3.190). Adesso le due cose si dicono separate:
+     il consumo (Σ `_vpBase`, la stessa base del pannello) e il già pagato (base − resto, mesa per mesa) ⇒ il «por
+     pagar» del papel È il numero del pannello per costruzione, e la propina sugerida si calcola su ciò che resta. */
+  const _pcMs = pc.modo === 'toda' ? det.mesas : (pc.modo === 'mesa' ? [pc.sub || det.mesas[0]] : []);
+  const _refTot = _pcMs.reduce(function (s, mm) { return s + _vpBase(mm); }, 0);
+  const _pcPag = Math.round(_pcMs.reduce(function (s, mm) { return s + Math.max(0, _vpBase(mm) - _vpTot(mm)); }, 0));
   let faltanP = 0;
   if (_refTot > tot) { faltanP = Math.round(_refTot - tot); tot = _refTot; }
-  const prop = Math.round(tot * 0.10);
+  const resto = Math.max(0, tot - _pcPag);
+  const prop = Math.round(resto * 0.10);
   /* v3.4.3 · il lucchetto guarda la mesa che STAMPA: nella junta la copia va
      alla sub-mesa, e ognuna ha il suo diritto a una precuenta */
   const mesaPrint = pc.modo === 'mesa' ? (pc.sub || det.mesas[0]) : mesa;
@@ -8486,8 +8493,10 @@ function vPrecuentaSala(mesa, _seguir) {
          di aprire quel pannello. Stessa informazione, messa dove si decide. */
       _pcYaPagado(mesa) +
       '<hr><div class="pr"><span>Consumo</span><span>$' + _fmtMiles(tot) + '</span></div>' +
+      (_pcPag > 0 ? '<div class="pr pc-yapag"><span>Ya pagado</span><span>−$' + _fmtMiles(_pcPag) + '</span></div>' +
+        '<div class="pr"><span><b>Por pagar</b></span><span><b>$' + _fmtMiles(resto) + '</b></span></div>' : '') +
       '<div class="pr pro"><span>Propina sugerida 10%</span><span>$' + _fmtMiles(prop) + '</span></div>' +
-      '<hr><div class="pr tt2"><span>TOTAL</span><span>$' + _fmtMiles(tot + prop) + '</span></div>' +
+      '<hr><div class="pr tt2"><span>TOTAL</span><span>$' + _fmtMiles(resto + prop) + '</span></div>' +
       '<div class="nota2">gracias · la propina es voluntaria</div></div>' +
     (imprimible
       /* v3.6.1 · LA RISTAMPA SI PUÒ (Alberto, 15-ago mattina). Il tetto duro
@@ -11441,9 +11450,12 @@ function _jtileHtml(jn, vivos, r, sel) {
      terza casa: ora il tavolone usa `_vpTot` mesa per mesa, cioè lo stesso
      metro di «Todo lo que queda». Mai meno di ciò che vedo, mai meno di ciò
      che dice il server. */
-  let plataReal = 0;
-  jn.mesas.forEach(function (mesa) { plataReal += _vpTot(mesa); });
+  /* [17-ott · AUT-0696] il confronto era righe (consumo) contro Σ `_vpTot` (resto): dopo una parte vinceva il consumo.
+     Adesso consumo contro consumo (Σ `_vpBase`), poi si toglie il già pagato — lo stesso metro della tessera singola. */
+  let plataReal = 0, pagJ = 0;
+  jn.mesas.forEach(function (mesa) { plataReal += _vpBase(mesa); pagJ += Math.max(0, _vpBase(mesa) - _vpTot(mesa)); });
   if (plataReal > plata) plata = plataReal;
+  plata = Math.max(0, plata - pagJ);
   if (llam) { st = 'nuevo'; PAL.nuevo = llam.motivo === 'cuenta' ? '💳 la cuenta' : '🔔 llama'; }
   const libre = st === null;
   const min = Math.round(mx / 60);
@@ -11992,6 +12004,9 @@ function renderMesas(r) {
       /* v3.4.6 · la tessera dice il totale VERO (server), non solo il mio */
       const _res = _resDe(m.mesa);
       if (_res && (_res.total || 0) > plata) plata = _res.total;
+      /* [17-ott · AUT-0696 · 997: tessera «por cobrar $7.080» col pannello a $3.190] la parte già pagata non è più
+         «por cobrar»: si toglie la stessa differenza base − resto del pannello, mai di più di quanto c'è. */
+      plata = Math.max(0, plata - Math.max(0, _vpBase(m.mesa) - _vpTot(m.mesa)));
       porCobrar += plata;
       const min = Math.round(mx / 60);
       const PAL = { nuevo: '\ud83d\udd14 pide ya', digitar: 'confirmar',
