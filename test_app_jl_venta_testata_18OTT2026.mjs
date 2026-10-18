@@ -36,6 +36,10 @@ const BORDO = { ok: true, venta: 6175862, cuentas: 134 }, GOOGLE = { ok: true, v
   t('E · l errore del bordo si vede: «venta · hace 5 min · sin respuesta»', /hace 5 min · sin respuesta/.test(kpi[1].s), kpi[1]); }
 { const { kpi } = testa({ serv: BORDO, tsServ: NOW - 2 * MIN, caja: GOOGLE, salud: null });
   t('F · /salud fallito (salud null) ⇒ resta il bordo con la sua età, non salta su Google', kpi[2].b === '134' && kpi[1].cls.includes('amb'), kpi); }
+{ const { kpi } = testa({ serv: BORDO, tsServ: NOW - 10 * MIN, caja: GOOGLE, salud: SAL_OFF });
+  t('F2 · [EL GIRO ⑤] leva spenta ad app aperta (rollback) col bordo già visto ⇒ torna a Google come prima: «venta hoy», 140', kpi[2].b === '140' && kpi[1].s === 'venta hoy' && !kpi[1].cls.includes('amb'), kpi); }
+{ const { kpi } = testa({ serv: BORDO, tsServ: NOW - 5 * MIN, caja: GOOGLE, servErr: 'servicio_spento' });
+  t('E2 · [EL GIRO ③] servicio_spento in spagnolo: «servicio apagado», mai «spento»', /servicio apagado/.test(kpi[1].s) && !/spento/.test(kpi[1].s), kpi[1]); }
 { const { kpi } = testa({ serv: { ok: true, venta: 298320, cuentas: 9 }, tsServ: NOW - 20e3, enSala: 44140 });
   t('G · sotto il milione le cifre restano intere ($298.320 · $44.140)', kpi[1].b === '$298.320' && kpi[0].b === '$44.140', kpi); }
 { const { kpi } = testa({});
