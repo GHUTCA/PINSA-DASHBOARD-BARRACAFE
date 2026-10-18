@@ -52,7 +52,8 @@ function banco(SRC) {
   t('① la pillola di vCaja e di vVentas e _cajaFuenteHtml', /El día ' \+ _cajaFuenteHtml\(\)/.test(vC) && /General ' \+ _cajaFuenteHtml\(\)/.test(vV));
   t('🟡 EL GIRO · senza Google e col bordo fresco le Mesas abiertas vengono dalla vista del bordo (_cjMesasDetalle), non spariscono',
     /const maB = \(!STATE\.caja && c\.fuente_bordo\) \? _cjMesasDetalle\(\)\.map\(/.test(vC) && /const ma = maB \|\| c\.mesas_abiertas \|\| \[\];/.test(vC));
-  t('⑤ con Ventas davanti (TAB 3) gira giroServicio, Google no', /if \(TAB === 2 \|\| TAB === 0\) giroCaja\(\); else if \(TAB === 3\) giroServicio\(\);/.test(SRC));
+  // [18-ott · app_jl v1.41.0 · TERZA] il ⑤ si allarga: giroServicio gira su OGNI tab che non è Servicio/Caja (Ventas compresa), Google resta solo su 0/2
+  t('⑤ con Ventas davanti (TAB 3) gira giroServicio, Google no', /if \(TAB === 2 \|\| TAB === 0\) giroCaja\(\); else giroServicio\(\);/.test(SRC));
   t('versione >= 1.40.4', /app_jl v1\.(40\.[4-9]|4[1-9]\.\d|[5-9]\d\.\d)/.test(SRC));
   return ko - k0;
 }
@@ -65,5 +66,5 @@ mut('vCaja torna a Google', "function vCaja() {\n  const c = _cajaVista();", "fu
 mut('la propina resta di Google', "(c && c.fuente_bordo) ? (c.propinas_bordo || 0)", "false ? 0");
 mut('Google vecchio non si colora', "return '<span class=\"pill ' + (vecchia ? 'amb' : 'off')", "return '<span class=\"pill ' + ('off')");
 mut('l errore di Google non si dice', "(STATE.cajaErr ? ' · ' + esc(", "(false ? ' · ' + esc(");
-mut('Ventas non rinfresca il bordo', " else if (TAB === 3) giroServicio();", "");
+mut('Ventas non rinfresca il bordo', " else giroServicio(); }, 60000);", " }, 60000);");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);

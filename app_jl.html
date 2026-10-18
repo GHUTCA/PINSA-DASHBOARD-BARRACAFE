@@ -63,9 +63,11 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 .alr button.amb i{background:#FFF3DF;color:#5d3f0e}
 .hd .r2{display:flex;gap:6px;margin-top:8px;justify-content:space-between}
 .hd .kpi{flex:1;text-align:center;min-width:0}
-.hd .kpi b{display:block;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.15}
-.hd .kpi small{font-size:9.5px;color:#b9b2a4;text-transform:uppercase;letter-spacing:.04em}
+.hd .kpi b{display:block;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.15;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hd .kpi small{font-size:9.5px;color:#b9b2a4;text-transform:uppercase;letter-spacing:.04em;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hd .kpi.ok b{color:#3DC97E}
+.hd .kpi.amb b,.hd .kpi.amb small{color:#FFB558}   /* [18-ott · v1.41.0] la venta del bordo vecchia, o di Google: non sembra viva */
+.hd .kpi.amb small{white-space:normal;line-height:1.2}   /* l'età è l'informazione: va a capo, non si taglia */
 /* tab */
 .tabs{flex:0 0 auto;display:flex;background:#0e0e15;border-bottom:1px solid rgba(255,255,255,.09)}
 .tabs button{flex:1;background:none;border:0;color:#7d7d95;font:inherit;font-size:12px;font-weight:700;padding:10px 0;cursor:pointer;border-bottom:2px solid transparent}
@@ -182,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.40.6</span>
+<span class="ver" id="ver">app_jl v1.41.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1365,10 +1367,33 @@ async function giroServicio() {
   try {
     const r = await cajaPost1({ verbo: 'servicio', pin_jl: STATE.pin });
     if (r && r.ok) { STATE.serv = r; STATE.ts.serv = Date.now(); STATE.servErr = ''; pintaTesta(); pintaTab(); }
-    else STATE.servErr = (r && r.error) || 'no_ok';   // spento o errore: silenzio, resta Google — e la riga «📷 caja» dice quanto e' vecchio
+    else STATE.servErr = (r && r.error) || 'no_ok';   // spento o errore: resta Google — e la riga «📷 caja» dice quanto e' vecchio
   } catch (e) { STATE.servErr = e && e.message === 'timeout' ? 'timeout' : 'sin_conexion'; }
   STATE.servInVolo = false;
+  if (STATE.servErr) pintaTesta();   // [18-ott · v1.41.0] l'errore del bordo si vede in testata, non resta in una variabile
 }
+/* ═══ [18-ott · app_jl v1.41.0 · 🎛 V30 `V30 LA VENTA DEL JL SI FERMA ANCORA A MEZZANOTTE`] LA VENTA DELLA TESTATA DICE DA DOVE VIENE ═══
+   🩸 Foto di Eduardo, 00:46: «venta hoy 6.179.752 · 140 cerradas», ferma. Era GOOGLE vecchia di 31 min (PG: quella cifra si tocca alle
+      00:15:02 contando il pago di prova della 997, che il bordo esclude; col bordo sarebbero 6.175.862 · 134). Il `servicio` non era fresco e
+      la testata ricadeva su `getCaja` in silenzio, con la stessa faccia della cifra viva.
+   🩹 La testata prende venta/cerradas/promedio dal BORDO anche se vecchio, con l'età in ámbar oltre 3 min (N4: una cifra ferma non deve
+      sembrare viva). Google solo se il bordo non ha MAI risposto, e allora lo dice. A leva `caja_servicio_on` spenta: Google come prima. */
+function _testaVenta() {
+  const E = { timeout: 'sin respuesta', sin_conexion: 'sin red', pg_no_responde: 'base sin respuesta', pin_jl_bloqueado: 'PIN bloqueado' };
+  const err = STATE.servErr ? (E[STATE.servErr] || String(STATE.servErr).replace(/_/g, ' ')) : '';
+  if (STATE.serv && STATE.serv.ok) {
+    const fresco = _servFresco();
+    return { venta: +STATE.serv.venta || 0, cuentas: +STATE.serv.cuentas || 0, amb: !fresco,
+      etiqueta: fresco ? 'venta hoy' : 'venta · ' + edadTxt('serv') + (err ? ' · ' + err : '') };
+  }
+  const c = STATE.caja;
+  if (!c) return null;
+  const bordoAtteso = cjFlag('caja_servicio_on');
+  return { venta: +c.venta || 0, cuentas: +c.cuentas || 0, amb: bordoAtteso,
+    etiqueta: bordoAtteso ? 'venta · de Google' + (err ? ' · ' + err : '') : 'venta hoy' };
+}
+/* le cifre della testata: sopra il milione compatte («$6,18M»), sotto intere. Cinque riquadri da sette cifre non stanno in un telefono. */
+function fmtTesta(n) { const v = Math.round(n) || 0; return Math.abs(v) >= 1000000 ? '$' + (v / 1000000).toFixed(2).replace('.', ',') + 'M' : fmt(v); }
 /* la caja come la VEDE il JL: Google + (se il bordo la serve fresca) il denaro incassato e i tavoli aperti del bordo. NON muta STATE.caja. */
 function _cajaVista() {
   const c = STATE.caja;
@@ -1521,13 +1546,15 @@ function pintaTesta() {
      servizio: «0» e «NON LO SO» non devono avere la stessa faccia. Se la
      fetta non è arrivata il riquadro lo DICE — non mostra uno zero che
      significa «non ho il dato». Uno zero vero (tutto pagato) resta $0. */
+  const tv = _testaVenta();   // [18-ott · v1.41.0] venta, cerradas e promedio da UNA fonte, che si dichiara
+  const ambV = tv && tv.amb ? ' amb' : '';
   $('hKpi').innerHTML =
-    '<span class="kpi"><b>' + (enSala == null ? '···' : fmt(enSala)) + '</b><small>' +
+    '<span class="kpi"><b>' + (enSala == null ? '···' : fmtTesta(enSala)) + '</b><small>' +
       (enSala == null ? 'en sala · sin dato' : 'en sala') + '</small></span>' +
-    '<span class="kpi ok"><b>' + (c ? fmt(c.venta || 0) : vuoto) + '</b><small>venta hoy</small></span>' +
-    '<span class="kpi"><b>' + (c ? (c.cuentas || 0) : vuoto) + '</b><small>cerradas</small></span>' +
+    '<span class="kpi ok' + ambV + '"><b>' + (tv ? fmtTesta(tv.venta) : vuoto) + '</b><small>' + esc(tv ? tv.etiqueta : 'venta hoy') + '</small></span>' +
+    '<span class="kpi' + ambV + '"><b>' + (tv ? tv.cuentas : vuoto) + '</b><small>cerradas</small></span>' +
     '<span class="kpi"><b>' + (abiertas == null ? vuoto : abiertas) + '</b><small>abiertas</small></span>' +
-    '<span class="kpi"><b>' + (c && c.cuentas ? fmt((c.venta || 0) / c.cuentas) : vuoto) + '</b><small>promedio</small></span>';
+    '<span class="kpi' + ambV + '"><b>' + (tv && tv.cuentas ? fmtTesta(tv.venta / tv.cuentas) : vuoto) + '</b><small>promedio</small></span>';
 }
 
 /* [AUT-0244] la plata VIVA in sala, letta dalla fetta del bordo.
@@ -2827,7 +2854,10 @@ function boot() {
   pintaTesta(); tab(0);
   giroVeloce(); giroCaja(); giroProds();
   setInterval(giroVeloce, CFG.POLL_MS);
-  setInterval(() => { if (TAB === 2 || TAB === 0) giroCaja(); else if (TAB === 3) giroServicio(); }, 60000);   // [16-ott · AUT-0703] con Ventas davanti la venta del bordo non invecchia (Google no: solo con Sala/Caja, come prima)
+  /* [18-ott · v1.41.0] il `servicio` gira su OGNI tab (prima: Turno e agotados non rinfrescavano mai la testata — a mezzanotte il JL sta su
+     Turno), e subito al ritorno in primo piano. Google resta solo con Servicio/Caja davanti, come prima. */
+  setInterval(() => { if (TAB === 2 || TAB === 0) giroCaja(); else giroServicio(); }, 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { giroServicio(); pintaTesta(); } });   // [16-ott · AUT-0703] con Ventas davanti la venta del bordo non invecchia (Google no: solo con Sala/Caja, come prima)
   setInterval(giroTurno, 300000);
   let _cjTick = 0;
   setInterval(() => { if (!cjAtto1On()) return; _cjTick++; if (TAB === 2 || _cjTick % 3 === 0) cjAtto1Giro(); }, 20000);   // [v1.33.0] Caja davanti ogni 20 s, altrimenti ogni minuto: l'aviso deve arrivare anche in sala
