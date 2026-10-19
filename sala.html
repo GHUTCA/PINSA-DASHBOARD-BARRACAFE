@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.227.1 · vetro</span>
+      <span class="ver" id="ver">sala v3.227.2 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9240,6 +9240,9 @@ var SALDO_SIN_PADRON_ON = false;
 /* [11-ott · AUT-0665 · 🎛 V28 `PROVA 108 DOM PASSATA E FAM MANCA NELLA APP JL`] regola di Alberto «il JL fa tutto dalla sua app»: ELIMINAR nell'app del JL offriva SOLO «Un producto»; Familia, Convenio e Colación
    esistevano solo sul telefono del mesero (ieri Alberto e dovuto passare dall'app di Jurley). /salud → jl_eliminar_todo_on. NASCE SPENTA: spenta, la porta e quella di ieri (solo «Un producto»). */
 var JL_ELIMINAR_TODO_ON = false;
+/* [19-ott · AUT-0716 · 🎛 V31 `V31 PROPINA MIXTO TAMPONE CONTEGGIO E AUT-0716`] nel mixto la propina dice IN CHE MEZZO entra (contratto di 🎛 BKP
+   `BKP V31 AUT-0716 IL CONTRATTO DELLA PROPINA DEL MIXTO`: `propina` su ogni riga di `medios_json`). Leva del bordo, nasce "0": la accende BKP insieme a `cajaAtteso`. */
+var PROPINA_MIXTO_MEDIO_ON = false;
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
 /* ═══ [10-ott · 🎛 V28 AUT-0663 `FOTO SALVATA SENZA ETA CURA ALLA RADICE`] UNA SALA SALVATA PIU VECCHIA DEL TETTO NON SI DISEGNA MAI COME SE FOSSE VIVA ═══════════
    IL FATTO (mesa 100, telefono di Ary, 10-ott): il catch del poll ridisegnava `sala_foto_v1` SENZA tetto d'eta («una sala di un'ora fa, dichiarata, batte il vuoto») e il ricarico non la toglie: Ary ha visto
@@ -9308,6 +9311,7 @@ function _salaMuertaPinta(edadMs) {
       CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
       SALDO_SIN_PADRON_ON = String(cercaK(j, 'saldo_sin_padron_on')) === '1';             // [11-ott · AUT-0666]
       JL_ELIMINAR_TODO_ON = String(cercaK(j, 'jl_eliminar_todo_on')) === '1';   // [11-ott · AUT-0665]
+      PROPINA_MIXTO_MEDIO_ON = String(cercaK(j, 'propina_mixto_medio_on')) === '1';   // [19-ott · AUT-0716]
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
       FOTO_VIVA_LEIDA = true;                                               // [EL GIRO ⑥⑦] il bordo ha risposto: da qui vale la leva (assente = spenta)
     }).catch(function () {});
@@ -13778,6 +13782,34 @@ function _bMonto() {
    scrivendo. Chi digita la sua cifra non incontra mai un valore che non ha
    scritto lui; chi tocca e se ne va senza scrivere si becca il resto giusto,
    come prima. Zero dipendenza da `.select()`. */
+/* ═══ [19-ott · AUT-0716] LA PROPINA DEL MIXTO DICE IN CHE MEZZO ENTRA ═══════════════════════════════════════════════════════════
+   🩸 Isa, mesa 20 (18-ott): mixto efectivo + débito con propina $5.074 in contanti. La regola del bordo la mette «in carta se c'è carta» ⇒
+      «Dinero en sala» diceva 5.074 in meno di quello che Isa aveva in tasca. Il mezzo della propina non si catturava: si indovinava.
+   🩹 Il mesero lo sceglie con un chip, fra i mezzi GIÀ nel mixto (monto > 0): v1 = un mezzo solo per tutta la propina. Il contratto
+      (`propina` su ogni riga di `medios_json`, somma = propina del pago) regge anche la divisa; il vetro non la offre ancora.
+   ⚖️ A leva accesa e propina > 0 il chip è obbligatorio: senza, il pago non parte. A leva spenta: niente chip, body identico a ieri. */
+function _mxMediosConMonto(pg) {
+  const mx = (pg && pg.mixto) || {};
+  return ['efectivo', 'debito', 'credito', 'transferencia'].filter(function (k) {
+    return (Math.round(parseFloat(String(mx[k]).replace(/[^0-9]/g, '')) || 0)) > 0; });
+}
+function _mxPropMedio(pg) {   // il mezzo scelto, solo se è ancora uno dei mezzi del mixto
+  const k = pg && pg.propMedio;
+  return (k && _mxMediosConMonto(pg).indexOf(k) >= 0) ? k : '';
+}
+function _mxPropHtml(pg, prop) {
+  if (!PROPINA_MIXTO_MEDIO_ON || !(prop > 0)) return '';
+  const ms = _mxMediosConMonto(pg);
+  if (!ms.length) return '';
+  const L = { efectivo: 'Efectivo', debito: 'Débito', credito: 'Crédito', transferencia: 'Transfer' };
+  const sel = _mxPropMedio(pg);
+  return '<div class="c4lab" style="margin-top:10px' + (sel ? '' : ';color:#f5a623') + '">' +
+      (sel ? 'La propina de <b>$' + _fmtMiles(prop) + '</b> entra en:' : '¿La propina de <b>$' + _fmtMiles(prop) + '</b> en qué medio?') + '</div>' +
+    '<div class="c4chips">' + ms.map(function (k) {
+      return '<div class="cs-chip' + (sel === k ? ' sel' : '') + '" onclick="bPropMedio(\'' + k + '\')">' + L[k] + '</div>';
+    }).join('') + '</div>';
+}
+function bPropMedio(k) { const pg = STATE.pago; if (!pg) return; pg.propMedio = k; renderPago(); }
 function bMxBlur(el, k2) {
   var pg = STATE.pago; if (!pg || !pg.mixto) return;
   if (!String(pg.mixto[k2] || '').trim()) {
@@ -13880,6 +13912,7 @@ function bMedio(w, pg) {
       (prop > 0 ? '<div style="font-size:11.5px;color:var(--cs-mut);margin:-2px 0 5px;line-height:1.45">' +
         'la propina de <b>$' + _fmtMiles(prop) + '</b> se suma sola al final — <b>no la repartas aquí</b></div>' : '') +
       fila('efectivo', 'Efectivo') + fila('debito', 'Débito') + fila('credito', 'Crédito') + fila('transferencia', 'Transfer') +
+      _mxPropHtml(pg, prop) +   // [19-ott · AUT-0716] in che mezzo entra la propina
       '<div style="margin-top:8px;font-size:12.5px;' + (mxResto === 0 && mxSuma > 0 ? 'color:#3db876' : 'color:#f5a623') + '">' +
       (mxResto === 0 && mxSuma > 0 ? '✓ cuadra: $' + _fmtMiles(mxSuma)
         : mxResto > 0 ? 'faltan <b>$' + _fmtMiles(mxResto) + '</b> de $' + _fmtMiles(mB)
@@ -15200,6 +15233,14 @@ async function pagoConfirmar(btn) {
     const suma = mixtoPartes.reduce(function (s, x) { return s + x.monto; }, 0);
     if (mixtoPartes.length < 2) { toast('err', 'Mixto = al menos 2 medios con monto'); return; }
     if (suma !== _pagoMonto()) { toast('err', 'La suma no cuadra: $' + _fmtMiles(suma) + ' vs $' + _fmtMiles(_pagoMonto())); return; }
+    /* [19-ott · AUT-0716] a leva accesa la propina va sulla riga del suo mezzo, e 0 su tutte le altre: «presente» = ogni riga ha la chiave.
+       Somma delle righe = la propina del pago (la stessa `_pagoPropina()` che va nel body più giù). Senza scelta il pago non parte. */
+    const _propMx = PROPINA_MIXTO_MEDIO_ON ? (_pagoPropina() || 0) : 0;
+    if (_propMx > 0) {
+      const pm = _mxPropMedio(pg);
+      if (!pm) { toast('warn', '¿La propina de $' + _fmtMiles(_propMx) + ' en qué medio? Tócalo arriba'); renderPago(); return; }
+      mixtoPartes = mixtoPartes.map(function (x) { return { medio: x.medio, monto: x.monto, propina: x.medio === pm ? _propMx : 0 }; });
+    }
   }
   /* v3.7.2 · AUT-0007 · decisione di Alberto (16-ago): STASERA il campo è
      INFORMATIVO — si manda quello che c'è, non si blocca nessuno. Da LUNEDÌ
