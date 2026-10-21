@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.42.2</span>
+<span class="ver" id="ver">app_jl v1.42.3</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1523,10 +1523,39 @@ async function giroCaja() {
     else { STATE.cajaErr = (r && (r.error || r.exige)) || 'no_ok'; pintaTesta(); pintaTab(); }
   } catch (e) { STATE.cajaErr = e.message === 'timeout' ? 'timeout' : 'sin_red'; pintaTesta(); pintaTab(); }
 }
+/* ═══ [21-ott · pezzo 5.10] LA LISTA DEL 🚫 86 DAL BORDO, non da `adminListProducts` ═══════════════════════════════════════════════════════
+   I prodotti da `/catalogoMesero/<local>` (la carta che il bordo serve già alla sala) e QUALI sono agotados da `/ago86/<local>` (lo stato del DO,
+   lo stesso che `/admin86` scrive). La leva è la rotta stessa: con `RESET86_BORDE_ON` spenta `/ago86` risponde 404 `ruta_apagada` ⇒ il GAS come
+   ieri. Anche `seeded:false` (il DO non ha ancora la lista) o `apagado` ⇒ GAS: non è ancora suo. Rete morta ⇒ resta la lista in memoria.
+   ⚠️ Dichiarato: `/catalogoMesero` è ancora la COPIA della carta del GAS (il GAS la spinge al bordo): il vetro non chiede più a Google, ma il
+   dato nasce lì finché non arriva il catalogo da PG (1.8 di BKP / 5.1 di MENU). La leva del menù (getLevaMenu/setLevaMenu) NON è qui: è del 5.1. */
+async function _prodsDalBorde() {
+  const get = async function (rotta) {
+    const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 5000);
+    try {
+      const r = await fetch(BORDE_86 + '/' + rotta + '/' + encodeURIComponent(CFG.LOCAL), { headers: { 'X-Borde-Token': BORDE_TOKEN_86 }, cache: 'no-store', signal: ctrl.signal });
+      return { status: r.status, j: await r.json().catch(function () { return null; }) };
+    } finally { clearTimeout(to); }
+  };
+  let a, c;
+  try { a = await get('ago86'); } catch (e) { return { stato: 'rete' }; }
+  if (!a.j || a.status === 404 || a.j.error === 'ruta_apagada' || a.j.ok !== true || a.j.apagado || !a.j.seeded || !Array.isArray(a.j.ids)) return { stato: 'non_mio' };
+  try { c = await get('catalogoMesero'); } catch (e) { return { stato: 'rete' }; }
+  if (!c.j || c.j.ok !== true || !Array.isArray(c.j.productos) || !c.j.productos.length) return { stato: 'non_mio' };
+  const ago = {}; a.j.ids.forEach(function (id) { ago[String(id)] = true; });
+  return { stato: 'ok', prods: c.j.productos.filter(function (p) { return p && p.id; })
+    .map(function (p) { return { id: String(p.id), nombre: p.nombre || String(p.id), agotado: !!ago[String(p.id)] }; }) };
+}
 async function giroProds() {
   /* il catalogo del pannello (adminListProducts): serve al 🚫 86 — ricerca
      client e conteggio agotados. Lento → dietro, cache 10 min. */
   if (DEMO || !STATE.pin) return;
+  let salta = false; try { salta = new URLSearchParams(location.search).get('borde') === '0'; } catch (e) {}   // lo stesso freno di adminToggle86Via
+  if (!salta) {
+    const b = await _prodsDalBorde();   // [21-ott · 5.10]
+    if (b.stato === 'ok') { STATE.prods = b.prods; STATE.ts.prods = Date.now(); STATE.prodsFonte = 'bordo'; salva(); pintaTesta(); if (TAB === -1) ochenta(); return; }
+    if (b.stato === 'rete') return;   // resta quella in memoria: è una lettura, il giro dopo riprova
+  }
   try {
     const r = await gasGet('adminListProducts', { pin: STATE.pin });
     if (r && r.ok) { STATE.prods = r.products || []; STATE.ts.prods = Date.now(); salva(); pintaTesta(); if (TAB === -1) ochenta(); }
