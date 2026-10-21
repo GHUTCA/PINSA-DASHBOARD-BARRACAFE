@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.42.0</span>
+<span class="ver" id="ver">app_jl v1.42.1</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1334,9 +1334,35 @@ async function giroVeloce() {
   }
   salva(); pintaTesta(); pintaTab();
 }
+/* ═══ [21-ott · pezzo 1.15 · ⚙️ `ARQ V32 PEZZO 1.15 TURNO AL BORDO ACB32CE PER IL BANCO`] LA LETTURA DEL TURNO DAL BORDO ═══════════════════
+   `POST /turno/admin/<local>` {pin_jl}: la stessa forma di `getTurnoAdmin` (turno · plazas · asignaciones · grupos · ts, più `fuente:'borde'`), zero rete
+   nel DO. Si ripiega sul GAS SOLO quando il bordo dice che non è suo: `gate_spento` (leva `TURNO_ABRE_BORDE_ON` spenta, o il turno di oggi l'ha
+   aperto il GAS), 404 o 403. Un PIN rifiutato si tratta come `pin_invalid` del GAS. Rete morta o risposta illeggibile: resta il turno già in
+   memoria, si riprova al giro dopo (è una lettura: aspettare 5 minuti non sbaglia niente). */
+async function _turnoAdminPorBordo() {
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 8000);
+  let r, j;
+  try {
+    r = await fetch(CFG.BORDE + '/turno/admin/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T },
+      body: JSON.stringify({ pin_jl: STATE.pin }), signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    j = await r.json().catch(function () { return null; });
+  } catch (e) { clearTimeout(to); return { usado: true, ok: false }; }
+  if (r.status === 404 || r.status === 403) return { usado: false };
+  if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') return { usado: false };
+  if (j && j.ok === false && /^pin(_jl)?_(invalid|invalido|requerido)$/.test(String(j.error || ''))) return { usado: true, ok: false, pinMal: true };
+  if (j && j.ok === true && j.fuente === 'borde') return { usado: true, ok: true, r: j };
+  return { usado: true, ok: false };
+}
 async function giroTurno() {
   if (DEMO || !STATE.pin) return;
   try {
+    const bd = await _turnoAdminPorBordo();   // [21-ott · 1.15]
+    if (bd.usado) {
+      if (bd.ok) { STATE.turno = bd.r; STATE.ts.turno = Date.now(); salva(); pintaTesta(); pintaTab(); }
+      else if (bd.pinMal) { sessionStorage.removeItem('jl_pin'); location.reload(); }
+      return;
+    }
     const r = await gasGet('getTurnoAdmin', { pin: STATE.pin });
     if (r && r.ok) { STATE.turno = r; STATE.ts.turno = Date.now(); salva(); pintaTesta(); pintaTab(); }
     else if (r && r.error === 'pin_invalid') { sessionStorage.removeItem('jl_pin'); location.reload(); }
@@ -2335,9 +2361,33 @@ async function abrirT() {
     else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
   } catch (e) { toast('err', 'Sin conexión'); }
 }
+/* [21-ott · pezzo 1.15] chiudere il turno al bordo: `/turno/apertura` {accion:'cerrar'}, stesso vestito e stessa regola di `_aperturaPorBordo`.
+   Idempotente per `uid_gesto` (un secondo colpo rivede la stessa risposta) e per giorno (`ya_cerrado`). Il GAS solo con `gate_spento` (il turno di
+   oggi non è del bordo), 404 o 403. Timeout: NON si sa se ha chiuso ⇒ niente GAS, si dice di riprovare (il bordo rivede la stessa chiusura). */
+async function _cierrePorBordo(uid) {
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 8000);
+  let r, j;
+  try {
+    r = await fetch(CFG.BORDE + '/turno/apertura/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T },
+      body: JSON.stringify({ accion: 'cerrar', uid_gesto: uid, nombre: STATE.user || 'JL', pin_jl: STATE.pin }), signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    j = await r.json().catch(function () { return null; });
+  } catch (e) { clearTimeout(to); return { usado: true, ok: false, dudoso: true }; }
+  if (r.status === 404 || r.status === 403) return { usado: false };
+  if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') return { usado: false };
+  if (j && j.ok === false && j.error) return { usado: true, ok: false, err: _ERR_APERTURA[j.error] || j.error, bloqueado: /^pin(_jl)?_bloqueado/.test(String(j.error)) ? (j.faltan_s || 0) : 0 };
+  if (!r.ok || !j || j.ok !== true || j.cerrado !== true) return { usado: true, ok: false, dudoso: true };
+  return { usado: true, ok: true, ya: !!j.ya_cerrado };
+}
 async function cerrarT() {
   if (!confirm('¿Cerrar el turno? Después de esto nadie más entra.')) return;
   try {
+    const bd = await _cierrePorBordo(_uidGesto());   // [21-ott · 1.15]
+    if (bd.usado) {
+      if (bd.ok) { toast('ok', 'Turno cerrado' + (bd.ya ? ' (ya estaba)' : '')); giroTurno(); return; }
+      if (bd.dudoso) { toast('warn', '⏳ El sistema está lento: puede que el turno SÍ se haya cerrado. Toca «Cerrar turno» otra vez: si ya estaba, te lo dice.'); return; }
+      toast('err', '✋ ' + (bd.bloqueado ? 'Demasiados intentos con el PIN, espera ' + Math.ceil(bd.bloqueado / 60) + ' min' : bd.err)); return;
+    }
     const r = await gasPost('cerrarTurno', { pin: STATE.pin });
     if (r && r.ok) { toast('ok', 'Turno cerrado'); giroTurno(); }
     else toast('err', '✋ ' + ((r && r.error) || 'No se pudo'));
