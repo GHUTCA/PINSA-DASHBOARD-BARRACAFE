@@ -13,7 +13,7 @@ async function banco(SRC, quieto) {
       _colaGet: () => JSON.parse(JSON.stringify(mem)), _colaSave: (a) => { mem = JSON.parse(JSON.stringify(a)); },
       staffPost: async (a, b) => { vie.push(['staff', a, b.uuid, b.codigo]); return staff(b); },
       gasPost: async (a, b) => { vie.push(['gas', a, b.uuid, b.codigo]); return gas(b); },
-      toast: (k, s) => toasts.push(s), refrescar: () => {} };
+      toast: (k, s) => toasts.push(s), refrescar: () => {}, _soloBorde: () => false };   // [21-ott] la leva per verbo dell'1.3: qui spenta
     vm.createContext(ctx); vm.runInContext(F, ctx); await vm.runInContext('_colaFlush()', ctx);
     return { vie, mem, toasts };
   }

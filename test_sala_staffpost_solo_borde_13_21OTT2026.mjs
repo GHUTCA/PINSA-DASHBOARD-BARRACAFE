@@ -34,6 +34,28 @@ async function banco(SRC, quieto) {
   { const x = await chiama('marcarPedido', { solo: '1', bw: false, body: TIMBRO }); t('G · leva accesa ⇒ bussa al bordo ANCHE con bw spento', x.L.fetch === 1 && x.r.borde === true && x.L.gas.length === 0, x); }
   { const x = await chiama('marcarPedido', { solo: '1', qs: '0', body: TIMBRO }); t('H · il freno del telefono ?bordew=0 vince: GAS diretto', x.L.fetch === 0 && x.L.gas.length === 1, x); }
   { const x = await chiama('moverMesa', { solo: ' crearPedidoMesero , moverMesa ', body: TIMBRO }); t('I · elenco con spazi', x.r.borde === true && x.L.gas.length === 0, x); }
+  // la coda offline (le condizioni ① e ③ di EL GIRO, curate nel codice)
+  const FC = 'let COLA_FLUSHING = false;\n' + fnVin(SRC, '_soloBorde') + 'async ' + fnVin(SRC, '_colaFlush');
+  async function svuota({ solo = '', cola = false, risposte }) {
+    let mem = [{ action: 'crearPedidoMesero', body: { uuid: 'A' }, intentos: 0 }, { action: 'crearPedidoMesero', body: { uuid: 'B' }, intentos: 0 }];
+    const vie = [];
+    const ctx = { BORDE_W: { QS: '' }, STATE: { codigo: 'C' }, JSON, String, COLA_BORDE_ON: cola,
+      _colaGet: () => JSON.parse(JSON.stringify(mem)), _colaSave: (a) => { mem = JSON.parse(JSON.stringify(a)); },
+      staffPost: async (a, b) => { vie.push(['staff', b.uuid]); return risposte[b.uuid]; }, gasPost: async (a, b) => { vie.push(['gas', b.uuid]); return { ok: true }; },
+      toast: () => {}, refrescar: () => {} };
+    vm.createContext(ctx); vm.runInContext(FC, ctx); vm.runInContext('STAFFPOST_SOLO = ' + JSON.stringify(solo) + ';', ctx);
+    await vm.runInContext('_colaFlush()', ctx); return { vie, mem };
+  }
+  { const x = await svuota({ solo: 'crearPedidoMesero', cola: false, risposte: { A: { ok: true, borde: true }, B: { ok: true, borde: true } } });
+    t('K · ① crear «solo bordo» con cola_borde_on SPENTA ⇒ la coda passa dal bordo, ZERO Google', x.vie.every((v) => v[0] === 'staff') && x.mem.length === 0, x); }
+  { const x = await svuota({ solo: '', cola: false, risposte: {} });
+    t('K2 · leva vuota e cola spenta ⇒ la coda va al GAS, come ieri', x.vie.every((v) => v[0] === 'gas') && x.mem.length === 0, x); }
+  { const x = await svuota({ solo: 'crearPedidoMesero', risposte: { A: { ok: false, sin_borde: true, error: 'need_gas' }, B: { ok: true, borde: true } } });
+    t('L · ③ un need:gas in testa NON blocca la coda: B entra, A va in fondo con intentos 1, e il giro finisce', x.vie.length === 2 && x.mem.length === 1 && x.mem[0].body.uuid === 'A' && x.mem[0].intentos === 1, x); }
+  { const x = await svuota({ solo: 'crearPedidoMesero', risposte: { A: { ok: false, sin_borde: true }, B: { ok: false, sin_borde: true } } });
+    t('L2 · tutti need:gas ⇒ un solo passaggio per entrata, nessun giro infinito, nessuno perso', x.vie.length === 2 && x.mem.length === 2, x); }
+  { const x = await svuota({ solo: 'crearPedidoMesero', risposte: { A: { ok: false, error: 'codigo_invalid', borde: true }, B: { ok: true, borde: true } } });
+    t('L3 · un rifiuto timbrato ferma il giro come ieri (B aspetta il prossimo)', x.vie.length === 1 && x.mem.length === 2 && x.mem[0].intentos === 1, x); }
   t('J · la leva si legge dal /salud e nasce vuota', /STAFFPOST_SOLO = String\(cercaK\(j, 'staffpost_solo_borde'\) == null \? '' : cercaK\(j, 'staffpost_solo_borde'\)\);/.test(SRC) && /let STAFFPOST_SOLO = '';/.test(SRC));
   return { ok, ko };
 }
@@ -43,6 +65,9 @@ if (process.argv.includes('--mutanti')) {
     ['la rete torna al GAS', "    if (_solo) { _pennaDice('solo:' + (e && e.name === 'AbortError' ? 'timeout' : 'red')); throw new Error(e && e.name === 'AbortError' ? 'timeout' : 'sin_red'); }", ''],
     ['bw spento ferma anche il solo', "  if (!_solo && !bordeWriteOn() && !_ingreso)", "  if (!bordeWriteOn() && !_ingreso)"],
     ['il freno del telefono ignorato', "  if (BORDE_W.QS === '0') return false;   // il freno del telefono vince sempre", ''],
+    ['la coda torna al GAS col verbo «solo bordo»', 'const _viaB = COLA_BORDE_ON || _soloBorde(e0.action);', 'const _viaB = COLA_BORDE_ON;'],
+    ['un need:gas ferma la coda (niente rotazione)', '      if (r && r.sin_borde) { a.push(a.shift()); _colaSave(a); continue; }\n', ''],
+    // il mutante «senza tetto dei giri» non si mette: girerebbe per sempre e bloccherebbe il banco invece di farlo morire
     ['elenco ignorato (tutti sempre)', "  return v.split(',').map(function (x) { return x.trim(); }).indexOf(String(action || '')) >= 0;", '  return true;'],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.replace(a, b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
