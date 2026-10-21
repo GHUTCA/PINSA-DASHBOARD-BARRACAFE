@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.3 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.6 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -13326,12 +13326,20 @@ function _vouEstado(pg) {
   if (!(tot > 0)) return { aplica: true, ok: false, motivo: 'vacio', consumo: consumo, tot: tot };
   if (prop < 0) return { aplica: true, ok: false, motivo: 'menor', consumo: consumo, tot: tot };
   if (prop > consumo) return { aplica: true, ok: false, motivo: 'excesivo', consumo: consumo, tot: tot, prop: prop };   // un cero di troppo, quasi sempre
+  /* [21-ott ~16 · 🎛 V32 `V32 RAY HA SCRITTO IL VOUCHER SENZA PROPINA`] tre pagos carta di Ray a propina 0: aveva scritto il CONSUMO, non il totale
+     del voucher. Totale = consumo ⇒ un secondo tocco obbligato («¿El cliente no dejó propina?»): Sí, sin propina · Corregir. */
+  if (prop === 0 && !pg.vouSinPropOk) return { aplica: true, ok: false, motivo: 'sin_propina', consumo: consumo, tot: tot, prop: 0 };
   return { aplica: true, ok: true, consumo: consumo, tot: tot, prop: prop, pct: consumo > 0 ? Math.round(prop * 100 / consumo) : 0 };
 }
 function _vouTxt(ve) {
   if (ve.motivo === 'vacio') return '<span style="color:var(--cs-mut)">consumo <b>$' + _fmtMiles(ve.consumo) + '</b> · escribe el TOTAL del voucher (con la propina)</span>';
   if (ve.motivo === 'menor') return '<span style="color:#ff9c9c">El total no puede ser menor que el consumo <b>$' + _fmtMiles(ve.consumo) + '</b> — revisa el voucher</span>';
   if (ve.motivo === 'excesivo') return '<span style="color:#ff9c9c">La propina sería <b>$' + _fmtMiles(ve.prop) + '</b>, más que el consumo — revisa el total</span>';
+  if (ve.motivo === 'sin_propina') return '<div style="color:#f5a623;font-weight:700;font-size:13px">¿El cliente no dejó propina?</div>' +   // [21-ott · el caso de Ray]
+    '<div style="color:var(--cs-mut);margin-top:2px">Si dejó, escribe el total del voucher <b>con la propina</b>.</div>' +
+    '<div class="cs-chips" style="margin-top:8px;justify-content:center">' +
+      '<div class="cs-chip" onclick="vouSinPropSi()">Sí, sin propina</div>' +
+      '<div class="cs-chip" onclick="vouCorregir()">Corregir</div></div>';
   return '<span style="color:' + (ve.pct > 25 ? '#f5a623' : '#3db876') + '">consumo $' + _fmtMiles(ve.consumo) + ' · propina <b>$' + _fmtMiles(ve.prop) + '</b> (' + ve.pct + '%)' +
     (ve.pct > 25 ? ' — revisa' : '') + '</span>';
 }
@@ -13339,8 +13347,21 @@ function _vouTxt(ve) {
 function pagoVouTotIn(el) {
   if (!STATE.pago) return;
   STATE.pago.vouTot = String(el.value || '').replace(/[^0-9]/g, '').slice(0, 9);
+  STATE.pago.vouSinPropOk = false;   // [21-ott] cambia il totale ⇒ il «sin propina» si ri-conferma
   const ve = _vouEstado(STATE.pago);
   const tx = $('pgVouTotTxt'); if (tx && ve.aplica) tx.innerHTML = _vouTxt(ve);
+  _pgVouBtnPinta();
+}
+/* [21-ott · el caso de Ray] le due risposte al «¿El cliente no dejó propina?»: si ritoccano solo la riga e il bottone, mai il campo */
+function vouSinPropSi() {
+  if (!STATE.pago) return; STATE.pago.vouSinPropOk = true;
+  const ve = _vouEstado(STATE.pago); const tx = $('pgVouTotTxt'); if (tx && ve.aplica) tx.innerHTML = _vouTxt(ve);
+  _pgVouBtnPinta();
+}
+function vouCorregir() {
+  if (!STATE.pago) return; STATE.pago.vouTot = ''; STATE.pago.vouSinPropOk = false;
+  const el = $('pgVouTotIn'); if (el) { el.value = ''; try { el.focus(); } catch (e) {} }
+  const ve = _vouEstado(STATE.pago); const tx = $('pgVouTotTxt'); if (tx && ve.aplica) tx.innerHTML = _vouTxt(ve);
   _pgVouBtnPinta();
 }
 /* il bottone della ③: a leva spenta è ESATTAMENTE quello di ieri (6 cifre ⇒ CERRAR) */
@@ -13351,7 +13372,7 @@ function _pgVouBtnPinta() {
   const ok6 = d.length === 6;
   const ve = _vouEstado(pg), okT = !ve.aplica || ve.ok;
   b.disabled = !(ok6 && okT);
-  b.textContent = !ok6 ? 'Faltan ' + (6 - d.length) + ' cifras' : !okT ? 'Escribe el total del voucher' : 'CERRAR MESA ' + pg.mesa;
+  b.textContent = !ok6 ? 'Faltan ' + (6 - d.length) + ' cifras' : !okT ? (ve.motivo === 'sin_propina' ? '¿Sin propina? Confírmalo arriba' : 'Escribe el total del voucher') : 'CERRAR MESA ' + pg.mesa;
 }
 /* v3.41.0 · toccare «Otro» sceglie E riapre la casella (anche se «Otro» era
    gia' scelto: e' cosi' che si corregge un monto sbagliato). */
@@ -14782,8 +14803,11 @@ function renderPago() {
             '<span id="pgVouN" style="font-weight:800;color:' + (vD.length === 6 ? '#3db876' : 'var(--cs-mut)') + '">' + vD.length + '/6</span></div>' +
           /* [21-ott · AUT-0716 ②] il totale del voucher: la propina si deduce, non si conferma */
           (_ve.aplica
-            ? '<div class="cs-psec" style="text-align:center;margin-top:14px">💳 Total del voucher</div>' +
-              '<input class="cs-pin" id="pgVouTotIn" style="font-size:21px;text-align:center;padding:12px" inputmode="numeric" autocomplete="off" placeholder="$ total impreso" value="' + esc(pg.vouTot || '') + '" oninput="pagoVouTotIn(this)">' +
+            /* [21-ott · el caso de Ray] il campo si vede e dice COSA scrivere: il numero grande del voucher, con la propina */
+            ? '<div style="margin-top:16px;padding:12px;border-radius:14px;border:2px solid #E9C46A;background:rgba(233,196,106,.10)">' +
+              '<div style="text-align:center;font-size:16px;font-weight:900;letter-spacing:.02em;color:#E9C46A">💳 TOTAL DEL VOUCHER (con propina)</div>' +
+              '<div style="text-align:center;font-size:12px;color:var(--cs-ink2,#cfc8b8);margin:3px 0 8px">el número grande del voucher, con la propina incluida</div>' +
+              '<input class="cs-pin" id="pgVouTotIn" style="font-size:24px;font-weight:800;text-align:center;padding:12px;margin:0" inputmode="numeric" autocomplete="off" placeholder="$ total del voucher" value="' + esc(pg.vouTot || '') + '" oninput="pagoVouTotIn(this)"></div>' +
               '<div id="pgVouTotTxt" style="text-align:center;font-size:12px;margin-top:6px;line-height:1.45">' + _vouTxt(_ve) + '</div>'
             : '') +
           ''

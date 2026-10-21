@@ -14,7 +14,7 @@ try { VECCHIA = execSync('git show 07f3f55:sala.html', { cwd: new URL('.', impor
 function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const fnV = (n) => fnVin(SRC, n);
-  const FUN = ['_vouTotNum', '_vouEstado', '_vouTxt', '_pgVouBtnPinta', 'pagoVouIn', 'pagoVouTotIn', '_pagoPropina'].map(fnV).join('');
+  const FUN = ['_vouTotNum', '_vouEstado', '_vouTxt', '_pgVouBtnPinta', 'pagoVouIn', 'pagoVouTotIn', '_pagoPropina', 'vouSinPropSi', 'vouCorregir'].map(fnV).join('');
   function mondo({ on = true, v3 = true, medio = 'debito', consumo = 61090, prop = 'sug', otro = '', vouTot = '', voucher = '', sinVoucher = false } = {}) {
     const dom = {};
     const el = (id) => dom[id] || (dom[id] = { id, textContent: '', innerHTML: '', disabled: false, style: {} });
@@ -29,8 +29,18 @@ function banco(SRC, quieto) {
     t('A · voucher 67.199 su consumo 61.090 ⇒ propina 6.109 (dedotta, non confermata)', m.run('_pagoPropina()') === 6109, m.run('_vouEstado(STATE.pago)')); }
   { const m = mondo({ vouTot: '64000', prop: 'sug' });
     t('A2 · il cliente lascia meno: chip 10% (6.109) ma voucher 64.000 ⇒ si registra 2.910', m.run('_pagoPropina()') === 2910, m.run('_pagoPropina()')); }
-  { const m = mondo({ vouTot: '61090' });
-    t('A3 · voucher = consumo ⇒ propina 0, ok', m.run('_pagoPropina()') === 0 && m.run('_vouEstado(STATE.pago).ok') === true); }
+  /* [21-ott ~16 · el caso de Ray] voucher = consumo NON è più ok da solo: vuole il secondo tocco */
+  { const m = mondo({ vouTot: '61090' }); const e = m.run('_vouEstado(STATE.pago)');
+    t('A3 · voucher = consumo ⇒ NON ok, motivo sin_propina («¿El cliente no dejó propina?» con Sí / Corregir)', e.aplica && !e.ok && e.motivo === 'sin_propina' &&
+      /¿El cliente no dejó propina\?/.test(m.run('_vouTxt(_vouEstado(STATE.pago))')) && /vouSinPropSi\(\)/.test(m.run('_vouTxt(_vouEstado(STATE.pago))')) && /vouCorregir\(\)/.test(m.run('_vouTxt(_vouEstado(STATE.pago))')), e); }
+  { const m = mondo({ vouTot: '61090' }); m.run("pagoVouIn({ value: '123456' })"); const b = m.el('pgVouBtn');
+    t('A3b · … e CERRAR resta spento, «¿Sin propina? Confírmalo arriba»', b.disabled && /Confírmalo/.test(b.textContent), b); }
+  { const m = mondo({ vouTot: '61090' }); m.run("pagoVouIn({ value: '123456' })"); m.run('vouSinPropSi()'); const b = m.el('pgVouBtn');
+    t('A3c · «Sí, sin propina» ⇒ ok con propina 0, CERRAR acceso', m.run('_vouEstado(STATE.pago).ok') === true && m.run('_pagoPropina()') === 0 && !b.disabled, b); }
+  { const m = mondo({ vouTot: '61090' }); m.run('vouSinPropSi()'); m.run("pagoVouTotIn({ value: '61090' })");
+    t('A3d · riscrivere il totale annulla la conferma: si ri-chiede', m.run('_vouEstado(STATE.pago).motivo') === 'sin_propina'); }
+  { const m = mondo({ vouTot: '61090' }); m.el('pgVouTotIn').value = '61090'; m.run('vouCorregir()');
+    t('A3e · «Corregir» svuota il campo e il totale', m.el('pgVouTotIn').value === '' && m.ctx.STATE.pago.vouTot === '' && m.run('_vouEstado(STATE.pago).motivo') === 'vacio'); }
   { const m = mondo({ vouTot: '$67.199' });
     t('A4 · il totale scritto con punto e segno vale uguale', m.run('_pagoPropina()') === 6109); }
   // B-D · totale mancante o sbagliato ⇒ non ok (CERRAR spento, cintura in pagoConfirmar)
@@ -75,7 +85,8 @@ function banco(SRC, quieto) {
   t('K · body.voucher_total solo con totale valido', /if \(_vePago\.aplica && _vePago\.ok\) body\.voucher_total = _vePago\.tot;/.test(SRC));
   t('K · la leva si legge dal /salud e nasce spenta', /PROPINA_VOUCHER_ON = String\(cercaK\(j, 'propina_voucher_on'\)\) === '1';/.test(SRC) && /var PROPINA_VOUCHER_ON = false;/.test(SRC));
   t('K · tornando indietro dalla ③ il totale si azzera', /function pagoVolverA2\(\) \{ if \(STATE\.pago\) \{ STATE\.pago\.paso3 = false; STATE\.pago\.vouTot = ''; renderPago\(\); \} \}/.test(SRC));
-  t('K · la ③ disegna il campo solo se aplica', /\(_ve\.aplica\s*\n\s*\? '<div class="cs-psec" style="text-align:center;margin-top:14px">💳 Total del voucher<\/div>'/.test(SRC));
+  t('K · la ③ disegna il campo solo se aplica, con l etichetta evidente «TOTAL DEL VOUCHER (con propina)» e l aiuto', /\(_ve\.aplica\s*\n(\s*\/\*[^\n]*\*\/\n)?\s*\? '<div style="margin-top:16px;padding:12px;border-radius:14px;border:2px solid #E9C46A/.test(SRC) &&
+    SRC.includes('💳 TOTAL DEL VOUCHER (con propina)') && SRC.includes('el número grande del voucher, con la propina incluida'));
   // L · a leva spenta _pagoPropina è numericamente quella di ieri
   if (VECCHIA) {
     const FV = fnVin(VECCHIA, '_pagoPropina'); let uguali = true; const diff = [];
@@ -98,6 +109,8 @@ if (process.argv.includes('--mutanti')) {
     ['sin voucher non esce', 'pg.sinVoucher || !(pg.medio', '!(pg.medio'],
     ['bottone non guarda il totale', 'b.disabled = !(ok6 && okT);', 'b.disabled = !ok6;'],
     ['cintura disattivata', "if (_vePago.aplica && !_vePago.ok) { toast(", "if (false) { toast("],
+    ['niente secondo tocco a propina 0', "  if (prop === 0 && !pg.vouSinPropOk) return", "  if (false) return"],
+    ['la conferma non si azzera riscrivendo', '  STATE.pago.vouSinPropOk = false;   // [21-ott] cambia il totale', '  // [21-ott] cambia il totale'],
     ['base sbagliata (10% fisso)', 'const consumo = _bMonto(), tot', 'const consumo = Math.round(_bMonto() * 1.1), tot'],
   ];
   let morti = 0;
