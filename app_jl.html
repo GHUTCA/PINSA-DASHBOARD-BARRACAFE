@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.42.3</span>
+<span class="ver" id="ver">app_jl v1.42.4</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -2281,12 +2281,39 @@ function _levaHoraOk() {
   const hhmm = new Date().toLocaleString('sv-SE', { timeZone: 'America/Santiago' }).slice(11, 16);
   return hhmm >= '08:00' && hhmm < '14:00';
 }
+/* ═══ [21-ott · pezzo 5.10, la leva del menù · 🎛 `V32 LE 10 SENZA CASA HANNO CASA`: BKP il get/set al bordo, TERZA il vetro] ═══════════════════
+   `POST /menuLeva/<local>` {pin_jl, accion:'get'|'set', tipo:'dia'|'noche', escalon?, uid} → la STESSA forma di getLevaMenu/setLevaMenu del GAS
+   ({ok, escalon:'esca'|'estandar'|'mixto'|'apagado', esca:{precio}, estandar:{precio}}): `_levaAplica` / `_levaAplicaNoche` non cambiano.
+   La leva è la rotta: 404, 403 o `gate_spento` ⇒ il GAS come ieri. Un errore con `ok:false` è del bordo ed è FINALE (PIN, fuera de horario):
+   non si ripiega, ripiegare aggirerebbe il suo no. Una lettura con la rete morta lascia la card com'è. Una SCRITTURA con la rete morta NON va al
+   GAS (due porte per lo stesso gesto): «no sé si cambió», e si rilegge lo stato. Una chiave per gesto (`uid`). Freno `?borde=0`. */
+function uidLeva() { return 'lev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+async function _levaAlBorde(body) {
+  let salta = false; try { salta = new URLSearchParams(location.search).get('borde') === '0'; } catch (e) {}
+  if (salta) return { usado: false };
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
+  let r, j;
+  try {
+    r = await fetch(BORDE_86 + '/menuLeva/' + encodeURIComponent(CFG.LOCAL), { method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8', 'X-Borde-Token': BORDE_TOKEN_86 },
+      body: JSON.stringify(Object.assign({ pin_jl: STATE.pin }, body)), signal: ctrl.signal, cache: 'no-store' });
+    j = await r.json().catch(function () { return null; });
+  } catch (e) { return { usado: true, ok: false, rete: true }; }
+  finally { clearTimeout(to); }
+  if (r.status === 404 || r.status === 403) return { usado: false };
+  if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') return { usado: false };
+  if (j && j.ok === true && j.escalon) return { usado: true, ok: true, r: j };
+  if (j && j.ok === false && j.error) return { usado: true, ok: false, r: j };
+  return { usado: true, ok: false, rete: true };   // 5xx o risposta illeggibile: non si sa
+}
 /* lo stato all'apertura del tab si LEGGE dal server (getLevaMenu, GET),
    non dalla memoria dell'ultimo click — uno stato letto invecchia. */
 let _levaLeyendo = false;
 async function levaRefresca() {
   if (_levaLeyendo) return;
   _levaLeyendo = true;
+  const bd = await _levaAlBorde({ accion: 'get', tipo: 'dia' });   // [21-ott · 5.10]
+  if (bd.usado) { if (bd.ok) { _levaAplica(bd.r); salva(); pintaTab(); } _levaLeyendo = false; return; }
   try { const r = await gasGet('getLevaMenu', { pin: STATE.pin }); if (r && r.ok) { _levaAplica(r); salva(); pintaTab(); } }
   catch (e) { /* senza rete la card resta com'è: memoria dichiarata, non verità */ }
   finally { _levaLeyendo = false; }
@@ -2296,7 +2323,9 @@ async function leva(escalon) {
   if (!confirm('¿Menú → ' + escalon.toUpperCase() + '?')) return;
   if (!confirm('Segunda confirmación: ' + escalon.toUpperCase() + ' para TODO el local.')) return;
   try {
-    const r = await gasPost('setLevaMenu', { pin: STATE.pin, escalon: escalon });
+    const bd = await _levaAlBorde({ accion: 'set', tipo: 'dia', escalon: escalon, uid: uidLeva() });   // [21-ott · 5.10]
+    if (bd.usado && bd.rete) { toast('warn', '⏳ No sé si el menú cambió — mira el estado antes de tocar de nuevo'); levaRefresca(); return; }
+    const r = bd.usado ? bd.r : await gasPost('setLevaMenu', { pin: STATE.pin, escalon: escalon });
     if (r && r.ok) {
       /* 🔴 [06-set · Alberto: «clicco Desactivar e si attiva 16.990»] il server
          SPEGNEVA davvero, ma nella risposta parla il SUO lessico
@@ -2329,6 +2358,8 @@ let _levaNocheLeyendo = false;
 async function levaRefrescaNoche() {
   if (_levaNocheLeyendo) return;
   _levaNocheLeyendo = true;
+  const bd = await _levaAlBorde({ accion: 'get', tipo: 'noche' });   // [21-ott · 5.10]
+  if (bd.usado) { if (bd.ok) { _levaAplicaNoche(bd.r); salva(); pintaTab(); } _levaNocheLeyendo = false; return; }
   try { const r = await gasGet('getLevaMenu', { pin: STATE.pin, tipo: 'noche' }); if (r && r.ok) { _levaAplicaNoche(r); salva(); pintaTab(); } }
   catch (e) { /* senza rete la card resta com'è: memoria dichiarata, non verità */ }
   finally { _levaNocheLeyendo = false; }
@@ -2338,7 +2369,9 @@ async function levaNoche(escalon) {
   if (!confirm('¿Menú Noche → ' + etq + '?')) return;
   if (!confirm('Segunda confirmación: ' + etq + ' para TODO el local.')) return;
   try {
-    const r = await gasPost('setLevaMenu', { pin: STATE.pin, escalon: escalon, tipo: 'noche' });
+    const bd = await _levaAlBorde({ accion: 'set', tipo: 'noche', escalon: escalon, uid: uidLeva() });   // [21-ott · 5.10]
+    if (bd.usado && bd.rete) { toast('warn', '⏳ No sé si el menú de la noche cambió — mira el estado antes de tocar de nuevo'); levaRefrescaNoche(); return; }
+    const r = bd.usado ? bd.r : await gasPost('setLevaMenu', { pin: STATE.pin, escalon: escalon, tipo: 'noche' });
     if (r && r.ok) {
       _levaAplicaNoche(r);
       salva(); pintaTab();
