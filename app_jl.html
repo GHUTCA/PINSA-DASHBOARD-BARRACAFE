@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.42.1</span>
+<span class="ver" id="ver">app_jl v1.42.2</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1454,24 +1454,25 @@ function _cajaVista() {
   base.propinas_bordo = +sv.propinas || 0;   // [16-ott · AUT-0703] la propina del giorno dai pagos del bordo (il totale; lo split tarjeta/efectivo resta di Google)
   /* [21-ott · pezzo 2.3] boletas e franjas dal bordo QUANDO le porta (`CAJA_SERVICIO_FRANJA_ON` di BKP: spenta ⇒ chiavi assenti ⇒ come ieri) */
   if (sv.boletas && typeof sv.boletas === 'object') { base.boletas = +sv.boletas.emitidas || 0; base.boletas_bordo = sv.boletas; }
-  if (Array.isArray(sv.por_franja)) { base.por_franja = _franjaObj(sv.por_franja); base.franja_bordo = true; }
+  if (sv.por_franja && typeof sv.por_franja === 'object' && !Array.isArray(sv.por_franja)) { base.por_franja = _franjaObj(sv.por_franja); base.franja_bordo = true; }
   return base;
 }
-/* [21-ott · 2.3] `por_franja` del bordo è un array `[{franja, venta, cuentas, propinas}]`; il vetro ha le chiavi fisse di TURNI (`ctas`, non `cuentas`).
-   Una franja che non è fra le quattro (o 'sin_franja') NON si perde: va in `_otras`, che la tabella mostra in una riga sua. */
-function _franjaObj(arr) {
+/* [21-ott · 2.3] `por_franja` del bordo (`BKP V32 2.3 A7B2910 AL BANCO E LA FORMA CORRETTA DI POR_FRANJA`) è un OGGETTO per fascia oraria di Santiago
+   (DÍA 06:00–17:30 · HH –20:00 · NOCHE –22:00 · TRASNOCHE –06:00) con `{venta, ctas, propinas}` — le chiavi di TURNI. Un pago senza ora arriva in
+   `sin_hora`: NON si perde e non si spalma, va in `_otras`, che la tabella mostra in una riga sua (come ogni chiave che non è fra le quattro). */
+function _franjaObj(fr) {
   const note = {}; Object.keys(TURNI).forEach(function (tn) { TURNI[tn].forEach(function (f) { note[f] = true; }); });
   const o = { _otras: { venta: 0, ctas: 0 } };
-  (arr || []).forEach(function (x) {
-    if (!x) return;
-    const k = String(x.franja || '').trim().toUpperCase().replace('DIA', 'DÍA');
+  Object.keys(fr || {}).forEach(function (k0) {
+    const x = fr[k0]; if (!x || typeof x !== 'object') return;
+    const k = String(k0).trim().toUpperCase().replace(/^DIA$/, 'DÍA');
     const dst = note[k] ? (o[k] = o[k] || { venta: 0, ctas: 0 }) : o._otras;
-    dst.venta += +x.venta || 0; dst.ctas += +x.cuentas || 0;
+    dst.venta += +x.venta || 0; dst.ctas += +x.ctas || 0;
   });
   return o;
 }
 /* ═══ [21-ott · pezzo 2.3] AYER e SEM. PASADA dal bordo: lo stesso verbo `servicio` con `dia` (giorno operativo, cambia alle 06:00) ═══
-   Si crede alla risposta SOLO se riporta lo stesso `dia`: a leva di BKP spenta il bordo ignora `dia` e risponderebbe con OGGI, e «ayer = hoy»
+   Si crede alla risposta SOLO se riporta lo stesso giorno (`dia_operativo`): a leva di BKP spenta il bordo ignora `dia` e risponderebbe con OGGI, e «ayer = hoy»
    sarebbe un numero falso con la faccia di uno vero. Una lettura ogni 10 minuti per colonna (i giorni passati non cambiano). */
 const HIST = { ayer: null, sem: null, ts: 0 };
 function _diaOp(menoGiorni) {
@@ -1482,7 +1483,7 @@ async function giroHistorico() {
   if (DEMO || !STATE.pin || !_servOn() || (Date.now() - HIST.ts) < 10 * 60000) return;
   HIST.ts = Date.now();
   const leggi = async function (dia) {
-    try { const r = await cajaPost1({ verbo: 'servicio', pin_jl: STATE.pin, dia: dia }); return (r && r.ok && r.dia === dia) ? r : null; }
+    try { const r = await cajaPost1({ verbo: 'servicio', pin_jl: STATE.pin, dia: dia }); return (r && r.ok && r.dia_operativo === dia) ? r : null; }   // il bordo dice il giorno che ha letto
     catch (e) { return null; }
   };
   const a = await leggi(_diaOp(1)), s = await leggi(_diaOp(7));
@@ -2741,8 +2742,8 @@ function _ventasFranjas(c) {
       });
       h += '<tr><td style="padding-left:16px"><b>TOTAL ' + tn + '</b></td><td><b>' + fmt(tv) + '</b></td><td><b>' + tc + '</b></td><td><b>' + (tc ? fmt(tv / tc) : '—') + '</b></td></tr>';
     });
-    if (_ot.ctas || _ot.venta) h += '<tr><td style="padding-top:10px;color:#f5a623"><b>Sin franja</b></td><td>' + fmt(_ot.venta || 0) + '</td><td>' + (_ot.ctas || 0) + '</td><td>' +
-      (_ot.ctas ? fmt(_ot.venta / _ot.ctas) : '—') + '</td></tr>';   // [21-ott · 2.3] cobros di chi non aveva asignación: si vedono, non si spalmano
+    if (_ot.ctas || _ot.venta) h += '<tr><td style="padding-top:10px;color:#f5a623"><b>Sin hora</b></td><td>' + fmt(_ot.venta || 0) + '</td><td>' + (_ot.ctas || 0) + '</td><td>' +
+      (_ot.ctas ? fmt(_ot.venta / _ot.ctas) : '—') + '</td></tr>';   // [21-ott · 2.3] cobros senza ora (sin_hora): si vedono, non si spalmano
     h += '</table>';
   } else {
     h += '<p class="mini">El corte por franja necesita los pagos con su hora — <b>declarado</b>: llega apenas la caja exponga la hora por pago (pedido a 💰). Mientras, el día entero está arriba.</p>';
