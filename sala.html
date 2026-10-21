@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.3 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.4 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2296,6 +2296,26 @@ async function staffPost(action, body, opts) {   // [01-ott] opts.ingreso: vedi 
    Dichiarato: un ricarico della pagina lo azzera (nessun tempo, nessun timer:
    il segno non sparisce «a tempo»). Il conteggio dei caduti NON va sul vetro del
    mesero: è del JL e del controllo della serata. */
+/* ═══ [21-ott · 🖐 QUARTA V32 · pezzo 1.7] LE LETTURE DEL 1.7 DAL BORDO, SENZA IL RIPIEGO DI staffPost ═══
+   `getModificadores` e `getFrecuentes` nel GAS vivono in `doGet` (MENU_GAS r.629-630): il ripiego di `staffPost`
+   è `gasPost`, che per loro risponde «azione sconosciuta». ⇒ qui il bordo si chiede da `/pedido-staff` e si crede
+   SOLO a `borde:true` (come staffPost); tutto il resto, rete compresa, torna a `gasGet` come ieri.
+   La leva è del chiamante: spenta = non si bussa nemmeno al bordo. */
+async function _letturaBordeOGas(levaOn, action, bodyBorde, paramsGas) {
+  if (levaOn && BORDE_SALA && BORDE_SALA.URL) {
+    try {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?t=' + encodeURIComponent(BORDE_SALA.T), {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctrl.signal, cache: 'no-store',
+        body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL, cli_ver: _salaVer(), app: APP_ID }, bodyBorde || {})) });
+      clearTimeout(to);
+      const j = await r.json();
+      if (j && j.borde === true) return j;
+    } catch (e) { /* rete o timeout: la via di sempre */ }
+  }
+  return gasGet(action, paramsGas || {});
+}
 const CADUTA_RIGA = 'Salió, pero tardará en aparecer en la cuenta.';
 const CADUTA_CHIP = 'tardará';
 const _CAIDOS = {};
@@ -5229,7 +5249,9 @@ function novEntendida(id){
   novActualizar(STATE.novedades);
   novAbrir();   // re-render: la card scivola nell'ayuda
   // il fossile — best-effort, mai blocca il gesto
-  try { gasPost('novedadEntendida', { codigo: STATE.codigo, nombre: STATE.nombre, id: id, app: 'mesero' }).catch(function(){}); } catch(e){}
+  /* [21-ott · QUARTA V32 · 1.7] a leva `novedad_borde_on` la ricevuta entra da /pedido-staff (doPost nel GAS: il ripiego di staffPost vale) */
+  try { const _bN = { codigo: STATE.codigo, nombre: STATE.nombre, id: id, app: 'mesero' };
+    (NOVEDAD_BORDE_ON ? staffPost('novedadEntendida', _bN) : gasPost('novedadEntendida', _bN)).catch(function(){}); } catch(e){}
 }
 
 /* v2.5 · 🔀 MOVER MESA — el cliente se cambió (caso 86→82 del 23-jul).
@@ -5658,7 +5680,7 @@ async function mods2Cargar(rCat){
   mods2Cancello(rCat);        // v3.14.0 · il cancello del foglio PRIMA del no-op
   if (!MODS2_ON) return;
   try {
-    const r = await gasGet('getModificadores', {});
+    const r = await _letturaBordeOGas(MODS2_BORDE_ON, 'getModificadores', { codigo: STATE.codigo, nombre: STATE.nombre }, {});   // [21-ott · QUARTA V32 · 1.7] stessa forma del GAS: { ok, grupos }
     if (r && r.ok) {
       MODS2_VOC = r;
       try { localStorage.setItem('mesero_mods2_voc', JSON.stringify(r)); } catch(e){}
@@ -7490,7 +7512,8 @@ function entrarSala() {
   pushEstado();  // v1.14 · riflette lo stato del bottone avisos
   _colaBadge(); _colaFlush();   // v2.2 · pedidos rimasti in cola da un turno interrotto → atterrano subito
   // v2.3 · F3 · frecuentes de ahora: il cervello, non l'alfabeto (cache GAS 5min)
-  gasGet('getFrecuentes', { codigo: STATE.codigo }).then(function(r){ if (r && r.ok && Array.isArray(r.ids)) STATE.frecuentes = r.ids; }).catch(function(){});
+  /* [21-ott · QUARTA V32 · 1.7] a leva `frecuentes_borde_on` dal bordo, altrimenti (o se il bordo non timbra) il GAS come ieri */
+  _letturaBordeOGas(FRECUENTES_BORDE_ON, 'getFrecuentes', { codigo: STATE.codigo, nombre: STATE.nombre }, { codigo: STATE.codigo }).then(function(r){ if (r && r.ok && Array.isArray(r.ids)) STATE.frecuentes = r.ids; }).catch(function(){});
   /* v1.15 · LA CARTA SI PRECALIENTA AL BOOT (VB Alberto, collaudo D-day):
      il catalogo si scarica in silenzio appena entri — il primo ➕ PEDIDO
      apre all'istante invece di pagare la chiamata GAS davanti al cliente.
@@ -9354,6 +9377,12 @@ var SALUD_LEVE_P = null;   // [21-ott · 6.5] la lettura di /salud qui sotto: il
 var SALIDA_BORDE_V = false;   // [21-ott · pezzo 1.6b] la leva DEL BORDO `salida_borde_on` letta da /salud ("1" o la lista dei locali): spenta ⇒ GAS diretto
 var CHECKIN_BORDE_ON = false;   // [21-ott · pezzo 6.5 · AUT-0719] /salud → checkin_borde_on: il check-in del telefono battezzato dal bordo. Nasce "0". Vedi `_checkInDalBorde`.
 var CORTE_MESAS_PG_ON = false;   // [21-ott · pezzo 1.6] /salud → corte_mesas_pg_on: il corte e il fin turno senza `getCierreMesero` (mesas da PG). Nasce "0". Vedi `_cieMesasDalBorde`.
+/* [21-ott · QUARTA V32 · pezzo 1.7] le tre leve dei vetri del 1.7, da /salud. Nascono "0". `getFrecuentes` e `getModificadores` girano
+   all'avvio, PRIMA che /salud risponda: il telefono ricorda l'ultima risposta (`sala_lett17`), come fa il check-in (`sala_checkinb`). */
+var _lett17 = (function () { try { return localStorage.getItem('sala_lett17') || ''; } catch (e) { return ''; } })();
+var FRECUENTES_BORDE_ON = _lett17.indexOf('f') >= 0;   // /salud → frecuentes_borde_on
+var MODS2_BORDE_ON = _lett17.indexOf('m') >= 0;        // /salud → mods2_borde_on
+var NOVEDAD_BORDE_ON = false;                          // /salud → novedad_borde_on
 var SOLTAR2X1_BORDE_ON = false;   // [21-ott · pezzo 1.7] /salud → soltar2x1_borde_on: «suelta el regalo» da /pedido-staff. Nasce "0".
 var COLN_STAFF_BORDE_ON = false;   // [21-ott · pezzo 2.6b] /salud → colacion_staff_borde_on: la lista della colación da /turno/estado (PG). Nasce "0". Vedi `_staffDalBorde`.
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
@@ -9430,6 +9459,10 @@ function _salaMuertaPinta(edadMs) {
       COLA_BORDE_ON = String(cercaK(j, 'cola_borde_on')) === '1';             // [21-ott · pezzo 1.16]
       COLN_STAFF_BORDE_ON = String(cercaK(j, 'colacion_staff_borde_on')) === '1';   // [21-ott · pezzo 2.6b]
       SOLTAR2X1_BORDE_ON = String(cercaK(j, 'soltar2x1_borde_on')) === '1';         // [21-ott · pezzo 1.7]
+      FRECUENTES_BORDE_ON = String(cercaK(j, 'frecuentes_borde_on')) === '1';       // [21-ott · QUARTA V32 · 1.7]
+      MODS2_BORDE_ON = String(cercaK(j, 'mods2_borde_on')) === '1';                 // [21-ott · QUARTA V32 · 1.7]
+      NOVEDAD_BORDE_ON = String(cercaK(j, 'novedad_borde_on')) === '1';             // [21-ott · QUARTA V32 · 1.7]
+      try { localStorage.setItem('sala_lett17', (FRECUENTES_BORDE_ON ? 'f' : '') + (MODS2_BORDE_ON ? 'm' : '')); } catch (e) {}   // le due letture girano all avvio, prima di /salud
       CORTE_MESAS_PG_ON = String(cercaK(j, 'corte_mesas_pg_on')) === '1';           // [21-ott · pezzo 1.6]
       CHECKIN_BORDE_ON = String(cercaK(j, 'checkin_borde_on')) === '1';             // [21-ott · pezzo 6.5]
       MXV2_SRV = String(cercaK(j, 'cobro_mixto_v2_on')) === '1';                    // [21-ott · le note di Alberto sul mixto] vedi `mxV2On`
