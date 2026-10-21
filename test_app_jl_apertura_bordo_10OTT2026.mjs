@@ -52,8 +52,11 @@ async function banco(SRC) {
   t('versione >= 1.38.0', /app_jl v1\.(3[89]|[4-9]\d)\.\d/.test(SRC));
 }
 await banco(SRC0);
-const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }
-  const k0 = ko, o0 = ok; muto = true; const k1 = ko; try { await banco(SRC0.replace(da, () => a)); } catch (e) { ko++; } muto = false; const rossi = ko - k1; ko = k0; ok = o0;
+/* [21-ott · TERZA V32] il mutante si applica DA `_aperturaPorBordo` in poi: dalla v1.42.1 le stesse righe (404/403, gate_spento, pin_jl) vivono anche in
+   `_turnoAdminPorBordo` (1.15), che sta PRIMA nel file — e un replace sulla prima occorrenza mutava quella, lasciando vivo il mutante qui. */
+const I0 = SRC0.indexOf('const _ERR_APERTURA = ');   // subito prima di _aperturaPorBordo, e dopo _turnoAdminPorBordo
+const mut = async (nome, da, a) => { if (!SRC0.slice(I0).includes(da)) { ko++; console.log('✗ mutante «' + nome + '»: stringa non trovata'); return; }
+  const k0 = ko, o0 = ok; muto = true; const k1 = ko; try { await banco(SRC0.slice(0, I0) + SRC0.slice(I0).replace(da, () => a)); } catch (e) { ko++; } muto = false; const rossi = ko - k1; ko = k0; ok = o0;
   t('mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
 await mut('il bordo non si prova (sempre GAS)', "const bd = await _aperturaPorBordo(_uidGesto());", "const bd = { usado: false };");
 await mut('timeout ripiega sul GAS', "clearTimeout(to); return { usado: true, ok: false, dudoso: true }; }   // timeout", "clearTimeout(to); return { usado: false }; }   // timeout");
