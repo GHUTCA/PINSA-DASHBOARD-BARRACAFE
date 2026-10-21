@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.42.7</span>
+<span class="ver" id="ver">app_jl v1.42.8</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1153,6 +1153,8 @@ async function _turnoAdminPorBordo() {
   if (r.status === 404 || r.status === 403) return { usado: false };
   if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') return { usado: false };
   if (j && j.ok === false && /^pin(_jl)?_(invalid|invalido|requerido)$/.test(String(j.error || ''))) return { usado: true, ok: false, pinMal: true };
+  /* [21-ott · 🟡③ di 💵 `EL GIRO V32 8B8A1E7 …`] il freno del bordo (troppi PIN sbagliati) NON si aggira ricadendo sul GAS: si dice, col tempo che manca */
+  if (j && j.ok === false && /^pin(_jl)?_bloqueado/.test(String(j.error || ''))) return { usado: true, ok: false, bloqueado: true, faltan_s: +j.faltan_s || 0 };
   if (j && j.ok === true && j.fuente === 'borde') return { usado: true, ok: true, r: j };
   return { usado: true, ok: false };
 }
@@ -2812,13 +2814,15 @@ async function entrar() {
   /* ═══ [21-ott · 🎛 V32 AUT-0725 · ⚙️ `ARQ V32 ADMINPING D5EBF18 COSA LO SOSTITUISCE E QUANDO MUORE` · TERZA] IL LOGIN DAL BORDO ═══════════════
      Prima di Google si chiede il turno al bordo (`/turno/admin`, la stessa lettura del giro dei 5 minuti, 1.15). Se il bordo è suo e risponde:
      turno dal bordo, e il NOME di chi guarda dal campo `user` (il bordo lo prende da PIN_JL_MAP, mai dal telefono) ⇒ né `getTurnoAdmin` né `adminPing`.
-     Se il bordo risponde senza `user` (bordo prima di d5ebf18), il nome si chiede ancora ad `adminPing` come oggi: mai `abierto_by` al suo posto,
-     è l'errore del 06-set («Mi plaza» di un altro). PIN rifiutato ⇒ «PIN no válido». Leva spenta (`gate_spento`), 404/403, rete morta o risposta
+     Se il bordo risponde senza `user` (bordo prima di d5ebf18), il nome si chiede ancora ad `adminPing` come oggi; se tace anche quello, `abierto_by`
+     COME OGGI (è l'errore del 06-set, «Mi plaza» di un altro: per questo d5ebf18 va spedito PRIMA o INSIEME a questo vetro, nota ② di 💵).
+     PIN rifiutato ⇒ «PIN no válido». PIN bloccato dal freno del bordo ⇒ «PIN bloqueado» col tempo, niente ripiego sul GAS (nota ③ di 💵). Leva spenta (`gate_spento`), 404/403, rete morta o risposta
      illeggibile ⇒ il cammino di oggi, intero: il login non resta mai chiuso per colpa del bordo. Muore con la leva TURNO_ABRE_BORDE_ON (ven 23). */
   STATE.pin = pin;
   let bd = { usado: false };
   try { bd = await _turnoAdminPorBordo(); } catch (e) { bd = { usado: false }; }
   if (bd.usado && bd.pinMal) { STATE.pin = null; $('gErr').textContent = 'PIN no válido'; return; }
+  if (bd.usado && bd.bloqueado) { STATE.pin = null; const mn = Math.max(1, Math.ceil((bd.faltan_s || 0) / 60)); $('gErr').textContent = '✋ PIN bloqueado por intentos fallidos · prueba en ' + mn + ' min'; return; }
   if (bd.usado && bd.ok) {
     const rB = bd.r; STATE.turno = rB; STATE.ts.turno = Date.now(); STATE.user = rB.user ? String(rB.user) : '';
     if (!STATE.user) { try { const who = await gasGet('adminPing', { pin: pin }); if (who && who.ok && who.user) STATE.user = who.user; } catch (e) {} }
