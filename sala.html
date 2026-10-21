@@ -7465,7 +7465,8 @@ async function _colaFlush() {
   COLA_FLUSHING = true;
   let entraron = 0;
   try {
-    while (a.length) {
+    let giri = a.length;   // [21-ott · 1.3] al più un passaggio per entrata: la rotazione qui sotto non può girare per sempre
+    while (a.length && giri-- > 0) {
       const e0 = a[0];
       let r = null;
       /* v2.0.1 · la cattura sopravvive al cambio turno (reperto: col codigo
@@ -7475,10 +7476,18 @@ async function _colaFlush() {
       if (e0.body && e0.body.codigo && STATE.codigo && e0.body.codigo !== STATE.codigo) e0.body.codigo = STATE.codigo;
       /* [21-ott · pezzo 1.16] a leva `cola_borde_on` la cola entra dalla STESSA porta dei pedidos vivi (`staffPost`: il bordo, che deduplica
          per uuid e scrive PG; il suo ripiego è quello di 1.3, non di qui). Spenta: dritta al GAS, come ieri. */
-      try { r = COLA_BORDE_ON ? await staffPost(e0.action, e0.body) : await gasPost(e0.action, e0.body); }
+      /* [21-ott · 1.3 · condizione ① di 💵 EL GIRO `EL GIRO V32 593AD62 VERDE STAFFPOST SENZA GOOGLE`] un verbo «solo bordo» (`_soloBorde`)
+         passa dal bordo ANCHE se `cola_borde_on` è spenta: altrimenti il pedido che il guasto ha messo in coda si svuoterebbe su Google. */
+      const _viaB = COLA_BORDE_ON || _soloBorde(e0.action);
+      try { r = _viaB ? await staffPost(e0.action, e0.body) : await gasPost(e0.action, e0.body); }
       catch (err) { break; }   // sigue sin señal: próximo giro
       if (r && r.ok) { a.shift(); _colaSave(a); entraron++; continue; }
-      e0.intentos = (e0.intentos || 0) + 1; _colaSave(a); break;
+      e0.intentos = (e0.intentos || 0) + 1;
+      /* [21-ott · 1.3 · condizione ③ di EL GIRO] un «non so» del bordo (`sin_borde`, need:'gas') non si risolve ripetendo: se fermasse il giro,
+         bloccherebbe TUTTI i pedidos dietro di lui per sempre. Va in fondo alla coda (non si perde: è una cattura) e gli altri entrano.
+         Ogni altro rifiuto si ferma come ieri. Il badge «por entrar» lo resta a mostrare: è il giro del JL che lo vede. */
+      if (r && r.sin_borde) { a.push(a.shift()); _colaSave(a); continue; }
+      _colaSave(a); break;
     }
   } finally { COLA_FLUSHING = false; }
   if (entraron) { toast('ok', '✓ ' + entraron + ' pedido' + (entraron === 1 ? '' : 's') + ' de la cola entraron al sistema'); refrescar(false); }
