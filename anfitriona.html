@@ -156,7 +156,7 @@
   <div id="mapaPlazas"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.9 · 21ott</span>
+    <span class="ver" id="ver">v1.10 · 21ott</span>
     <span class="ver" id="fuente" style="margin-left:8px"></span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
@@ -434,8 +434,23 @@ function entrarMapa() {
    DA DOVE viene la mappa e quanto e' vecchia. `?anfborde=0` e' il freno per apparecchio (si ricorda), `?anfborde=1` lo toglie.
    🔴 Le SEDUTE devono arrivare al bordo, o la mappa del bordo non le vede: con la leva accesa il tap «Sentados» passa dal bordo (come con `?sentarborde=1`), e per un tap che il bordo non
    ha preso (rete, `need:gas`) la seduta si ricorda anche QUI per 25 min, cosi' la mesa non torna «libre» e non si siede due volte. */
-const ANF_BORDE = { on: false, ts: 0, ver: '' };
+/* ═══ [21-ott · 1.9/1.10 · 🚚 MIGRACION V32 · 🎛 V32 `V32 ANFITRIONA A MIGRA`] LA MAPPA E IL SENTARE SENZA GOOGLE ═════════════════════════════════
+   Leva del bordo `anfitriona_sin_gas_on` (/salud, nasce "0") — vale SOLO insieme a `anfitriona_borde_on` "1" (senza la mappa del bordo non c'e' niente da mostrare).
+   A leva accesa: ① la mappa viene SEMPRE dal bordo; un dato vecchio si mostra con la sua eta' in rosso (N4), un bordo muto lascia l'ultima mappa con «Sin conexión»
+   — mai `getSalaAnfitriona` ② «Sentados» passa SOLO dal bordo: un rifiuto o la rete morta dicono il perche' e il foglio resta aperto con la STESSA `seat_uid`
+   (il ritentativo non siede due volte) — mai `sentarMesa` del GAS. Freno per apparecchio `?anfsingas=0` (si ricorda), `?anfsingas=1` lo toglie.
+   ⚠️ Fuori da questo pezzo, dichiarato: l'identita' (clockIn · salaCheckIn · getStaffSala · bautizarDevice · revocarDevice) resta com'era: e' di ⚙️ ARQ
+   (6.4 · 6.5 · 6.5b), e il criterio del 23 non la nomina. */
+const ANF_BORDE = { on: false, sinGas: false, ts: 0, ver: '' };
 const ANF_SEAT_VIGENCIA_MS = 25 * 60000, ANF_FRESCO_S = 90;
+function _anfSinGasFreno() {
+  const q = QS.get('anfsingas');
+  try {
+    if (q === '0') { localStorage.setItem('anfi_singas_off', '1'); return true; }
+    if (q === '1') { localStorage.removeItem('anfi_singas_off'); return false; }
+    return localStorage.getItem('anfi_singas_off') === '1';
+  } catch (e) { return q === '0'; }
+}
 function _anfFreno() {
   const q = QS.get('anfborde');
   try {
@@ -454,8 +469,13 @@ async function anfSaludLeva() {
     const j = await r.json();
     ANF_BORDE.on = !!(j && j.flags && String(j.flags.anfitriona_borde_on) === '1') && !_anfFreno();
     try { localStorage.setItem('anf_checkinb', (j && j.flags && String(j.flags.checkin_borde_on) === '1') ? '1' : '0'); } catch (e) {}   // [6.5] il prossimo avvio sa se chiedere al bordo
+    ANF_BORDE.sinGas = ANF_BORDE.on && !!(j && j.flags && String(j.flags.anfitriona_sin_gas_on) === '1') && !_anfSinGasFreno();
     ANF_BORDE.ver = (j && j.version) || '';
-  } catch (e) { ANF_BORDE.on = false; }   // /salud muto = spenta: mai una mappa del bordo senza che il bordo l'abbia detto
+  } catch (e) {
+    /* /salud muto = mappa del bordo spenta (mai una mappa del bordo senza che il bordo l'abbia detto). MA a leva «sin gas» gia' vista accesa la si tiene:
+       un /salud che non risponde e' esattamente il momento in cui il ripiego su Google tornerebbe — e la leva esiste per non farlo tornare. */
+    if (!ANF_BORDE.sinGas) ANF_BORDE.on = false;
+  }
   return ANF_BORDE.on;
 }
 function _anfSeatsLocales() { STATE.seatsLoc = (STATE.seatsLoc || []).filter(x => Date.now() - x.ts <= ANF_SEAT_VIGENCIA_MS); return STATE.seatsLoc; }
@@ -484,13 +504,16 @@ async function leerSalaBorde() {
     const d = j && j.ok && j.datos && j.datos.datos;
     if (!d || !d.anfitriona || !Array.isArray(d.anfitriona.plazas)) return null;      // el bordo no la trae: GAS
     const edad = typeof d.edad_borde_s === 'number' ? d.edad_borde_s : null;
-    if (edad == null || edad > ANF_FRESCO_S) return null;                              // dato del bordo viejo: GAS
-    return Object.assign({ ok: true, _fuente: 'bordo', _edad_s: edad }, d.anfitriona, { ts_datos: d.ts_datos });
+    const vieja = edad == null || edad > ANF_FRESCO_S;
+    if (vieja && !ANF_BORDE.sinGas) return null;                                       // dato del bordo viejo: GAS
+    return Object.assign({ ok: true, _fuente: 'bordo', _edad_s: edad, _vieja: vieja }, d.anfitriona, { ts_datos: d.ts_datos });   // [1.10 sin gas] vieja: si mostra con l'eta'
   } catch (e) { return null; }
 }
 function pintaFuente(r) {
   const el = $('fuente'); if (!el) return;
-  el.textContent = r && r._fuente === 'bordo' ? '· bordo hace ' + (r._edad_s || 0) + ' s' : '· google';
+  el.textContent = r && r._fuente === 'bordo'
+    ? '· bordo hace ' + (r._edad_s == null ? '?' : r._edad_s) + ' s' + (r._vieja ? ' ⚠️ mapa vieja' : '') : '· google';
+  if (el.style) el.style.color = r && r._vieja ? 'var(--bad)' : '';
 }
 async function refrescar(conSkeleton) {
   if (!STATE.codigo || !STATE.nombre) return;
@@ -499,6 +522,7 @@ async function refrescar(conSkeleton) {
   try {
     const rB = await leerSalaBorde();
     if (rB) { STATE.strikes = 0; STATE.sala = rB; $('offline').classList.remove('show'); render(anfAplicaSeatsLocales(rB)); pintaFuente(rB); return; }
+    if (ANF_BORDE.sinGas) { $('offline').classList.add('show'); return; }   // [1.10 sin gas] bordo muto: l'ultima mappa resta, mai Google
     const r = await gasGet('getSalaAnfitriona', { codigo: STATE.codigo, nombre: STATE.nombre });
     if (!r || !r.ok) {
       // v1.3 · corazza: si esce solo dopo 3 conferme consecutive
@@ -595,8 +619,13 @@ async function _sentarAlBorde(body) {
     clearTimeout(to);
     const j = await r.json();
     if (j && j.borde === true) return j;   // timbrato dal DO: risposta definitiva
+    /* [1.9 sin gas] a leva accesa non c'e' un «di la'»: il rifiuto torna col suo nome (apagado · seat_uid_missing · mesa_missing · pax_invalid · sin_gate…) */
+    if (ANF_BORDE.sinGas) return { ok: false, error: (j && (j.error || j.motivo)) || ('http_' + r.status), _sinGas: true };
     return null;   // need:'gas' o qualunque altra forma: vai di là, come sempre
-  } catch (e) { return null; }   // rete morta/timeout: vai di là, come sempre
+  } catch (e) {
+    if (ANF_BORDE.sinGas) return { ok: false, error: e && e.name === 'AbortError' ? 'timeout' : 'red', _sinGas: true };
+    return null;   // rete morta/timeout: vai di là, come sempre
+  }
 }
 async function confirmarSentar() {
   if (!STATE.bsMesa || STATE.enviando) return;
@@ -607,6 +636,12 @@ async function confirmarSentar() {
       seat_uid: STATE.bsSeatUid };   // [AUT-0424] la chiave d'idempotenza, mai dal server
     const rB = await _sentarAlBorde(body);
     const r = rB || await gasPost('sentarMesa', body);
+    /* [1.9 sin gas] il bordo ha detto di no o non ha risposto: il foglio RESTA aperto (stessa seat_uid ⇒ il ritentativo non siede due volte), e si dice perche' */
+    if (r && r._sinGas) {
+      const msg = { timeout: 'El sistema no respondió — reintenta (no se sentó dos veces)', red: 'Sin conexión — reintenta (no se sentó dos veces)' };
+      toast('err', msg[r.error] || ('No se pudo sentar: ' + r.error + ' — reintenta o avisa al JL'));
+      return;
+    }
     if (r && r.ok) { toast('ok', '✓ Mesa ' + r.mesa + ' · ' + r.pax + ' pax'); (STATE.seatsLoc = STATE.seatsLoc || []).push({ mesa: String(r.mesa || STATE.bsMesa), pax: STATE.bsPax, ts: Date.now() }); cerrarSheet(); }
     else if (r && (r.error === 'no_turno_abierto' || r.error === 'codigo_invalid')) { cerrarSheet(); _strikeTurno(); return; }   // v1.3 · corazza
     else toast('err', 'No se pudo: ' + (r && r.error || '?'));
