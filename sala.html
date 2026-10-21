@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.0 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.1 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9427,6 +9427,7 @@ function _salaMuertaPinta(edadMs) {
       SOLTAR2X1_BORDE_ON = String(cercaK(j, 'soltar2x1_borde_on')) === '1';         // [21-ott · pezzo 1.7]
       CORTE_MESAS_PG_ON = String(cercaK(j, 'corte_mesas_pg_on')) === '1';           // [21-ott · pezzo 1.6]
       CHECKIN_BORDE_ON = String(cercaK(j, 'checkin_borde_on')) === '1';             // [21-ott · pezzo 6.5]
+      MXV2_SRV = String(cercaK(j, 'cobro_mixto_v2_on')) === '1';                    // [21-ott · le note di Alberto sul mixto] vedi `mxV2On`
       try { localStorage.setItem('sala_checkinb', CHECKIN_BORDE_ON ? '1' : '0'); } catch (e) {}   // [6.5] il prossimo avvio sa se aspettare /salud
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
       FOTO_VIVA_LEIDA = true;                                               // [EL GIRO ⑥⑦] il bordo ha risposto: da qui vale la leva (assente = spenta)
@@ -13998,6 +13999,59 @@ function bMxBlur(el, k2) {
   }
   renderPago();
 }
+/* ═══ [21-ott · le due note di Alberto sulla prova del mixto, mesa 999 · `BKP V32 PROVA 0716 MIXTO FATTA E DUE NOTE DI ALBERTO SUL VETRO`] ═══════
+   🩸 ② «ogni volta che si scrive un importo la schermata torna in cima»: `bMxBlur` chiamava `renderPago()` all'uscita da OGNI campo ⇒ il pannello
+      rinasceva intero, `.c4body` ripartiva da scroll 0, e il campo appena toccato (e PAGAR, se era il dito dopo) rinasceva sotto il dito.
+   🩹 A leva: scrivere e lasciare un campo aggiorna SUL POSTO solo le tre cose che cambiano — la riga «cuadra/faltan/sobran», il chip della
+      propina (AUT-0716) e il bottone PAGAR — più i placeholder «toca y listo». Nessun campo rinasce. Dove un ridisegno resta (un tocco su un
+      chip), `bMedio` tiene lo scroll. ① il mixto scelto chiude i bottoni dei medios in una riga sola.
+   Leva: `cobro_mixto_v2_on` dal /salud, e `?mxv2=1` / `?mxv2=0` per telefono (vince, e si ricorda). Spenta: il pannello di ieri. */
+let MXV2_SRV = false;
+const MXV2_QS = (function () {
+  const q = QS.get('mxv2');
+  try { if (q === '1' || q === '0') localStorage.setItem('sala_mxv2', q); return localStorage.getItem('sala_mxv2') || ''; }
+  catch (e) { return (q === '1' || q === '0') ? q : ''; }
+})();
+function mxV2On() { return MXV2_QS === '0' ? false : (MXV2_QS === '1' || MXV2_SRV); }
+function _bMxNum(v) { return Math.round(parseFloat(String(v).replace(/[^0-9]/g, '')) || 0); }
+function _bMxPinta() {
+  const pg = STATE.pago; if (!pg || pg.medio !== 'mixto' || !pg.mixto) return;
+  const ks = ['efectivo', 'debito', 'credito', 'transferencia'];
+  const mB = _bMonto(), prop = _pagoPropina();
+  const suma = ks.reduce(function (s, k) { return s + _bMxNum(pg.mixto[k]); }, 0), resto = mB - suma;
+  ks.forEach(function (k) {
+    const el = $('bmx_' + k); if (!el) return;
+    el.placeholder = (!String(pg.mixto[k] || '').trim() && resto > 0) ? '$' + _fmtMiles(resto) + ' — toca y listo' : '$0';
+  });
+  const cu = $('bmxCuadra');
+  if (cu) {
+    const ok = resto === 0 && suma > 0;
+    cu.style.color = ok ? '#3db876' : '#f5a623';
+    cu.innerHTML = ok ? '✓ cuadra: $' + _fmtMiles(suma)
+      : resto > 0 ? 'faltan <b>$' + _fmtMiles(resto) + '</b> de $' + _fmtMiles(mB)
+      : 'sobran <b>$' + _fmtMiles(-resto) + '</b> — baja alguna cifra';
+  }
+  const pp = $('bmxProp'); if (pp) pp.innerHTML = _mxPropHtml(pg, prop);
+  const bt = $('c4Pagar');
+  if (bt) {
+    const mal = !(resto === 0 && suma > 0), alP3 = _pagoQuiereVoucher(), totB = mB + prop;
+    bt.disabled = !!(pg.enviando || mal);
+    bt.setAttribute('onclick', alP3 ? 'pagoAlPaso3()' : 'pagoConfirmar(this)');
+    bt.textContent = pg.enviando ? 'Registrando…' : mal ? 'La suma no cuadra todavía'
+      : alP3 ? 'PAGAR ' + fmtPrice(totB) + ' — pasa la tarjeta' : 'PAGAR Y CERRAR ' + fmtPrice(totB);
+  }
+}
+function bMxIn(el, k2) { const pg = STATE.pago; if (!pg || !pg.mixto) return; pg.mixto[k2] = el.value; _bMxPinta(); }
+/* l'uscita dal campo: il «toca y listo» si scrive DENTRO il campo (stessa regola di `bMxBlur`, v3.77.0), poi si ritocca sul posto — mai renderPago */
+function bMxBlur2(el, k2) {
+  const pg = STATE.pago; if (!pg || !pg.mixto) return;
+  if (!String(pg.mixto[k2] || '').trim()) {
+    const suma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k3) { return s + _bMxNum(pg.mixto[k3]); }, 0);
+    const resto = _bMonto() - suma;
+    if (resto > 0) { pg.mixto[k2] = String(resto); if (el) el.value = String(resto); }
+  }
+  _bMxPinta();
+}
 function bMedio(w, pg) {
   c4Css();
   var mB = _bMonto(), prop = _pagoPropina(), totB = mB + prop;
@@ -14053,23 +14107,30 @@ function bMedio(w, pg) {
        express/menu), mai dentro la schermata del mesero. Il segnaposto che
        stava qui era ereditato dal pannello vecchio (v3.36), non dalla
        decisione — e quel segnaposto morirà col pannello che lo porta. */
-    '<div class="c4chips">' + chipM('debito', 'Débito', 'tarjeta') + chipM('credito', 'Crédito', 'tarjeta') + '</div>' +
+    /* [21-ott · nota ① di Alberto, `BKP V32 PROVA 0716 MIXTO FATTA E DUE NOTE DI ALBERTO SUL VETRO`] scelto «Mixto» i cinque bottoni non servono
+       più: resta una riga sola (Mixto scelto · Cambiar), e la ripartizione sale subito sotto. Leva `mxV2On()`. */
+    ((mxV2On() && pg.medio === 'mixto')
+      ? '<div class="c4chips">' + chipM('mixto', '🔀 Mixto', '2+ medios') +
+        '<button class="c4chip b2" onclick="pagoSet(\'medio\',\'\')">Cambiar<small>otro medio</small></button></div>'
+      : '<div class="c4chips">' + chipM('debito', 'Débito', 'tarjeta') + chipM('credito', 'Crédito', 'tarjeta') + '</div>' +
     '<div class="c4chips" style="margin-top:8px">' + chipM('efectivo', 'Efectivo', '') + chipM('mixto', '🔀 Mixto', '2+ medios') + '</div>' +
     /* ⚠️ Transfer RESTA, contro il mockup — stessa dichiarazione del v3.36:
        il mockup lo toglie perché «è Fintoc», ma Fintoc NON è attivo. */
-    '<div class="c4chips" style="margin-top:8px">' + chipM('transferencia', 'Transfer', 'bancaria') + '</div>';
+    '<div class="c4chips" style="margin-top:8px">' + chipM('transferencia', 'Transfer', 'bancaria') + '</div>');
   var mxResto = 0, mxSuma = 0;
   if (pg.medio === 'mixto') {
     pg.mixto = pg.mixto || { efectivo: '', debito: '', credito: '', transferencia: '' };
     mxSuma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k2) {
       return s + (Math.round(parseFloat(String(pg.mixto[k2]).replace(/[^0-9]/g, '')) || 0)); }, 0);
     mxResto = mB - mxSuma;
+    var _v2 = mxV2On();   // [21-ott · nota ② di Alberto] a leva accesa scrivere un importo NON ridisegna il pannello: si aggiorna sul posto
     var fila = function (k2, lbl) {
       var vacio = !String(pg.mixto[k2] || '').trim();
       return '<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="flex:0 0 96px;font-size:13px">' + lbl + '</span>' +
-        '<input class="cs-pin" style="margin:0" inputmode="numeric" placeholder="' +
+        '<input class="cs-pin" style="margin:0" inputmode="numeric" ' + (_v2 ? 'id="bmx_' + k2 + '" ' : '') + 'placeholder="' +
         (vacio && mxResto > 0 ? '$' + _fmtMiles(mxResto) + ' — toca y listo' : '$0') + '" value="' + esc(pg.mixto[k2]) + '"' +
-        ' oninput="STATE.pago.mixto[\'' + k2 + '\']=this.value" onblur="bMxBlur(this,\'' + k2 + '\')"></div>';
+        (_v2 ? ' oninput="bMxIn(this,\'' + k2 + '\')" onblur="bMxBlur2(this,\'' + k2 + '\')"></div>'
+          : ' oninput="STATE.pago.mixto[\'' + k2 + '\']=this.value" onblur="bMxBlur(this,\'' + k2 + '\')"></div>');
     };
     b += '<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.35)">' +
       /* ═══ 🔴 v3.70.0 · IL MIXTO CHIEDEVA UNA CIFRA E IL PANNELLO NE MOSTRAVA
@@ -14090,8 +14151,8 @@ function bMedio(w, pg) {
       (prop > 0 ? '<div style="font-size:11.5px;color:var(--cs-mut);margin:-2px 0 5px;line-height:1.45">' +
         'la propina de <b>$' + _fmtMiles(prop) + '</b> se suma sola al final — <b>no la repartas aquí</b></div>' : '') +
       fila('efectivo', 'Efectivo') + fila('debito', 'Débito') + fila('credito', 'Crédito') + fila('transferencia', 'Transfer') +
-      _mxPropHtml(pg, prop) +   // [19-ott · AUT-0716] in che mezzo entra la propina
-      '<div style="margin-top:8px;font-size:12.5px;' + (mxResto === 0 && mxSuma > 0 ? 'color:#3db876' : 'color:#f5a623') + '">' +
+      (_v2 ? '<div id="bmxProp">' + _mxPropHtml(pg, prop) + '</div>' : _mxPropHtml(pg, prop)) +   // [19-ott · AUT-0716] in che mezzo entra la propina
+      '<div ' + (_v2 ? 'id="bmxCuadra" ' : '') + 'style="margin-top:8px;font-size:12.5px;' + (mxResto === 0 && mxSuma > 0 ? 'color:#3db876' : 'color:#f5a623') + '">' +
       (mxResto === 0 && mxSuma > 0 ? '✓ cuadra: $' + _fmtMiles(mxSuma)
         : mxResto > 0 ? 'faltan <b>$' + _fmtMiles(mxResto) + '</b> de $' + _fmtMiles(mB)
         : 'sobran <b>$' + _fmtMiles(-mxResto) + '</b> — baja alguna cifra') + '</div></div>';
@@ -14142,7 +14203,7 @@ function bMedio(w, pg) {
     var mixtoMal = pg.medio === 'mixto' && !(mxResto === 0 && mxSuma > 0);
     var alPaso3 = _pagoQuiereVoucher();
     var off = pg.enviando || !pg.medio || mixtoMal;
-    f = '<button class="c4cta" ' + (off ? 'disabled ' : '') +
+    f = '<button class="c4cta" ' + (mxV2On() ? 'id="c4Pagar" ' : '') + (off ? 'disabled ' : '') +
       'onclick="' + (alPaso3 ? 'pagoAlPaso3()' : 'pagoConfirmar(this)') + '">' +
       (pg.enviando ? 'Registrando…'
         : !pg.medio ? 'Elige el medio de pago'
@@ -14154,11 +14215,15 @@ function bMedio(w, pg) {
       ((pg.c4 && !pg.c4.b)
         ? '<button class="c4cta sec" onclick="c4Go(\'inicio\')">‹ Volver a mostrárselo al cliente</button>' : '');
   }
-  w.innerHTML = '<div class="c4">' +
+  /* [21-ott · nota ② di Alberto] un ridisegno che resta resta: si tiene lo scroll di `.c4body` se era GIÀ questa schermata, dello stesso pago */
+  var _scV = mxV2On() ? w.querySelector('.c4[data-scr="medio"]') : null;
+  var _scTop = (_scV && _scV.getAttribute('data-uid') === String(pg.uid || '') && _scV.querySelector('.c4body')) ? _scV.querySelector('.c4body').scrollTop : 0;
+  w.innerHTML = '<div class="c4"' + (mxV2On() ? ' data-scr="medio" data-uid="' + esc(String(pg.uid || '')) + '"' : '') + '>' +
     '<div class="c4bar"><span class="c4tt">Cobrar</span>' +
       '<button class="c4salir" onclick="pagoCerrar()">✕ Salir</button></div>' +
     '<div class="c4body">' + b + '</div>' +
     '<div class="c4foot">' + f + '</div></div>';
+  if (_scTop) { var _scB = w.querySelector('.c4body'); if (_scB) _scB.scrollTop = _scTop; }
   _pgRelojOff();
 }
 
