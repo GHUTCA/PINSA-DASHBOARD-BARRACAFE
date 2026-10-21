@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.227.6 · vetro</span>
+      <span class="ver" id="ver">sala v3.227.7 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3616,7 +3616,10 @@ function salir() {
   if (finTurno && FINTURNO_BLOQUEO_ON && !_CIE_FIRMADO) {
     _cieLeerFresco().then(async function (f) {
       let ab = f ? _misMesasAbiertas(f.sala) : null;
-      if (!ab) {
+      if (!ab && CORTE_MESAS_PG_ON) {   // [21-ott · pezzo 1.6] le mesas aperte da Postgres (estado_mesero), non dal libro
+        const mb = await _cieMesasDalBorde();
+        if (mb.sabe) ab = mb.mesas.map(function (m) { return { mesa: m.mesa, total: m.consumo }; });
+      } else if (!ab) {
         try {
           const rl = await gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre });
           if (rl && rl.ok && Array.isArray(rl.mesas_abiertas)) {
@@ -3879,12 +3882,39 @@ async function cierreAbrir() {
        régimen · cierre previo · tolerancia con cui decide il CORTE DEL BORDO. Si usa solo una risposta che lo dice (`corte_fuente:'borde'`)
        e che porta la chiave `ya_cerrado` (null = «non hai chiuso»; ASSENTE = il corte non passa dal bordo, «non so»). Tutto il resto
        (leva del bordo spenta, chiave assente, rete) ⇒ il libro di sempre. Il fatto dice da dove è venuto: è la misura dell'efficacia. */
-    if (corteEstadoOn()) {
+    if (corteEstadoOn() || CORTE_MESAS_PG_ON) {
       _cajaMesero({ verbo: 'estado_mesero' }).then(function (r) {
         if (r && r.ok && r.corte_fuente === 'borde' && ('ya_cerrado' in r)) { bordeHecho('corte_estado', { fuente: 'borde', ya: !!r.ya_cerrado }); _cieCompleta(r); }
+        /* [21-ott · 1.6] a leva `corte_mesas_pg_on` il completamento non va al libro: senza risposta del bordo il corte resta con le mesas
+           della sala fresca (già a schermo) e i default (tolerancia 2000), come quando il libro non rispondeva */
+        else if (CORTE_MESAS_PG_ON) bordeHecho('corte_estado', { fuente: 'nessuna', motivo: !r ? 'red' : (r.corte_fuente !== 'borde' ? 'leva' : 'sin_clave') });
         else { bordeHecho('corte_estado', { fuente: 'gas', motivo: !r ? 'red' : (r.corte_fuente !== 'borde' ? 'leva' : 'sin_clave') }); _cieDalLibro(); }
       });
     } else _cieDalLibro();
+    return;
+  }
+  /* [21-ott · pezzo 1.6] senza sala fresca, a leva accesa le mesas aperte vengono da Postgres (`estado_mesero.mesas_abiertas`, fuente 'pg').
+     `pasa_a` non c'è (nessuna sala per sapere chi eredita la plaza): il corte mostra tutte le mesas come TUE, il verso prudente. «Non so»
+     (fuente null, rete, leva del bordo spenta) ⇒ il messaggio di sempre, mai Google e mai «zero mesas». */
+  if (CORTE_MESAS_PG_ON) {
+    const mb = await _cieMesasDalBorde();
+    if (mb.sabe) {
+      const r0 = mb.r || {};
+      let monto = 0; mb.mesas.forEach(function (m) { monto += m.consumo; });
+      CIE.data = { ok: true, _pg: true, mesero: r0.mesero || STATE.nombre,
+        mesas_abiertas: mb.mesas.map(function (m) { return { mesa: m.mesa, consumo: m.consumo, pasa_a: '' }; }),
+        n_abiertas: mb.mesas.length, monto_abierto: monto, hay_heredero: false };
+      if (r0.corte_fuente === 'borde' && ('ya_cerrado' in r0)) { CIE.data.turno = r0.turno; CIE.data.regimen = r0.regimen; CIE.data.ya_cerrado = r0.ya_cerrado; }
+      CIE.tol = r0.tolerancia || 2000;
+      bordeHecho('corte_estado', { fuente: 'pg_mesas', n_abiertas: mb.mesas.length });   // stesso gesto già accettato dal bordo
+      _ciePaso1();
+      return;
+    }
+    bordeHecho('corte_estado', { fuente: 'nessuna_mesas', motivo: mb.motivo });
+    _cieRender('<div class="cie-msg">No pude leer tus mesas (' + esc(mb.motivo) + ').<br>' +
+      'Reintenta en un momento — si sigue igual, avísale al JL antes de irte.</div>' +
+      '<button class="btn" onclick="cierreAbrir()">Reintentar</button>' +
+      '<div class="cie-out" onclick="_cieSalirSinCerrar()">Salir sin cerrar</div>');
     return;
   }
   try {
@@ -3996,6 +4026,18 @@ async function _cajaMesero(extra) {
     clearTimeout(to);
     return await r.json();
   } catch (e) { clearTimeout(to); return null; }
+}
+/* [21-ott · pezzo 1.6] le mesas aperte del mesero da Postgres: `estado_mesero.mesas_abiertas` (contratto `BKP V32 LE FORME PER I VETRI DI TERZA`:
+   `[{mesa, consumo, pedidos, desde_ts}]` + `mesas_abiertas_fuente: 'pg' | null`). Si crede SOLO a fuente 'pg' con un array: null, chiave assente
+   (leva del bordo `ESTADO_MESERO_MESAS_ON` spenta) o rete ⇒ `sabe:false`, mai «zero mesas». */
+async function _cieMesasDalBorde() {
+  const r = await _cajaMesero({ verbo: 'estado_mesero' });
+  if (!r) return { sabe: false, motivo: 'sin_red' };
+  if (!r.ok) return { sabe: false, motivo: String(r.error || 'no_ok'), r: r };
+  if (r.mesas_abiertas_fuente !== 'pg' || !Array.isArray(r.mesas_abiertas)) return { sabe: false, motivo: 'sin_mesas_pg', r: r };
+  const mesas = r.mesas_abiertas.filter(function (m) { return m && m.mesa != null && String(m.mesa).trim(); })
+    .map(function (m) { return { mesa: String(m.mesa), consumo: Math.round(parseFloat(m.consumo) || 0) }; });
+  return { sabe: true, mesas: mesas, r: r };
 }
 /* [03-ott · i vetri di 🎨 DESIGN, ⑤] Mi corte nelle parole del mockup: Recaudación en efectivo ·
    Retiros · Saldo por entregar. Nessuna frase dentro il telefono, «dinero» e mai «plata».
@@ -9264,6 +9306,8 @@ var CORR_SIN_GAS_ON = false;
 /* [21-ott · pezzo 1.16] la cola offline dei pedidos entra dal bordo (`staffPost`) invece che dritta al GAS. Leva del bordo `cola_borde_on`, nasce "0".
    Toglie la riga «La cola offline resta puntata al GAS (cintura)» di v3.3: era la cintura di un bordo nuovo, oggi il bordo è la porta dei pedidos vivi. */
 var COLA_BORDE_ON = false;
+var CORTE_MESAS_PG_ON = false;   // [21-ott · pezzo 1.6] /salud → corte_mesas_pg_on: il corte e il fin turno senza `getCierreMesero` (mesas da PG). Nasce "0". Vedi `_cieMesasDalBorde`.
+var SOLTAR2X1_BORDE_ON = false;   // [21-ott · pezzo 1.7] /salud → soltar2x1_borde_on: «suelta el regalo» da /pedido-staff. Nasce "0".
 var COLN_STAFF_BORDE_ON = false;   // [21-ott · pezzo 2.6b] /salud → colacion_staff_borde_on: la lista della colación da /turno/estado (PG). Nasce "0". Vedi `_staffDalBorde`.
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
 /* ═══ [10-ott · 🎛 V28 AUT-0663 `FOTO SALVATA SENZA ETA CURA ALLA RADICE`] UNA SALA SALVATA PIU VECCHIA DEL TETTO NON SI DISEGNA MAI COME SE FOSSE VIVA ═══════════
@@ -9338,6 +9382,8 @@ function _salaMuertaPinta(edadMs) {
       CORR_SIN_GAS_ON = String(cercaK(j, 'corregir_sin_gas_on')) === '1';     // [21-ott · pezzo 1.5]
       COLA_BORDE_ON = String(cercaK(j, 'cola_borde_on')) === '1';             // [21-ott · pezzo 1.16]
       COLN_STAFF_BORDE_ON = String(cercaK(j, 'colacion_staff_borde_on')) === '1';   // [21-ott · pezzo 2.6b]
+      SOLTAR2X1_BORDE_ON = String(cercaK(j, 'soltar2x1_borde_on')) === '1';         // [21-ott · pezzo 1.7]
+      CORTE_MESAS_PG_ON = String(cercaK(j, 'corte_mesas_pg_on')) === '1';           // [21-ott · pezzo 1.6]
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
       FOTO_VIVA_LEIDA = true;                                               // [EL GIRO ⑥⑦] il bordo ha risposto: da qui vale la leva (assente = spenta)
     }).catch(function () {});
@@ -16242,7 +16288,10 @@ function cardMio(p, umb) {
 async function soltarRegalo__in(uuid, btn) {
   if (btn) btn.disabled = true;
   try {
-    const r = await gasPost('soltar2x1', { codigo: STATE.codigo, nombre: STATE.nombre, uuid: uuid });
+    /* [21-ott · pezzo 1.7, la parte che ce la fa] a leva `soltar2x1_borde_on` il gesto entra da `/pedido-staff` (staffPost, action `soltar2x1`,
+       stesso corpo): il bordo spegne `espera` sui regali e stampa solo loro (contratto in `TERZA V32 SOLTAR2X1 COSA FA IL GAS`). Spenta: GAS come ieri. */
+    const _bS = { codigo: STATE.codigo, nombre: STATE.nombre, uuid: uuid };
+    const r = SOLTAR2X1_BORDE_ON ? await staffPost('soltar2x1', _bS) : await gasPost('soltar2x1', _bS);
     if (r && r.ok) {
       toast('ok', r.sin_pendientes ? 'Ya estaba en producción' : '🎁 Regalo soltado — tkt en camino');
       try { refrescar(false); } catch (e2) {}
