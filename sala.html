@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.227.5 · vetro</span>
+      <span class="ver" id="ver">sala v3.227.6 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9264,6 +9264,7 @@ var CORR_SIN_GAS_ON = false;
 /* [21-ott · pezzo 1.16] la cola offline dei pedidos entra dal bordo (`staffPost`) invece che dritta al GAS. Leva del bordo `cola_borde_on`, nasce "0".
    Toglie la riga «La cola offline resta puntata al GAS (cintura)» di v3.3: era la cintura di un bordo nuovo, oggi il bordo è la porta dei pedidos vivi. */
 var COLA_BORDE_ON = false;
+var COLN_STAFF_BORDE_ON = false;   // [21-ott · pezzo 2.6b] /salud → colacion_staff_borde_on: la lista della colación da /turno/estado (PG). Nasce "0". Vedi `_staffDalBorde`.
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
 /* ═══ [10-ott · 🎛 V28 AUT-0663 `FOTO SALVATA SENZA ETA CURA ALLA RADICE`] UNA SALA SALVATA PIU VECCHIA DEL TETTO NON SI DISEGNA MAI COME SE FOSSE VIVA ═══════════
    IL FATTO (mesa 100, telefono di Ary, 10-ott): il catch del poll ridisegnava `sala_foto_v1` SENZA tetto d'eta («una sala di un'ora fa, dichiarata, batte il vuoto») e il ricarico non la toglie: Ary ha visto
@@ -9336,6 +9337,7 @@ function _salaMuertaPinta(edadMs) {
       PROPINA_VOUCHER_ON = String(cercaK(j, 'propina_voucher_on')) === '1';   // [21-ott · AUT-0716 ②]
       CORR_SIN_GAS_ON = String(cercaK(j, 'corregir_sin_gas_on')) === '1';     // [21-ott · pezzo 1.5]
       COLA_BORDE_ON = String(cercaK(j, 'cola_borde_on')) === '1';             // [21-ott · pezzo 1.16]
+      COLN_STAFF_BORDE_ON = String(cercaK(j, 'colacion_staff_borde_on')) === '1';   // [21-ott · pezzo 2.6b]
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
       FOTO_VIVA_LEIDA = true;                                               // [EL GIRO ⑥⑦] il bordo ha risposto: da qui vale la leva (assente = spenta)
     }).catch(function () {});
@@ -10576,10 +10578,31 @@ function _dtoOtroMonto(mesa) {
 /* v3.4.3 · il flusso della colación: nome dalla lista (la mesa si SCEGLIE,
    il nome pure) → PIN JL → registrarColacion. L'azione server nasce con
    l'innesto (PATCH_GAS_COLACION): finché non c'è, il bottone risponde onesto. */
+/* ═══ [21-ott · pezzo 2.6b] LA LISTA DELLA COLACIÓN DA POSTGRES (via bordo) ═══════════════════════════════════════════════════
+   `GET /turno/estado/<local>` (bordo → `staff_locale_vigente`), la stessa che usa l'app del JL (`_staffJLCarga`, RRHH 6.3). Qui TUTTO lo staff del
+   locale, non solo chi è in plaza: la colación è anche per cocina e barra. Leva del bordo `colacion_staff_borde_on`, nasce "0", e serve
+   anche `TURNO_PG_ON` "1" (spento ⇒ 503). A leva accesa NON si torna a Google: se il bordo non risponde la lista dice di riprovare. */
+const LOC_PG_SALA = { BKS: 'BKS', RIESCO: 'RSC', CANDELARIA: 'CDL' };
+async function _staffDalBorde() {
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
+  try {
+    const r = await fetch(BORDE_SALA.URL + '/turno/estado/' + encodeURIComponent(LOC_PG_SALA[CFG.LOCAL] || CFG.LOCAL || 'BKS'),
+      { headers: { 'x-borde-token': BORDE_SALA.T }, cache: 'no-store', signal: ctrl.signal });
+    const j = await r.json();
+    if (j && j.ok && Array.isArray(j.staff)) {
+      const vist = {}, out = [];
+      j.staff.forEach(function (s) { const n = String((s && s.nombre) || '').trim(); const k = n.toLowerCase(); if (n && !vist[k]) { vist[k] = 1; out.push(n); } });
+      return out.sort(function (a, b) { return a.localeCompare(b); });
+    }
+    return [];
+  } catch (e) { return []; }
+  finally { clearTimeout(to); }
+}
 async function _dtoColacion__in(mesa) {
   vhojaCerrar();
   let staff = [];
-  try { const r = await gasPost('getStaffSala', { codigo: STATE.codigo });
+  if (COLN_STAFF_BORDE_ON) staff = await _staffDalBorde();   // [2.6b] niente Google a leva accesa
+  else try { const r = await gasPost('getStaffSala', { codigo: STATE.codigo });
     if (r && r.ok) staff = (r.staff || []).map(function (s) { return s.nombre; }); } catch (e) {}
   STATE.coln = { mesa: mesa, para: '', pin: '' };
   vhoja('<h3>🍱 Colación · Mesa ' + esc(mesa) + '</h3>' +
