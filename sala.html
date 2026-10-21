@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.12 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.13 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -14047,7 +14047,39 @@ function _mxMediosConMonto(pg) {
 }
 function _mxPropMedio(pg) {   // il mezzo scelto, solo se è ancora uno dei mezzi del mixto
   const k = pg && pg.propMedio;
+  if (k === '_div') return _mxMediosConMonto(pg).length >= 2 ? '_div' : '';   // [21-ott] «Dividir»: solo con almeno due mezzi
   return (k && _mxMediosConMonto(pg).indexOf(k) >= 0) ? k : '';
+}
+/* ═══ [21-ott · 🎛 V32 `V32 MIXTO CON LA PROPINA IN DUE MEZZI MESA 47` · dentro AUT-0716 · TERZA] LA PROPINA DIVISA FRA I MEZZI ═══════════════
+   🩸 Mesa 47 (21-ott): mixto, propina 3.268 lasciata metà in efectivo e metà in débito; il chip ne prendeva uno solo ⇒ efectivo +1.634 sull'atteso
+      del garzón, uno sconto a torto al ritiro. 🩹 Il chip «Dividir» apre una casella per ogni mezzo del mixto. Si parte con tutta la propina in
+      efectivo (regola di Alberto; senza efectivo, nel primo mezzo). Con due mezzi, scrivere una casella riempie l'altra col resto. La somma
+      DEVE tornare alla propina: senza, il pago non parte. Il contratto del bordo regge già la divisa (`propina` per riga di `medios_json`, 46fb1f6). */
+function _mxPropNum(v) { return Math.max(0, Math.round(parseFloat(String(v == null ? '' : v).replace(/[^0-9]/g, '')) || 0)); }
+function _mxPropDiv(pg) {   // {mezzo: propina} sui mezzi del mixto, o null se non si sta dividendo
+  if (_mxPropMedio(pg) !== '_div') return null;
+  const d = pg.propDiv || {}, out = {};
+  _mxMediosConMonto(pg).forEach(function (k) { out[k] = _mxPropNum(d[k]); });
+  return out;
+}
+function _mxPropDivCuadra(pg, prop) {
+  const d = _mxPropDiv(pg); if (!d) return '';
+  const su = Object.keys(d).reduce(function (a, k) { return a + d[k]; }, 0), r = prop - su;
+  return r === 0 ? '<span style="color:#3db876">✓ suma $' + _fmtMiles(su) + '</span>'
+    : '<span style="color:#f5a623">' + (r > 0 ? 'faltan <b>$' + _fmtMiles(r) + '</b>' : 'sobran <b>$' + _fmtMiles(-r) + '</b>') + ' de propina</span>';
+}
+function bPropDivIn(k, v) {
+  const pg = STATE.pago; if (!pg) return; pg.propDiv = pg.propDiv || {}; pg.propDiv[k] = v;
+  const cu = $('bmxPropCu'); if (cu) cu.innerHTML = _mxPropDivCuadra(pg, _pagoPropina());
+}
+function bPropDivBlur(k) {
+  const pg = STATE.pago; if (!pg || !pg.propDiv) return;
+  const ms = _mxMediosConMonto(pg), prop = _pagoPropina();
+  if (ms.length === 2 && String(pg.propDiv[k] == null ? '' : pg.propDiv[k]).trim() !== '') {   // due mezzi: l'altra casella è il resto
+    const o = ms[0] === k ? ms[1] : ms[0], resto = Math.max(0, prop - _mxPropNum(pg.propDiv[k]));
+    pg.propDiv[o] = String(resto); const el = $('bmxp_' + o); if (el) el.value = resto ? _fmtMiles(resto) : '0';
+  }
+  const cu = $('bmxPropCu'); if (cu) cu.innerHTML = _mxPropDivCuadra(pg, prop);
 }
 function _mxPropHtml(pg, prop) {
   if (!PROPINA_MIXTO_MEDIO_ON || !(prop > 0)) return '';
@@ -14059,9 +14091,25 @@ function _mxPropHtml(pg, prop) {
       (sel ? 'La propina de <b>$' + _fmtMiles(prop) + '</b> entra en:' : '¿La propina de <b>$' + _fmtMiles(prop) + '</b> en qué medio?') + '</div>' +
     '<div class="c4chips">' + ms.map(function (k) {
       return '<div class="cs-chip' + (sel === k ? ' sel' : '') + '" onclick="bPropMedio(\'' + k + '\')">' + L[k] + '</div>';
-    }).join('') + '</div>';
+    }).join('') + (ms.length >= 2 ? '<div class="cs-chip' + (sel === '_div' ? ' sel' : '') + '" onclick="bPropMedio(\'_div\')">➗ Dividir</div>' : '') + '</div>' +
+    (sel === '_div' ? (function () {
+      const d = _mxPropDiv(pg);
+      return ms.map(function (k) {
+        return '<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="min-width:74px">' + L[k] + '</span>' +
+          '<input class="busca" id="bmxp_' + k + '" type="text" inputmode="numeric" autocomplete="off" style="flex:1;text-align:right" placeholder="$0"' +
+          ' value="' + (String((pg.propDiv || {})[k] == null ? '' : pg.propDiv[k]).trim() === '' ? '' : _fmtMiles(d[k])) + '"' +
+          ' oninput="bPropDivIn(\'' + k + '\', this.value)" onblur="bPropDivBlur(\'' + k + '\')"></div>';
+      }).join('') + '<div class="c4lab" id="bmxPropCu" style="margin-top:6px">' + _mxPropDivCuadra(pg, prop) + '</div>';
+    })() : '');
 }
-function bPropMedio(k) { const pg = STATE.pago; if (!pg) return; pg.propMedio = k; renderPago(); }
+function bPropMedio(k) {
+  const pg = STATE.pago; if (!pg) return; pg.propMedio = k;
+  if (k === '_div') {   // si parte con tutta la propina in efectivo (o nel primo mezzo se non c'è efectivo)
+    const ms = _mxMediosConMonto(pg), p0 = ms.indexOf('efectivo') >= 0 ? 'efectivo' : ms[0], prop = _pagoPropina() || 0;
+    pg.propDiv = {}; ms.forEach(function (m) { pg.propDiv[m] = m === p0 ? String(prop) : '0'; });
+  }
+  renderPago();
+}
 function bMxBlur(el, k2) {
   var pg = STATE.pago; if (!pg || !pg.mixto) return;
   if (!String(pg.mixto[k2] || '').trim()) {
@@ -15565,6 +15613,11 @@ async function pagoConfirmar(btn) {
     if (_propMx > 0) {
       const pm = _mxPropMedio(pg);
       if (!pm) { toast('warn', '¿La propina de $' + _fmtMiles(_propMx) + ' en qué medio? Tócalo arriba'); renderPago(); return; }
+      if (pm === '_div') {   // [21-ott · mesa 47] la propina per mezzo, e la somma deve tornare
+        const dv = _mxPropDiv(pg) || {}, suD = Object.keys(dv).reduce(function (a, k) { return a + dv[k]; }, 0);
+        if (suD !== _propMx) { toast('warn', 'La propina dividida suma $' + _fmtMiles(suD) + ' y debe sumar $' + _fmtMiles(_propMx)); renderPago(); return; }
+        mixtoPartes = mixtoPartes.map(function (x) { return { medio: x.medio, monto: x.monto, propina: dv[x.medio] || 0 }; });
+      } else
       mixtoPartes = mixtoPartes.map(function (x) { return { medio: x.medio, monto: x.monto, propina: x.medio === pm ? _propMx : 0 }; });
     }
   }
