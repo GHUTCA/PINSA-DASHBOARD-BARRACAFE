@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.42.5</span>
+<span class="ver" id="ver">app_jl v1.42.6</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1189,6 +1189,16 @@ function _cierresTodos() {
    🪦 DEBITO DICHIARATO (N2): `giroServicio` e' una lettura in piu' (stessa cadenza di giroCaja, 60 s). Muore con `getCaja` quando la caja intera esce da Google (cantiere 23-ott). */
 function _servOn() { return cjFlag('caja_servicio_on') && cjAtto1On(); }
 function _servFresco() { return !!(_servOn() && STATE.serv && STATE.serv.ok && STATE.ts.serv && (Date.now() - STATE.ts.serv) < 180000); }
+/* ═══ [21-ott · 🖐 QUARTA V32 · 2.3, il resto di getCaja · `V32 I PEZZI CHE RESTANO DELLE 58 CHIAMATE`] LA CAJA INTERA DAL BORDO ═══
+   `getCaja` serviva ancora per due cifre: le BOLETAS e i DOBLES («Cobradas más de una vez»). Il bordo le porta nel `servicio` a leva
+   `SERVICIO_BOLETAS_DOBLES_ON` (ramo quarta-servicio-boletas-dobles-21ott). ⇒ col bordo FRESCO e quelle due chiavi presenti, Google non si chiede
+   più e la sua copia in memoria si butta (vecchia, mentirebbe sulle mesas e sui cierres). Nessuna leva qui: spenta quella del bordo le chiavi
+   mancano e tutto è come ieri; bordo vecchio di 3 minuti o in errore ⇒ si torna a getCaja al giro dopo.
+   ⚠️ Con ATTO III acceso no: la card 🫙 Propinas legge lo split tarjeta/efectivo e il reparto, che ha solo Google (oggi ATTO III è spento). */
+function _cajaSoloBordo() {
+  const sv = STATE.serv;
+  return !!(_servFresco() && sv && sv.boletas && typeof sv.boletas === 'object' && Array.isArray(sv.dobles) && !cjAtto3On());
+}
 async function giroServicio() {
   if (DEMO || !STATE.pin || !_servOn() || STATE.servInVolo) return;
   STATE.servInVolo = true;
@@ -1256,6 +1266,7 @@ function _cajaVista() {
   base.propinas_bordo = +sv.propinas || 0;   // [16-ott · AUT-0703] la propina del giorno dai pagos del bordo (il totale; lo split tarjeta/efectivo resta di Google)
   /* [21-ott · pezzo 2.3] boletas e franjas dal bordo QUANDO le porta (`CAJA_SERVICIO_FRANJA_ON` di BKP: spenta ⇒ chiavi assenti ⇒ come ieri) */
   if (sv.boletas && typeof sv.boletas === 'object') { base.boletas = +sv.boletas.emitidas || 0; base.boletas_bordo = sv.boletas; }
+  if (Array.isArray(sv.dobles)) { base.dobles = sv.dobles; base.dobles_bordo = true; }   // [21-ott · QUARTA V32 · 2.3] «Cobradas más de una vez» dal bordo, la regola di getCaja
   if (sv.por_franja && typeof sv.por_franja === 'object' && !Array.isArray(sv.por_franja)) { base.por_franja = _franjaObj(sv.por_franja); base.franja_bordo = true; }
   return base;
 }
@@ -1311,6 +1322,8 @@ function _cajaFuenteHtml() {
 async function giroCaja() {
   if (DEMO || !STATE.pin) return;
   giroServicio();   // [v1.37.2] in parallelo, senza aspettare Google; a leva spenta esce subito
+  /* [21-ott · 2.3] col bordo che porta tutta la caja, Google non si chiede (vedi `_cajaSoloBordo`) */
+  if (_cajaSoloBordo()) { if (STATE.caja) { STATE.caja = null; salva(); } STATE.cajaErr = ''; return; }
   try {
     /* [06-set · Alberto: «i 4 numeri non si vedono ancora»] getCaja legge
        `payload.pin_jl`, NON `payload.pin` (r.20192 del GAS): col nome
@@ -2480,8 +2493,8 @@ function vCaja() {
   }
   let h = '<div class="card"><h4>💰 El día ' + _cajaFuenteHtml() + '</h4>' +
     '<div class="pers" style="border:0;padding:4px 0"><span class="nb"><b>Venta</b></span><span class="val"><b>' + fmt(c.venta || 0) + '</b></span></div>' +
-    '<div class="pers" style="border:0;padding:4px 0"><span class="nb"><b>Boletas</b>' + (c.fuente_bordo ? '<small>de Google ' + (STATE.ts.caja ? edadTxt('caja') : 'sin dato') + '</small>' : '') +
-    '</span><span class="val"><b>' + (STATE.caja ? (c.boletas || 0) : '—') + '</b></span></div></div>';
+    '<div class="pers" style="border:0;padding:4px 0"><span class="nb"><b>Boletas</b>' + (c.boletas_bordo ? '' : (c.fuente_bordo ? '<small>de Google ' + (STATE.ts.caja ? edadTxt('caja') : 'sin dato') + '</small>' : '')) +   // [21-ott · 2.3] dal bordo: niente età di Google
+    '</span><span class="val"><b>' + ((STATE.caja || c.boletas_bordo) ? (c.boletas || 0) : '—') + '</b></span></div></div>';
   /* [16-ott · AUT-0703 · 🟡 di 💵 EL GIRO] senza la risposta di Google (STATE.caja null) e col bordo fresco la card non deve dire «nessuna aperta»:
      le aperte vengono dalla vista del bordo che l'app ha già (`_cjMesasDetalle`, la stessa della testata), senza `min_quieta` (il bordo non la dà). */
   const maB = (!STATE.caja && c.fuente_bordo) ? _cjMesasDetalle().map(function (m) { return { mesa: m.mesa, consumo: m.total }; }) : null;
