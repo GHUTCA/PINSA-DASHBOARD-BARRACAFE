@@ -35,6 +35,16 @@ async function banco(SRC, quieto) {
   { let g = 0; for (const c of [{ body: { ok: false, need: 'gas' } }, { lancia: true }, { body: { ok: true, fuente: 'borde' } }]) g += (await chiama(c)).L.gas;
     t('F · ZERO chiamate a Google in ogni ramo', g === 0, g); }
   t('G · nel sorgente fetchYaPagado non nomina gasPost', !/gasPost\('fetchYaPagado'/.test(SRC));
+  // la leva: il telefono vince, altrimenti segue ya_pagado_ack_on del /salud
+  const iT = SRC.indexOf('const YAPAG3_TEL = (function () {'), TEL = SRC.slice(iT, SRC.indexOf('})();', iT) + 5) + '\n' + SRC.slice(SRC.indexOf('let YAPAG3_ON = '), SRC.indexOf('\n', SRC.indexOf('let YAPAG3_ON = ')));
+  const RS = (() => { const i = SRC.indexOf("      if (YAPAG3_TEL === null) YAPAG3_ON ="); if (i < 0) throw new Error('riga salud'); return SRC.slice(i, SRC.indexOf('\n', i)); })();
+  const leva = (q, mem, salud) => { const st = Object.assign({}, mem); const ctx = { String, QS: { get: (k) => (k === 'yapag3' ? q : null) },
+      localStorage: { getItem: (k) => (k in st ? st[k] : null), setItem: (k, v) => { st[k] = v; } }, cercaK: (j, k) => j[k] };
+    vm.createContext(ctx); vm.runInContext(TEL + '\nthis.prima = YAPAG3_ON;\nvar j = ' + JSON.stringify(salud) + ';\n' + RS + '\nthis.dopo = YAPAG3_ON;', ctx); return [ctx.prima, ctx.dopo]; };
+  { const [p, d] = leva(null, {}, { ya_pagado_ack_on: '0' }); t('H · telefono muto, leva del bordo "0" ⇒ spenta', p === false && d === false, [p, d]); }
+  { const [p, d] = leva(null, {}, { ya_pagado_ack_on: '1' }); t('H2 · telefono muto, leva del bordo "1" ⇒ la guardia si accende su ogni telefono', p === false && d === true, [p, d]); }
+  { const [p, d] = leva('0', {}, { ya_pagado_ack_on: '1' }); t('H3 · ?yapag3=0 vince sulla leva accesa', d === false, [p, d]); }
+  { const [p, d] = leva(null, { sala_yapag3: '1' }, { ya_pagado_ack_on: '0' }); t('H4 · telefono acceso a mano resta acceso a leva spenta (come oggi)', p === true && d === true, [p, d]); }
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
@@ -43,6 +53,8 @@ if (process.argv.includes('--mutanti')) {
     ['crede a ogni risposta', "    if (j && j.ok === true && j.fuente === 'borde') return j;", '    return j;'],
     ['senza la firma', "j.ok === true && j.fuente === 'borde'", 'j.ok === true'],
     ['la rete lancia', "  } catch (e) { return { ok: false, error: 'sin_red' }; }\n  finally { clearTimeout(to); }", "  } finally { clearTimeout(to); }"],
+    ['la leva del bordo ignorata', "      if (YAPAG3_TEL === null) YAPAG3_ON = String(cercaK(j, 'ya_pagado_ack_on')) === '1';", "      if (YAPAG3_TEL === null) YAPAG3_ON = YAPAG3_ON;"],
+    ['il telefono non vince', "if (YAPAG3_TEL === null) YAPAG3_ON", "if (true) YAPAG3_ON"],
     ['senza la mesa', 'codigo: STATE.codigo, mesa: mesa, app: APP_ID', 'codigo: STATE.codigo, app: APP_ID'],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.replace(a, b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
