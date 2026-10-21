@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.8 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.9 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -12529,8 +12529,23 @@ function _pagadaAviso(mesa) {
    ⚙️ ARQUITECTURA). Il chiamante (abrirPago) non aspetta questa promise: se
    torna tardi o fallisce, il pannello resta com'è oggi — mai un muro che
    costringe ad aspettare davanti a un incasso. */
-function fetchYaPagado(mesa) {
-  return gasPost('fetchYaPagado', { codigo: STATE.codigo, mesa: mesa });
+/* ═══ [21-ott · 🎛 V32 `V32 I PEZZI CHE RESTANO DELLE 58 CHIAMATE` ②] LA DOMANDA VA SOLO AL BORDO ═══════════════════════════════════════
+   Il GAS `fetchYaPagado` NON l'ha MAI avuto (`Unknown action`, misurato da 💵 EL GIRO il 14-ott): la chiamata a Google non poteva dare
+   altro che «non so». Il bordo invece la sa (AUT-0675 ⓑ, `/pedido-staff` action `fetchYaPagado`, leva sua YA_PAGADO_ACK_ON): risponde
+   `{ok:true, fuente:'borde', ya_pagado?}`. Si crede SOLO a quella forma; ogni altra (need:'gas' a leva spenta, rete, 4xx) ⇒ `{ok:false}`
+   = «non so», cioè ESATTAMENTE quello che il GAS rispondeva. Zero Google, stesso comportamento finché la leva del bordo è spenta.
+   Il chiamante resta quello di AUT-0376 (dietro YAPAG3_ON per telefono, non aspetta la promise). */
+async function fetchYaPagado(mesa) {
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 4000);
+  try {
+    const r = await fetch(BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?t=' + encodeURIComponent(BORDE_SALA.T), {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, cache: 'no-store', signal: ctrl.signal,
+      body: JSON.stringify({ action: 'fetchYaPagado', local: CFG.LOCAL, codigo: STATE.codigo, mesa: mesa, app: APP_ID }) });
+    const j = await r.json();
+    if (j && j.ok === true && j.fuente === 'borde') return j;
+    return { ok: false, error: (j && (j.error || j.need)) || ('http_' + r.status) };
+  } catch (e) { return { ok: false, error: 'sin_red' }; }
+  finally { clearTimeout(to); }
 }
 /* v3.5.7 · la riga «ya pagado» dentro il papel della precuenta (v. il commento
    lungo nel punto d'innesto: caso mesa 120, doppio addebito sfiorato).
