@@ -108,6 +108,10 @@ async function banco(SRC) {
   { const m = mondo(SRC, { sentarRisp: { ok: false, need: 'gas', error: 'apagado' } }); m.ctx.STATE.bsMesa = '2'; m.ctx.STATE.enviando = false; m.ctx.refrescar = async () => {};
     await m.ctx.F.confirmarSentar();
     t('⑨ undicesimo leva sin gas SPENTA: il rifiuto del bordo va al GAS come ieri (v1.8 intatta)', cuenta(m, 'gas') === 1 && m.dom.cerrato === true, m.calls); }
+  { const m = mondo(SRC, { sinGas: '1', estado: { ok: false, error: 'codigo_invalid' } }); await m.ctx.F.refrescar(false);
+    t('⑨ dodicesimo sin gas: il turno chiuso (codigo_invalid dal bordo) e uno strike come col GAS, nessuna mappa, nessun GAS', m.ctx.STATE.strikes === 1 && cuenta(m, 'gas') === 0 && m.rendered.length === 0, [m.ctx.STATE.strikes, m.calls]); }
+  { const m = mondo(SRC, { estado: { ok: false, error: 'codigo_invalid' }, gas: { ok: false, error: 'codigo_invalid' } }); await m.ctx.F.refrescar(false);
+    t('⑨ tredicesimo leva SPENTA: codigo_invalid del bordo non conta due volte (lo strike resta del GAS, uno solo)', m.ctx.STATE.strikes === 1 && cuenta(m, 'gas') === 1, [m.ctx.STATE.strikes, m.calls]); }
   t('⑦ bis la seduta riuscita si ricorda (seatsLoc.push) e render ne riceve la versione con le sedute', /seatsLoc = STATE\.seatsLoc \|\| \[\]\)\.push/.test(SRC) && /render\(anfAplicaSeatsLocales\(rB\)\)/.test(SRC));
 }
 await banco(SRC0);
@@ -133,4 +137,6 @@ await mut('sin gas: il foglio si chiude sul rifiuto', "if (r && r._sinGas) {", "
 await mut('sin gas: la leva sola accende', "ANF_BORDE.sinGas = ANF_BORDE.on && ", "ANF_BORDE.sinGas = ");
 await mut('sin gas: il freno non frena', "&& !_anfSinGasFreno();", ";");
 await mut('sin gas: /salud che cade spegne', "if (!ANF_BORDE.sinGas) ANF_BORDE.on = false;", "ANF_BORDE.on = false; ANF_BORDE.sinGas = false;");
+await mut('sin gas: il turno chiuso non fa strike', "if (rB && rB._codigoMuerto) { _strikeTurno(); return; }", "if (rB && rB._codigoMuerto) { return; }");
+await mut('sin gas: il turno chiuso diventa Sin conexión', "if (ANF_BORDE.sinGas && j && j.ok === false && j.error === 'codigo_invalid') return { _codigoMuerto: true };", "");
 console.log(ko === 0 ? `✅ ${ok}/${ok} verdi` : `❌ ${ko} rossi su ${ok + ko}`); process.exit(ko ? 1 : 0);
