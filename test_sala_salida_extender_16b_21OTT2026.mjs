@@ -8,10 +8,10 @@ const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0)
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const F = fnVin(SRC, '_gestoUid') + fnVin(SRC, '_salirProsegui') + 'async ' + fnVin(SRC, 'seguirEnSala');
-  function mondo(risp) {
+  function mondo(risp, on = true) {
     const L = { staff: [], gas: [], entrada: [], fatti: [], toasts: [] };
     const banner = { classList: { add: () => {} } };
-    const ctx = { STATE: { codigo: 'C1', nombre: 'Ray' }, deviceToken: '', CFG: { SK: {} }, Math, Date, String, JSON,
+    const ctx = { SALIDA_BORDE_V: on, STATE: { codigo: 'C1', nombre: 'Ray' }, deviceToken: '', CFG: { SK: {} }, Math, Date, String, JSON,
       staffPost: async (a, b) => { L.staff.push([a, b]); return risp; }, gasPost: async (a, b) => { L.gas.push([a, b]); return risp; },
       showEntrada: (s) => L.entrada.push(s), bordeHecho: (g, d) => L.fatti.push([g, d]), toast: (k, s) => L.toasts.push(s), refrescar: () => {},
       confirm: () => false, localStorage: { removeItem: () => {} }, $: () => banner, setTimeout, mostrarLogin: () => {}, showEntradaFin: () => {} };
@@ -30,6 +30,9 @@ async function banco(SRC, quieto) {
     t('E · rifiuto ⇒ «No pude extender — reintenta», come ieri', /No pude extender/.test(L.toasts[0]), L.toasts); }
   { const { ctx } = mondo({}); const a = vm.runInContext("_gestoUid('sal')", ctx), b = vm.runInContext("_gestoUid('sal')", ctx);
     t('F · un uid per tocco: due tocchi, due chiavi diverse, entrambe valide per il bordo', a !== b && uidOk(a) && uidOk(b), [a, b]); }
+  { const { ctx, L } = mondo({ ok: true, filas: 1 }, false); try { vm.runInContext('_salirProsegui(true)', ctx); } catch (e) {} await vm.runInContext('seguirEnSala(null)', ctx);
+    t('G · leva del bordo spenta ⇒ salida ed extender dritti al GAS, nessun giro al bordo (nota di EL GIRO)', L.staff.length === 0 && L.gas.some((g) => g[0] === 'salidaMesero') && L.gas.some((g) => g[0] === 'extenderFranja'), L); }
+  t('H · la leva del bordo si legge da /salud con la regola di levaSalidaBorde ("1" o la lista dei locali)', SRC.includes('SALIDA_BORDE_V = (function (v)') && SRC.includes("(cercaK(j, 'salida_borde_on'));") && SRC.includes('var SALIDA_BORDE_V = false;'));
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
@@ -37,6 +40,7 @@ if (process.argv.includes('--mutanti')) {
     ['salida ancora al GAS', "staffPost('salidaMesero', { codigo: STATE.codigo, nombre: STATE.nombre, gesto_uid: _gestoUid('sal') })", "gasPost('salidaMesero', { codigo: STATE.codigo, nombre: STATE.nombre })"],
     ['extender senza gesto_uid', "staffPost('extenderFranja', { codigo: STATE.codigo, nombre: STATE.nombre, gesto_uid: _gestoUid('ext') })", "staffPost('extenderFranja', { codigo: STATE.codigo, nombre: STATE.nombre })"],
     ['uid fisso', "function _gestoUid(pref) { return pref + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }", "function _gestoUid(pref) { return pref + '-1'; }"],
+    ['al bordo anche a leva spenta', "if (finTurno && STATE.codigo && STATE.nombre) (SALIDA_BORDE_V ? staffPost", "if (finTurno && STATE.codigo && STATE.nombre) (true ? staffPost"],
     ['uid con caratteri rifiutati', "return pref + '-' + Date.now()", "return pref + ' · ' + Date.now()"],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.replace(a, b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
