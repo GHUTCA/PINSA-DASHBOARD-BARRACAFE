@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.227.2 · vetro</span>
+      <span class="ver" id="ver">sala v3.227.3 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9243,6 +9243,9 @@ var JL_ELIMINAR_TODO_ON = false;
 /* [19-ott · AUT-0716 · 🎛 V31 `V31 PROPINA MIXTO TAMPONE CONTEGGIO E AUT-0716`] nel mixto la propina dice IN CHE MEZZO entra (contratto di 🎛 BKP
    `BKP V31 AUT-0716 IL CONTRATTO DELLA PROPINA DEL MIXTO`: `propina` su ogni riga di `medios_json`). Leva del bordo, nasce "0": la accende BKP insieme a `cajaAtteso`. */
 var PROPINA_MIXTO_MEDIO_ON = false;
+/* [21-ott · AUT-0716 ② · 🎛 V31 `V31 PROPINA REGISTRATA AL 10 PER CENTO E NON QUELLA VERA`] nel pago con carta la propina NON si conferma da un default:
+   il mesero scrive il TOTALE DEL VOUCHER e il vetro deduce propina = voucher − consumo. Leva del bordo, nasce "0". */
+var PROPINA_VOUCHER_ON = false;
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
 /* ═══ [10-ott · 🎛 V28 AUT-0663 `FOTO SALVATA SENZA ETA CURA ALLA RADICE`] UNA SALA SALVATA PIU VECCHIA DEL TETTO NON SI DISEGNA MAI COME SE FOSSE VIVA ═══════════
    IL FATTO (mesa 100, telefono di Ary, 10-ott): il catch del poll ridisegnava `sala_foto_v1` SENZA tetto d'eta («una sala di un'ora fa, dichiarata, batte il vuoto») e il ricarico non la toglie: Ary ha visto
@@ -9312,6 +9315,7 @@ function _salaMuertaPinta(edadMs) {
       SALDO_SIN_PADRON_ON = String(cercaK(j, 'saldo_sin_padron_on')) === '1';             // [11-ott · AUT-0666]
       JL_ELIMINAR_TODO_ON = String(cercaK(j, 'jl_eliminar_todo_on')) === '1';   // [11-ott · AUT-0665]
       PROPINA_MIXTO_MEDIO_ON = String(cercaK(j, 'propina_mixto_medio_on')) === '1';   // [19-ott · AUT-0716]
+      PROPINA_VOUCHER_ON = String(cercaK(j, 'propina_voucher_on')) === '1';   // [21-ott · AUT-0716 ②]
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
       FOTO_VIVA_LEIDA = true;                                               // [EL GIRO ⑥⑦] il bordo ha risposto: da qui vale la leva (assente = spenta)
     }).catch(function () {});
@@ -13162,12 +13166,48 @@ function pagoVouIn(el) {
   STATE.pago.voucher = d;
   const n = $('pgVouN');
   if (n) { n.textContent = d.length + '/6'; n.style.color = d.length === 6 ? '#3db876' : 'var(--cs-mut)'; }
-  const b = $('pgVouBtn');
-  if (b) {
-    const ok6 = d.length === 6;
-    b.disabled = !ok6;
-    b.textContent = ok6 ? 'CERRAR MESA ' + STATE.pago.mesa : 'Faltan ' + (6 - d.length) + ' cifras';
-  }
+  _pgVouBtnPinta();
+}
+/* ═══ [21-ott · AUT-0716 ②] LA PROPINA DELLA CARTA NASCE DAL VOUCHER, NON DAL 10% ═══════════════════════════════════════════════════════════
+   🩸 Alberto, 20-ott: il cliente lascia MENO della propina sugerida e il garzón conferma il 10% precompilato ⇒ sulla carta il fondo paga
+      una propina mai incassata. Il numero veniva dal default, non dal pezzo di carta.
+   🩹 A leva accesa, nel pago con carta (débito/crédito, non mixto) la ③ chiede anche il TOTALE DEL VOUCHER; propina = voucher − consumo
+      (`_bMonto()`, la stessa base del PAGAR). Senza un totale valido CERRAR resta spento. «No hay voucher» = la propina del chip, come oggi
+      (la mesa resta marcata senza voucher). Il mixto con carta NON è coperto in v1: lì vale il chip del mezzo (AUT-0716 ①).
+   ⚖️ Leva spenta, o `?pagov3=0` (nessuna ③): niente campo, `_pagoPropina` e il body identici a ieri. */
+function _vouTotNum(pg) { return Math.round(parseFloat(String((pg && pg.vouTot) || '').replace(/[^0-9]/g, '')) || 0); }
+function _vouEstado(pg) {
+  if (!PROPINA_VOUCHER_ON || !PAGO_V3_ON || !pg || pg.sinVoucher || !(pg.medio === 'debito' || pg.medio === 'credito')) return { aplica: false };
+  const consumo = _bMonto(), tot = _vouTotNum(pg), prop = tot - consumo;
+  if (!(tot > 0)) return { aplica: true, ok: false, motivo: 'vacio', consumo: consumo, tot: tot };
+  if (prop < 0) return { aplica: true, ok: false, motivo: 'menor', consumo: consumo, tot: tot };
+  if (prop > consumo) return { aplica: true, ok: false, motivo: 'excesivo', consumo: consumo, tot: tot, prop: prop };   // un cero di troppo, quasi sempre
+  return { aplica: true, ok: true, consumo: consumo, tot: tot, prop: prop, pct: consumo > 0 ? Math.round(prop * 100 / consumo) : 0 };
+}
+function _vouTxt(ve) {
+  if (ve.motivo === 'vacio') return '<span style="color:var(--cs-mut)">consumo <b>$' + _fmtMiles(ve.consumo) + '</b> · escribe el TOTAL del voucher (con la propina)</span>';
+  if (ve.motivo === 'menor') return '<span style="color:#ff9c9c">El total no puede ser menor que el consumo <b>$' + _fmtMiles(ve.consumo) + '</b> — revisa el voucher</span>';
+  if (ve.motivo === 'excesivo') return '<span style="color:#ff9c9c">La propina sería <b>$' + _fmtMiles(ve.prop) + '</b>, más que el consumo — revisa el total</span>';
+  return '<span style="color:' + (ve.pct > 25 ? '#f5a623' : '#3db876') + '">consumo $' + _fmtMiles(ve.consumo) + ' · propina <b>$' + _fmtMiles(ve.prop) + '</b> (' + ve.pct + '%)' +
+    (ve.pct > 25 ? ' — revisa' : '') + '</span>';
+}
+/* il totale si batte di fila come le 6 cifre: si ritoccano solo la riga della propina e il bottone, mai il campo */
+function pagoVouTotIn(el) {
+  if (!STATE.pago) return;
+  STATE.pago.vouTot = String(el.value || '').replace(/[^0-9]/g, '').slice(0, 9);
+  const ve = _vouEstado(STATE.pago);
+  const tx = $('pgVouTotTxt'); if (tx && ve.aplica) tx.innerHTML = _vouTxt(ve);
+  _pgVouBtnPinta();
+}
+/* il bottone della ③: a leva spenta è ESATTAMENTE quello di ieri (6 cifre ⇒ CERRAR) */
+function _pgVouBtnPinta() {
+  const pg = STATE.pago; if (!pg) return;
+  const b = $('pgVouBtn'); if (!b) return;
+  const d = String(pg.voucher || '').replace(/[^0-9]/g, '').slice(0, 6);
+  const ok6 = d.length === 6;
+  const ve = _vouEstado(pg), okT = !ve.aplica || ve.ok;
+  b.disabled = !(ok6 && okT);
+  b.textContent = !ok6 ? 'Faltan ' + (6 - d.length) + ' cifras' : !okT ? 'Escribe el total del voucher' : 'CERRAR MESA ' + pg.mesa;
 }
 /* v3.41.0 · toccare «Otro» sceglie E riapre la casella (anche se «Otro» era
    gia' scelto: e' cosi' che si corregge un monto sbagliato). */
@@ -13193,7 +13233,7 @@ function pagoOtroIn(el) {
   const t = $('pgTotLinea'); if (t) t.textContent = 'TOTAL ' + fmtPrice(_pagoMonto() + p);
 }
 function pagoAlPaso3() { if (STATE.pago) { STATE.pago.paso3 = true; renderPago(); } }
-function pagoVolverA2() { if (STATE.pago) { STATE.pago.paso3 = false; renderPago(); } }
+function pagoVolverA2() { if (STATE.pago) { STATE.pago.paso3 = false; STATE.pago.vouTot = ''; renderPago(); } }   // [AUT-0716 ②] tornando indietro il totale si riscrive: il medio o la parte possono cambiare
 function pagoClienteAbrir() { if (STATE.pago) { STATE.pago.cliente = true; renderPago(); } }
 /* «Listo» es un gesto DEL CLIENTE: cierra su parte y devuelve el aparato. */
 function pagoClienteListo() { if (STATE.pago) { STATE.pago.cliente = false; STATE.pago.clienteHecho = true; _pgRelojOff(); renderPago(); } }
@@ -13244,6 +13284,9 @@ function _pagoPropina() {
         ricalcola la stessa cosa a mano). Curarne uno solo mostrerebbe un
         numero e ne incasserebbe un altro — **il difetto peggiore dei due,
         perché sembra curato.** */
+  /* [21-ott · AUT-0716 ②] con la carta, scritto il totale del voucher, la propina È voucher − consumo: il chip resta solo un suggerimento */
+  const _ve = _vouEstado(pg);
+  if (_ve.aplica && _ve.ok) return _ve.prop;
   if (pg.prop === 'sug') return Math.round(_bMonto() * 0.10);
   if (pg.prop === 'otro') return Math.max(0, Math.round(parseFloat(String(pg.otro).replace(/[^0-9]/g, '')) || 0));
   return 0;
@@ -14511,12 +14554,13 @@ function renderPago() {
        si misura dopo, non si sbarra adesso. Un lucchetto in piu' sul cammino
        rotto e' un tavolo fermo di sabato sera; il dato basta per capire chi
        ha bisogno di aiuto. (`regola-zero-gesti-jl`) */
-    const listo = pg.sinVoucher ? true : vD.length === 6;
+    const _ve = _vouEstado(pg);   // [21-ott · AUT-0716 ②] a leva spenta `aplica:false` e la ③ è quella di ieri
+    const listo = (pg.sinVoucher ? true : vD.length === 6) && (!_ve.aplica || _ve.ok);
     w.innerHTML = '<div class="cs-pago"><div class="cs-pcard">' +
       '<div class="cs-asa"></div>' +
       '<div style="text-align:center;margin:2px 0 4px">' +
         '<div style="font-size:19px;font-weight:800">Mesa ' + esc(pg.mesa) + '</div>' +
-        '<div style="font-size:12px;color:var(--cs-mut);margin-top:2px">' + fmtPrice(_pagoMonto() + _pagoPropina()) + '</div></div>' +
+        '<div style="font-size:12px;color:var(--cs-mut);margin-top:2px">' + (_ve.aplica ? 'consumo ' + fmtPrice(_ve.consumo) : fmtPrice(_pagoMonto() + _pagoPropina())) + '</div></div>' +
       (!pg.sinVoucher
         ? '<div class="cs-psec" style="text-align:center;margin-top:14px">🧾 Voucher de la tarjeta</div>' +
           /* 🔴 v3.40.0 · NIENTE renderPago QUI (Alberto: «ti chiede un numero
@@ -14528,6 +14572,12 @@ function renderPago() {
           '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--cs-mut);margin-top:6px">' +
             '<span>del papelito del POS · «Operación #»</span>' +
             '<span id="pgVouN" style="font-weight:800;color:' + (vD.length === 6 ? '#3db876' : 'var(--cs-mut)') + '">' + vD.length + '/6</span></div>' +
+          /* [21-ott · AUT-0716 ②] il totale del voucher: la propina si deduce, non si conferma */
+          (_ve.aplica
+            ? '<div class="cs-psec" style="text-align:center;margin-top:14px">💳 Total del voucher</div>' +
+              '<input class="cs-pin" id="pgVouTotIn" style="font-size:21px;text-align:center;padding:12px" inputmode="numeric" autocomplete="off" placeholder="$ total impreso" value="' + esc(pg.vouTot || '') + '" oninput="pagoVouTotIn(this)">' +
+              '<div id="pgVouTotTxt" style="text-align:center;font-size:12px;margin-top:6px;line-height:1.45">' + _vouTxt(_ve) + '</div>'
+            : '') +
           ''
         : '<div style="font-size:12.5px;margin:14px 0 6px">Sin voucher — <b>cierra igual</b>. Queda anotado que esta mesa se cerró sin número de operación.</div>') +
       /* la boleta lo dice qui, dove si chiude: è l'ultimo momento per stamparla */
@@ -14542,7 +14592,7 @@ function renderPago() {
          mano deve trovare il bottone di chiusura per primo; chi non ce l'ha
          cerca, e trova. */
       '<button class="btn verde" id="pgVouBtn" style="margin-top:14px" ' + (listo ? '' : 'disabled') + ' onclick="pagoConfirmar(this)">' +
-        (listo ? 'CERRAR MESA ' + esc(pg.mesa) : 'Faltan ' + (6 - vD.length) + ' cifras') + '</button>' +
+        (listo ? 'CERRAR MESA ' + esc(pg.mesa) : (pg.sinVoucher || vD.length === 6) ? 'Escribe el total del voucher' : 'Faltan ' + (6 - vD.length) + ' cifras') + '</button>' +
       (!pg.sinVoucher
         ? '<div class="cs-chips" style="margin-top:10px"><div class="cs-chip" onclick="pagoSet(\'sinVoucher\',true)">No hay voucher<small>cierra igual</small></div></div>'
         : '<div class="cs-chips" style="margin-top:10px"><div class="cs-chip" onclick="pagoSet(\'sinVoucher\',false)">← Sí hay voucher</div></div>') +
@@ -15270,6 +15320,9 @@ async function pagoConfirmar(btn) {
       toast('err', '🧾 El N° de operación son 6 cifras (o déjalo vacío por hoy)'); return;
     }
   }
+  /* [21-ott · AUT-0716 ②] seconda cintura del totale del voucher: la ③ tiene spento CERRAR, ma una funzione che scrive denaro non si fida del solo vetro */
+  const _vePago = _vouEstado(pg);
+  if (_vePago.aplica && !_vePago.ok) { toast('warn', '💳 Escribe el total del voucher (consumo + propina)'); renderPago(); return; }
   // [AUT-0416] · l'ultima porta prima di impegnare: si NOMINA il tavolo.
   if (CERRAR_ASK_ON && !(await _cerrarAsk(pg))) return;
   pg.enviando = true; if (btn) btn.disabled = true; renderPago();   // [09-ott · mesa 55] el boton se apaga al PRIMER toque (Ray: 6-7 toques seguidos)
@@ -15305,6 +15358,7 @@ async function pagoConfirmar(btn) {
      (`mesas_payload_rechazado`) senza motivo. */
   if (intest) { body.intestatario = intest.nombre; body.intestatario_plaza = intest.plaza; body.intestatario_fonte = intest.fonte_plaza || ''; }   // [10-ott · AUT-0646] il mesero A CUI VA il denaro; `registrado_por` resta chi incassa
   if (pg.gid) body.gid = pg.gid;
+  if (_vePago.aplica && _vePago.ok) body.voucher_total = _vePago.tot;   // [21-ott · AUT-0716 ②] il testimone: additivo, chi non lo legge lo ignora; `propina` è già voucher − consumo
   if (pg.uuids && pg.uuids.length) body.uuids = pg.uuids;   // [AUT-0462] le righe del pannello, congelate all apertura
   /* v1.4 · le mosse del JL viaggiano DICHIARATE + col PIN (GAS v3.75.0):
      cortesía → cortesia:1 (il server forza $0 e non emette) · otro monto →
