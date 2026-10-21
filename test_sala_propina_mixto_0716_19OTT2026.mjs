@@ -53,7 +53,7 @@ function chip({ on = true, mixto, prop, propMedio }) {
   t('H · toccare Efectivo lo sceglie: «entra en:» e il chip è sel', pg.propMedio === 'efectivo' && /entra en:/.test(h2) && /cs-chip sel" onclick="bPropMedio\('efectivo'\)/.test(h2), h2); }
 t('I · leva spenta ⇒ nessun chip', chip({ on: false, mixto: ISA, prop: 5074 }).html === '');
 t('I · propina 0 ⇒ nessun chip', chip({ mixto: ISA, prop: 0 }).html === '');
-t('J · il chip è dentro il pannello del mixto (bMedio), dopo le quattro righe', /fila\('transferencia', 'Transfer'\) \+\n\s+_mxPropHtml\(pg, prop\) \+/.test(fnV('bMedio')));
+t('J · il chip è dentro il pannello del mixto (bMedio), dopo le quattro righe', /fila\('transferencia', 'Transfer'\) \+\n\s+(\(_v2 \? '<div id="bmxProp">' \+ _mxPropHtml\(pg, prop\) \+ '<\/div>' : _mxPropHtml\(pg, prop\)\)|_mxPropHtml\(pg, prop\)) \+/.test(fnV('bMedio'))   /* [21-ott] anche col contenitore bmxProp della leva mixto v2 */);
 t('J · la leva si legge dal /salud come le altre', /PROPINA_MIXTO_MEDIO_ON = String\(cercaK\(j, 'propina_mixto_medio_on'\)\) === '1';/.test(SRC) && /var PROPINA_MIXTO_MEDIO_ON = false;/.test(SRC));
 console.log('\n' + (ko ? '🔴 ' + ko + ' rossi su ' + (ok + ko) : '🟢 ' + ok + ' controlli, tutti verdi'));
 process.exitCode = ko ? 1 : 0;
