@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.227.3 · vetro</span>
+      <span class="ver" id="ver">sala v3.227.4 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -4722,7 +4722,7 @@ async function _corregirAlBorde(bodyBorde) {
      STATE.editVoid, e il ramo «Un producto» di _dtGo via `_dt`, che non
      tocca mai STATE.editVoid). L'unico invariante vero è «c'è un PIN in
      gioco», non DA DOVE arriva lo stato: si controlla solo quello. */
-  if (!bodyBorde.pin_jl) return null;   // senza PIN in gioco, nulla da mandare qui
+  if (!bodyBorde.pin_jl && !CORR_SIN_GAS_ON) return null;   // senza PIN in gioco, nulla da mandare qui [1.5: a leva accesa va al bordo anche la correzione libera]
   try {
     const u = BORDE_SALA.URL + '/correccion/' + encodeURIComponent(CFG.LOCAL || 'BKS');
     const ctrl = new AbortController();
@@ -4735,9 +4735,13 @@ async function _corregirAlBorde(bodyBorde) {
     });
     clearTimeout(to);
     const j = _vediNoAsignado(await r.json());   // [29-set] solo chi è nel turno
-    if (j && j.scritto === false && j.motivo === 'gate_spento') return null;   // leva del bordo spenta: vai di là
+    if (j && j.scritto === false && j.motivo === 'gate_spento') return CORR_SIN_GAS_ON ? { ok: false, error: 'borde_cerrado' } : null;   // leva del bordo spenta: vai di là [1.5: niente più «di là»]
     return j;   // {ok:true,scritto:true,...} O un rifiuto con merito — sempre FINALE
-  } catch (e) { return null; }   // rete morta/timeout: vai di là, come sempre
+  } catch (e) {
+    /* [1.5] a leva accesa un timeout NON è «non è entrato»: può essere atterrato. Si rilancia, così il chiamante dice «No sé si entró» (il suo catch) */
+    if (CORR_SIN_GAS_ON) throw e;
+    return null;   // rete morta/timeout: vai di là, come sempre
+  }
 }
 /* ═══ [24-set, reperto di Alberto su mesa 997] IL RIFIUTO CHE SPARIVA E IL
    SILENZIO DOPO IL FRENO ═══════════════════════════════════════════════════
@@ -4820,7 +4824,7 @@ async function guardarCorreccion__in(uuid, btn) {
        dalla via GAS: le etichette sono IDENTICHE (righe lette dal sorgente
        del bordo), zero rami nuovi da scrivere per quei casi. */
     const rB = await _corregirAlBorde(bodyBorde);
-    const r = rB || await gasPost('corregirPedido', body);
+    const r = rB || await gasPost('corregirPedido', body);   // [1.5] a leva `corregir_sin_gas_on` rB non è mai null salvo `?corrborde=0` (il freno del telefono)
     if (r && r.ok) {
       /* v3.24.0 · [AUT-0058] il testimone: il GAS risponde col totale NUOVO
          (o `cancelado`) — si racconta al bordo, mai prima dell'ok.
@@ -4890,6 +4894,11 @@ async function guardarCorreccion__in(uuid, btn) {
     } else if (r && r.error === 'no_es_tuyo') {
       toast('warn', 'Es de ' + (r.mesero || 'otro') + ' — que lo corrija él');
       STATE.editando = null;
+    } else if (r && r.error === 'borde_cerrado') {
+      // [21-ott · 1.5] il bordo ha detto di no PRIMA di scrivere: non è cambiato niente, si può riprovare
+      toast('warn', 'El sistema no recibe correcciones ahora — no se cambió nada. Reintenta o avisa al JL');
+      if (btn) btn.disabled = false;
+      return;
     } else {
       toast('err', 'No se pudo: ' + (r && r.error || '?'));
       if (btn) btn.disabled = false;
@@ -9246,6 +9255,10 @@ var PROPINA_MIXTO_MEDIO_ON = false;
 /* [21-ott · AUT-0716 ② · 🎛 V31 `V31 PROPINA REGISTRATA AL 10 PER CENTO E NON QUELLA VERA`] nel pago con carta la propina NON si conferma da un default:
    il mesero scrive il TOTALE DEL VOUCHER e il vetro deduce propina = voucher − consumo. Leva del bordo, nasce "0". */
 var PROPINA_VOUCHER_ON = false;
+/* [21-ott · pezzo 1.5 · 🚚 `MIGRACION V32 1.5 E IL 20 DEI TURNI`] corregir SENZA il ripiego a Google: ogni correzione va al bordo (anche senza PIN),
+   e se il bordo non risponde il vetro lo dice invece di girare a `gasPost('corregirPedido')`. Leva del bordo `corregir_sin_gas_on`, nasce "0".
+   ⚠️ Si accende SOLO quando il bordo accetta la correzione libera senza PIN (oggi `/correccion` vuole sempre `pin_jl`). Freno per telefono: `?corrborde=0`. */
+var CORR_SIN_GAS_ON = false;
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
 /* ═══ [10-ott · 🎛 V28 AUT-0663 `FOTO SALVATA SENZA ETA CURA ALLA RADICE`] UNA SALA SALVATA PIU VECCHIA DEL TETTO NON SI DISEGNA MAI COME SE FOSSE VIVA ═══════════
    IL FATTO (mesa 100, telefono di Ary, 10-ott): il catch del poll ridisegnava `sala_foto_v1` SENZA tetto d'eta («una sala di un'ora fa, dichiarata, batte il vuoto») e il ricarico non la toglie: Ary ha visto
@@ -9316,6 +9329,7 @@ function _salaMuertaPinta(edadMs) {
       JL_ELIMINAR_TODO_ON = String(cercaK(j, 'jl_eliminar_todo_on')) === '1';   // [11-ott · AUT-0665]
       PROPINA_MIXTO_MEDIO_ON = String(cercaK(j, 'propina_mixto_medio_on')) === '1';   // [19-ott · AUT-0716]
       PROPINA_VOUCHER_ON = String(cercaK(j, 'propina_voucher_on')) === '1';   // [21-ott · AUT-0716 ②]
+      CORR_SIN_GAS_ON = String(cercaK(j, 'corregir_sin_gas_on')) === '1';     // [21-ott · pezzo 1.5]
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
       FOTO_VIVA_LEIDA = true;                                               // [EL GIRO ⑥⑦] il bordo ha risposto: da qui vale la leva (assente = spenta)
     }).catch(function () {});
@@ -10367,6 +10381,8 @@ function _dtGo() {
              il mesero deve LEGGERE prima di lasciare il tavolo — ≥4s. */
           toast('ok', '🍽 ' + (pr.quita > 1 ? pr.quita + '× ' : '') + pr.n + ' fuera · mesa ' + mesa, 4500);
           refrescar();
+        } else if (r && r.error === 'borde_cerrado') {
+          toast('warn', 'El sistema no recibe correcciones ahora — no se quitó nada. Reintenta o avisa al JL', 4500);   // [21-ott · 1.5] un no PRIMA di scrivere
         } else if (!_pinErrorPersistente(r)) {
           /* 🔴 e se non si sa, si dice che NON SI SA — non che è fallito.
              Rimandare «ha fallito» quando la comanda potrebbe essere già
