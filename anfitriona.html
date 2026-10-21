@@ -156,7 +156,7 @@
   <div id="mapaPlazas"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.8 · 10ott</span>
+    <span class="ver" id="ver">v1.9 · 21ott</span>
     <span class="ver" id="fuente" style="margin-left:8px"></span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
@@ -264,9 +264,38 @@ function showEntrada(msg) {
 }
 
 /* ═════ v1.3 · PATCH ② · battesimo device + check-in via token ═════ */
+/* ═══ [21-ott · pezzo 6.5 · AUT-0719 `V32 AUT-0719 STRADA DUE`] il check-in del telefono battezzato dal bordo — gemello di sala.html ═══
+   `POST /deviceCheckin/<local>` {device_token}: si crede solo a `ok:true` CON `codigo`; `device_revocado` è definitivo; tutto il resto ⇒ GAS come ieri.
+   La leva (`checkin_borde_on` dal /salud) si consulta all'avvio SOLO se questo telefono l'ha già vista accesa (`anf_checkinb`): a leva spenta
+   l'avvio non aspetta niente in più. 🩹 TAMPONE: muore ven 30-ott con la strada ③. */
+async function _checkInDalBorde() {
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
+  try {
+    const r = await fetch(BORDE_SALA.URL + '/deviceCheckin/' + encodeURIComponent(CFG.LOCAL || 'BKS'), { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE_SALA.T }, body: JSON.stringify({ device_token: deviceToken }), cache: 'no-store', signal: ctrl.signal });
+    const j = await r.json();
+    if (j && j.ok === true && j.codigo) return j;
+    if (j && j.ok === false && j.error === 'device_revocado') return j;
+    return null;
+  } catch (e) { return null; }
+  finally { clearTimeout(to); }
+}
+async function _anfCheckinLeva() {
+  try {
+    const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 1500);
+    const r = await fetch(BORDE_SALA.URL + '/salud', { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    const j = await r.json();
+    const on = !!(j && j.flags && String(j.flags.checkin_borde_on) === '1');
+    try { localStorage.setItem('anf_checkinb', on ? '1' : '0'); } catch (e) {}
+    return on;
+  } catch (e) { return false; }   // /salud muto = spenta
+}
 async function checkInConToken() {
   try {
-    const r = await gasPost('salaCheckIn', { device_token: deviceToken });
+    let _cbVista = ''; try { _cbVista = localStorage.getItem('anf_checkinb') || ''; } catch (e) {}
+    const rB = (_cbVista === '1' && await _anfCheckinLeva()) ? await _checkInDalBorde() : null;   // [6.5 · AUT-0719]
+    const r = rB || await gasPost('salaCheckIn', { device_token: deviceToken });
     if (r && r.ok) {
       STATE.codigo = r.codigo; STATE.nombre = r.nombre;
       try {
@@ -424,6 +453,7 @@ async function anfSaludLeva() {
     clearTimeout(to);
     const j = await r.json();
     ANF_BORDE.on = !!(j && j.flags && String(j.flags.anfitriona_borde_on) === '1') && !_anfFreno();
+    try { localStorage.setItem('anf_checkinb', (j && j.flags && String(j.flags.checkin_borde_on) === '1') ? '1' : '0'); } catch (e) {}   // [6.5] il prossimo avvio sa se chiedere al bordo
     ANF_BORDE.ver = (j && j.version) || '';
   } catch (e) { ANF_BORDE.on = false; }   // /salud muto = spenta: mai una mappa del bordo senza che il bordo l'abbia detto
   return ANF_BORDE.on;

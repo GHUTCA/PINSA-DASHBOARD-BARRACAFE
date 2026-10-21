@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.227.7 · vetro</span>
+      <span class="ver" id="ver">sala v3.227.8 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3439,11 +3439,35 @@ function showEntrada(msg) {
    sovrascriveva la sessione di chi era già dentro. entrarSala() la bumpa. */
 let AUTH_EPOCH = 0;
 var _CLOCKIN_UID = null;   // [30-set] la chiave dell'ingresso al bordo
+/* ═══ [21-ott · pezzo 6.5 · AUT-0719 `V32 AUT-0719 STRADA DUE`] IL CHECK-IN DEL TELEFONO BATTEZZATO DAL BORDO ═══════════════════════════════
+   `POST /deviceCheckin/<local>` {device_token}: a un device battezzato del SUO locale il bordo dà `codigo` (la stessa esposizione di oggi: il GAS lo
+   dà allo stesso token) più `nombre` e `session_tok`. Il codigo finisce in `STATE.codigo` COME OGGI, così i ripieghi `gasPost` restano vivi.
+   Si crede solo a `ok:true` CON `codigo`; `device_revocado` è definitivo (stessa replica del foglio). Ogni altra risposta (`need:'gas'`, leva del
+   bordo spenta, rete) ⇒ `salaCheckIn` del GAS, come ieri. L'ingresso (clockIn) lo fa il GAS dietro: il bordo gli inoltra il `salaCheckIn`.
+   Leva del vetro `checkin_borde_on` "0". 🩹 TAMPONE dichiarato: muore ven 30-ott con il cancello per device su tutta la sala (strada ③). */
+async function _checkInDalBorde() {
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
+  try {
+    const r = await fetch(BORDE_SALA.URL + '/deviceCheckin/' + encodeURIComponent(CFG.LOCAL || 'BKS'), { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE_SALA.T }, body: JSON.stringify({ device_token: deviceToken }), cache: 'no-store', signal: ctrl.signal });
+    const j = await r.json();
+    if (j && j.ok === true && j.codigo) return j;
+    if (j && j.ok === false && j.error === 'device_revocado') return j;
+    return null;
+  } catch (e) { return null; }
+  finally { clearTimeout(to); }
+}
 async function checkInConToken() {
   // ritorna true se è entrato; false = prosegui col flusso normale
   const epoca0 = AUTH_EPOCH;
   try {
-    const r = await gasPost('salaCheckIn', { device_token: deviceToken });
+    /* [6.5] all'avvio /salud può non aver ancora risposto: si aspetta al massimo 1,2 s, MA solo se questo telefono ha già visto la leva accesa
+       (`sala_checkinb`). A leva spenta nessuna attesa: l'avvio è quello di ieri. */
+    let _cbVista = ''; try { _cbVista = localStorage.getItem('sala_checkinb') || ''; } catch (e) {}
+    if (SALUD_LEVE_P && _cbVista === '1') { try { await Promise.race([SALUD_LEVE_P, new Promise(function (ok) { setTimeout(ok, 1200); })]); } catch (e) {} }
+    const rB = CHECKIN_BORDE_ON ? await _checkInDalBorde() : null;   // [6.5 · AUT-0719]
+    if (rB && rB.session_tok) STATE.sessionTok = rB.session_tok;     // per la strada ③: oggi nessuno lo legge
+    const r = rB || await gasPost('salaCheckIn', { device_token: deviceToken });
     // risposta di un mondo vecchio: qualcuno è già entrato — non si tocca niente
     if (AUTH_EPOCH !== epoca0 && STATE.codigo) return true;
     if (r && r.ok) {
@@ -9306,6 +9330,8 @@ var CORR_SIN_GAS_ON = false;
 /* [21-ott · pezzo 1.16] la cola offline dei pedidos entra dal bordo (`staffPost`) invece che dritta al GAS. Leva del bordo `cola_borde_on`, nasce "0".
    Toglie la riga «La cola offline resta puntata al GAS (cintura)» di v3.3: era la cintura di un bordo nuovo, oggi il bordo è la porta dei pedidos vivi. */
 var COLA_BORDE_ON = false;
+var SALUD_LEVE_P = null;   // [21-ott · 6.5] la lettura di /salud qui sotto: il check-in d'avvio parte PRIMA che risponda, e senza aspettarla la sua leva non conterebbe mai
+var CHECKIN_BORDE_ON = false;   // [21-ott · pezzo 6.5 · AUT-0719] /salud → checkin_borde_on: il check-in del telefono battezzato dal bordo. Nasce "0". Vedi `_checkInDalBorde`.
 var CORTE_MESAS_PG_ON = false;   // [21-ott · pezzo 1.6] /salud → corte_mesas_pg_on: il corte e il fin turno senza `getCierreMesero` (mesas da PG). Nasce "0". Vedi `_cieMesasDalBorde`.
 var SOLTAR2X1_BORDE_ON = false;   // [21-ott · pezzo 1.7] /salud → soltar2x1_borde_on: «suelta el regalo» da /pedido-staff. Nasce "0".
 var COLN_STAFF_BORDE_ON = false;   // [21-ott · pezzo 2.6b] /salud → colacion_staff_borde_on: la lista della colación da /turno/estado (PG). Nasce "0". Vedi `_staffDalBorde`.
@@ -9348,7 +9374,7 @@ function _salaMuertaPinta(edadMs) {
 (function () {
   try {
     if (!BORDE_SALA || !BORDE_SALA.URL) return;
-    fetch(BORDE_SALA.URL + '/salud', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+    SALUD_LEVE_P = fetch(BORDE_SALA.URL + '/salud', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {   // [6.5] la promessa: chi decide all'avvio la può aspettare
       const cerca = function (o) {
         if (!o || typeof o !== 'object') return null;
         if (o.desc_max_pct != null) return o.desc_max_pct;
@@ -9384,6 +9410,8 @@ function _salaMuertaPinta(edadMs) {
       COLN_STAFF_BORDE_ON = String(cercaK(j, 'colacion_staff_borde_on')) === '1';   // [21-ott · pezzo 2.6b]
       SOLTAR2X1_BORDE_ON = String(cercaK(j, 'soltar2x1_borde_on')) === '1';         // [21-ott · pezzo 1.7]
       CORTE_MESAS_PG_ON = String(cercaK(j, 'corte_mesas_pg_on')) === '1';           // [21-ott · pezzo 1.6]
+      CHECKIN_BORDE_ON = String(cercaK(j, 'checkin_borde_on')) === '1';             // [21-ott · pezzo 6.5]
+      try { localStorage.setItem('sala_checkinb', CHECKIN_BORDE_ON ? '1' : '0'); } catch (e) {}   // [6.5] il prossimo avvio sa se aspettare /salud
       FOTO_VIVA_ON = String(cercaK(j, 'foto_viva_on')) === '1';             // [10-ott · AUT-0663]
       FOTO_VIVA_LEIDA = true;                                               // [EL GIRO ⑥⑦] il bordo ha risposto: da qui vale la leva (assente = spenta)
     }).catch(function () {});
