@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.3 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.4 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2223,6 +2223,20 @@ function bordeWriteOn() {
   if (BORDE_W.QS === '1') return true;
   return !!(STATE.sala && STATE.sala.bw);
 }
+/* ═══ [21-ott · pezzo 1.3 · la pulizia dei ripieghi] I VERBI DI staffPost SENZA LA STRADA DI GOOGLE ═══════════════════════════════════════════
+   🎛 BKP ha misurato il ripiego verso Google a ZERO nei fatti da due giorni (`BKP V32 1.3 ZERO NEI FATTI`: pagos 0 · pedidos 0). Il ripiego
+   resta solo nel codice, e si toglie verbo per verbo dopo il taglio, quando la leva di quel verbo è accesa e provata sul vivo.
+   Leva `staffpost_solo_borde` dal /salud: "" = come ieri · "1" = tutti i verbi · oppure l'elenco dei verbi ("crearPedidoMesero,marcarPedido").
+   A leva accesa per un verbo: il bordo si chiama SEMPRE (anche con bw spento); una risposta senza timbro `borde:true` torna come `ok:false`
+   col suo motivo (`sin_borde`); la rete morta lancia «timeout» come gasPost. Freno per telefono: `?bordew=0` rimette il cammino di ieri. */
+let STAFFPOST_SOLO = '';
+function _soloBorde(action) {
+  if (BORDE_W.QS === '0') return false;   // il freno del telefono vince sempre
+  const v = String(STAFFPOST_SOLO || '').trim();
+  if (!v || v === '0') return false;
+  if (v === '1') return true;
+  return v.split(',').map(function (x) { return x.trim(); }).indexOf(String(action || '')) >= 0;
+}
 async function staffPost(action, body, opts) {   // [01-ott] opts.ingreso: vedi sotto
   /* ═══ v3.19.0 · [AUT-EMERG 22-ago] · LA PENNA SI SGANCIA DALLA FOTO ═══════
      Scoperto la notte del 21: `BORDE_SALA.ON` è l'opt-in della FOTO (spento
@@ -2240,7 +2254,9 @@ async function staffPost(action, body, opts) {   // [01-ott] opts.ingreso: vedi 
      dopo il cambio del 30-set. L'ingresso bussa al bordo comunque (salvo il
      freno `?bordew=0`): il bordo rifiuta da sé e si ripiega sul libro. */
   const _ingreso = !!(opts && opts.ingreso) && BORDE_W.QS !== '0';
-  if (!bordeWriteOn() && !_ingreso) { _pennaDice('gas:leva-off'); return _cadutaMarca(action, await gasPost(action, body)); }
+  /* [21-ott · pezzo 1.3 · 🎛 BKP `BKP V32 1.3 ZERO NEI FATTI`] a leva `staffpost_solo_borde` il verbo NON ha più ripiego verso Google: vedi `_soloBorde` */
+  const _solo = _soloBorde(action);
+  if (!_solo && !bordeWriteOn() && !_ingreso) { _pennaDice('gas:leva-off'); return _cadutaMarca(action, await gasPost(action, body)); }
   const _VOLO_B = {};   // [AUT-0273 ①] la scatola di QUESTA chiamata, non del modulo
   try {
     const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS')
@@ -2277,8 +2293,19 @@ async function staffPost(action, body, opts) {   // [01-ott] opts.ingreso: vedi 
     _VOLO_B.vie = null;   // non consegnato: i conteggi restano, riproveranno
     /* v3.21.0 · il ripiego DICE il suo motivo. Fino a oggi taceva: il 22-ago
        ci è costato mezza giornata di diagnosi a scatola chiusa. */
+    if (_solo) {   // [1.3] il bordo ha risposto ma non è suo: niente GAS
+      _pennaDice('solo:' + ((j && (j.error || j.motivo)) || ('http' + r.status)));
+      /* `need:'gas'` = il bordo dice «non so giudicare questo caso»: ripetere non cambia niente ⇒ torna come ok:false, visibile.
+         Tutto il resto senza timbro (sin_gate 503, rate_limit 429, token, 5xx, corpo illeggibile) è un GUASTO, non un no ⇒ si lancia come
+         la rete morta: il pedido va nella coda offline e riprova da solo, gli altri gesti dicono «sin señal». */
+      if (j && j.need === 'gas') return Object.assign({}, j, { ok: false, sin_borde: true, error: j.error || j.motivo || 'need_gas' });
+      throw new Error('sin_red');
+    }
     _pennaDice('gas:' + ((j && (j.error || j.motivo)) || ('http' + r.status)));
   } catch (e) {
+    /* [1.3] rete morta: la STESSA forma di gasPost (lancia «timeout»), così ogni chiamante fa quello che fa già con Google muto
+       (il pedido va nella coda offline, i gesti dicono «sin señal»). Mai una seconda porta per lo stesso gesto. */
+    if (_solo) { _pennaDice('solo:' + (e && e.name === 'AbortError' ? 'timeout' : 'red')); throw new Error(e && e.name === 'AbortError' ? 'timeout' : 'sin_red'); }
     _pennaDice('gas:' + (e && e.name === 'AbortError' ? 'timeout' : 'red'));
   }
   return _cadutaMarca(action, await gasPost(action, body));
@@ -9433,6 +9460,7 @@ function _salaMuertaPinta(edadMs) {
       CORTE_MESAS_PG_ON = String(cercaK(j, 'corte_mesas_pg_on')) === '1';           // [21-ott · pezzo 1.6]
       CHECKIN_BORDE_ON = String(cercaK(j, 'checkin_borde_on')) === '1';             // [21-ott · pezzo 6.5]
       MXV2_SRV = String(cercaK(j, 'cobro_mixto_v2_on')) === '1';                    // [21-ott · le note di Alberto sul mixto] vedi `mxV2On`
+      STAFFPOST_SOLO = String(cercaK(j, 'staffpost_solo_borde') == null ? '' : cercaK(j, 'staffpost_solo_borde'));   // [21-ott · 1.3] vedi `_soloBorde`
       SALIDA_BORDE_V = (function (v) { v = String(v == null ? '' : v).trim().toUpperCase();   // [21-ott · 1.6b] la stessa regola di `levaSalidaBorde` del bordo
         if (v === '' || v === '0' || v === 'FALSE') return false; if (v === '1' || v === 'TRUE') return true;
         return v.split(',').map(function (x) { return x.trim(); }).indexOf(String(CFG.LOCAL || 'BKS').toUpperCase()) >= 0; })(cercaK(j, 'salida_borde_on'));
