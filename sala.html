@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.11 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.12 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2684,6 +2684,15 @@ function _pennaPack() {
   const cp = {}; ks.forEach(function (k) { cp[k] = _PENNA_N[k]; });
   return cp;
 }
+/* ═══ [21-ott · ⚙️ `ARQ V32 IL METRO DELLE CHIAMATE VERE E IL PRIMA DEL 21` · TERZA] IL PERCHÉ DI OGNI LETTURA DELLA SALA CHE FINISCE SU GOOGLE ═══
+   Il metro del 21 conta ~140 `getSalaMesero` dirette e solo 46 `leer:bordo-red`: le altre ~94 partono da vie MUTE (nome non ancora nella foto,
+   foto oltre il tetto, pausa dei 3 fallimenti, 200 senza dati). Prima di curare si nomina la radice: questi contatori SOLO nel `muro_via`
+   (stesso slot, stesso svuotamento a consegna), senza toccare l'etichetta che il mesero vede né `_PENNA_ULT`. Chiave `leer:d:<perché>`. */
+function _pennaConta(v) {
+  if (!MURO_ON || !v) return;
+  _PENNA_N[v] = Math.min(PENNA_TETTO, (_PENNA_N[v] || 0) + 1);
+  _pennaSalva();
+}
 function _pennaSvuota(inviato) {
   if (!inviato) return;
   Object.keys(inviato).forEach(function (k) {
@@ -3020,6 +3029,7 @@ async function leerSala(codigo, nombre) {
   // [AUT-0396 ②] vero solo per un FALLO DI RETE (o il lockout che lo ricorda)
   // — mai per «il mio nombre non è ancora nella foto», che non è un guasto.
   let bordoFalloRed = (BORDE_SALA.ON && BORDE_SALA.fallos >= 3);
+  if (bordoFalloRed) _pennaConta('leer:d:pausa');
   if (BORDE_SALA.ON && BORDE_SALA.fallos < 3) {
     try {
       const u = BORDE_SALA.URL + '/estado/' + encodeURIComponent(CFG.LOCAL || 'BKS')
@@ -3141,11 +3151,14 @@ async function leerSala(codigo, nombre) {
             return mia;
           }
           fotoVieja = mia; fotoVieja._vieja_s = Math.round(_edadV / 1000);
-        }
+          _pennaConta('leer:d:foto_vieja');
+        } else _pennaConta('leer:d:sin_nombre');
         // il mio nombre non c'è nella foto (appena entrato, fila non ancora
         // scritta): non è un guasto del bordo — si chiede al GAS e basta
-      } else if (!r.ok) { BORDE_SALA.fallos++; if (BORDE_FALLBACK_ON) BORDE_SALA.fallosTs = Date.now(); bordoFalloRed = true; _pennaDice('leer:bordo-red'); }
-    } catch (e) { BORDE_SALA.fallos++; if (BORDE_FALLBACK_ON) BORDE_SALA.fallosTs = Date.now(); bordoFalloRed = true; _pennaDice('leer:bordo-red'); }
+      } else if (!r.ok) { BORDE_SALA.fallos++; if (BORDE_FALLBACK_ON) BORDE_SALA.fallosTs = Date.now(); bordoFalloRed = true; _pennaConta('leer:d:http_' + r.status); _pennaDice('leer:bordo-red'); }
+      else _pennaConta('leer:d:sin_datos');
+    } catch (e) { BORDE_SALA.fallos++; if (BORDE_FALLBACK_ON) BORDE_SALA.fallosTs = Date.now(); bordoFalloRed = true;
+      _pennaConta('leer:d:' + (e && e.name === 'AbortError' ? 'timeout' : e && e.name === 'SyntaxError' ? 'json' : 'rete')); _pennaDice('leer:bordo-red'); }
   }
   /* v3.9 · IL GRADINO SENZA ATTESA: se il GAS è caduto da poco (<25s) e ho
      una foto-ombra in mano, non rifaccio la fila davanti a una porta morta —
@@ -3161,6 +3174,7 @@ async function leerSala(codigo, nombre) {
     const ultima = _fallbackUltimaVista();
     if (ultima) { _pennaDice('leer:fallback-vieja'); return ultima; }
   }
+  _pennaConta('leer:d:gas');
   try {
     const rG = await gasGet('getSalaMesero', { codigo: codigo, nombre: nombre });
     STATE.gasCaidoHasta = 0;
