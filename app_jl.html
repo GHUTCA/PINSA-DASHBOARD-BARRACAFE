@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.41.0</span>
+<span class="ver" id="ver">app_jl v1.42.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1371,6 +1371,8 @@ async function giroServicio() {
   } catch (e) { STATE.servErr = e && e.message === 'timeout' ? 'timeout' : 'sin_conexion'; }
   STATE.servInVolo = false;
   if (STATE.servErr) pintaTesta();   // [18-ott · v1.41.0] l'errore del bordo si vede in testata, non resta in una variabile
+  /* [21-ott · 2.3] ayer/sem. pasada, ogni 10 min — FUORI dal try e isolato: un guasto della storia non deve mai trasformare la venta di OGGI in un errore */
+  else { try { giroHistorico(); } catch (e) {} }
 }
 /* ═══ [18-ott · app_jl v1.41.0 · 🎛 V30 `V30 LA VENTA DEL JL SI FERMA ANCORA A MEZZANOTTE`] LA VENTA DELLA TESTATA DICE DA DOVE VIENE ═══
    🩸 Foto di Eduardo, 00:46: «venta hoy 6.179.752 · 140 cerradas», ferma. Era GOOGLE vecchia di 31 min (PG: quella cifra si tocca alle
@@ -1424,7 +1426,49 @@ function _cajaVista() {
   }
   base.por_mesero = pm; base.venta = +sv.venta || 0; base.cuentas = +sv.cuentas || 0; base.fuente_bordo = true;
   base.propinas_bordo = +sv.propinas || 0;   // [16-ott · AUT-0703] la propina del giorno dai pagos del bordo (il totale; lo split tarjeta/efectivo resta di Google)
+  /* [21-ott · pezzo 2.3] boletas e franjas dal bordo QUANDO le porta (`CAJA_SERVICIO_FRANJA_ON` di BKP: spenta ⇒ chiavi assenti ⇒ come ieri) */
+  if (sv.boletas && typeof sv.boletas === 'object') { base.boletas = +sv.boletas.emitidas || 0; base.boletas_bordo = sv.boletas; }
+  if (Array.isArray(sv.por_franja)) { base.por_franja = _franjaObj(sv.por_franja); base.franja_bordo = true; }
   return base;
+}
+/* [21-ott · 2.3] `por_franja` del bordo è un array `[{franja, venta, cuentas, propinas}]`; il vetro ha le chiavi fisse di TURNI (`ctas`, non `cuentas`).
+   Una franja che non è fra le quattro (o 'sin_franja') NON si perde: va in `_otras`, che la tabella mostra in una riga sua. */
+function _franjaObj(arr) {
+  const note = {}; Object.keys(TURNI).forEach(function (tn) { TURNI[tn].forEach(function (f) { note[f] = true; }); });
+  const o = { _otras: { venta: 0, ctas: 0 } };
+  (arr || []).forEach(function (x) {
+    if (!x) return;
+    const k = String(x.franja || '').trim().toUpperCase().replace('DIA', 'DÍA');
+    const dst = note[k] ? (o[k] = o[k] || { venta: 0, ctas: 0 }) : o._otras;
+    dst.venta += +x.venta || 0; dst.ctas += +x.cuentas || 0;
+  });
+  return o;
+}
+/* ═══ [21-ott · pezzo 2.3] AYER e SEM. PASADA dal bordo: lo stesso verbo `servicio` con `dia` (giorno operativo, cambia alle 06:00) ═══
+   Si crede alla risposta SOLO se riporta lo stesso `dia`: a leva di BKP spenta il bordo ignora `dia` e risponderebbe con OGGI, e «ayer = hoy»
+   sarebbe un numero falso con la faccia di uno vero. Una lettura ogni 10 minuti per colonna (i giorni passati non cambiano). */
+const HIST = { ayer: null, sem: null, ts: 0 };
+function _diaOp(menoGiorni) {
+  const t = Date.now() - 6 * 3600000 - (menoGiorni || 0) * 86400000;
+  return new Date(t).toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });   // AAAA-MM-GG
+}
+async function giroHistorico() {
+  if (DEMO || !STATE.pin || !_servOn() || (Date.now() - HIST.ts) < 10 * 60000) return;
+  HIST.ts = Date.now();
+  const leggi = async function (dia) {
+    try { const r = await cajaPost1({ verbo: 'servicio', pin_jl: STATE.pin, dia: dia }); return (r && r.ok && r.dia === dia) ? r : null; }
+    catch (e) { return null; }
+  };
+  const a = await leggi(_diaOp(1)), s = await leggi(_diaOp(7));
+  HIST.ayer = a; HIST.sem = s;
+  if (!a && !s) HIST.ts = Date.now() - 8 * 60000;   // niente: si riprova fra 2 minuti, non fra 10
+  try { pintaTab(); } catch (e) {}
+}
+function _histCol(r) {   // le cinque righe della tabla General per un giorno passato
+  if (!r) return ['—', '—', '—', '—', '—'];
+  const v = +r.venta || 0, n = +r.cuentas || 0, b = (r.boletas && typeof r.boletas === 'object') ? (+r.boletas.emitidas || 0) : null;
+  const p = (r.propinas && typeof r.propinas === 'object') ? (+r.propinas.total || 0) : (+r.propinas || 0);
+  return [fmt(v), n || '—', b == null ? '—' : (b || '—'), n ? fmt(v / n) : '—', p ? fmt(p) : '—'];
 }
 /* [16-ott · AUT-0703 · 🎛 V30 `V30 AUT-0703 LA VENTA DEL JL DAL BORDO OGGI` · N4] DA DOVE viene la cifra e QUANTO è vecchia, in ogni riquadro della
    venta: «del bordo hace X» se `servicio` è fresco, altrimenti «de Google hace X» — e Google oltre 3 minuti (o in errore) si colora: un numero fermo
@@ -2600,36 +2644,41 @@ function vVentas() {
     const venta = c ? (c.venta || 0) : 0, bol = c ? (c.boletas || 0) : 0, ctas = c ? (c.cuentas || 0) : 0;
     const pr = (c && c.propinas) || {};
     const propTot = (c && c.fuente_bordo) ? (c.propinas_bordo || 0) : (pr.tarjeta || 0) + (pr.efectivo || 0);
+    const _hA = _histCol(HIST.ayer), _hS = _histCol(HIST.sem);   // [21-ott · 2.3] dal bordo con `dia`; senza risposta col SUO dia: «—» come ieri
     const F = [
-      ['Venta',   fmt(venta), '—', '—', '—'],
-      ['Cuentas', ctas || '—', '—', '—', '—'],
-      ['Boletas', bol || '—', '—', '—', '—'],
-      ['Ticket',  ctas ? fmt(venta / ctas) : '—', '—', '—', '—'],
+      ['Venta',   fmt(venta), _hA[0], _hS[0], '—'],
+      ['Cuentas', ctas || '—', _hA[1], _hS[1], '—'],
+      ['Boletas', bol || '—', _hA[2], _hS[2], '—'],
+      ['Ticket',  ctas ? fmt(venta / ctas) : '—', _hA[3], _hS[3], '—'],
       /* v1.27.1 · [Alberto, in sala 10-set 12:5x] «elimina quel 10% tra
          parentesi nella propina, non serve». Il numero che il JL deve leggere
          è QUANTO, non che percentuale è: la percentuale la sa già ed è quasi
          sempre la stessa. Una cifra in più su una riga che si legge di corsa
          è rumore, non informazione. */
-      ['Propina', propTot ? fmt(propTot) : '—', '—', '—', '—']];
+      ['Propina', propTot ? fmt(propTot) : '—', _hA[4], _hS[4], '—']];
     h += '<div class="card"><h4>📊 General ' + _cajaFuenteHtml() + '</h4>' +
       '<div style="overflow-x:auto"><table class="rep" style="min-width:430px">' +
       '<tr><th>&nbsp;</th><th>HOY</th><th>AYER</th><th>SEM. PASADA</th><th>MAÑANA*</th></tr>' +
       F.map(r => '<tr><td>' + r[0] + '</td><td><b>' + r[1] + '</b></td><td class="mid">' + r[2] + '</td><td class="mid">' + r[3] + '</td><td class="mid">' + r[4] + '</td></tr>').join('') +
       '</table></div>' +
       '<p class="mini">* MAÑANA = mismo día sem. pasada + previsión de 📊 STATISTICS. ' +
-      'Las 3 columnas históricas <b>llegan esta semana</b> — hoy ya es real.</p></div>';
+      ((HIST.ayer || HIST.sem) ? 'AYER y SEM. PASADA: del sistema, mismo día operativo (cambia a las 06:00).</p></div>'
+        : 'Las 3 columnas históricas <b>llegan esta semana</b> — hoy ya es real.</p></div>');
     return h + _ventasFranjas(c);
   }
   return h + _ventasMeseros();
 }
 function _ventasFranjas(c) {
   /* [16-ott · AUT-0703] le franjas restano di Google (il bordo non le calcola ancora): si dice di chi sono e quanto sono vecchie */
-  let h = '<div class="card"><h4>📊 Por turno y franja <span class="pill ' + ((!STATE.ts.caja || (Date.now() - STATE.ts.caja) > 180000) ? 'amb' : 'off') +
-    '">📷 de Google ' + (STATE.ts.caja ? edadTxt('caja') : 'sin dato') + '</span></h4>';
+  let h = '<div class="card"><h4>📊 Por turno y franja ' + ((c && c.franja_bordo)   // [21-ott · 2.3] dal bordo se le porta
+    ? '<span class="pill on">📷 del bordo ' + edadTxt('serv') + '</span>'
+    : '<span class="pill ' + ((!STATE.ts.caja || (Date.now() - STATE.ts.caja) > 180000) ? 'amb' : 'off') +
+      '">📷 de Google ' + (STATE.ts.caja ? edadTxt('caja') : 'sin dato') + '</span>') + '</h4>';
   const fr = (c && c.por_franja) || null;
   if (fr) {
     let gv = 0, gc = 0;
     Object.keys(TURNI).forEach(tn => TURNI[tn].forEach(f => { const x = fr[f] || {}; gv += x.venta || 0; gc += x.ctas || 0; }));
+    const _ot = fr._otras || { venta: 0, ctas: 0 }; gv += _ot.venta || 0; gc += _ot.ctas || 0;   // [21-ott · 2.3] il totale conta anche chi non ha franja
     h += '<table class="rep"><tr><th>&nbsp;</th><th>venta</th><th>ctas</th><th>prom</th></tr>';
     h += '<tr><td><b>TOTAL DEL DÍA</b></td><td><b>' + fmt(gv) + '</b></td><td><b>' + gc + '</b></td><td><b>' + (gc ? fmt(gv / gc) : '—') + '</b></td></tr>';
     Object.keys(TURNI).forEach(tn => {
@@ -2642,6 +2691,8 @@ function _ventasFranjas(c) {
       });
       h += '<tr><td style="padding-left:16px"><b>TOTAL ' + tn + '</b></td><td><b>' + fmt(tv) + '</b></td><td><b>' + tc + '</b></td><td><b>' + (tc ? fmt(tv / tc) : '—') + '</b></td></tr>';
     });
+    if (_ot.ctas || _ot.venta) h += '<tr><td style="padding-top:10px;color:#f5a623"><b>Sin franja</b></td><td>' + fmt(_ot.venta || 0) + '</td><td>' + (_ot.ctas || 0) + '</td><td>' +
+      (_ot.ctas ? fmt(_ot.venta / _ot.ctas) : '—') + '</td></tr>';   // [21-ott · 2.3] cobros di chi non aveva asignación: si vedono, non si spalmano
     h += '</table>';
   } else {
     h += '<p class="mini">El corte por franja necesita los pagos con su hora — <b>declarado</b>: llega apenas la caja exponga la hora por pago (pedido a 💰). Mientras, el día entero está arriba.</p>';

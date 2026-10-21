@@ -15,11 +15,11 @@ function mondo(SRC, o) {
   const STATE = { caja: o.caja === undefined ? GOOGLE() : o.caja, vista: null, ts: { caja: o.cajaTs === undefined ? NOW - 20000 : o.cajaTs },
     salud: { flags: { caja_atto1_on: '1', caja_servicio_on: o.leva === false ? '0' : '1' } }, serv: o.serv || null, cajaErr: o.err || '' };
   if (o.serv) STATE.ts.serv = o.servTs === undefined ? NOW - 5000 : o.servTs;
-  const ctx = { JSON, Math, Date, String, Number, Object, Array, RegExp, STATE, VTAB: 'general', TURNI: {},
+  const ctx = { JSON, Math, Date, String, Number, Object, Array, RegExp, STATE, VTAB: 'general', TURNI: {}, HIST: { ayer: null, sem: null, ts: 0 },   // [21-ott · 2.3] storia vuota: le colonne restano «—»
     fmt: (n) => '$' + Number(n || 0).toLocaleString('es-CL'), esc: String,
     edadS: (k) => Math.round((Date.now() - (STATE.ts[k] || 0)) / 1000), _fmtEdadS: (s) => 'hace ' + s + ' s', _ventasMeseros: () => '' };
   vm.createContext(ctx);
-  vm.runInContext(['cjFlag', 'cjAtto1On', '_servOn', '_servFresco', '_cajaVista', '_slugSalaJS', '_cjMesasDetalle', '_cjMesasAbiertas', 'edadTxt', '_cajaFuenteHtml', '_ventasFranjas', 'vVentas']
+  vm.runInContext(['cjFlag', 'cjAtto1On', '_servOn', '_servFresco', '_cajaVista', '_slugSalaJS', '_cjMesasDetalle', '_cjMesasAbiertas', 'edadTxt', '_cajaFuenteHtml', '_ventasFranjas', 'vVentas', '_franjaObj', '_histCol']
     .map((n) => fnDe(SRC, n)).join('\n') + '\nthis.F = { _cajaFuenteHtml, vVentas };', ctx);
   return ctx.F;
 }
