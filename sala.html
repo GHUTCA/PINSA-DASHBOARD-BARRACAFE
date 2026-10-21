@@ -1111,7 +1111,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.227.9 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.0 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3900,7 +3900,8 @@ async function cierreAbrir() {
     const _uidFlusso = _CIE_INTENTO;
     const _cieCompleta = function (r) {
       if (!r || !r.ok || _uidFlusso !== _CIE_INTENTO || !CIE.data || !CIE.data._local) return;
-      CIE.data.turno = r.turno; CIE.data.regimen = r.regimen; CIE.data.ya_cerrado = r.ya_cerrado;
+      CIE.data.turno = r.turno; CIE.data.ya_cerrado = r.ya_cerrado;
+      CIE.data.regimen = r.corte_fuente === 'borde' ? r.regimen : null;   // [21-ott · AUT-0720] il regime del libro non si mostra
       CIE.tol = r.tolerancia || 2000;
       if (CIE.paso === 1) _ciePaso1();
     };
@@ -3950,6 +3951,7 @@ async function cierreAbrir() {
     const r = await gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre });
     if (!r || !r.ok) throw new Error((r && r.error) || 'no_ok');
     CIE.data = r; CIE.tol = r.tolerancia || 2000;
+    CIE.data.regimen = null;   // [21-ott · AUT-0720] questo è il libro: il suo regime non si mostra
     _ciePaso1();
   } catch (e) {
     /* niente scorciatoie: se non si sa quali mese sono aperte, non si finge
@@ -4233,7 +4235,11 @@ async function cierreEnviar() {
        chi fa DUE turni nello stesso giorno (pranzo+sera, i chip del 12-ago) non
        si vede più inghiottire il secondo corte come duplicato. Il valore nasce
        al primo passo e resta stabile per i retry della stessa dichiarazione. */
-    if (!CIE.franja) CIE.franja = (new Date().getHours() < 17 ? 'dia' : 'noche');
+    /* [21-ott · AUT-0720 · 🖐 QUARTA `QUARTA V32 IL TURNO DEL CORTE E INVERTITO DALL 8 OTTOBRE`] era `getHours() < 17 ? 'dia' : 'noche'`: la notte
+       chiude dopo mezzanotte (01:xx ⇒ «dia») e il turno AM alle 17-19 (⇒ «noche») — invertito quasi sempre (76 corti in PG dall'8-ott). Ora:
+       madrugada (prima delle 06:00) e dalle 18:30 = noche, il taglio di PG. Il bordo il turno lo ricalcola da sé (`turnoDelCorte`, asignación
+       prima): questo valore resta per il GAS, che lo usa per non fondere due corti dello stesso giorno. 🟢 ritorno: revert del commit. */
+    if (!CIE.franja) { const _d = new Date(), _m = _d.getHours() * 60 + _d.getMinutes(); CIE.franja = (_m < 6 * 60 || _m >= 18 * 60 + 30) ? 'noche' : 'dia'; }
     const _cierreBody = { codigo: STATE.codigo, nombre: STATE.nombre,
       franja: CIE.franja,
       uid: _cieUid(monto), efectivo_declarado: monto, motivo: CIE.motivo || '',
@@ -4265,7 +4271,12 @@ async function cierreEnviar() {
       _cerrarMeseroAlBorde(_cierreBody).catch(function () {});
     }
     if (rbSaldo) { _cieSaldo(rbSaldo); CIE.enviando = false; return; }   // [AUT-0666] niente GAS, niente ripiego: il corte NON si chiude con una mesa a saldo
-    if (!r) r = await gasPost('cerrarMesero', _cierreBody);
+    if (!r) {
+      r = await gasPost('cerrarMesero', _cierreBody);
+      /* [21-ott · AUT-0720] il regime del GAS («esta noche es tuya» / «pozo común») viene da una regola vecchia (taglio 17:00, ven-sab individual):
+         meglio nessuna riga che quella sbagliata. Il regime vero arriva dal bordo (`regimenDelTurno` da `reparto_regola_vigente`). */
+      if (r && typeof r === 'object') r.regimen = null;
+    }
     if (r && r.ok) {
       /* v2.0.1 · REPERTO ROSSO del collaudo a teste diverse: l'uid persistito
          NON moriva mai — il secondo cierre del giorno con lo STESSO monto
