@@ -5,7 +5,7 @@
 import fs from 'node:fs'; import vm from 'node:vm'; import { execSync } from 'node:child_process';
 const FILE = process.argv.find((a, i) => i > 1 && !a.startsWith('--')) || new URL('./sala.html', import.meta.url);
 const ORIG = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
-let HEAD = null; try { HEAD = execSync('git show 6bb39de:sala.html', { cwd: new URL('.', import.meta.url), maxBuffer: 64 << 20 }).toString('utf8').replace(/\r\n/g, '\n'); } catch (e) {}
+let HEAD = null; try { HEAD = execSync('git show 8814ab5:sala.html', { cwd: new URL('.', import.meta.url), maxBuffer: 64 << 20 }).toString('utf8').replace(/\r\n/g, '\n'); } catch (e) {}
 const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n}\n', i) + 3); };
 function elFinto(id) { return { id, value: '', placeholder: '', innerHTML: '', textContent: '', disabled: false, style: {}, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } }; }
 function mondo(SRC, { v2 = true, pg, monto = 3190, prop = 319 }) {
