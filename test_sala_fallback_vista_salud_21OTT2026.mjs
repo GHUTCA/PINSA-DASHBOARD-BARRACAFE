@@ -1,0 +1,55 @@
+// BANCO · TERZA PENNA V32 · CONTROLLO DELL'AUTRICE · l'ultima vista buona invece di Google, a leva della flotta (21-ott)
+// Richiesta: ⚙️ `ARQ V32 LEER BORDO RED IL BORDO E SANO IL TEMPO SI PERDE PRIMA`. Gira la leva VERA (telefono + /salud) e `leerSala` VERA in vm.
+// node test_sala_fallback_vista_salud_21OTT2026.mjs [sala.html] · --mutanti
+import fs from 'node:fs'; import vm from 'node:vm';
+const FILE = process.argv.find((a, i) => i > 1 && !a.startsWith('--')) || new URL('./sala.html', import.meta.url);
+const ORIG = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
+const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n}\n', i) + 3); };
+async function banco(SRC, quieto) {
+  let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
+  // ① la leva
+  const iT = SRC.indexOf('const BORDE_FALLBACK_TEL = (function () {'); if (iT < 0) throw new Error('leva');
+  const TEL = SRC.slice(iT, SRC.indexOf('})();', iT) + 5) + '\n' + SRC.slice(SRC.indexOf('let BORDE_FALLBACK_ON = '), SRC.indexOf('\n', SRC.indexOf('let BORDE_FALLBACK_ON = ')));
+  const iR = SRC.indexOf('      if (BORDE_FALLBACK_TEL === null) {'); if (iR < 0) throw new Error('riga salud');
+  const RS = SRC.slice(iR, SRC.indexOf('\n', iR));
+  const leva = (q, mem, salud) => { const st = Object.assign({}, mem); let badge = 0;
+    const ctx = { String, QS: { get: (k) => (k === 'bfb' ? q : null) }, localStorage: { getItem: (k) => (k in st ? st[k] : null), setItem: (k, v) => { st[k] = v; } },
+      cercaK: (j, k) => j[k], _pintarGuardiaBadge: () => { badge++; } };
+    vm.createContext(ctx); vm.runInContext(TEL + '\nthis.prima = BORDE_FALLBACK_ON;\nvar j = ' + JSON.stringify(salud) + ';\n' + RS + '\nthis.dopo = BORDE_FALLBACK_ON;', ctx);
+    return { prima: ctx.prima, dopo: ctx.dopo, badge }; };
+  { const x = leva(null, {}, {}); t('A · telefono muto, /salud senza la chiave ⇒ spenta (come oggi)', x.prima === false && x.dopo === false && x.badge === 0, x); }
+  { const x = leva(null, {}, { borde_fallback_on: '1' }); t('B · telefono muto, borde_fallback_on "1" ⇒ accesa su tutta la flotta, e il badge si ridipinge', x.dopo === true && x.badge === 1, x); }
+  { const x = leva('0', {}, { borde_fallback_on: '1' }); t('C · ?bfb=0 vince sulla leva accesa', x.dopo === false, x); }
+  { const x = leva(null, { sala_bfb: '0' }, { borde_fallback_on: '1' }); t('C2 · un telefono spento a mano in passato resta spento', x.dopo === false, x); }
+  { const x = leva(null, { sala_bfb: '1' }, { borde_fallback_on: '0' }); t('D · un telefono acceso a mano resta acceso a leva spenta', x.prima === true && x.dopo === true, x); }
+  // ② leerSala: il timeout di Ruth
+  const F = 'var _PENNA_N = {};\n' + fnVin(SRC, '_pennaConta') + fnVin(SRC, '_fallbackUltimaVista') + 'async ' + fnVin(SRC, 'leerSala');
+  async function leggi({ bfb, lancia = 'AbortError', salaTs = Date.now() - 30000 }) {
+    const L = { gas: 0, dice: [] };
+    const ctx = { JSON, Object, Number, Math, Date, String, AbortController, setTimeout, clearTimeout, encodeURIComponent,
+      MURO_ON: true, PENNA_TETTO: 999, _pennaSalva: () => {}, _pennaDice: (v) => L.dice.push(v),
+      BORDE_SALA: { ON: true, fallos: 0, fallosTs: 0, URL: 'https://b', T: 't', MAX_EDAD_MS: 900000, MAX_EDAD_BORDE_MS: 900000 },
+      BORDE_FALLBACK_ON: bfb, BANNER_EDAD_BORDE_ON: false, CFG: { LOCAL: 'BKS' },
+      STATE: { sala: { ok: true, mesas: [{ mesa: '12' }] }, salaTs: salaTs }, _slugSalaJS: (n) => String(n).toLowerCase(),
+      fetch: async () => { const e = new Error('x'); e.name = lancia; throw e; },
+      gasGet: async () => { L.gas++; return { ok: true, via: 'gas' }; } };
+    vm.createContext(ctx); vm.runInContext(F, ctx);
+    const r = await vm.runInContext('leerSala("C1", "Ruth")', ctx);
+    return { r, L, N: JSON.parse(JSON.stringify(ctx._PENNA_N)) };
+  }
+  { const x = await leggi({ bfb: false }); t('E · leva spenta: il timeout va a Google (la sera di Ruth)', x.L.gas === 1 && x.N['leer:d:gas'] === 1, x); }
+  { const x = await leggi({ bfb: true }); t('F · leva accesa: il timeout mostra l ultima vista con la sua età, ZERO Google', x.L.gas === 0 && x.r.mesas && x.r._vieja_s >= 29 && x.L.dice.indexOf('leer:fallback-vieja') >= 0, x); }
+  { const x = await leggi({ bfb: true, lancia: 'TypeError' }); t('F2 · leva accesa: anche la rete morta', x.L.gas === 0 && x.r._vieja_s >= 29, x); }
+  { const x = await leggi({ bfb: true, salaTs: Date.now() - 20 * 60000 }); t('G · ultima vista oltre i 15 min ⇒ Google come prima (il tetto di sempre)', x.L.gas === 1, x); }
+  return { ok, ko };
+}
+if (process.argv.includes('--mutanti')) {
+  const M = [
+    ['il /salud ignorato', "const _bfb = String(cercaK(j, 'borde_fallback_on')) === '1';", 'const _bfb = BORDE_FALLBACK_ON;'],
+    ['il telefono non vince', 'if (BORDE_FALLBACK_TEL === null) {', 'if (true) {'],
+    ['accesa di fabbrica', "let BORDE_FALLBACK_ON = BORDE_FALLBACK_TEL === '1';", "let BORDE_FALLBACK_ON = BORDE_FALLBACK_TEL !== '0';"],
+    ['il badge non si ridipinge', 'BORDE_FALLBACK_ON = _bfb; _pintarGuardiaBadge();', 'BORDE_FALLBACK_ON = _bfb;'],
+  ];
+  let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.replace(a, b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
+  console.log('\nmutanti ' + m + '/' + M.length); process.exitCode = m === M.length ? 0 : 1;
+} else { const r = await banco(ORIG, false); console.log('\n' + (r.ko ? '🔴 ' + r.ko + ' rossi su ' + (r.ok + r.ko) : '🟢 ' + r.ok + ' controlli, tutti verdi')); process.exitCode = r.ko ? 1 : 0; }
