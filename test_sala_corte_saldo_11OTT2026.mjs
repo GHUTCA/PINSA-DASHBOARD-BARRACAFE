@@ -11,6 +11,7 @@ const fnDe = (SRC, nome) => { const i = SRC.indexOf('function ' + nome + '('); i
 function mondo(SRC, o) {
   const ev = { render: [], bordo: [], gas: [], hechos: [], paso4: [], toasts: [] };
   const ctx = { CORTE_BORDE_ON: !!o.corteBorde, CAJA_ATTO1_ON: o.atto1 !== false, SALDO_SIN_PADRON_ON: !!o.saldoOn,
+    CORTE_TRAS_BORDE_ON: !!o.trasBorde,   // [21-ott · TERZA 44399c5] la leva del corte col traspaso: spenta qui, il banco resta quello del saldo
     CIE: { enviando: false, paso: 2, uidMonto: 5000, motivo: '', pasarMesas: !!o.pasar, res: null, franja: 'noche' },
     _cieMontoValor: () => 5000, $: () => null, toast: (k, m) => ev.toasts.push([k, m]), esc: (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), fmtPrice: (n) => '$' + n, STATE: { codigo: 'C1', nombre: 'Anthony' },
     _cieUid: () => 'uid-1', _cieUidKey: () => 'k', localStorage: { removeItem() {} }, Date, Math, Number, Object, Array, Promise, String, JSON, console,
