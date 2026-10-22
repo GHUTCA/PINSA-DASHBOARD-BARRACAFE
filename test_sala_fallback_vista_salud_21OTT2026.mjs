@@ -45,7 +45,8 @@ async function banco(SRC, quieto) {
   const iP = SRC.indexOf('    STATE.sala = r;\n'); const iQ = SRC.indexOf('    STATE.salaTs = ', iP);
   if (iP < 0 || iQ < 0 || iQ - iP > 1200) throw new Error('righe del poll');
   const POLL = SRC.slice(iP, SRC.indexOf('\n', iQ) + 1);
-  async function catena(minuti) {
+  async function catena(minuti) { return catena2(minuti, 20); }
+  async function catena2(minuti, passo) {
     let ora = 1e12; const L = { gas: 0, giri: [] };
     class D extends Date { constructor(...a) { super(...(a.length ? a : [ora])); } static now() { return ora; } }
     const ctx = { JSON, Object, Number, Math, Date: D, String, AbortController, setTimeout, clearTimeout, encodeURIComponent,
@@ -57,7 +58,7 @@ async function banco(SRC, quieto) {
       gasGet: async () => { L.gas++; return { ok: true, via: 'gas' }; } };
     vm.createContext(ctx); vm.runInContext(F + '\nasync function giro() { let r = await leerSala("C1", "Ruth");\n' + POLL + ' return r; }', ctx);
     const t0 = ora;
-    for (let s = 20; s <= minuti * 60; s += 20) {
+    for (let s = passo; s <= minuti * 60; s += passo) {
       ora = t0 + s * 1000; ctx.BORDE_SALA.fallos = 0;   // il respiro dei 90 s non conta qui: ogni giro arriva al ripiego
       const r = await vm.runInContext('giro()', ctx);
       L.giri.push({ s, via: r.via === 'gas' ? 'gas' : 'vieja', dich: r._vieja_s });
@@ -68,6 +69,9 @@ async function banco(SRC, quieto) {
     t('H · 2 min di rete giù: l età DICHIARATA è quella VERA a ogni giro (N4), non riparte da 20 s', male.length === 0 && L.gas === 0, male.slice(0, 4)); }
   { const L = await catena(25); const primoGas = L.giri.find((g) => g.via === 'gas');
     t('I · 25 min di rete giù: oltre i 15 min si torna a Google (il tetto scatta)', !!primoGas && primoGas.s > 880 && primoGas.s <= 920, primoGas || L.giri.slice(-2)); }
+  { // il giallo di 💵: passo 17,3 s, l'arrotondamento al secondo non si accumula
+    const L = await catena2(14.9, 17.3); const ult = L.giri.filter((g) => g.via === 'vieja').pop();
+    t('J · passo 17,3 s per ~15 min: l età dichiarata non resta indietro (≤ 1 s)', !!ult && Math.abs(ult.dich - ult.s) <= 1, ult); }
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
@@ -76,7 +80,8 @@ if (process.argv.includes('--mutanti')) {
     ['il telefono non vince', 'if (BORDE_FALLBACK_TEL === null) {', 'if (true) {'],
     ['accesa di fabbrica', "let BORDE_FALLBACK_ON = BORDE_FALLBACK_TEL === '1';", "let BORDE_FALLBACK_ON = BORDE_FALLBACK_TEL !== '0';"],
     ['il badge non si ridipinge', 'BORDE_FALLBACK_ON = _bfb; _pintarGuardiaBadge();', 'BORDE_FALLBACK_ON = _bfb;'],
-    ['l età si azzera a ogni giro (il rosso di 💵)', "STATE.salaTs = Date.now() - (typeof r._vieja_s === 'number' && r._vieja_s > 0 ? r._vieja_s * 1000 : 0);", 'STATE.salaTs = Date.now();'],
+    ['l età si azzera a ogni giro (il rosso di 💵)', "STATE.salaTs = Date.now() - (typeof r._vieja_ms", 'STATE.salaTs = Date.now() - 0 * (typeof r._vieja_ms'],
+    ['i ms non viaggiano (il giallo di 💵)', 'vieja._vieja_ms = edad;', ''],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.replace(a, b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
   console.log('\nmutanti ' + m + '/' + M.length); process.exitCode = m === M.length ? 0 : 1;
