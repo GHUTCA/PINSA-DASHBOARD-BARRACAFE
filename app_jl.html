@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.43.0</span>
+<span class="ver" id="ver">app_jl v1.43.1</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -241,9 +241,14 @@ const DEMO = QS.get('demo') === '1' || location.hash === '#demo';   // #demo: re
 const CK = 'jl_cache_' + CFG.LOCAL;
 let STATE = { pin: '', user: '', turno: null, caja: null, vista: null, rechazos: null,
   agotados: null, salud: null, pagosHoy: null, ts: {} };
-try { const c = JSON.parse(localStorage.getItem(CK) || 'null'); if (c && c.ts) { STATE = Object.assign(STATE, c); STATE.pin = ''; } } catch (e) {}
+/* 🔴 [22-ott · 🎛 V32 `V32 L APP DEL JL NON VEDE LA VENTA DALLE 08 20` · TERZA] la foto di Eduardo: «VENTA · HACE 576 MIN» $0, senza errore.
+   `salva()` scriveva TUTTO lo STATE, compreso `servInVolo` — e `giroCaja` lancia `giroServicio` senza aspettarlo e poi salva quando `getCaja`
+   risponde: il flag finiva nella cache ACCESO. Al ricaricamento tornava acceso, e `giroServicio` usciva per sempre alla prima riga, in silenzio
+   (nessun `servErr` ⇒ nessuna riga in testata). Ricaricare non curava: il flag tornava dalla cache. Un flag di volo è del giro in corso, mai
+   della cache: ① non si ripristina · ② non si salva · ③ in `giroServicio` scade dopo 30 s comunque (un volo vero ne dura al più 10). */
+try { const c = JSON.parse(localStorage.getItem(CK) || 'null'); if (c && c.ts) { STATE = Object.assign(STATE, c); STATE.pin = ''; STATE.servInVolo = false; STATE.servInVoloTs = 0; } } catch (e) {}
 try { STATE.pin = sessionStorage.getItem('jl_pin') || ''; STATE.user = sessionStorage.getItem('jl_user') || ''; } catch (e) {}
-function salva() { try { const c = Object.assign({}, STATE); delete c.pin; localStorage.setItem(CK, JSON.stringify(c)); } catch (e) {} }
+function salva() { try { const c = Object.assign({}, STATE); delete c.pin; delete c.servInVolo; delete c.servInVoloTs; localStorage.setItem(CK, JSON.stringify(c)); } catch (e) {} }
 
 /* ═════ HELPERS ═════ */
 const $ = id => document.getElementById(id);
@@ -1192,8 +1197,9 @@ function _cierresTodos() {
 function _servOn() { return cjFlag('caja_servicio_on') && cjAtto1On(); }
 function _servFresco() { return !!(_servOn() && STATE.serv && STATE.serv.ok && STATE.ts.serv && (Date.now() - STATE.ts.serv) < 180000); }
 async function giroServicio() {
-  if (DEMO || !STATE.pin || !_servOn() || STATE.servInVolo) return;
-  STATE.servInVolo = true;
+  if (DEMO || !STATE.pin || !_servOn()) return;
+  if (STATE.servInVolo && (Date.now() - (STATE.servInVoloTs || 0)) < 30000) return;   // [22-ott] un volo rimasto acceso scade: mai un blocco per sempre
+  STATE.servInVolo = true; STATE.servInVoloTs = Date.now();
   try {
     const r = await cajaPost1({ verbo: 'servicio', pin_jl: STATE.pin });
     if (r && r.ok) { STATE.serv = r; STATE.ts.serv = Date.now(); STATE.servErr = ''; pintaTesta(); pintaTab(); }
