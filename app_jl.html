@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.42.8</span>
+<span class="ver" id="ver">app_jl v1.42.9</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1733,9 +1733,42 @@ function _mesasHtml(mm, nombre) {
     '<button class="mz ' + mm.mesas[n] + '" onclick="event.stopPropagation();mesaAbrir(\'' +
     esc(nombre) + '\',\'' + esc(n) + '\')">' + esc(n) + '</button>').join('') + '</div>';
 }
+/* ═══ [22-ott · AUT-0728 ② · 🎛 `V32 LE QUATTRO REGOLE DEL MESSAGGIO DI ALBERTO` · forma di 🎛 BKP `BKP V32 AUT-0728 LA FACCIA DELLE MESAS DI IERI`] ═══
+   MESAS ABIERTAS DE AYER. Alberto al personale: nessuna mesa resta aperta senza pagare; il giorno dopo il sistema la chiede al JL di turno, e le
+   propinas restano bloccate finché non è saldata. Il bordo (`/caja` verbo `mesas_ayer`, leva sua `MESAS_AYER_ON`) dice quali sono, da PG, con le
+   morti lette (la lezione della 997). Qui: la card in testa a Sala e Turno, letta all'avvio e ogni 10 minuti.
+   · leva del bordo spenta (`need:'gas'`) ⇒ nessuna card: è la strada di oggi, che non esiste;
+   · lettura fallita (`pg_no_responde`, rete) ⇒ una riga ámbar che lo DICE, mai una lista vuota finta («nessuna mesa» sarebbe un falso via libera);
+   · zero mesas ⇒ nessuna card. */
+const AYER = { r: null, err: '', ts: 0 };
+async function giroAyer() {
+  if (DEMO || !STATE.pin) return;
+  if (AYER.ts && (Date.now() - AYER.ts) < (AYER.err ? 120000 : 600000)) return;
+  AYER.ts = Date.now();
+  try {
+    const r = await cajaPost1({ verbo: 'mesas_ayer', pin_jl: STATE.pin });
+    if (r && r.ok === true && r.borde === true && Array.isArray(r.mesas)) { AYER.r = r; AYER.err = ''; }
+    else if (r && r.need === 'gas') { AYER.r = null; AYER.err = ''; }
+    else { AYER.err = (r && (r.error || r.motivo)) || 'no_ok'; }
+  } catch (e) { AYER.err = e && e.message === 'timeout' ? 'timeout' : 'sin_red'; }
+  try { if (TAB === 0 || TAB === 1) pintaTab(); } catch (e) {}
+}
+function _ayerHtml() {
+  if (AYER.err) return '<div class="card ambra"><p class="mini">⚠️ No pude leer las mesas abiertas de ayer (' +
+    esc(AYER.err === 'pg_no_responde' ? 'la base no responde' : AYER.err === 'timeout' ? 'sin respuesta' : AYER.err === 'sin_red' ? 'sin red' : String(AYER.err).replace(/_/g, ' ')) +
+    '). Reintento solo.</p></div>';
+  const r = AYER.r; if (!r || !(r.mesas || []).length) return '';
+  let h = '<div class="card rossa"><h4>💸 Mesas abiertas de ayer <span class="pill off">' + r.mesas.length + '</span> <span class="pill off">' + fmt(+r.monto || 0) + '</span></h4>';
+  r.mesas.slice(0, 10).forEach(function (m) {
+    h += '<div class="cob">Mesa ' + esc(m.mesa) + ' · ' + fmt(+m.consumo || 0) +
+      '<span class="st2 dn">' + esc((m.meseros || []).join(', ') || 'sin mesero') + '</span></div>';
+  });
+  if (r.mesas.length > 10) h += '<p class="mini">… y ' + (r.mesas.length - 10) + ' más</p>';
+  return h + '<p class="mini"><b>Cóbralas hoy.</b> Mientras estén abiertas, las propinas de ayer no salen.</p></div>';
+}
 function vSala() {
   const t = STATE.turno;
-  let h = '';
+  let h = _ayerHtml();   // [22-ott · AUT-0728 ②] le mesas aperte di ieri, prima di tutto
   /* [v1.33.0] ① l'aviso della caja arriva anche qui: il JL non deve stare sulla scheda Caja per saperlo */
   if (cjAtto1On() && CJ1.st && CJ1.st.aviso && CJ1.st.aviso.abierto) {
     h += '<div class="card rossa" onclick="tab(2)" style="cursor:pointer"><b>💸 Dinero en sala</b> · ' + fmt(CJ1.st.totale_en_mano) + ' <span class="mini">· toca para retirar</span></div>';
@@ -2024,7 +2057,7 @@ async function moverJL() {
 /* ═════ SCHEDA TURNO — il semaforo e le eccezioni ═════ */
 function vTurno() {
   const t = STATE.turno, tt = t && t.turno;
-  let h = '';
+  let h = _ayerHtml();   // [22-ott · AUT-0728 ②] all'apertura del turno: le mesas aperte di ieri
   if (!tt) {
     h += '<div class="card ambra"><h4>🔑 Turno <span class="pill off">CERRADO</span></h4>' +
       '<button class="btn acc" onclick="abrirT()">Abrir turno</button>' +
@@ -2858,7 +2891,8 @@ async function entrar() {
 }
 function boot() {
   pintaTesta(); tab(0);
-  giroVeloce(); giroCaja(); giroProds();
+  giroVeloce(); giroCaja(); giroProds(); giroAyer();
+  setInterval(giroAyer, 30000);   // [22-ott · AUT-0728 ②] il giro chiede al bordo al più ogni 10 min (2 min se l'ultima lettura è fallita)
   setInterval(giroVeloce, CFG.POLL_MS);
   /* [18-ott · v1.41.0] il `servicio` gira su OGNI tab (prima: Turno e agotados non rinfrescavano mai la testata — a mezzanotte il JL sta su
      Turno), e subito al ritorno in primo piano. Google resta solo con Servicio/Caja davanti, come prima. */
