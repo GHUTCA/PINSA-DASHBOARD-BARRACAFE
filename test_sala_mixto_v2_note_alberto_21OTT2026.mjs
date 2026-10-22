@@ -27,7 +27,10 @@ async function banco(SRC, quieto) {
   if (HEAD) {
     const stati = [PG(), Object.assign(PG(), { medio: 'debito' }), Object.assign(PG(), { mixto: { efectivo: '1500', debito: '1690', credito: '', transferencia: '' }, propMedio: 'efectivo' }), Object.assign(PG(), { medio: '' })];
     const diversi = stati.filter((p) => { const a = mondo(SRC, { v2: false, pg: JSON.parse(JSON.stringify(p)) }), b = mondo(HEAD, { v2: false, pg: JSON.parse(JSON.stringify(p)) });
-      vm.runInContext('bMedio(w, STATE.pago)', a.ctx); vm.runInContext('bMedio(w, STATE.pago)', b.ctx); return a.w.innerHTML !== b.w.innerHTML; }).length;
+      vm.runInContext('bMedio(w, STATE.pago)', a.ctx); vm.runInContext('bMedio(w, STATE.pago)', b.ctx);
+      /* [21-ott · mesa 47] l'unica differenza voluta da allora: il chip «➗ Dividir» della propina (dietro PROPINA_MIXTO_MEDIO_ON, non dietro la leva v2) */
+      const senzaDiv = (h) => h.replace(/<div class="cs-chip( sel)?" onclick="bPropMedio\('_div'\)">➗ Dividir<\/div>/, '');
+      return senzaDiv(a.w.innerHTML) !== b.w.innerHTML; }).length;
     t('⓪ leva spenta: l HTML di bMedio è IDENTICO a quello di 6bb39de su 4 stati (mixto, débito, mixto quadrato, senza medio)', diversi === 0, diversi);
   } else t('⓪ (git show 6bb39de non disponibile: confronto saltato)', true);
   // ① la riga sola

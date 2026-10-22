@@ -10,11 +10,18 @@ async function banco(SRC, quieto) {
   const FR = riga('    if (!CIE.franja) {');
   const franjaAlle = (h, m) => { class D extends Date { getHours() { return h; } getMinutes() { return m; } }
     const ctx = { CIE: {}, Date: D }; vm.createContext(ctx); vm.runInContext(FR, ctx); return ctx.CIE.franja; };
-  const CASI = [[0, 0, 'noche'], [1, 10, 'noche'], [3, 11, 'noche'], [5, 59, 'noche'], [6, 0, 'dia'], [12, 0, 'dia'], [17, 2, 'dia'], [17, 25, 'dia'], [18, 29, 'dia'], [18, 30, 'noche'], [18, 50, 'noche'], [23, 59, 'noche']];
+  const CASI = [[0, 0, 'noche'], [1, 10, 'noche'], [3, 11, 'noche'], [5, 59, 'noche'], [6, 0, 'dia'], [12, 0, 'dia'], [17, 2, 'dia'], [17, 25, 'dia'], [18, 30, 'dia'], [18, 54, 'dia'], [19, 29, 'dia'], [19, 30, 'noche'], [20, 10, 'noche'], [23, 59, 'noche']];
   const sbagli = CASI.filter(([h, m, att]) => franjaAlle(h, m) !== att).map(([h, m, att]) => h + ':' + m + ' atteso ' + att + ' uscito ' + franjaAlle(h, m));
-  t('A · i confini al minuto: madrugada e dalle 18:30 = noche, 06:00–18:29 = dia (Ray 17:25 ⇒ dia · Jurley 03:11 ⇒ noche · Isa 17:02 ⇒ dia)', sbagli.length === 0, sbagli);
+  t('A · i confini al minuto: madrugada e dalle 19:30 = noche, 06:00–19:29 = dia (Ray 17:25 ⇒ dia · Jurley 03:11 ⇒ noche · Isa 17:02 ⇒ dia · un AM alle 18:54 ⇒ dia)', sbagli.length === 0, sbagli);
   { const ctx = { CIE: { franja: 'dia' }, Date }; vm.createContext(ctx); vm.runInContext(FR, ctx);
     t('A2 · una franja già nata (retry della stessa dichiarazione) non si ricalcola', ctx.CIE.franja === 'dia'); }
+  // la testa del corte (_cieTurnoHoy): lo stesso taglio, rosso di QUARTA
+  const fnT = (() => { const i = SRC.indexOf('function _cieTurnoHoy('); return SRC.slice(i, SRC.indexOf('\n}\n', i) + 3); })();
+  const testaAlle = (h, m) => {   // un orologio fermo a h:m del 21-ott (le ore e i minuti li legge solo la funzione)
+    class D extends Date { constructor(...a) { super(...(a.length ? a : [2026, 9, 21, h, m])); } }
+    const ctx = { Date: D }; vm.createContext(ctx); vm.runInContext(fnT, ctx); return vm.runInContext('_cieTurnoHoy()', ctx); };
+  const sbT = [[18, 54, 'día'], [19, 29, 'día'], [19, 30, 'noche'], [12, 0, 'día']].filter(([h, m, att]) => !testaAlle(h, m).endsWith('· ' + att)).map(([h, m, att]) => h + ':' + m + ' atteso ' + att + ' uscito ' + testaAlle(h, m));
+  t('A3 · la testa del corte «Tu turno de hoy» taglia alle 19:30 come la franja (18:54 ⇒ día)', sbT.length === 0, sbT);
   // il regime
   const G = SRC.slice(SRC.indexOf("    if (!r) {\n      r = await gasPost('cerrarMesero', _cierreBody);"), SRC.indexOf('    if (r && r.ok) {', SRC.indexOf("r = await gasPost('cerrarMesero', _cierreBody);")));
   async function chiude(rBordo, rGas) { const ctx = { r: rBordo, gasPost: async () => JSON.parse(JSON.stringify(rGas)), _cierreBody: {}, out: null };
@@ -30,9 +37,10 @@ async function banco(SRC, quieto) {
 }
 if (process.argv.includes('--mutanti')) {
   const M = [
-    ['la riga vecchia (17:00)', "CIE.franja = (_m < 6 * 60 || _m >= 18 * 60 + 30) ? 'noche' : 'dia';", "CIE.franja = (_d.getHours() < 17 ? 'dia' : 'noche');"],
-    ['senza madrugada', "CIE.franja = (_m < 6 * 60 || _m >= 18 * 60 + 30) ? 'noche' : 'dia';", "CIE.franja = (_m >= 18 * 60 + 30) ? 'noche' : 'dia';"],
-    ['taglio alle 18:00', '_m >= 18 * 60 + 30', '_m >= 18 * 60'],
+    ['la riga vecchia (17:00)', "CIE.franja = (_m < 6 * 60 || _m >= 19 * 60 + 30) ? 'noche' : 'dia';", "CIE.franja = (_d.getHours() < 17 ? 'dia' : 'noche');"],
+    ['senza madrugada', "CIE.franja = (_m < 6 * 60 || _m >= 19 * 60 + 30) ? 'noche' : 'dia';", "CIE.franja = (_m >= 19 * 60 + 30) ? 'noche' : 'dia';"],
+    ['taglio di ieri alle 18:30', '_m >= 19 * 60 + 30', '_m >= 18 * 60 + 30'],
+    ['la testa del corte alle 18:30', 'const noche = (hh * 60 + mm) >= (19 * 60 + 30) || hh < 6;', 'const noche = (hh * 60 + mm) >= (18 * 60 + 30) || hh < 6;'],
     ['il regime del GAS passa', "      if (r && typeof r === 'object') r.regimen = null;\n", ''],
     ['il regime cancellato anche al bordo', "      if (r && typeof r === 'object') r.regimen = null;\n    }\n", "    }\n    if (r && typeof r === 'object') r.regimen = null;\n"],
   ];
