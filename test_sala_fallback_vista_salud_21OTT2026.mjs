@@ -41,6 +41,33 @@ async function banco(SRC, quieto) {
   { const x = await leggi({ bfb: true }); t('F · leva accesa: il timeout mostra l ultima vista con la sua età, ZERO Google', x.L.gas === 0 && x.r.mesas && x.r._vieja_s >= 29 && x.L.dice.indexOf('leer:fallback-vieja') >= 0, x); }
   { const x = await leggi({ bfb: true, lancia: 'TypeError' }); t('F2 · leva accesa: anche la rete morta', x.L.gas === 0 && x.r._vieja_s >= 29, x); }
   { const x = await leggi({ bfb: true, salaTs: Date.now() - 20 * 60000 }); t('G · ultima vista oltre i 15 min ⇒ Google come prima (il tetto di sempre)', x.L.gas === 1, x); }
+  // ③ la catena di 💵 (`EL GIRO V32 57C6174 … L ETA SI AZZERA`): rete giù per N minuti, un giro ogni 20 s, con le righe VERE del poll dopo la lettura
+  const iP = SRC.indexOf('    STATE.sala = r;\n'); const iQ = SRC.indexOf('    STATE.salaTs = ', iP);
+  if (iP < 0 || iQ < 0 || iQ - iP > 1200) throw new Error('righe del poll');
+  const POLL = SRC.slice(iP, SRC.indexOf('\n', iQ) + 1);
+  async function catena(minuti) {
+    let ora = 1e12; const L = { gas: 0, giri: [] };
+    class D extends Date { constructor(...a) { super(...(a.length ? a : [ora])); } static now() { return ora; } }
+    const ctx = { JSON, Object, Number, Math, Date: D, String, AbortController, setTimeout, clearTimeout, encodeURIComponent,
+      MURO_ON: true, PENNA_TETTO: 999, _pennaSalva: () => {}, _pennaDice: () => {},
+      BORDE_SALA: { ON: true, fallos: 0, fallosTs: 0, URL: 'https://b', T: 't', MAX_EDAD_MS: 900000, MAX_EDAD_BORDE_MS: 900000 },
+      BORDE_FALLBACK_ON: true, BANNER_EDAD_BORDE_ON: false, CFG: { LOCAL: 'BKS' }, STATE: { sala: { ok: true, mesas: [] }, salaTs: ora },
+      _slugSalaJS: (n) => String(n).toLowerCase(),
+      fetch: async () => { const e = new Error('x'); e.name = 'AbortError'; throw e; },
+      gasGet: async () => { L.gas++; return { ok: true, via: 'gas' }; } };
+    vm.createContext(ctx); vm.runInContext(F + '\nasync function giro() { let r = await leerSala("C1", "Ruth");\n' + POLL + ' return r; }', ctx);
+    const t0 = ora;
+    for (let s = 20; s <= minuti * 60; s += 20) {
+      ora = t0 + s * 1000; ctx.BORDE_SALA.fallos = 0;   // il respiro dei 90 s non conta qui: ogni giro arriva al ripiego
+      const r = await vm.runInContext('giro()', ctx);
+      L.giri.push({ s, via: r.via === 'gas' ? 'gas' : 'vieja', dich: r._vieja_s });
+    }
+    return L;
+  }
+  { const L = await catena(2); const male = L.giri.filter((g) => g.via === 'vieja' && Math.abs(g.dich - g.s) > 1);
+    t('H · 2 min di rete giù: l età DICHIARATA è quella VERA a ogni giro (N4), non riparte da 20 s', male.length === 0 && L.gas === 0, male.slice(0, 4)); }
+  { const L = await catena(25); const primoGas = L.giri.find((g) => g.via === 'gas');
+    t('I · 25 min di rete giù: oltre i 15 min si torna a Google (il tetto scatta)', !!primoGas && primoGas.s > 880 && primoGas.s <= 920, primoGas || L.giri.slice(-2)); }
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
@@ -49,6 +76,7 @@ if (process.argv.includes('--mutanti')) {
     ['il telefono non vince', 'if (BORDE_FALLBACK_TEL === null) {', 'if (true) {'],
     ['accesa di fabbrica', "let BORDE_FALLBACK_ON = BORDE_FALLBACK_TEL === '1';", "let BORDE_FALLBACK_ON = BORDE_FALLBACK_TEL !== '0';"],
     ['il badge non si ridipinge', 'BORDE_FALLBACK_ON = _bfb; _pintarGuardiaBadge();', 'BORDE_FALLBACK_ON = _bfb;'],
+    ['l età si azzera a ogni giro (il rosso di 💵)', "STATE.salaTs = Date.now() - (typeof r._vieja_s === 'number' && r._vieja_s > 0 ? r._vieja_s * 1000 : 0);", 'STATE.salaTs = Date.now();'],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.replace(a, b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
   console.log('\nmutanti ' + m + '/' + M.length); process.exitCode = m === M.length ? 0 : 1;
