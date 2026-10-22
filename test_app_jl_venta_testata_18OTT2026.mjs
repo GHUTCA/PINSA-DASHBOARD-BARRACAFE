@@ -48,7 +48,7 @@ const BORDO = { ok: true, venta: 6175862, cuentas: 134 }, GOOGLE = { ok: true, v
 { const cb = []; const lis = {}; const chiamate = [];
   const ctx = { Math, STATE: {}, CFG: { POLL_MS: 20000 }, TAB: 0, setInterval: (f, ms) => cb.push([f, ms]),
     document: { hidden: false, addEventListener: (k, f) => { lis[k] = f; } },
-    pintaTesta: () => chiamate.push('testa'), tab: () => {}, giroVeloce: () => {}, giroProds: () => {}, giroTurno: () => {}, cjAtto1On: () => false, cjAtto1Giro: () => {},
+    pintaTesta: () => chiamate.push('testa'), tab: () => {}, giroVeloce: () => {}, giroProds: () => {}, giroAyer: () => {} /* [22-ott · TERZA AUT-0728] il giro delle mesas di ieri, nato nel boot */, giroTurno: () => {}, cjAtto1On: () => false, cjAtto1Giro: () => {},
     giroCaja: () => chiamate.push('caja'), giroServicio: () => chiamate.push('serv') };
   vm.createContext(ctx); vm.runInContext(fnV('boot'), ctx); vm.runInContext('boot();', ctx);
   const g = cb.find((x) => x[1] === 60000); chiamate.length = 0;

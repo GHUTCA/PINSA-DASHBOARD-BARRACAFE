@@ -40,6 +40,10 @@ async function banco(SRC, quieto) {
     t('E2 · risposta illeggibile ⇒ cammino di oggi', x.L.gas[0] === 'getTurnoAdmin' && x.L.boot === 1, x); }
   { const x = await login({ body: { ok: true, scritto: false, motivo: 'gate_spento' }, gasTurno: { ok: false, error: 'pin_invalid' } });
     t('F · ripiego col PIN sbagliato ⇒ «PIN no válido» e nessun PIN in memoria', x.err === 'PIN no válido' && x.S.pin === null && x.L.boot === 0, x); }
+  { const x = await login({ status: 429, body: { ok: false, error: 'pin_jl_bloqueado', faltan_s: 290 } });
+    t('K · PIN bloccato dal freno del bordo ⇒ «bloqueado · 5 min», niente GAS, niente PIN in memoria', /bloqueado/.test(x.err) && /5 min/.test(x.err) && x.L.gas.length === 0 && x.S.pin === null && x.L.boot === 0, x); }
+  { const x = await login({ status: 429, body: { ok: false, error: 'pin_jl_bloqueado_apparecchio', faltan_s: 30 } });
+    t('K2 · bloccato per apparecchio ⇒ lo stesso, almeno 1 min', /1 min/.test(x.err) && x.L.gas.length === 0, x); }
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
@@ -49,6 +53,7 @@ if (process.argv.includes('--mutanti')) {
     ['senza ripiego adminPing', "    if (!STATE.user) { try { const who = await gasGet('adminPing', { pin: pin }); if (who && who.ok && who.user) STATE.user = who.user; } catch (e) {} }\n    if (!STATE.user) STATE.user = (rB", '    if (!STATE.user) STATE.user = (rB'],
     ['pin rifiutato va al GAS', "  if (bd.usado && bd.pinMal) { STATE.pin = null; $('gErr').textContent = 'PIN no válido'; return; }\n", ''],
     ['rete morta blocca il login', "  if (bd.usado && bd.ok) {", "  if (bd.usado && !bd.ok) { $('gErr').textContent = 'Sin conexión — prueba de nuevo'; return; }\n  if (bd.usado && bd.ok) {"],
+    ['il freno del bordo si aggira (bloqueado va al GAS)', "  if (j && j.ok === false && /^pin(_jl)?_bloqueado/.test(String(j.error || ''))) return { usado: true, ok: false, bloqueado: true, faltan_s: +j.faltan_s || 0 };", ''],
     ['il PIN resta in memoria nel ripiego', "  STATE.pin = null;\n  try {\n    const r = await gasGet('getTurnoAdmin'", "  try {\n    const r = await gasGet('getTurnoAdmin'"],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.replace(a, b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
