@@ -31,6 +31,8 @@ async function banco(SRC, quieto) {
     t('B3 · ridisegna la scheda se Sala/Turno è davanti', x.L.pinte === 1); }
   { const x = await giro([{ ok: false, need: 'gas', motivo: 'apagado' }]);
     t('C · leva del bordo spenta ⇒ nessuna card (la strada di oggi)', x.html() === '', x.html()); }
+  { const x = await giro([{ ok: false, error: 'verbo_sconosciuto' }]);
+    t('C2 · il bordo vivo senza il verbo (400 verbo_sconosciuto) ⇒ come leva spenta, nessuna card né ámbar', x.html() === '', x.html()); }
   { const x = await giro([{ ok: false, borde: true, error: 'pg_no_responde' }]);
     const h = x.html();
     t('D · PG non risponde ⇒ riga ámbar che lo dice, MAI «nessuna mesa»', /card ambra/.test(h) && /la base no responde/.test(h) && !/card rossa/.test(h), h); }
@@ -54,7 +56,8 @@ async function banco(SRC, quieto) {
 }
 if (process.argv.includes('--mutanti')) {
   const M = [
-    ['need:gas letto come lista vuota', "    else if (r && r.need === 'gas') { AYER.r = null; AYER.err = ''; }\n", ''],
+    ['need:gas letto come lista vuota', "    else if (r && (r.need === 'gas' || /^verbo_(sconosciuto|desconocido)$/.test(String(r.error || '')))) { AYER.r = null; AYER.err = ''; }\n", ''],
+    ['verbo_sconosciuto letto come errore', "r.need === 'gas' || /^verbo_(sconosciuto|desconocido)$/.test(String(r.error || ''))", "r.need === 'gas'"],
     ['errore letto come nessuna mesa', "  if (AYER.err) return '<div class=\"card ambra\">", "  if (false) return '<div class=\"card ambra\">"],
     ['ok senza borde creduto', "r.ok === true && r.borde === true && Array.isArray(r.mesas)", "r.ok === true && Array.isArray(r.mesas)"],
     ['nessun tetto di frequenza', "  if (AYER.ts && (Date.now() - AYER.ts) < (AYER.err ? 120000 : 600000)) return;\n", ''],
