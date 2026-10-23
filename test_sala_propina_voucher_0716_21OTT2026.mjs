@@ -14,7 +14,7 @@ try { VECCHIA = execSync('git show 07f3f55:sala.html', { cwd: new URL('.', impor
 function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const fnV = (n) => fnVin(SRC, n);
-  const FUN = ['_vouTotNum', '_vouEstado', '_vouTxt', '_pgVouBtnPinta', 'pagoVouIn', 'pagoVouTotIn', '_pagoPropina', 'vouSinPropSi', 'vouCorregir'].map(fnV).join('');
+  const FUN = ['_vouTotNum', '_vouEstado', '_vouTxt', '_pgVouBtnPinta', 'pagoVouIn', 'pagoVouTotIn', '_pagoPropina', 'vouSinPropSi', 'vouCorregir'].map(fnV).join('') + '\nfunction _propBaseConv(d) { return d; }\n';   // [24-ott] la leva della propina del convenio spenta: la base di ieri
   function mondo({ on = true, v3 = true, medio = 'debito', consumo = 61090, prop = 'sug', otro = '', vouTot = '', voucher = '', sinVoucher = false } = {}) {
     const dom = {};
     const el = (id) => dom[id] || (dom[id] = { id, textContent: '', innerHTML: '', disabled: false, style: {} });

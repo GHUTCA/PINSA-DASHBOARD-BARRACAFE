@@ -17,7 +17,7 @@ function mondo(SRC, { v2 = true, pg, monto = 3190, prop = 319 }) {
     _pagoQuiereVoucher: () => !!(pg.mixto && (_n(pg.mixto.debito) > 0 || _n(pg.mixto.credito) > 0)),
     $: (id) => dom[id] || null, dom, w, renderPago: () => { ctx.ridisegni = (ctx.ridisegni || 0) + 1; }, ridisegni: 0 };
   function _n(v) { return Math.round(parseFloat(String(v).replace(/[^0-9]/g, '')) || 0); }
-  vm.createContext(ctx); vm.runInContext(fns.map((n) => fnVin(SRC, n)).join('\n'), ctx);
+  vm.createContext(ctx); vm.runInContext(fns.map((n) => fnVin(SRC, n)).join('\n') + '\nfunction _propBaseConv(d) { return d; }\n', ctx);   // [24-ott] la leva della propina del convenio spenta: la base di ieri
   return { ctx, w, dom };
 }
 async function banco(SRC, quieto) {

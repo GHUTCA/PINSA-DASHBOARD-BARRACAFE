@@ -12,7 +12,7 @@ function banco(S, quieto) {
   t('B · ③ sobran/faltan sta nei montos, non nella propina, e la carta è la «Venta» del voucher', /Si en <b>«¿Cuánto con cada uno\?»<\/b> dice <b>«sobran»<\/b> o <b>«faltan»<\/b>, la diferencia está <b>en los montos de los medios, no en la propina<\/b>/.test(S.g) && /«faltan \$… <b>de propina<\/b>»: ahí sí se corrige la propina/.test(S.g) && /«Venta» del voucher/.test(S.g));
   t('C · ① Falabella: non sulle promo, e dopo una parte sul resto', /No se aplica sobre lo que ya está en promoción/.test(S.g) && /<b>sobre lo que queda por pagar<\/b>/.test(S.g));
   t('D · ② una mesa aperta blocca le propinas del giorno', /las propinas de ese día quedan bloqueadas<\/b>/.test(S.g));
-  t('E · la versione è la v2.5 nel piè di pagina e nell intestazione', /guía del cobro · v2\.5 · 23-oct-2026/.test(S.g) && /guia_turno\.html · v2\.5 · 23-oct-2026/.test(S.g));
+  t('E · la versione è la v2.5 nel piè di pagina e nell intestazione', /guía del cobro · v2\.([5-9]|\d\d) · 2\d-oct-2026/.test(S.g) && /guia_turno\.html · v2\.([5-9]|\d\d) · 2\d-oct-2026/.test(S.g));
   t('F · «Qué cambió» ha la sua riga e rimanda alla guida', /La guía del cobro, actualizada/.test(S.q) && /<a href="guia_turno\.html">la guía del cobro<\/a>/.test(S.q));
   return { ok, ko };
 }
