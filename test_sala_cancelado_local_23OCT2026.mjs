@@ -11,14 +11,16 @@ const P = (uuid, mesa, total) => ({ uuid, mesa, total, estado: 'digitado', items
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const F = "const _ARRAYS_SALA_MESA = ['mios', 'pendientes', 'por_limpiar', 'sin_dueno'];\n" + fnRiga(SRC, '_idPedido') + fnVin(SRC, '_mesasJustificadasCalo') +
-    fnRiga(SRC, '_cancLocalOn') + fnVin(SRC, '_cancLocalVivi') + fnVin(SRC, '_cancLocalFiltra') + fnVin(SRC, '_cancLocalSegna') + fnVin(SRC, 'mergeSalaGuardia');
+    fnRiga(SRC, '_cancLocalOn') + fnVin(SRC, '_cancLocalVivi') + fnVin(SRC, '_cancLocalFiltra') + fnVin(SRC, '_cancLocalSegna') + fnVin(SRC, 'mergeSalaGuardia') +
+    (SRC.includes('function _cancTraza(') ? fnVin(SRC, '_cancTraza') + fnRiga(SRC, '_cancTrazaMesas') + fnVin(SRC, '_cancTrazaConta') + fnVin(SRC, '_cancTrazaRes') : '');
   function mondo({ leva = true, tel = null } = {}) {
     const L = { limpiar: [], mappa: 0, panel: 0, rech: 0 };
     let now = Date.parse('2026-10-23T16:33:00-03:00');
-    const ctx = { String, Object, Array, JSON, Date: { now: () => now }, MARCA_SAFETY_MS: 300000, CANC_LOCAL_SRV: leva, CANC_LOCAL_TEL: tel,
+    const ctx = { String, Object, Array, JSON, Date: Object.assign(function () { return new globalThis.Date(now); }, { now: () => now }), MARCA_SAFETY_MS: 300000, CANC_LOCAL_SRV: leva, CANC_LOCAL_TEL: tel,
       STATE: { marcado: {}, mesaAbierta: '' }, _limpiarMesaLocal: (m) => { L.limpiarMesa = (L.limpiarMesa || 0) + 1; },
       _limpiarUuidsLocal: (us, m) => { us.forEach((u) => { L.limpiar.push(m + ':' + u); ctx.STATE.marcado[u] = { marca: 'limpia', mesa: m, ts: now }; }); },
-      refrescarMapa: () => { L.mappa++; }, renderPanel: () => { L.panel++; }, renderMesaSheet: () => {}, _pennaDice: () => { L.rech++; }, _guardiaLocalRegistra: () => {} };
+      refrescarMapa: () => { L.mappa++; }, renderPanel: () => { L.panel++; }, renderMesaSheet: () => {}, _pennaDice: () => { L.rech++; }, _guardiaLocalRegistra: () => {},
+      localStorage: (() => { const LS = {}; L.LS = LS; return { getItem: (k) => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); } }; })() };
     vm.createContext(ctx); vm.runInContext(F.replace(/^let CANC_LOCAL_SRV.*$/m, ''), ctx);
     // il ciclo del poll, nell'ordine di refrescar: filtro → guardia → STATE.sala
     const poll = (r) => { r = Object.assign({ ok: true }, JSON.parse(JSON.stringify(r))); r = ctx._cancLocalFiltra(r); r = ctx.mergeSalaGuardia(ctx.STATE.sala, r); ctx.STATE.sala = r; return r; };
@@ -61,6 +63,13 @@ async function banco(SRC, quieto) {
   { const w = mondo(); w.poll({ mios: [P('u-pan', 998, 1090)] }); w.ctx._cancLocalSegna(998, 'u-pan');
     w.poll({ pendientes: [P('u-nuevo', 998, 3000)] });
     t('E · un pedido nuovo sulla mesa dopo il gesto si vede', w.vede('u-nuevo') && !w.vede('u-pan')); }
+  // T · la traccia del lampeggio (solo a leva accesa, solo nel telefono)
+  { const w = mondo(); w.poll({ mios: [P('u-pan', 998, 1090)], mesas: [{ mesa: 998, total: 1090 }] }); w.ctx._cancLocalSegna(998, 'u-pan');
+    const tr = JSON.parse(w.L.LS.sala_canc_traza || '[]');
+    t('T1 · il gesto lascia «segna» con mesa, uuid, quedan e il résumé che c era', tr.length === 1 && tr[0].e === 'segna' && tr[0].uuid === 'u-pan' && tr[0].quedan === false && tr[0].res === 1090, tr);
+    const w2 = mondo({ leva: false }); w2.poll({ mios: [P('u-pan', 998, 1090)] }); w2.ctx._cancLocalSegna(998, 'u-pan');
+    t('T2 · leva spenta: nessuna traccia', !w2.L.LS.sala_canc_traza);
+    t('T3 · il poll scrive la traccia DOPO render(r), con fuente/res/vptot/modelo, e si legge con ?canc_traza=1', SRC.includes("render(r);\n    try { _cancTrazaMesas().forEach") && SRC.includes('vptot: _vpTot(m)') && SRC.includes("QS.get('canc_traza') === '1'")); }
   // F · i cammini nel file
   t('F1 · refrescar filtra PRIMA della guardia', /r = _cancLocalFiltra\(r\);[^\n]*\n\s*if \(GUARDIA_SALA_ON\) r = mergeSalaGuardia\(STATE\.sala, r\);/.test(SRC));
   t('F2 · «Un producto»: tutte le qty a zero = cancellato anche se il bordo non ripete cancelado', /\(_bodyCorrBorde\.cancelado && !r\.cancelado\) \? Object\.assign\(\{\}, r, \{ _cancelado_vetro: true \}\) : r\)/.test(SRC) && /if \(r\.cancelado \|\| r\._cancelado_vetro\) _cancLocalSegna\(mesa, uuid\);/.test(fnVin(SRC, '_dtEliminarOptimista')));
@@ -109,7 +118,7 @@ async function banco(SRC, quieto) {
 }
 if (process.argv.includes('--mutanti')) {
   const M = [
-    ['il filtro non toglie niente', '    if (Array.isArray(r[k])) r[k] = r[k].filter(function (p) { return !(p && p.uuid != null && v[String(p.uuid)]); });', ''],
+    ['il filtro non toglie niente', 'r[k] = r[k].filter(function (p) { return !(p && p.uuid != null && v[String(p.uuid)]); });', 'r[k] = r[k].slice();'],
     ['la mesa vuota non prende il segno', "  if (!quedan) _limpiarUuidsLocal([String(uuid)], String(mesa));", ''],
     ['segno anche se resta un pedido', "  if (!quedan) _limpiarUuidsLocal([String(uuid)], String(mesa));", '  _limpiarUuidsLocal([String(uuid)], String(mesa));'],
     ['torna il segno di mesa (la finestra del café)', "  if (!quedan) _limpiarUuidsLocal([String(uuid)], String(mesa));", '  if (!quedan) _limpiarMesaLocal(String(mesa));'],

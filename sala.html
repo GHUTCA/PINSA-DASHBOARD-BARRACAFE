@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.23 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.24 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -7953,6 +7953,35 @@ const CANC_LOCAL_TEL = (function () {
   } catch (e) { return q === '1' ? true : q === '0' ? false : null; }
 })();
 function _cancLocalOn() { return CANC_LOCAL_TEL !== null ? CANC_LOCAL_TEL : CANC_LOCAL_SRV; }
+/* [23-ott · 🖐 TERZA · `TERZA V32 IL LAMPEGGIO RIAPERTO`] LA TRACCIA DEL LAMPEGGIO — solo su questo telefono, solo a leva/`?canc=1` accesa, ultimi 80
+   eventi in `sala_canc_traza` (localStorage). Per ogni poll dopo un gesto: fonte, età e `ts_datos` della foto, totale del résumé della mesa segnata,
+   pedidos di quella mesa nelle liste (prima e dopo il filtro), restauri della guardia, `_vpTot` e se la mesa è nel modello. Si legge con `?canc_traza=1`.
+   Non scrive niente fuori dal telefono, non cambia nessun disegno. Muore con la causa trovata. */
+function _cancTraza(ev) {
+  if (!_cancLocalOn()) return;
+  try {
+    const a = JSON.parse(localStorage.getItem('sala_canc_traza') || '[]');
+    a.push(Object.assign({ t: new Date().toLocaleTimeString('es-CL', { hour12: false }) }, ev));
+    while (a.length > 80) a.shift();
+    localStorage.setItem('sala_canc_traza', JSON.stringify(a));
+  } catch (e) {}
+}
+function _cancTrazaMesas() { const v = _cancLocalVivi(), m = {}; Object.keys(v).forEach(function (u) { m[v[u].mesa] = true; }); return Object.keys(m); }
+function _cancTrazaConta(r, mesa) {
+  let n = 0; _ARRAYS_SALA_MESA.forEach(function (k) { (r && r[k] || []).forEach(function (p) { if (p && String(p.mesa) === String(mesa)) n++; }); }); return n;
+}
+function _cancTrazaRes(r, mesa) {
+  const rs = (r && (r.mesas || r.mesas_resumen)) || []; for (let i = 0; i < rs.length; i++) if (String(rs[i].mesa) === String(mesa)) return rs[i].total; return null;
+}
+function _cancTrazaMostra() {
+  let a = []; try { a = JSON.parse(localStorage.getItem('sala_canc_traza') || '[]'); } catch (e) {}
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#111;color:#e8e2d0;overflow:auto;padding:12px;font:11px/1.35 monospace;white-space:pre-wrap';
+  d.textContent = 'TRAZA DEL PARPADEO · ' + a.length + ' eventos (toca para cerrar)\n\n' + a.map(function (x) { return JSON.stringify(x); }).join('\n');
+  d.onclick = function () { d.remove(); };
+  document.body.appendChild(d);
+}
+if (QS.get('canc_traza') === '1') { try { window.addEventListener('load', _cancTrazaMostra); } catch (e) {} }
 function _cancLocalVivi() {
   const reg = STATE._cancLocal || {}, now = Date.now(), out = {};
   Object.keys(reg).forEach(function (u) { if (now - reg[u].ts < MARCA_SAFETY_MS) out[u] = reg[u]; else delete reg[u]; });
@@ -7961,9 +7990,11 @@ function _cancLocalVivi() {
 function _cancLocalFiltra(r) {
   if (!r || !_cancLocalOn()) return r;
   const v = _cancLocalVivi(); if (!Object.keys(v).length) return r;
+  let _tolti = 0;
   _ARRAYS_SALA_MESA.forEach(function (k) {
-    if (Array.isArray(r[k])) r[k] = r[k].filter(function (p) { return !(p && p.uuid != null && v[String(p.uuid)]); });
+    if (Array.isArray(r[k])) { const n0 = r[k].length; r[k] = r[k].filter(function (p) { return !(p && p.uuid != null && v[String(p.uuid)]); }); _tolti += n0 - r[k].length; }
   });
+  r._canc_tolti = _tolti;   // [23-ott · traccia] quanti ne ha tolti QUESTO poll
   return r;
 }
 function _cancLocalSegna(mesa, uuid) {
@@ -7978,6 +8009,7 @@ function _cancLocalSegna(mesa, uuid) {
      `mesa#` nasconderebbe per 5 minuti un pedido VIVO arrivato dopo la foto (il café dal QR 30 s prima) e `_vpTot` direbbe $0 da cobrar
      — la stessa forma che AUT-0463 aveva curato nel pago con l'elenco. Il segno per uuid giustifica la guardia sulla mesa e nasconde solo questo.
      Prezzo dichiarato: col poll partito prima del gesto il résumé stantio può ancora dire «$1.090 · 0 líneas» (sovrastima visibile, non consumo nascosto). */
+  _cancTraza({ e: 'segna', mesa: String(mesa), uuid: String(uuid), quedan: quedan, res: _cancTrazaRes(STATE.sala, mesa) });
   if (!quedan) _limpiarUuidsLocal([String(uuid)], String(mesa));
   try { refrescarMapa(); } catch (e) {}           // la tessera subito, non al poll dopo
   try { renderPanel(); } catch (e) {}
@@ -8030,6 +8062,7 @@ function mergeSalaGuardia(prevR, respR) {
      _muroCampi, AUT-0273) — viaja con el proximo gesto hacia el bordo, cero
      canales nuevos. */
   mancanti.forEach(function () { _pennaDice('guardia:rechazo'); });
+  try { mancanti.forEach(function (it) { if (_cancTrazaMesas().indexOf(String(it.mesa)) >= 0) _cancTraza({ e: 'restauro', mesa: it.mesa, uuid: it.row && it.row.uuid, k: it.k }); }); } catch (e) {}
   _guardiaLocalRegistra(mancanti);
   return out;
 }
@@ -8254,6 +8287,12 @@ async function refrescar(conSkeleton) {
     }
     detectarNuevos(r);   // v1.4 · doble campana su arrivi nuovi
     render(r);
+    try { _cancTrazaMesas().forEach(function (m) {   // [23-ott · traccia del lampeggio] dopo il disegno: cosa ha visto questo poll
+      _cancTraza({ e: 'poll', mesa: m, fuente: (r._ts_datos ? 'borde' : 'otra') + (r._vieja_s ? ':vieja' + r._vieja_s : '') + (r._foto_local ? ':foto' : ''),
+        edad: r._edad_dato_s, tsd: r._ts_datos ? new Date(r._ts_datos).toLocaleTimeString('es-CL', { hour12: false }) : null,
+        tolti: r._canc_tolti || 0, en_listas: _cancTrazaConta(r, m), res: _cancTrazaRes(r, m),
+        modelo: (STATE.mesasModel || []).some(function (x) { return String(x.mesa) === String(m); }), vptot: _vpTot(m), sel: (STATE.selMesas || []).indexOf(m) >= 0 });
+    }); } catch (e) {}
     /* [AUT-0216c] il link profondo: al PRIMO poll fresco la mesa chiesta si
        seleziona e il pannello dei verbi si apre — una volta sola, mai al
        ritorno di ogni poll (il JL potrebbe averla già chiusa). */
