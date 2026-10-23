@@ -75,6 +75,23 @@ async function banco(SRC, quieto) {
     try { ret = new Function('r', 'btn', '_ago86Marca', 'toast', corpo + '\nreturn "caduto";')({ ok: false, borde: true, scritto: false, need: 'items_agotados', agotados: [{ id: 'pan', nombre: 'Pan de masa madre' }] }, L.btn, g._ago86Marca, g.toast); } catch (e) { ret = 'errore ' + e.message; }
     t('G · need:items_agotados nella correzione: il nome del piatto, segnato 86, bottone riattivato, il pannello resta (return)', i > 0 && ret === undefined && L.marca && L.marca[0].id === 'pan' && /Se acabó: Pan de masa madre — no se agregó nada/.test((L.toast[0] || [])[1] || '') && L.btn.disabled === false, { ret, L });
     t('G2 · «Qué cambió» ha la riga', /Agregar algo que se acabó/.test(fs.readFileSync(new URL('./que_cambio.html', import.meta.url), 'utf8'))); }
+  // H · [23-ott · EL GIRO c8d8c73] il pedido nuovo riconosce need:'items_agotados' (forma del bordo) oltre a error (forma del GAS)
+  t('H · crearPedido: l 86 dal bordo (need) come dal GAS (error)', /if \(r && \(r\.error === 'items_agotados' \|\| r\.need === 'items_agotados'\)\) \{/.test(SRC));
+  // I · la coda offline: un pedido 86 esce, gli altri dietro entrano, il mesero lo sa col nome — _colaFlush VERO
+  { const LS = {}; let cola = [
+      { action: 'crearPedidoMesero', body: { uuid: 'q1', mesa: 42, codigo: 'C' } },
+      { action: 'crearPedidoMesero', body: { uuid: 'q2', mesa: 43, codigo: 'C' } },
+      { action: 'crearPedidoMesero', body: { uuid: 'q3', mesa: 44, codigo: 'C' } }];
+    const L = { toast: [], marca: null, refr: 0, post: [] };
+    const ctx = { JSON, Date, String, Math, COLA_FLUSHING: false, COLA_BORDE_ON: true, STATE: { codigo: 'C' },
+      localStorage: { getItem: (k) => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); } },
+      _colaGet: () => cola.slice(), _colaSave: (x) => { cola = x.slice(); }, _soloBorde: () => true,
+      staffPost: async (act, b) => { L.post.push(b.uuid); return b.uuid === 'q1' ? { ok: false, borde: true, scritto: false, need: 'items_agotados', agotados: [{ id: 'pan', nombre: 'Pan' }], mesa: 42 } : { ok: true }; },
+      gasPost: async () => ({ ok: true }), _ago86Marca: (x) => { L.marca = x; }, toast: (k, s) => L.toast.push([k, s]), refrescar: () => { L.refr++; } };
+    vm.createContext(ctx); vm.runInContext('let COLA_FLUSHING_X;' + 'async ' + fnVin(SRC, '_colaFlush'), ctx);
+    await vm.runInContext('_colaFlush()', ctx);
+    const s86 = JSON.parse(LS.sala_cola_86 || '[]');
+    t('I · coda: il pedido 86 esce e si mette da parte, gli altri due entrano, il mesero legge mesa e piatto', cola.length === 0 && L.post.join(',') === 'q1,q2,q3' && s86.length === 1 && s86[0].body.uuid === 'q1' && L.marca && L.marca[0].id === 'pan' && L.toast.some((x) => /Mesa 42: el pedido guardado NO entró — se acabó Pan/.test(x[1])) && L.toast.some((x) => /2 pedidos de la cola entraron/.test(x[1])), { cola, post: L.post, toast: L.toast }); }
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
@@ -87,6 +104,8 @@ if (process.argv.includes('--mutanti')) {
     ['il poll filtra DOPO la guardia', "    r = _cancLocalFiltra(r);   // [23-ott · TERZA]", "    //"],
     ['la tessera non si ridisegna', '  try { refrescarMapa(); } catch (e) {}', ''],
     ['la correzione 86 non riconosciuta (torna «No se pudo: ?»)', "} else if (r && (r.need === 'items_agotados' || r.error === 'items_agotados')) {", "} else if (r && r.error === 'items_agotados_x') {"],
+    ['crearPedido non legge need', "if (r && (r.error === 'items_agotados' || r.need === 'items_agotados')) {   // [23-ott", "if (r && (r.error === 'items_agotados')) {   // [23-ott"],
+    ['la coda si ferma sull 86 (come ieri)', "      if (r && (r.need === 'items_agotados' || r.error === 'items_agotados')) {\n        const e86", "      if (false) {\n        const e86"],
     ['il bordo muto su cancelado non segna', 'if (r.cancelado || r._cancelado_vetro) _cancLocalSegna(mesa, uuid);', 'if (r.cancelado) _cancLocalSegna(mesa, uuid);'],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.split(a).join(b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
