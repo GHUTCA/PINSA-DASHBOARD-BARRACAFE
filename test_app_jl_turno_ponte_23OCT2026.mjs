@@ -7,7 +7,8 @@ const ORIG = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
 const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n}\n', i) + 3); };
 const fnRiga = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n', i) + 1); };
 const OGGI = '2026-10-23', IERI = '2026-10-22';
-const PONTE = (pid) => ({ ok: true, fuente: 'ponte', plazas: [{ id: 'p1' }], asignaciones: [{ nombre: 'Ana' }], grupos: [], user: { nombre: 'JL' }, turno: Object.assign({ codigo: null, abierto: true }, pid ? { ponte_id: pid } : {}) });
+// la forma di 🎛 BKP 9f9e57c: turno:null. Con ponte_id (chiesto, non ancora nel bordo) turno porta solo quello.
+const PONTE = (pid) => ({ ok: true, fuente: 'ponte', plazas: [{ id: 'p1' }], asignaciones: [{ nombre: 'Ana' }], user: { nombre: 'JL' }, turno: pid ? { ponte_id: pid } : null });
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const F = 'async ' + fnVin(SRC, '_turnoAdminPorBordo') + fnRiga(SRC, '_turnoCodRicorda') + fnVin(SRC, '_turnoConCodigoDeHoy') + 'async ' + fnVin(SRC, 'giroTurno');
@@ -23,14 +24,17 @@ async function banco(SRC, quieto) {
     vm.createContext(ctx); vm.runInContext(F, ctx);
     return { ctx, L, giro: () => vm.runInContext('giroTurno()', ctx) };
   }
-  const GAS = { ok: true, plazas: [], asignaciones: [], turno: { codigo: '3805', abierto: true } };
+  const GAS = { ok: true, plazas: [], asignaciones: [], turno: { codigo: '3805', abierto_by: 'Eduardo' } };
   // A · leva del bordo spenta: gate_spento ⇒ il GAS come oggi, e il codice del GAS si ricorda
   { const w = mondo({ bordo: { body: { ok: true, scritto: false, motivo: 'gate_spento' } }, gas: GAS }); await w.giro();
     t('A · ponte chiuso / leva spenta ⇒ una getTurnoAdmin, e il codice del GAS resta in mano col giorno', w.L.gas === 1 && w.ctx.STATE.turno.turno.codigo === '3805' && w.ctx.STATE.turnoCod === '3805' && w.ctx.STATE.turnoCodDia === OGGI, w.L); }
   // B · il valore: ponte + codice di oggi in mano ⇒ ZERO GAS, plazas del bordo, codice del GAS
-  { const w = mondo({ bordo: { body: PONTE() }, gas: GAS, stato: { turnoCod: '3805', turnoCodDia: OGGI } }); await w.giro();
+  { const w = mondo({ bordo: { body: PONTE() }, gas: GAS, stato: { turnoCod: '3805', turnoCodGas: { codigo: '3805', abierto_by: 'Eduardo' }, turnoCodDia: OGGI } }); await w.giro();
     const tu = w.ctx.STATE.turno;
-    t('B · ponte e codice di oggi ⇒ ZERO GAS, le plazas del bordo e il codice letto dal GAS', w.L.gas === 0 && tu.fuente === 'ponte' && tu.plazas.length === 1 && tu.turno.codigo === '3805' && tu.turno.abierto === true, { L: w.L, tu }); }
+    t('B · ponte (turno:null) e codice di oggi ⇒ ZERO GAS, le plazas del bordo, il codice e abierto_by letti dal GAS', w.L.gas === 0 && tu.fuente === 'ponte' && tu.plazas.length === 1 && tu.turno.codigo === '3805' && tu.turno.abierto_by === 'Eduardo', { L: w.L, tu }); }
+  { const w = mondo({ bordo: { body: { ok: true, scritto: false, motivo: 'gate_spento' } }, gas: GAS }); await w.giro();
+    w.ctx.fetch = async () => ({ status: 200, json: async () => PONTE() }); await w.giro();
+    t('B2 · dal GAS al ponte nel giro dopo: il turno intero del GAS sopravvive (abierto_by), zero GAS in più', w.L.gas === 1 && w.ctx.STATE.turno.turno.abierto_by === 'Eduardo' && w.ctx.STATE.turno.turno.codigo === '3805', w.ctx.STATE.turno); }
   // C · codice di IERI (lo STATE torna dalla cache del telefono) ⇒ mai rinasce: il GAS
   { const w = mondo({ bordo: { body: PONTE() }, gas: Object.assign({}, GAS, { turno: { codigo: '7711' } }), stato: { turnoCod: '3805', turnoCodDia: IERI } }); await w.giro();
     t('C · codice di ieri ⇒ una getTurnoAdmin, il codice nuovo, mai quello di ieri', w.L.gas === 1 && w.ctx.STATE.turno.turno.codigo === '7711' && w.ctx.STATE.turnoCod === '7711', w.L); }
@@ -64,6 +68,7 @@ if (process.argv.includes('--mutanti')) {
     ['il codice del bordo si ricorda', '        if (bd.ok) { STATE.turno = bd.r;', '        if (bd.ok) { _turnoCodRicorda(bd.r); STATE.turno = bd.r;'],
     ['il codice del GAS non si ricorda nel giro', "    if (r && r.ok) { _turnoCodRicorda(r); STATE.turno = r;", '    if (r && r.ok) { STATE.turno = r;'],
     ['il codice nuovo non slega il ponte', ' STATE.turnoCodPonte = null; } }', ' } }'],
+    ['il turno del GAS non si conserva (solo il codice)', 'Object.assign({}, STATE.turnoCodGas || {}, rB.turno || {},', 'Object.assign({}, rB.turno || {},'],
     ['il login col ponte non va al GAS', 'if (bd.usado && bd.ok && !bd.ponte) {', 'if (bd.usado && bd.ok) {'],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.split(a).join(b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
