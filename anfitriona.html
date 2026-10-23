@@ -156,7 +156,7 @@
   <div id="mapaPlazas"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.10 · 21ott</span>
+    <span class="ver" id="ver">v1.11 · 23oct</span>
     <span class="ver" id="fuente" style="margin-left:8px"></span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
@@ -386,7 +386,7 @@ async function entrar() {
   const btn = $('entBtn'); btn.disabled = true; btn.textContent = 'ENTRANDO…'; btn.classList.add('cargando');
   try {
     // stessa porta del mesero: clockIn = marcaje (fila presencia se sin plaza)
-    const r = await gasPost('clockIn', { codigo, nombre });
+    const r = (await _clockInAlBorde(codigo, nombre)) || await gasPost('clockIn', { codigo, nombre });   // [23-ott] il bordo prima, a leva
     if (!r || !r.ok) {
       const msgs = { codigo_invalid: 'Código incorrecto — pídelo al JL', no_turno_abierto: 'No hay turno abierto todavía' };
       $('entErr').textContent = msgs[r && r.error] || ('Error: ' + (r && r.error || '?')); return;
@@ -441,7 +441,7 @@ function entrarMapa() {
    (il ritentativo non siede due volte) — mai `sentarMesa` del GAS. Freno per apparecchio `?anfsingas=0` (si ricorda), `?anfsingas=1` lo toglie.
    ⚠️ Fuori da questo pezzo, dichiarato: l'identita' (clockIn · salaCheckIn · getStaffSala · bautizarDevice · revocarDevice) resta com'era: e' di ⚙️ ARQ
    (6.4 · 6.5 · 6.5b), e il criterio del 23 non la nomina. */
-const ANF_BORDE = { on: false, sinGas: false, ts: 0, ver: '' };
+const ANF_BORDE = { on: false, sinGas: false, ts: 0, ver: '', clockin: false };
 const ANF_SEAT_VIGENCIA_MS = 25 * 60000, ANF_FRESCO_S = 90;
 function _anfSinGasFreno() {
   const q = QS.get('anfsingas');
@@ -471,6 +471,7 @@ async function anfSaludLeva() {
     try { localStorage.setItem('anf_checkinb', (j && j.flags && String(j.flags.checkin_borde_on) === '1') ? '1' : '0'); } catch (e) {}   // [6.5] il prossimo avvio sa se chiedere al bordo
     ANF_BORDE.sinGas = ANF_BORDE.on && !!(j && j.flags && String(j.flags.anfitriona_sin_gas_on) === '1') && !_anfSinGasFreno();
     ANF_BORDE.ver = (j && j.version) || '';
+    ANF_BORDE.clockin = !!(j && j.flags && String(j.flags.clockin_vetro_borde_on) === '1');   // [23-ott] il clockIn dal bordo
   } catch (e) {
     /* /salud muto = mappa del bordo spenta (mai una mappa del bordo senza che il bordo l'abbia detto). MA a leva «sin gas» gia' vista accesa la si tiene:
        un /salud che non risponde e' esattamente il momento in cui il ripiego su Google tornerebbe — e la leva esiste per non farlo tornare. */
@@ -608,6 +609,27 @@ const SENTARBORDE_ON = (function () {
    portano tutte `need:'gas'`, letto dal sorgente del bordo). Nessun rifiuto
    è mai finale qui: a differenza del PIN di AUT-0412, non c'è un freno da
    rispettare — solo un dato mancante che Google può ancora accettare. */
+/* ═══ [23-ott · 🎛 `V32 IL 23 ALLE 10 COSA E FUORI E COSA NO` · C3 anfitriona:389 · 670 · TERZA] IL CLOCKIN DAL BORDO ═══════════════════════
+   Stampo di `_sentarAlBorde`. Leva `clockin_vetro_borde_on` (dal /salud, nasce assente = spenta): spenta ⇒ `null` ⇒ il GAS di sempre.
+   Accesa: `/pedido-staff` `clockIn` con la chiave dell'ingresso (una per codice + nome: un ritento non scrive due ingressi). Il bordo risponde
+   nella forma del GAS (ok · nombre · plazas · tg_link). Una risposta senza `borde:true`, un `need:'gas'` (replica assente, codice che il bordo
+   non può verificare), la rete o il timeout ⇒ `null` ⇒ il GAS: chi decide «codigo_invalid» resta il GAS, come oggi. */
+let _ANF_CI = null;
+async function _clockInAlBorde(codigo, nombre) {
+  await anfSaludLeva();
+  if (!ANF_BORDE.clockin) return null;
+  const k = codigo + '|' + nombre;
+  if (!_ANF_CI || _ANF_CI.k !== k) _ANF_CI = { k: k, u: 'ci-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7) };
+  try {
+    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 5000);
+    const r = await fetch(BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS'), { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE_SALA.T }, cache: 'no-store', signal: ctrl.signal,
+      body: JSON.stringify({ action: 'clockIn', local: CFG.LOCAL, codigo: codigo, nombre: nombre, clockin_uid: _ANF_CI.u, app: 'anfitriona' }) });
+    clearTimeout(to);
+    const j = await r.json();
+    return (j && j.borde === true && !j.need) ? j : null;
+  } catch (e) { return null; }
+}
 async function _sentarAlBorde(body) {
   if (!SENTARBORDE_ON && !(await anfSaludLeva())) return null;   // [1.10] con la mappa del bordo accesa le sedute vanno al bordo, o la mappa non le vede
   try {
@@ -667,7 +689,7 @@ async function confirmarSentar() {
   }
   if (STATE.codigo && STATE.nombre) {
     try {
-      const r = await gasPost('clockIn', { codigo: STATE.codigo, nombre: STATE.nombre });
+      const r = (await _clockInAlBorde(STATE.codigo, STATE.nombre)) || await gasPost('clockIn', { codigo: STATE.codigo, nombre: STATE.nombre });   // [23-ott] il bordo prima, a leva
       if (r && r.ok) { entrarMapa(); return; }
       // v1.3 · il código si dimentica SOLO se il server dice che è morto —
       // un buco di rete non slogga nessuno (pattern mesero v1.9)

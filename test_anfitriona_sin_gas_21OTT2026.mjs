@@ -80,7 +80,7 @@ async function banco(SRC) {
     t('④ ter la seduta che il bordo non mostra: mesa 2 libre -> ocupada con 6 pax (non si siede due volte)', mm('2').estado === 'ocupada' && mm('2').pax === 6, mm('2'));
     t('④ quater una seduta di 40 min fa (oltre i 25) NON conta e si butta', mm('3').estado === 'libre' && m.ctx.STATE.seatsLoc.length === 2, [mm('3'), m.ctx.STATE.seatsLoc]);
     t('④ quinto una mesa che il bordo gia dice ocupada (con il suo pedido) NON si tocca', mm('1').estado === 'ocupada' && mm('1').pendiente === true && mm('1').pax !== 9, mm('1')); }
-  t('⑦ versione e fuente: v1.10, e la riga «fuente» esiste', />v1\.10 · 21ott</.test(SRC) && /id="fuente"/.test(SRC));
+  t('⑦ versione e fuente: v1.10 o successiva, e la riga «fuente» esiste', />v1\.(1\d|[2-9]\d) · \d{2}o[ct]t</.test(SRC) && /id="fuente"/.test(SRC));   // [23-ott · TERZA] v1.11 · 23oct col clockIn dal bordo
   // ⑨ LA LEVA «SIN GAS»
   { const m = mondo(SRC, { sinGas: '1', edad: 200 }); await m.ctx.F.refrescar(false);
     t('⑨ sin gas: dato del bordo vecchio (200 s) si MOSTRA, il GAS non si chiama', cuenta(m, 'gas') === 0 && m.rendered.length === 1, m.calls);
