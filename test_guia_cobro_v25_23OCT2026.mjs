@@ -9,7 +9,7 @@ function banco(S, quieto) {
   t('A · ④ la guida non promette più «o dos tarjetas»', !/\(o dos tarjetas\)/.test(S.g));
   t('A2 · ④ dice che due carte dello stesso tipo oggi non si possono, e di chiamare il JL', /Dos tarjetas del mismo tipo<\/b>[^<]*<b>hoy no se pueden<\/b>/.test(S.g) && /Llama al JL<\/b> antes de cobrar/.test(S.g));
   t('A3 · ④ ed è vero sul vetro: il mixto della sala NON ha una seconda carta dello stesso tipo (credito2/debito2)', !/credito2|debito2/.test(S.s));
-  t('B · ③ sobran/faltan sta nei montos, non nella propina, e la carta è la «Venta» del voucher', /la diferencia está <b>en los montos de los medios, no en la propina<\/b>/.test(S.g) && /«Venta» del voucher/.test(S.g));
+  t('B · ③ sobran/faltan sta nei montos, non nella propina, e la carta è la «Venta» del voucher', /Si en <b>«¿Cuánto con cada uno\?»<\/b> dice <b>«sobran»<\/b> o <b>«faltan»<\/b>, la diferencia está <b>en los montos de los medios, no en la propina<\/b>/.test(S.g) && /«faltan \$… <b>de propina<\/b>»: ahí sí se corrige la propina/.test(S.g) && /«Venta» del voucher/.test(S.g));
   t('C · ① Falabella: non sulle promo, e dopo una parte sul resto', /No se aplica sobre lo que ya está en promoción/.test(S.g) && /<b>sobre lo que queda por pagar<\/b>/.test(S.g));
   t('D · ② una mesa aperta blocca le propinas del giorno', /las propinas de ese día quedan bloqueadas<\/b>/.test(S.g));
   t('E · la versione è la v2.5 nel piè di pagina e nell intestazione', /guía del cobro · v2\.5 · 23-oct-2026/.test(S.g) && /guia_turno\.html · v2\.5 · 23-oct-2026/.test(S.g));
