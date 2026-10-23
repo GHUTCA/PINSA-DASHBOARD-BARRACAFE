@@ -88,11 +88,23 @@ async function banco(SRC, quieto) {
       localStorage: { getItem: (k) => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); } },
       _colaGet: () => cola.slice(), _colaSave: (x) => { cola = x.slice(); }, _soloBorde: () => true,
       staffPost: async (act, b) => { L.post.push(b.uuid); return b.uuid === 'q1' ? { ok: false, borde: true, scritto: false, need: 'items_agotados', agotados: [{ id: 'pan', nombre: 'Pan' }], mesa: 42 } : { ok: true }; },
-      gasPost: async () => ({ ok: true }), _ago86Marca: (x) => { L.marca = x; }, toast: (k, s) => L.toast.push([k, s]), refrescar: () => { L.refr++; } };
-    vm.createContext(ctx); vm.runInContext('let COLA_FLUSHING_X;' + 'async ' + fnVin(SRC, '_colaFlush'), ctx);
+      gasPost: async () => ({ ok: true }), _ago86Marca: (x) => { L.marca = x; }, toast: (k, s) => L.toast.push([k, s]), refrescar: () => { L.refr++; },
+      _colaBadge: () => { L.badge = (L.badge || 0) + 1; } };
+    vm.createContext(ctx); vm.runInContext('async ' + fnVin(SRC, '_colaFlush') + fnVin(SRC, '_cola86Txt'), ctx);
     await vm.runInContext('_colaFlush()', ctx);
     const s86 = JSON.parse(LS.sala_cola_86 || '[]');
-    t('I · coda: il pedido 86 esce e si mette da parte, gli altri due entrano, il mesero legge mesa e piatto', cola.length === 0 && L.post.join(',') === 'q1,q2,q3' && s86.length === 1 && s86[0].body.uuid === 'q1' && L.marca && L.marca[0].id === 'pan' && L.toast.some((x) => /Mesa 42: el pedido guardado NO entró — se acabó Pan/.test(x[1])) && L.toast.some((x) => /2 pedidos de la cola entraron/.test(x[1])), { cola, post: L.post, toast: L.toast }); }
+    t('I · coda: il pedido 86 esce e si mette da parte, gli altri due entrano, il mesero legge mesa e piatto', cola.length === 0 && L.post.join(',') === 'q1,q2,q3' && s86.length === 1 && s86[0].body.uuid === 'q1' && L.marca && L.marca[0].id === 'pan' && L.toast.some((x) => /2 pedidos de la cola entraron/.test(x[1])), { cola, post: L.post, toast: L.toast });
+    const ult = L.toast[L.toast.length - 1] || [];
+    t('I2 · K3 di 💵: l ULTIMO toast (quello che resta a schermo) è il NO, con mesa, piatto e «los otros 2 sí entraron»', ult[0] === 'err' && /Mesa 42: se acabó Pan — el pedido guardado NO entró/.test(ult[1]) && /los otros 2 sí entraron/.test(ult[1]), L.toast); }
+  // I3 · il badge tiene il NO finché il mesero non tocca — _colaBadge · _cola86* VERI
+  { const LS = { sala_cola_86: JSON.stringify([{ ts: 1, body: { mesa: 42 }, agotados: [{ id: 'pan', nombre: 'Pan' }] }]), mesero_cola_v1: '[]' };
+    const el = { textContent: '', style: {}, onclick: null }; const L = { toast: [] };
+    const ctx = { JSON, localStorage: { getItem: (k) => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); } }, $: () => el,
+      _colaGet: () => JSON.parse(LS.mesero_cola_v1), toast: (k, s) => L.toast.push([k, s]) };
+    vm.createContext(ctx); vm.runInContext(fnVin(SRC, '_colaBadge') + fnRiga(SRC, '_cola86Get') + fnRiga(SRC, '_cola86NoVisti') + fnVin(SRC, '_cola86Txt') + fnVin(SRC, '_cola86Mostra'), ctx);
+    vm.runInContext('_colaBadge()', ctx); const prima = el.textContent, cliccabile = typeof el.onclick === 'function';
+    if (cliccabile) el.onclick(); const dopo = el.textContent;
+    t('I3 · badge «🚫 1 no entró — toca» finché non lo tocca; il tocco dice mesa e piatto e lo spegne', /🚫 1 no entró — toca/.test(prima) && cliccabile && /NO entraron: Mesa 42: se acabó Pan/.test((L.toast[0] || [])[1] || '') && dopo === '', { prima, dopo, toast: L.toast }); }
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
@@ -107,6 +119,8 @@ if (process.argv.includes('--mutanti')) {
     ['la tessera non si ridisegna', '  try { refrescarMapa(); } catch (e) {}', ''],
     ['la correzione 86 non riconosciuta (torna «No se pudo: ?»)', "} else if (r && (r.need === 'items_agotados' || r.error === 'items_agotados')) {", "} else if (r && r.error === 'items_agotados_x') {"],
     ['crearPedido non legge need', "if (r && (r.error === 'items_agotados' || r.need === 'items_agotados')) {   // [23-ott", "if (r && (r.error === 'items_agotados')) {   // [23-ott"],
+    ['il NO detto prima del SI (coperto)', "  if (no86.length) { toast('err',", "  if (false) { toast('err',"],
+    ['il badge non tiene il NO', "(no.length ? ((n ? ' · ' : '') + '🚫 ' + no.length + ' no entró — toca') : '')", "''"],
     ['la coda si ferma sull 86 (come ieri)', "      if (r && (r.need === 'items_agotados' || r.error === 'items_agotados')) {\n        const e86", "      if (false) {\n        const e86"],
     ['il bordo muto su cancelado non segna', 'if (r.cancelado || r._cancelado_vetro) _cancLocalSegna(mesa, uuid);', 'if (r.cancelado) _cancLocalSegna(mesa, uuid);'],
   ];
