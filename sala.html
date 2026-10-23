@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.21 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.23 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -5049,6 +5049,15 @@ async function guardarCorreccion__in(uuid, btn) {
       toast('warn', 'El sistema no recibe correcciones ahora — no se cambió nada. Reintenta o avisa al JL');
       if (btn) btn.disabled = false;
       return;
+    } else if (r && (r.need === 'items_agotados' || r.error === 'items_agotados')) {
+      /* [23-ott · 🎛 BKP `BKP V32 2F0C2E4 L 86 SULL AGREGAR`] il bordo rifiuta una riga che SALE su un prodotto 86 (`need:'items_agotados'`,
+         `scritto:false`): non si è scritto niente. Come il pedido nuovo (AUT-0062): il nome del piatto, il piatto fuori dal picker, e il
+         pannello resta aperto per toglierlo o cambiarlo. Prima diceva «No se pudo: ?». */
+      _ago86Marca(r.agotados || []);
+      const nomi86 = (r.agotados || []).map(function (x) { return x.nombre || x.id; }).join(' · ');
+      toast('err', '🚫 Se acabó: ' + (nomi86 || 'un producto') + ' — no se agregó nada. Quítalo o cámbialo y guarda de nuevo');
+      if (btn) btn.disabled = false;
+      return;
     } else {
       toast('err', 'No se pudo: ' + (r && r.error || '?'));
       if (btn) btn.disabled = false;
@@ -7063,7 +7072,7 @@ async function nuevoEnviar__in(btn) {
        picker e si segna la riga — la libreta NON si perde, lui cambia il
        piatto e rispedisce con lo stesso uuid. Prima leggeva «No se pudo:
        items_agotados» e non sapeva quale. */
-    if (r && r.error === 'items_agotados') {
+    if (r && (r.error === 'items_agotados' || r.need === 'items_agotados')) {   // [23-ott · 💵 `EL GIRO V32 C8D8C73 86 MESERO GUARDIA VERDE LA SALA NON LA LEGGE`] il bordo dice `need`, il GAS `error`
       _ago86Marca(r.agotados || []);
       const nomi = (r.agotados || []).map(function (x) { return x.nombre || x.id; }).join(' · ');
       toast('err', '🚫 Se acabó: ' + (nomi || r.producto || '') + ' — cámbialo y vuelve a enviar');
@@ -7457,7 +7466,26 @@ function _colaPut(entry) {
 function _colaBadge() {
   const el = $('colaBadge'); if (!el) return;
   const n = _colaGet().length;
-  el.textContent = n ? ('📡 ' + n + ' por entrar') : '';
+  /* [23-ott · 🟡 di 💵 `EL GIRO V32 858FBBC IL NO DELLA CODA E COPERTO DAL SI`] un pedido della coda che NON è entrato (86) resta nel badge finché
+     il mesero non lo tocca: un toast si perde col telefono in tasca, e quel pedido (coi piatti buoni dentro) nessuno lo rifarebbe. */
+  const no = _cola86NoVisti();
+  el.textContent = (n ? ('📡 ' + n + ' por entrar') : '') + (no.length ? ((n ? ' · ' : '') + '🚫 ' + no.length + ' no entró — toca') : '');
+  el.style.cursor = no.length ? 'pointer' : '';
+  el.onclick = no.length ? _cola86Mostra : null;
+}
+function _cola86Get() { try { return JSON.parse(localStorage.getItem('sala_cola_86') || '[]'); } catch (e) { return []; } }
+function _cola86NoVisti() { return _cola86Get().filter(function (x) { return x && !x.visto; }); }
+function _cola86Txt(x) {
+  const nomi = (x.agotados || []).map(function (a) { return a.nombre || a.id; }).join(' · ');
+  return 'Mesa ' + ((x.body && x.body.mesa) || '?') + ': se acabó ' + (nomi || 'un producto');
+}
+function _cola86Mostra() {
+  const s = _cola86Get(), no = s.filter(function (x) { return x && !x.visto; });
+  if (!no.length) return;
+  toast('err', '🚫 NO entraron: ' + no.map(_cola86Txt).join(' · ') + ' — hazlos de nuevo sin eso', 15000);
+  s.forEach(function (x) { if (x) x.visto = true; });
+  try { localStorage.setItem('sala_cola_86', JSON.stringify(s)); } catch (e) {}
+  _colaBadge();
 }
 let COLA_FLUSHING = false;
 async function _colaFlush() {
@@ -7465,6 +7493,7 @@ async function _colaFlush() {
   const a = _colaGet(); if (!a.length) return;
   COLA_FLUSHING = true;
   let entraron = 0;
+  const no86 = [];   // [23-ott] i NO del giro si dicono DOPO il «✓ entraron», mai sotto
   try {
     let giri = a.length;   // [21-ott · 1.3] al più un passaggio per entrata: la rotazione qui sotto non può girare per sempre
     while (a.length && giri-- > 0) {
@@ -7488,10 +7517,22 @@ async function _colaFlush() {
          bloccherebbe TUTTI i pedidos dietro di lui per sempre. Va in fondo alla coda (non si perde: è una cattura) e gli altri entrano.
          Ogni altro rifiuto si ferma come ieri. Il badge «por entrar» lo resta a mostrare: è il giro del JL che lo vede. */
       if (r && r.sin_borde) { a.push(a.shift()); _colaSave(a); continue; }
+      /* [23-ott · 🟡 «IL LIMITE della coda offline» di 💵 `EL GIRO V32 C8D8C73 86 MESERO GUARDIA VERDE LA SALA NON LA LEGGE`] un pedido in coda con un
+         piatto finito nel frattempo (86) è rifiutato a OGNI giro finché il piatto non torna: fermava tutti quelli dietro. Esce dalla coda, si mette da
+         parte nel telefono (`sala_cola_86`, gli ultimi 20, per chi indaga) e si dice al mesero col nome e la mesa: lo rifà senza quel piatto. Non va in
+         fondo: entrerebbe da solo quando il piatto torna, magari ore dopo, su un tavolo che ha già cambiato. */
+      if (r && (r.need === 'items_agotados' || r.error === 'items_agotados')) {
+        const e86 = a.shift(); _colaSave(a);
+        try { _ago86Marca(r.agotados || []); } catch (x) {}
+        try { const s86 = JSON.parse(localStorage.getItem('sala_cola_86') || '[]'); s86.push({ ts: Date.now(), action: e86.action, body: e86.body, agotados: r.agotados || [] }); while (s86.length > 20) s86.shift(); localStorage.setItem('sala_cola_86', JSON.stringify(s86)); } catch (x) {}
+        no86.push(_cola86Txt({ body: e86.body, agotados: r.agotados || [] }));
+        continue;
+      }
       _colaSave(a); break;
     }
   } finally { COLA_FLUSHING = false; }
   if (entraron) { toast('ok', '✓ ' + entraron + ' pedido' + (entraron === 1 ? '' : 's') + ' de la cola entraron al sistema'); refrescar(false); }
+  if (no86.length) { toast('err', '🚫 ' + no86.join(' · ') + ' — el pedido guardado NO entró, hazlo de nuevo sin eso' + (entraron ? ' (los otros ' + entraron + ' sí entraron)' : ''), 15000); _colaBadge(); }
 }
 window.addEventListener('online', function () { _colaFlush(); });
 setInterval(_colaFlush, 20000);
@@ -7896,6 +7937,52 @@ function _guardiaLocalRegistra(mancanti) {
     localStorage.setItem(GUARDIA_LOCAL_KEY, JSON.stringify(s));
   } catch (e) { /* la guardia no depende del contador */ }
 }
+/* ═══ [23-ott · 🖐 TERZA V32 · `TERZA V32 LA MESA CHE LAMPEGGIA LA CAUSA` · reperto di 🖐 QUARTA 997 (22-ott) e 998 (23-ott)] IL PEDIDO CANCELLATO DA QUI ═══
+   «Un producto» (e il pannello a steppers) che cancella un pedido lo toglieva SOLO dal modello: la guardia qui sotto lo RIMETTEVA al primo poll senza di lui
+   (la mesa non era «giustificata»: né pagata né unita né `limpia`), il résumé stantio vinceva in `_vpTot` («$1.090 · 0 líneas») e la tessera non si
+   ridisegnava. Con la leva: l'uuid cancellato da QUESTO telefono vive 5 minuti (MARCA_SAFETY_MS) in `STATE._cancLocal`; ogni poll in arrivo lo toglie
+   PRIMA della guardia (anche il poll partito prima del gesto), e se sulla mesa non resta nessun pedido vivo la mesa si chiude come la colación
+   (`_limpiarMesaLocal`). Leva spenta (`sala_cancelado_local_on` da /salud, `?canc=1|0` per apparecchio) = il vetro di ieri, riga per riga. */
+let CANC_LOCAL_SRV = false;
+const CANC_LOCAL_TEL = (function () {
+  const q = QS.get('canc');
+  try {
+    if (q === '1') { localStorage.setItem('sala_canc_local', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_canc_local', '0'); return false; }
+    const v = localStorage.getItem('sala_canc_local'); return v === '1' ? true : v === '0' ? false : null;
+  } catch (e) { return q === '1' ? true : q === '0' ? false : null; }
+})();
+function _cancLocalOn() { return CANC_LOCAL_TEL !== null ? CANC_LOCAL_TEL : CANC_LOCAL_SRV; }
+function _cancLocalVivi() {
+  const reg = STATE._cancLocal || {}, now = Date.now(), out = {};
+  Object.keys(reg).forEach(function (u) { if (now - reg[u].ts < MARCA_SAFETY_MS) out[u] = reg[u]; else delete reg[u]; });
+  return out;
+}
+function _cancLocalFiltra(r) {
+  if (!r || !_cancLocalOn()) return r;
+  const v = _cancLocalVivi(); if (!Object.keys(v).length) return r;
+  _ARRAYS_SALA_MESA.forEach(function (k) {
+    if (Array.isArray(r[k])) r[k] = r[k].filter(function (p) { return !(p && p.uuid != null && v[String(p.uuid)]); });
+  });
+  return r;
+}
+function _cancLocalSegna(mesa, uuid) {
+  if (!_cancLocalOn() || uuid == null || mesa == null) return;
+  STATE._cancLocal = STATE._cancLocal || {};
+  STATE._cancLocal[String(uuid)] = { mesa: String(mesa), ts: Date.now() };
+  if (STATE.sala) _cancLocalFiltra(STATE.sala);
+  const quedan = !STATE.sala || _ARRAYS_SALA_MESA.some(function (k) {
+    return (STATE.sala[k] || []).some(function (p) { return p && String(p.mesa) === String(mesa); });
+  });
+  /* [23-ott · 🔴 di 💵 `EL GIRO V32 F42FA5F SPEDIBILE SPENTO NON SI ACCENDE LA FINESTRA NASCONDE IL CAFE`, cura A] il segno è PER UUID, non di mesa:
+     `mesa#` nasconderebbe per 5 minuti un pedido VIVO arrivato dopo la foto (il café dal QR 30 s prima) e `_vpTot` direbbe $0 da cobrar
+     — la stessa forma che AUT-0463 aveva curato nel pago con l'elenco. Il segno per uuid giustifica la guardia sulla mesa e nasconde solo questo.
+     Prezzo dichiarato: col poll partito prima del gesto il résumé stantio può ancora dire «$1.090 · 0 líneas» (sovrastima visibile, non consumo nascosto). */
+  if (!quedan) _limpiarUuidsLocal([String(uuid)], String(mesa));
+  try { refrescarMapa(); } catch (e) {}           // la tessera subito, non al poll dopo
+  try { renderPanel(); } catch (e) {}
+  try { if (String(STATE.mesaAbierta) === String(mesa) && STATE.sala) renderMesaSheet(STATE.sala); } catch (e) {}
+}
 function mergeSalaGuardia(prevR, respR) {
   if (!respR || respR.ok !== true) return prevR || respR;
   if (!prevR) return respR;                    // niente "prima" con cui confrontare: entra libera
@@ -8000,6 +8087,7 @@ async function refrescar(conSkeleton) {
        mesa calerebbe senza ragione, `r` diventa la versione con quella mesa
        restaurata dalla foto precedente. Leva spenta = `r` esce identico
        all'ingresso, bit per bit (mergeSalaGuardia lo ritorna intatto). */
+    r = _cancLocalFiltra(r);   // [23-ott · TERZA] il pedido cancellato da qui non torna, nemmeno col poll partito prima del gesto (leva spenta = identico)
     if (GUARDIA_SALA_ON) r = mergeSalaGuardia(STATE.sala, r);
     /* ═══ v3.22.0 · [AUT-EMERG-0004] · LA JUNTA DICE DOVE È ANDATO IL CONTO ═══
        Il caso di oggi (mesa 124+125, $114.970): il pago fatto sulla principal
@@ -9519,6 +9607,7 @@ function _salaMuertaPinta(edadMs) {
       CLOCKIN_VETRO_ON = String(cercaK(j, 'clockin_vetro_borde_on')) === '1';   // [23-ott] il clockIn dietro le quinte dal bordo
       CHECKIN_BORDE_ON = String(cercaK(j, 'checkin_borde_on')) === '1';             // [21-ott · pezzo 6.5]
       if (YAPAG3_TEL === null) YAPAG3_ON = String(cercaK(j, 'ya_pagado_ack_on')) === '1';   // [21-ott · ②] la guardia segue la leva del bordo
+      CANC_LOCAL_SRV = String(cercaK(j, 'sala_cancelado_local_on')) === '1';       // [23-ott · TERZA] il pedido cancellato da qui
       MXV2_SRV = String(cercaK(j, 'cobro_mixto_v2_on')) === '1';                    // [21-ott · le note di Alberto sul mixto] vedi `mxV2On`
       STAFFPOST_SOLO = String(cercaK(j, 'staffpost_solo_borde') == null ? '' : cercaK(j, 'staffpost_solo_borde'));   // [21-ott · 1.3] vedi `_soloBorde`
       SALIDA_BORDE_V = (function (v) { v = String(v == null ? '' : v).trim().toUpperCase();   // [21-ott · 1.6b] la stessa regola di `levaSalidaBorde` del bordo
@@ -10273,6 +10362,7 @@ function _corrAplicaLocal(mesa, uuid, r) {
     if (r.items_json) arr[idx].items_json = r.items_json;
   }
   if (String(STATE.mesaAbierta) === String(mesa) && STATE.sala) renderMesaSheet(STATE.sala);
+  if (r.cancelado) _cancLocalSegna(mesa, uuid);   // [23-ott · TERZA] leva spenta = niente
   /* [25-set 14:0x · MISURATO da CONTROLLER nella console di Alberto] la
      mesa 997 aveva `mios/pend/limpiar` GIÀ a 0/0/0 (questa mutazione aveva
      funzionato) e `STATE.mesaAbierta` era '' — Alberto non stava guardando
@@ -10360,6 +10450,7 @@ function _dtEliminarOptimista(mesa, uuid, itemId, qtyEsperada, r) {
   }
   STATE._corrOptimista = STATE._corrOptimista || {};
   STATE._corrOptimista[uuid + ':' + itemId] = { mesa: mesa, uuid: uuid, itemId: itemId, qtyEsperada: qtyEsperada, ts: Date.now() };
+  if (r.cancelado || r._cancelado_vetro) _cancLocalSegna(mesa, uuid);   // [23-ott · TERZA] leva spenta = niente
   if (String(STATE.mesaAbierta) === String(mesa) && STATE.sala) renderMesaSheet(STATE.sala);
   renderPanel();   // [25-set 14:0x] stessa terza superficie di `_corrAplicaLocal` sopra
 }
@@ -10382,7 +10473,7 @@ function _corrOptimistaReconcilia() {
   let riapplicato = false;
   Object.keys(reg).forEach(function (k) {
     const e = reg[k], edad = Date.now() - e.ts;
-    const mm = (STATE.mesasModel || []).find(function (x) { return x.mesa === e.mesa; });
+    const mm = (STATE.mesasModel || []).find(function (x) { return _cancLocalOn() ? String(x.mesa) === String(e.mesa) : x.mesa === e.mesa; });   // [23-ott] tollerante al tipo, come le due gemelle (25-set)
     const arr = mm && mm.pend.some(function (p) { return p.uuid === e.uuid; }) ? mm.pend
       : mm && mm.mios.some(function (p) { return p.uuid === e.uuid; }) ? mm.mios
       : mm && mm.limpiar.some(function (p) { return p.uuid === e.uuid; }) ? mm.limpiar : null;
@@ -10571,7 +10662,8 @@ function _dtGo() {
              giusto SUBITO, e se il forward fallisce di merito il prossimo
              poll lo rimette e `_corrOptimistaReconcilia()` lo dice. */
           var _finItem = finales.filter(function (it) { return it.id === pr.id; })[0];
-          _dtEliminarOptimista(mesa, pr.uuid, pr.id, _finItem ? _finItem.qty : 0, r);
+          _dtEliminarOptimista(mesa, pr.uuid, pr.id, _finItem ? _finItem.qty : 0,
+            (_bodyCorrBorde.cancelado && !r.cancelado) ? Object.assign({}, r, { _cancelado_vetro: true }) : r);   // [23-ott · TERZA] tutte le qty a zero = cancellato, anche se il bordo non lo ripete
           /* [25-set · reperto di Alberto, mesa 997] 3200ms bastavano sulla
              carta e non sul tavolo: «niente, e un messaggio impossibile da
              leggere, meno di un secondo». L'esito di ELIMINAR è un gesto che

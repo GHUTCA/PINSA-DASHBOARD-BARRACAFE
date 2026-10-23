@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.43.2</span>
+<span class="ver" id="ver">app_jl v1.43.5</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1056,7 +1056,20 @@ function cjAtto1Html() {
 
 /* le SCRITTURE di sala passano dal bordo come in sala.html; fallback GAS
    identico (qualsiasi risposta senza borde:true → via di sempre). */
+/* ═══ [23-ott · 🎛 `V32 RIPRESA OGGI SOLO LA SALA FUORI DA GOOGLE` ② · C3 app_jl:1070 · TERZA] LA STESSA LEVA DELLA SALA ═══════════════════
+   `staffpost_solo_borde` (dal /salud: "" = come oggi · "1" = tutti i verbi · elenco separato da virgole), la stessa che regge la sala dal 22 coi
+   quattro verbi. Un verbo nell'elenco NON ricade mai su Google: se il bordo non lo prende (`need:'gas'`, un rifiuto senza timbro) si restituisce
+   `ok:false` col motivo, e il chiamante lo dice («✋ …»); se cade la rete si lancia, e il chiamante dice «Sin conexión — no se movió nada».
+   Oggi l'app del JL scrive così un verbo solo, `moverMesa`, che nella lista di stasera c'è già. */
+function _soloBordeJL(action) {
+  let v = '';
+  try { const m = JSON.stringify(STATE.salud || {}).match(/"staffpost_solo_borde"\s*:\s*"([^"]*)"/); v = m ? m[1].trim() : ''; } catch (e) { v = ''; }
+  if (!v) return false;
+  if (v === '1') return true;
+  return v.split(',').map(function (x) { return x.trim(); }).indexOf(String(action || '')) >= 0;
+}
 async function staffPost(action, body) {
+  const _solo = _soloBordeJL(action);
   try {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 6000);
@@ -1066,7 +1079,12 @@ async function staffPost(action, body) {
     clearTimeout(to);
     const j = await r.json();
     if (j && j.borde === true) return j;
-  } catch (e) { /* si ricade sul GAS */ }
+    if (_solo) return { ok: false, sin_borde: true, error: (j && (j.error || j.need)) || ('http_' + r.status),
+      mensaje: 'El sistema no lo tomó ahora (' + ((j && (j.error || j.motivo)) || 'sin respuesta') + '): inténtalo de nuevo' };
+  } catch (e) {
+    if (_solo) throw new Error(e && e.name === 'AbortError' ? 'timeout' : 'sin_red');   // mai Google per un verbo «solo bordo»
+    /* altrimenti si ricade sul GAS */
+  }
   return await gasPost(action, body);
 }
 
@@ -1161,19 +1179,46 @@ async function _turnoAdminPorBordo() {
   /* [21-ott · 🟡③ di 💵 `EL GIRO V32 8B8A1E7 …`] il freno del bordo (troppi PIN sbagliati) NON si aggira ricadendo sul GAS: si dice, col tempo che manca */
   if (j && j.ok === false && /^pin(_jl)?_bloqueado/.test(String(j.error || ''))) return { usado: true, ok: false, bloqueado: true, faltan_s: +j.faltan_s || 0 };
   if (j && j.ok === true && j.fuente === 'borde') return { usado: true, ok: true, r: j };
+  if (j && j.ok === true && j.fuente === 'ponte') return { usado: true, ok: true, r: j, ponte: true };   // [23-ott] il turno del ponte: senza codice (sotto)
   return { usado: true, ok: false };
+}
+/* ═══ [23-ott · 🎛 `V32 IL PONTE PASSA MANCA GETTURNOADMIN` · forma `TERZA V32 GETTURNOADMIN COL PONTE SI MA SENZA IL CODICE`] IL TURNO DAL PONTE ═══
+   Col turno aperto sul GAS il bordo tiene solo il DIGESTO del codice (il ponte), mai il codice in chiaro. A leva sua (`TURNO_ADMIN_PONTE_ON`, 🎛 BKP)
+   `/turno/admin` risponde `fuente:'ponte'` con plazas · asignaciones · user e `turno: null` (🎛 BKP `9f9e57c`). Il vetro tiene il codice che ha
+   letto DAL GAS nello STESSO giorno operativo (`turnoCod` + `turnoCodDia`): lo STATE torna dalla cache del telefono, e un codice di ieri non
+   deve mai rinascere. Senza un codice di oggi in mano (il login, un giorno nuovo) ⇒ UNA `getTurnoAdmin` come oggi. Ponte chiuso (il GAS ha chiuso
+   il turno) ⇒ il bordo dice `gate_spento` ⇒ il GAS, che dà il codice nuovo. A leva del bordo spenta il bordo non dice mai «ponte»: il vetro è quello di ieri.
+   🔴 Si ricorda SOLO il codice del GAS: quello di `fuente:'borde'` è il turno del bordo (`turno:gate`), un ALTRO codice.
+   🔴 Il turno riaperto sul GAS nello stesso giorno ha un codice nuovo e lo stesso giorno: il bordo porta `ponte_desde` (ms, `pr.ts_copia`: cambia SOLO
+   quando cambia il digesto o il ponte si riapre, non dice niente del codice — 🎛 BKP «porta ponte_desde», 💵 EL GIRO ①d). Il codice si lega al primo
+   `ponte_desde` visto dopo la lettura del GAS, e un `ponte_desde` diverso ⇒ una `getTurnoAdmin`. */
+function _turnoCodRicorda(r) { const c = r && r.turno && r.turno.codigo; if (c) { STATE.turnoCod = String(c); STATE.turnoCodGas = r.turno; STATE.turnoCodDia = _diaOp(0); STATE.turnoCodPonte = null; } }
+/* [23-ott · 🟡① di 💵 `EL GIRO V32 COPPIA F807C67 92E54F6 TURNO DAL PONTE`, finestra C7] la lettura del GAS partita da una risposta del ponte si lega
+   SUBITO al `ponte_desde` di quella risposta: se il codice cambia prima del giro dopo, il `ponte_desde` nuovo è diverso ⇒ una lettura in più, e converge. */
+function _turnoCodLegaPonte(bd) { if (bd && bd.usado && bd.ok && bd.ponte && bd.r && bd.r.ponte_desde != null && STATE.turnoCod && STATE.turnoCodDia === _diaOp(0)) STATE.turnoCodPonte = String(bd.r.ponte_desde); }
+function _turnoConCodigoDeHoy(rB) {
+  if (!STATE.turnoCod || STATE.turnoCodDia !== _diaOp(0)) return null;
+  const pid = rB.ponte_desde != null ? String(rB.ponte_desde) : '';
+  if (pid) { if (!STATE.turnoCodPonte) STATE.turnoCodPonte = pid; else if (STATE.turnoCodPonte !== pid) return null; }
+  const r = Object.assign({}, rB); r.turno = Object.assign({}, STATE.turnoCodGas || {}, rB.turno || {}, { codigo: STATE.turnoCod }); return r;   // il bordo dà turno:null: abierto_by e il resto vengono dal GAS
 }
 async function giroTurno() {
   if (DEMO || !STATE.pin) return;
   try {
     const bd = await _turnoAdminPorBordo();   // [21-ott · 1.15]
     if (bd.usado) {
-      if (bd.ok) { STATE.turno = bd.r; STATE.ts.turno = Date.now(); salva(); pintaTesta(); pintaTab(); }
-      else if (bd.pinMal) { sessionStorage.removeItem('jl_pin'); location.reload(); }
-      return;
+      if (bd.ok && bd.ponte) {
+        const m = _turnoConCodigoDeHoy(bd.r);
+        if (m) { STATE.turno = m; STATE.ts.turno = Date.now(); salva(); pintaTesta(); pintaTab(); return; }
+        /* senza il codice di oggi: il GAS, una volta (sotto) */
+      } else {
+        if (bd.ok) { STATE.turno = bd.r; STATE.ts.turno = Date.now(); salva(); pintaTesta(); pintaTab(); }
+        else if (bd.pinMal) { sessionStorage.removeItem('jl_pin'); location.reload(); }
+        return;
+      }
     }
     const r = await gasGet('getTurnoAdmin', { pin: STATE.pin });
-    if (r && r.ok) { STATE.turno = r; STATE.ts.turno = Date.now(); salva(); pintaTesta(); pintaTab(); }
+    if (r && r.ok) { _turnoCodRicorda(r); _turnoCodLegaPonte(bd); STATE.turno = r; STATE.ts.turno = Date.now(); salva(); pintaTesta(); pintaTab(); }
     else if (r && r.error === 'pin_invalid') { sessionStorage.removeItem('jl_pin'); location.reload(); }
   } catch (e) {}
 }
@@ -1916,7 +1961,7 @@ function vSala() {
       : lv === 'mixto' ? ' <span class="pill" style="background:rgba(230,180,60,.18);color:#e6c05a">MIXTO ⚠️</span>'
       : lv ? ' <span class="pill on">ACTIVO · ' + fmt(lv === 'esca' ? pE : pS) + '</span>'
       : ' <span class="pill off">—</span>') +
-    (fuoriOra ? ' <span class="pill off" style="font-weight:400">fuera de horario 08-14</span>' : '') + '</h4>' +
+    (fuoriOra ? ' <span class="pill off" style="font-weight:400">fuera de horario ' + _levaFasciaTxt() + '</span>' : '') + '</h4>' +
     '<div class="row2">' +
     '<button class="btn" style="' + (lv === 'esca' ? ON + ';' : '') + (fuoriOra ? MUTO : '') + '" onclick="leva(\'esca\')">Activar<small style="display:block;font-weight:400">' + fmt(pE) + '</small></button>' +
     '<button class="btn" style="' + (lv === 'estandar' ? ON + ';' : '') + (fuoriOra ? MUTO : '') + '" onclick="leva(\'estandar\')">Activar<small style="display:block;font-weight:400">' + fmt(pS) + '</small></button>' +
@@ -2135,9 +2180,24 @@ function _levaAplica(r) {
    Ora Cile via timeZone, DST-safe: mai un −4h cablato. E la guardia vera
    (il server che RIFIUTA fuori fascia) è anch'essa di 📖: questa è cortesia
    del vetro, il Panel non ce l'ha. */
+/* ═══ [23-ott · 📖 `MENU BKS V32 LEVA DEL MENU AL BORDO RAMO 210770A` ① · TERZA] LA FASCIA NON È PIÙ CABLATA ═══════════════════════════════
+   Lo specchio qui sopra è invecchiato come diceva: PARAMETROS oggi è 08:00-15:00 (letto da 📖 il 23-ott), il vetro diceva 08-14 ⇒ fra le 14 e le
+   15 il JL non poteva accendere. Ora la fascia viene dal bordo: `menu_leva_reloj` sul /salud (`modo|HH:MM|HH:MM|dias`, la leva
+   `MENU_LEVA_RELOJ` del ramo 210770a). Senza la chiave ⇒ 08:00-15:00, lo specchio di oggi (TAMPONE: muore quando la chiave è sul vivo, cioè
+   con la spedizione del ramo di 📖, lun 26). La guardia vera resta del bordo/GAS: questa è cortesia del vetro. */
+function _levaFascia() {
+  try {
+    const m = JSON.stringify(STATE.salud || {}).match(/"menu_leva_reloj"\s*:\s*"([^"]*)"/);
+    const p = m ? m[1].split('|') : [];
+    if (/^\d{2}:\d{2}$/.test(p[1] || '') && /^\d{2}:\d{2}$/.test(p[2] || '')) return { de: p[1], hasta: p[2], fuente: 'bordo' };
+  } catch (e) {}
+  return { de: '08:00', hasta: '15:00', fuente: 'espejo' };
+}
+function _levaFasciaTxt() { const f = _levaFascia(); return f.de.slice(0, 2) + '-' + f.hasta.slice(0, 2); }
 function _levaHoraOk() {
   const hhmm = new Date().toLocaleString('sv-SE', { timeZone: 'America/Santiago' }).slice(11, 16);
-  return hhmm >= '08:00' && hhmm < '14:00';
+  const f = _levaFascia();
+  return hhmm >= f.de && hhmm < f.hasta;
 }
 /* ═══ [21-ott · pezzo 5.10, la leva del menù · 🎛 `V32 LE 10 SENZA CASA HANNO CASA`: BKP il get/set al bordo, TERZA il vetro] ═══════════════════
    `POST /menuLeva/<local>` {pin_jl, accion:'get'|'set', tipo:'dia'|'noche', escalon?, uid} → la STESSA forma di getLevaMenu/setLevaMenu del GAS
@@ -2177,7 +2237,7 @@ async function levaRefresca() {
   finally { _levaLeyendo = false; }
 }
 async function leva(escalon) {
-  if (escalon !== 'off' && !_levaHoraOk()) { toast('warn', '⏰ Fuera de horario (08-14) — el menú no se activa a esta hora.'); return; }
+  if (escalon !== 'off' && !_levaHoraOk()) { toast('warn', '⏰ Fuera de horario (' + _levaFasciaTxt() + ') — el menú no se activa a esta hora.'); return; }
   if (!confirm('¿Menú → ' + escalon.toUpperCase() + '?')) return;
   if (!confirm('Segunda confirmación: ' + escalon.toUpperCase() + ' para TODO el local.')) return;
   try {
@@ -2864,7 +2924,7 @@ async function entrar() {
   try { bd = await _turnoAdminPorBordo(); } catch (e) { bd = { usado: false }; }
   if (bd.usado && bd.pinMal) { STATE.pin = null; $('gErr').textContent = 'PIN no válido'; return; }
   if (bd.usado && bd.bloqueado) { STATE.pin = null; const mn = Math.max(1, Math.ceil((bd.faltan_s || 0) / 60)); $('gErr').textContent = '✋ PIN bloqueado por intentos fallidos · prueba en ' + mn + ' min'; return; }
-  if (bd.usado && bd.ok) {
+  if (bd.usado && bd.ok && !bd.ponte) {   // [23-ott] col ponte, al login non c'è un codice di oggi in mano: il cammino di oggi (una getTurnoAdmin)
     const rB = bd.r; STATE.turno = rB; STATE.ts.turno = Date.now(); STATE.user = rB.user ? String(rB.user) : '';
     if (!STATE.user) { try { const who = await gasGet('adminPing', { pin: pin }); if (who && who.ok && who.user) STATE.user = who.user; } catch (e) {} }
     if (!STATE.user) STATE.user = (rB.turno && rB.turno.abierto_by) || 'JL';
@@ -2876,7 +2936,7 @@ async function entrar() {
   try {
     const r = await gasGet('getTurnoAdmin', { pin: pin });
     if (r && r.ok) {
-      STATE.pin = pin; STATE.turno = r; STATE.ts.turno = Date.now();
+      STATE.pin = pin; _turnoCodRicorda(r); _turnoCodLegaPonte(bd); STATE.turno = r; STATE.ts.turno = Date.now();
       /* 🔴 [06-set · reperto di Alberto: «non vedo le plazas di Eduardo»]
          PRIMA prendevo il nome da `turno.abierto_by` — CHI HA APERTO IL TURNO,
          non chi sta guardando. Entrato come Eduardo mentre il turno l'aveva

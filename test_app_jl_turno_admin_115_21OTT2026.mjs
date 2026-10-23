@@ -8,7 +8,8 @@ const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0)
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const riga = (p) => { const i = SRC.indexOf(p); if (i < 0) throw new Error(p); return SRC.slice(i, SRC.indexOf('\n', i) + 1); };
-  const F = riga('const LOC_PG = ') + riga('const _ERR_APERTURA = ') + ['_turnoAdminPorBordo', 'giroTurno', '_cierrePorBordo', 'cerrarT'].map((n) => 'async ' + fnVin(SRC, n)).join('');
+  const F = riga('const LOC_PG = ') + riga('const _ERR_APERTURA = ') + ['_turnoAdminPorBordo', 'giroTurno', '_cierrePorBordo', 'cerrarT'].map((n) => 'async ' + fnVin(SRC, n)).join('')
+    + (SRC.includes('function _turnoCodRicorda(') ? SRC.slice(SRC.indexOf('function _turnoCodRicorda('), SRC.indexOf('\n', SRC.indexOf('function _turnoCodRicorda(')) + 1) + (SRC.includes('function _turnoCodLegaPonte(') ? SRC.slice(SRC.indexOf('function _turnoCodLegaPonte('), SRC.indexOf('\n', SRC.indexOf('function _turnoCodLegaPonte(')) + 1) : '') + fnVin(SRC, '_turnoConCodigoDeHoy') + 'function _diaOp() { return "2026-10-23"; }\n' : '');   // [23-ott] il turno dal ponte
   function mondo({ status = 200, body, lancia = false, gas = { ok: true, turno: 'G123' } } = {}) {
     const L = { fetch: [], gas: [], toasts: [], reload: 0, rimosso: 0 };
     const ctx = { DEMO: false, STATE: { pin: '4321', user: 'Eduardo', ts: {} }, CFG: { BORDE: 'https://b', T: 'tok', LOCAL: 'BKS' }, JSON, String, Math, setTimeout, clearTimeout, AbortController, encodeURIComponent,
