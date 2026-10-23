@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.26 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.27 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3853,6 +3853,48 @@ function _cieYaCerraste(o) {
     '<div class="cie-out" onclick="_cieDeNuevo()">Contaste mal — cerrar de nuevo</div>');
 }
 function _cieDeNuevo() { CIE.deNuevo = true; cierreAbrir(); }
+/* ═══ [23-ott · 🚨 ⓐ di 💵 `EL GIRO V32 257710C INNOCUO MA NON CURA IL DOPPIO DI ARIANNA`] IL TIMEOUT NON INVITA A RIPROVARE ═══
+   🔬 Le due righe di Arianna hanno lo STESSO uid (`CM-mvlj6yzq-0ucoy`): il vetro non ha mai ricevuto il sì. `gasPost('cerrarMesero')` è andato in timeout
+   mentre il GAS faceva i 5 traspasos, il `catch` ha detto «reintenta», e il secondo invio (stesso uid) è arrivato mentre la prima esecuzione non aveva ancora
+   scritto la sua riga ⇒ la dedup per uid del GAS non l'ha vista. **9 doppi con lo stesso uid in 13 giorni (1 su 7).** La radice è nel GAS (ⓑ, di 🎛 BKP);
+   qui il vetro smette di aprire la finestra: dopo un errore ASPETTA (`CIE_DUDA_MS`), poi chiede al libro (`getCierreMesero` → `ya_cerrado`).
+   Corte trovato con lo stesso importo ⇒ «Ya cerraste» e la chiave si brucia. Nessun corte ⇒ «Intentar de nuevo» con la STESSA chiave. Nessuna risposta ⇒
+   «No sabemos si entró: pregunta al JL antes de repetir». A guardia spenta (`?cieg=0`) il «reintenta» di ieri. */
+const CIE_DUDA_MS = (parseInt(QS.get('cieduda'), 10) || 90) * 1000;
+function _cieDuda(monto) {
+  CIE.dudaHasta = Date.now() + CIE_DUDA_MS; CIE.paso = 5;   // paso 5: il monto è quello della chiave (CIE.uidMonto), l'input non c'è più
+  _cieRender('<div class="cie-h">⏳ Puede que haya entrado</div>' +
+    '<div class="cie-nota">El sistema tardó en responder. <b>No toques nada</b>: en un momento revisamos si tu corte quedó guardado.</div>' +
+    '<div class="cie-sub" id="cieDudaSeg">' + Math.round(CIE_DUDA_MS / 1000) + ' s</div>');
+  const iv = setInterval(function () { const el = $('cieDudaSeg'); const r = Math.max(0, Math.round((CIE.dudaHasta - Date.now()) / 1000)); if (el) el.textContent = r + ' s'; if (r <= 0) clearInterval(iv); }, 1000);
+  return new Promise(function (res) { setTimeout(function () { clearInterval(iv); _cieDudaMira(monto).then(res, res); }, CIE_DUDA_MS); });
+}
+async function _cieDudaMira(monto) {
+  let r = null;
+  try { r = await gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre }); } catch (e) { r = null; }
+  CIE.dudaHasta = 0;
+  const y = r && r.ok ? r.ya_cerrado : undefined;
+  if (y && (y.declarado == null || Math.round(Number(y.declarado)) === Math.round(Number(monto)))) {
+    try { localStorage.removeItem(_cieUidKey()); } catch (e2) {}
+    CIE.uid = ''; CIE.uidMonto = null;
+    _cieOkSegna({ id: y.id || '' });
+    _cieYaCerraste({ ts: Date.now(), id: y.id || '', nombre: STATE.nombre || '' });
+    bordeHecho('corte_duda', { esito: 'ya' });
+    return 'ya';
+  }
+  if (r && r.ok) {
+    _cieRender('<div class="cie-h">🧾 Tu corte no quedó guardado</div>' +
+      '<div class="cie-nota">El sistema no lo tiene. Puedes intentarlo de nuevo: es el mismo corte, no se duplica.</div>' +
+      '<button class="btn" id="cieBtn" onclick="cierreEnviar()">Intentar de nuevo</button>');
+    bordeHecho('corte_duda', { esito: 'no' });
+    return 'no';
+  }
+  _cieRender('<div class="cie-h">❓ No sabemos si entró</div>' +
+    '<div class="cie-nota">El sistema no responde. <b>Pregúntale al JL antes de repetir</b>: si tu corte ya está, no lo hagas otra vez.</div>' +
+    '<button class="btn sec" id="cieBtn" onclick="cierreEnviar()">El JL dice que no está — intentar de nuevo</button>');
+  bordeHecho('corte_duda', { esito: 'nose' });
+  return 'nose';
+}
 
 /* ═══ 🔴 [AUT-0284] · IL CORTE LASCIA UN FATTO, NON SOLO UN MESSAGGIO ═══════
    🩸 La notte 12→13, alle 02:46, Pedro scrive «el sistema no deja hacer el
@@ -4315,6 +4357,7 @@ function _cieMontoValor() {
 
 async function cierreEnviar() {
   if (CIE.enviando) return;
+  if (CIE.dudaHasta && Date.now() < CIE.dudaHasta) return;   // [23-ott] nella finestra del dubbio non parte niente
   const monto = CIE.paso === 2 ? _cieMontoValor() : CIE.uidMonto;
   if (monto == null) { toast('err', 'Escribe cuánto efectivo tienes'); return; }
   if (CIE.res && CIE.res.exige === 'motivo' && !CIE.motivo) { toast('err', 'Elige el motivo'); return; }
@@ -4415,6 +4458,9 @@ async function cierreEnviar() {
     }
     else throw new Error((r && r.error) || 'no_ok');
   } catch (e) {
+    /* [23-ott] ✏️ la frase qui sotto è vera solo se la prima esecuzione ha già scritto: con due chiamate sovrapposte la dedup per uid del GAS
+       non tiene (9 doppi in 13 giorni). A guardia accesa si aspetta e si chiede al libro (`_cieDuda`). */
+    if (CIE_GUARDIA_ON) { CIE.enviando = false; await _cieDuda(monto); return; }
     /* il retry riusa lo STESSO uid: se il cierre era già entrato, il server
        risponde `dedup` invece di scriverne un altro. Per questo qui si può
        dire «reintenta» senza paura di sdoppiare la dichiarazione. */
