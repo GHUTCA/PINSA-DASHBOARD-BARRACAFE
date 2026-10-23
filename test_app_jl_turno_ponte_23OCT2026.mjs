@@ -7,8 +7,8 @@ const ORIG = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
 const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n}\n', i) + 3); };
 const fnRiga = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n', i) + 1); };
 const OGGI = '2026-10-23', IERI = '2026-10-22';
-// la forma di 🎛 BKP 9f9e57c: turno:null. Con ponte_id (chiesto, non ancora nel bordo) turno porta solo quello.
-const PONTE = (pid) => ({ ok: true, fuente: 'ponte', plazas: [{ id: 'p1' }], asignaciones: [{ nombre: 'Ana' }], user: { nombre: 'JL' }, turno: pid ? { ponte_id: pid } : null });
+// la forma di 🎛 BKP 9f9e57c + «porta ponte_desde»: turno:null, ponte_desde = ms (o null)
+const PONTE = (pid) => ({ ok: true, fuente: 'ponte', plazas: [{ id: 'p1' }], asignaciones: [{ nombre: 'Ana' }], user: { nombre: 'JL' }, turno: null, ponte_desde: pid == null ? null : pid });
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const F = 'async ' + fnVin(SRC, '_turnoAdminPorBordo') + fnRiga(SRC, '_turnoCodRicorda') + fnVin(SRC, '_turnoConCodigoDeHoy') + 'async ' + fnVin(SRC, 'giroTurno');
@@ -46,12 +46,12 @@ async function banco(SRC, quieto) {
     t('E · fuente borde ⇒ zero GAS, e il suo codice (un ALTRO) non diventa il codice del ponte', w.L.gas === 0 && w.ctx.STATE.turno.turno.codigo === '9999' && !w.ctx.STATE.turnoCod, w.ctx.STATE); }
   // F · ponte_id: il primo si lega, lo stesso passa, uno diverso (turno riaperto sul GAS) ⇒ il GAS
   { const st = { turnoCod: '3805', turnoCodDia: OGGI, turnoCodPonte: null };
-    let pid = 'aa11'; const w = mondo({ bordo: () => ({ body: PONTE(pid) }), gas: Object.assign({}, GAS, { turno: { codigo: '4420' } }), stato: st });
+    let pid = 1761230000000; const w = mondo({ bordo: () => ({ body: PONTE(pid) }), gas: Object.assign({}, GAS, { turno: { codigo: '4420' } }), stato: st });
     await w.giro(); const g1 = w.L.gas, legato = w.ctx.STATE.turnoCodPonte;
     await w.giro(); const g2 = w.L.gas;
-    pid = 'bb22'; await w.giro(); const g3 = w.L.gas;
-    t('F · ponte_id: il primo si lega a 3805 (zero GAS), lo stesso passa, uno nuovo ⇒ una getTurnoAdmin e il codice nuovo', g1 === 0 && legato === 'aa11' && g2 === 0 && g3 === 1 && w.ctx.STATE.turnoCod === '4420' && w.ctx.STATE.turnoCodPonte === null, { g1, g2, g3, legato, st: w.ctx.STATE.turnoCod });
-    await w.giro(); t('F2 · dopo la rilettura il codice nuovo si lega al ponte nuovo (zero GAS)', w.L.gas === 1 && w.ctx.STATE.turno.turno.codigo === '4420' && w.ctx.STATE.turnoCodPonte === 'bb22', w.L); }
+    pid = 1761240000000; await w.giro(); const g3 = w.L.gas;
+    t('F · ponte_desde: il primo si lega a 3805 (zero GAS), lo stesso passa, uno nuovo ⇒ una getTurnoAdmin e il codice nuovo', g1 === 0 && legato === '1761230000000' && g2 === 0 && g3 === 1 && w.ctx.STATE.turnoCod === '4420' && w.ctx.STATE.turnoCodPonte === null, { g1, g2, g3, legato, st: w.ctx.STATE.turnoCod });
+    await w.giro(); t('F2 · dopo la rilettura il codice nuovo si lega al ponte nuovo (zero GAS)', w.L.gas === 1 && w.ctx.STATE.turno.turno.codigo === '4420' && w.ctx.STATE.turnoCodPonte === '1761240000000', w.L); }
   // G · pin sbagliato al bordo: come oggi
   { const w = mondo({ bordo: { body: { ok: false, error: 'pin_invalid' } }, gas: GAS }); await w.giro();
     t('G · pin sbagliato ⇒ ricarica, zero GAS (invariato)', w.L.reload === 1 && w.L.gas === 0, w.L); }
@@ -64,7 +64,7 @@ if (process.argv.includes('--mutanti')) {
   const M = [
     ['il ponte non si riconosce (torna rosso ⇒ niente)', "  if (j && j.ok === true && j.fuente === 'ponte') return { usado: true, ok: true, r: j, ponte: true };", ''],
     ['il giorno non si controlla', "  if (!STATE.turnoCod || STATE.turnoCodDia !== _diaOp(0)) return null;", '  if (!STATE.turnoCod) return null;'],
-    ['ponte_id ignorato', "else if (STATE.turnoCodPonte !== pid) return null;", ''],
+    ['ponte_desde ignorato', "else if (STATE.turnoCodPonte !== pid) return null;", ''],
     ['il codice del bordo si ricorda', '        if (bd.ok) { STATE.turno = bd.r;', '        if (bd.ok) { _turnoCodRicorda(bd.r); STATE.turno = bd.r;'],
     ['il codice del GAS non si ricorda nel giro', "    if (r && r.ok) { _turnoCodRicorda(r); STATE.turno = r;", '    if (r && r.ok) { STATE.turno = r;'],
     ['il codice nuovo non slega il ponte', ' STATE.turnoCodPonte = null; } }', ' } }'],
