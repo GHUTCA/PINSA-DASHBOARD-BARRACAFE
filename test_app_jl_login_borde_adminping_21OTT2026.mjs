@@ -7,7 +7,8 @@ const ORIG = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
 const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n}\n', i) + 3); };
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
-  const F = 'async ' + fnVin(SRC, '_turnoAdminPorBordo') + 'async ' + fnVin(SRC, 'entrar');
+  const F = 'async ' + fnVin(SRC, '_turnoAdminPorBordo') + 'async ' + fnVin(SRC, 'entrar')
+    + (SRC.includes('function _turnoCodRicorda(') ? SRC.slice(SRC.indexOf('function _turnoCodRicorda('), SRC.indexOf('\n', SRC.indexOf('function _turnoCodRicorda(')) + 1) + 'function _diaOp() { return "2026-10-23"; }\n' : '');   // [23-ott] il codice del GAS si ricorda (turno dal ponte)
   async function login({ status = 200, body, lancia = false, ping = { ok: true, user: 'Eduardo' }, gasTurno = { ok: true, turno: { abierto_by: 'Altro' } } } = {}) {
     const L = { gas: [], boot: 0, fetchBody: null };
     const el = { gPin: { value: ' 1234 ' }, gErr: { textContent: '' }, gate: { className: '' } };
@@ -52,7 +53,7 @@ if (process.argv.includes('--mutanti')) {
     ['user da abierto_by come prima del 06-set', "STATE.user = rB.user ? String(rB.user) : '';", "STATE.user = (rB.turno && rB.turno.abierto_by) || '';"],
     ['senza ripiego adminPing', "    if (!STATE.user) { try { const who = await gasGet('adminPing', { pin: pin }); if (who && who.ok && who.user) STATE.user = who.user; } catch (e) {} }\n    if (!STATE.user) STATE.user = (rB", '    if (!STATE.user) STATE.user = (rB'],
     ['pin rifiutato va al GAS', "  if (bd.usado && bd.pinMal) { STATE.pin = null; $('gErr').textContent = 'PIN no válido'; return; }\n", ''],
-    ['rete morta blocca il login', "  if (bd.usado && bd.ok) {", "  if (bd.usado && !bd.ok) { $('gErr').textContent = 'Sin conexión — prueba de nuevo'; return; }\n  if (bd.usado && bd.ok) {"],
+    ['rete morta blocca il login', "  if (bd.usado && bd.ok", "  if (bd.usado && !bd.ok) { $('gErr').textContent = 'Sin conexión — prueba de nuevo'; return; }\n  if (bd.usado && bd.ok"],
     ['il freno del bordo si aggira (bloqueado va al GAS)', "  if (j && j.ok === false && /^pin(_jl)?_bloqueado/.test(String(j.error || ''))) return { usado: true, ok: false, bloqueado: true, faltan_s: +j.faltan_s || 0 };", ''],
     ['il PIN resta in memoria nel ripiego', "  STATE.pin = null;\n  try {\n    const r = await gasGet('getTurnoAdmin'", "  try {\n    const r = await gasGet('getTurnoAdmin'"],
   ];
