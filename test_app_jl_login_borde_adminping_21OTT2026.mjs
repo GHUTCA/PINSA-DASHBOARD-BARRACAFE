@@ -8,7 +8,7 @@ const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0)
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const F = 'async ' + fnVin(SRC, '_turnoAdminPorBordo') + 'async ' + fnVin(SRC, 'entrar')
-    + (SRC.includes('function _turnoCodRicorda(') ? SRC.slice(SRC.indexOf('function _turnoCodRicorda('), SRC.indexOf('\n', SRC.indexOf('function _turnoCodRicorda(')) + 1) + 'function _diaOp() { return "2026-10-23"; }\n' : '');   // [23-ott] il codice del GAS si ricorda (turno dal ponte)
+    + (SRC.includes('function _turnoCodRicorda(') ? SRC.slice(SRC.indexOf('function _turnoCodRicorda('), SRC.indexOf('\n', SRC.indexOf('function _turnoCodRicorda(')) + 1) + (SRC.includes('function _turnoCodLegaPonte(') ? SRC.slice(SRC.indexOf('function _turnoCodLegaPonte('), SRC.indexOf('\n', SRC.indexOf('function _turnoCodLegaPonte(')) + 1) : '') + 'function _diaOp() { return "2026-10-23"; }\n' : '');   // [23-ott] il codice del GAS si ricorda (turno dal ponte)
   async function login({ status = 200, body, lancia = false, ping = { ok: true, user: 'Eduardo' }, gasTurno = { ok: true, turno: { abierto_by: 'Altro' } } } = {}) {
     const L = { gas: [], boot: 0, fetchBody: null };
     const el = { gPin: { value: ' 1234 ' }, gErr: { textContent: '' }, gate: { className: '' } };

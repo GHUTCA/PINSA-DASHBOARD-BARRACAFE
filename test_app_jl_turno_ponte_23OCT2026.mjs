@@ -11,7 +11,7 @@ const OGGI = '2026-10-23', IERI = '2026-10-22';
 const PONTE = (pid) => ({ ok: true, fuente: 'ponte', plazas: [{ id: 'p1' }], asignaciones: [{ nombre: 'Ana' }], user: { nombre: 'JL' }, turno: null, ponte_desde: pid == null ? null : pid });
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
-  const F = 'async ' + fnVin(SRC, '_turnoAdminPorBordo') + fnRiga(SRC, '_turnoCodRicorda') + fnVin(SRC, '_turnoConCodigoDeHoy') + 'async ' + fnVin(SRC, 'giroTurno');
+  const F = 'async ' + fnVin(SRC, '_turnoAdminPorBordo') + fnRiga(SRC, '_turnoCodRicorda') + fnVin(SRC, '_turnoConCodigoDeHoy') + fnRiga(SRC, '_turnoCodLegaPonte') + 'async ' + fnVin(SRC, 'giroTurno');
   function mondo({ bordo, gas, stato = {}, dia = OGGI }) {
     const L = { gas: 0, bordo: 0, reload: 0 };
     const ctx = { JSON, String, Object, AbortController, setTimeout, clearTimeout, encodeURIComponent, Date,
@@ -50,13 +50,26 @@ async function banco(SRC, quieto) {
     await w.giro(); const g1 = w.L.gas, legato = w.ctx.STATE.turnoCodPonte;
     await w.giro(); const g2 = w.L.gas;
     pid = 1761240000000; await w.giro(); const g3 = w.L.gas;
-    t('F · ponte_desde: il primo si lega a 3805 (zero GAS), lo stesso passa, uno nuovo ⇒ una getTurnoAdmin e il codice nuovo', g1 === 0 && legato === '1761230000000' && g2 === 0 && g3 === 1 && w.ctx.STATE.turnoCod === '4420' && w.ctx.STATE.turnoCodPonte === null, { g1, g2, g3, legato, st: w.ctx.STATE.turnoCod });
+    t('F · ponte_desde: il primo si lega a 3805 (zero GAS), lo stesso passa, uno nuovo ⇒ una getTurnoAdmin, il codice nuovo legato subito al ponte nuovo (C7)', g1 === 0 && legato === '1761230000000' && g2 === 0 && g3 === 1 && w.ctx.STATE.turnoCod === '4420' && w.ctx.STATE.turnoCodPonte === '1761240000000', { g1, g2, g3, legato, st: w.ctx.STATE.turnoCod });
     await w.giro(); t('F2 · dopo la rilettura il codice nuovo si lega al ponte nuovo (zero GAS)', w.L.gas === 1 && w.ctx.STATE.turno.turno.codigo === '4420' && w.ctx.STATE.turnoCodPonte === '1761240000000', w.L); }
+  // C7 · la finestra di 💵: il codice cambia DOPO la lettura del GAS e PRIMA del giro dopo ⇒ il ponte_desde nuovo deve far rileggere
+  { let pid = 1761230000000, cod = '3805';
+    const w = mondo({ bordo: () => ({ body: PONTE(pid) }), gas: null });
+    w.ctx.gasGet = async () => { w.L.gas++; return { ok: true, turno: { codigo: cod, abierto_by: 'Eduardo' } }; };
+    await w.giro(); const g1 = w.L.gas, legato = w.ctx.STATE.turnoCodPonte;
+    cod = '4417'; pid = 1761230300000; await w.giro();
+    t('C7 · lettura partita dal ponte ⇒ legata subito al suo ponte_desde; il codice cambia prima del giro dopo ⇒ una lettura e 4417', g1 === 1 && legato === '1761230000000' && w.L.gas === 2 && w.ctx.STATE.turno.turno.codigo === '4417', { g1, legato, gas: w.L.gas, cod: w.ctx.STATE.turno.turno.codigo }); }
+  t('C7b · anche il login lega la sua lettura al ponte_desde', /STATE\.pin = pin; _turnoCodRicorda\(r\); _turnoCodLegaPonte\(bd\);/.test(SRC));
+  // C9 · ponte chiuso ⇒ il GAS (codice nuovo); il ponte si riapre con un ponte_desde nuovo ⇒ il vecchio legame non deve costare una lettura
+  { let body = { ok: true, scritto: false, motivo: 'gate_spento' };
+    const w = mondo({ bordo: () => ({ body }), gas: Object.assign({}, GAS, { turno: { codigo: '5120', abierto_by: 'Eduardo' } }), stato: { turnoCod: '3805', turnoCodDia: OGGI, turnoCodPonte: '1761230000000' } });
+    await w.giro(); body = PONTE(1761250000000); await w.giro();
+    t('C9 · lettura del GAS a ponte chiuso slega il ponte vecchio: alla riapertura zero GAS in più, codice 5120', w.L.gas === 1 && w.ctx.STATE.turno.turno.codigo === '5120' && w.ctx.STATE.turnoCodPonte === '1761250000000', { gas: w.L.gas, p: w.ctx.STATE.turnoCodPonte }); }
   // G · pin sbagliato al bordo: come oggi
   { const w = mondo({ bordo: { body: { ok: false, error: 'pin_invalid' } }, gas: GAS }); await w.giro();
     t('G · pin sbagliato ⇒ ricarica, zero GAS (invariato)', w.L.reload === 1 && w.L.gas === 0, w.L); }
   // H · il login col ponte prende il cammino del GAS (serve il codice), e il codice del GAS si ricorda
-  t('H · entrar: col ponte il cammino della getTurnoAdmin; il codice del GAS si ricorda nel login', /if \(bd\.usado && bd\.ok && !bd\.ponte\) \{/.test(SRC) && /STATE\.pin = pin; _turnoCodRicorda\(r\); STATE\.turno = r;/.test(SRC));
+  t('H · entrar: col ponte il cammino della getTurnoAdmin; il codice del GAS si ricorda nel login', /if \(bd\.usado && bd\.ok && !bd\.ponte\) \{/.test(SRC) && /STATE\.pin = pin; _turnoCodRicorda\(r\); _turnoCodLegaPonte\(bd\); STATE\.turno = r;/.test(SRC));
   t('I · salva() non esclude turnoCod (il codice deve sopravvivere al giro, il giorno lo protegge)', !/turnoCod/.test(fnVin(SRC, 'salva')));
   return { ok, ko };
 }
@@ -66,8 +79,10 @@ if (process.argv.includes('--mutanti')) {
     ['il giorno non si controlla', "  if (!STATE.turnoCod || STATE.turnoCodDia !== _diaOp(0)) return null;", '  if (!STATE.turnoCod) return null;'],
     ['ponte_desde ignorato', "else if (STATE.turnoCodPonte !== pid) return null;", ''],
     ['il codice del bordo si ricorda', '        if (bd.ok) { STATE.turno = bd.r;', '        if (bd.ok) { _turnoCodRicorda(bd.r); STATE.turno = bd.r;'],
-    ['il codice del GAS non si ricorda nel giro', "    if (r && r.ok) { _turnoCodRicorda(r); STATE.turno = r;", '    if (r && r.ok) { STATE.turno = r;'],
+    ['il codice del GAS non si ricorda nel giro', "    if (r && r.ok) { _turnoCodRicorda(r); _turnoCodLegaPonte(bd); STATE.turno = r;", '    if (r && r.ok) { _turnoCodLegaPonte(bd); STATE.turno = r;'],
     ['il codice nuovo non slega il ponte', ' STATE.turnoCodPonte = null; } }', ' } }'],
+    ['C7: il giro non lega la lettura al ponte', '_turnoCodRicorda(r); _turnoCodLegaPonte(bd); STATE.turno = r; STATE.ts.turno = Date.now(); salva(); pintaTesta(); pintaTab(); }', '_turnoCodRicorda(r); STATE.turno = r; STATE.ts.turno = Date.now(); salva(); pintaTesta(); pintaTab(); }'],
+    ['C7: il login non lega la lettura al ponte', 'STATE.pin = pin; _turnoCodRicorda(r); _turnoCodLegaPonte(bd);', 'STATE.pin = pin; _turnoCodRicorda(r);'],
     ['il turno del GAS non si conserva (solo il codice)', 'Object.assign({}, STATE.turnoCodGas || {}, rB.turno || {},', 'Object.assign({}, rB.turno || {},'],
     ['il login col ponte non va al GAS', 'if (bd.usado && bd.ok && !bd.ponte) {', 'if (bd.usado && bd.ok) {'],
   ];
