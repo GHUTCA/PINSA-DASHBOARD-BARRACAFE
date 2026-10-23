@@ -16,7 +16,8 @@ async function banco(SRC, quieto) {
     const L = { limpiar: [], mappa: 0, panel: 0, rech: 0 };
     let now = Date.parse('2026-10-23T16:33:00-03:00');
     const ctx = { String, Object, Array, JSON, Date: { now: () => now }, MARCA_SAFETY_MS: 300000, CANC_LOCAL_SRV: leva, CANC_LOCAL_TEL: tel,
-      STATE: { marcado: {}, mesaAbierta: '' }, _limpiarMesaLocal: (m) => { L.limpiar.push(m); ctx.STATE.marcado['mesa#' + m] = { marca: 'limpia', mesa: m, ts: now }; },
+      STATE: { marcado: {}, mesaAbierta: '' }, _limpiarMesaLocal: (m) => { L.limpiarMesa = (L.limpiarMesa || 0) + 1; },
+      _limpiarUuidsLocal: (us, m) => { us.forEach((u) => { L.limpiar.push(m + ':' + u); ctx.STATE.marcado[u] = { marca: 'limpia', mesa: m, ts: now }; }); },
       refrescarMapa: () => { L.mappa++; }, renderPanel: () => { L.panel++; }, renderMesaSheet: () => {}, _pennaDice: () => { L.rech++; }, _guardiaLocalRegistra: () => {} };
     vm.createContext(ctx); vm.runInContext(F.replace(/^let CANC_LOCAL_SRV.*$/m, ''), ctx);
     // il ciclo del poll, nell'ordine di refrescar: filtro → guardia → STATE.sala
@@ -27,7 +28,7 @@ async function banco(SRC, quieto) {
   // A · la 998 di oggi: un pedido solo, cancellato da «Un producto»
   { const w = mondo(); w.poll({ mios: [P('u-pan', 998, 1090)] });
     w.ctx._cancLocalSegna(998, 'u-pan');
-    t('A1 · al gesto: sparito da STATE.sala, la mesa vuota si chiude come la colación, la tessera si ridisegna subito', !w.vede('u-pan') && w.L.limpiar[0] === '998' && w.L.mappa === 1 && w.L.panel === 1, w.L);
+    t('A1 · al gesto: sparito da STATE.sala, la mesa vuota prende il segno PER UUID (mai mesa#), la tessera si ridisegna subito', !w.vede('u-pan') && w.L.limpiar[0] === '998:u-pan' && !w.L.limpiarMesa && !w.ctx.STATE.marcado['mesa#998'] && w.L.mappa === 1 && w.L.panel === 1, w.L);
     w.poll({ mios: [P('u-pan', 998, 1090)] });
     t('A2 · il poll partito PRIMA del gesto (ha ancora il pedido) non lo rimette', !w.vede('u-pan'));
     w.poll({ mios: [] });
@@ -97,8 +98,9 @@ async function banco(SRC, quieto) {
 if (process.argv.includes('--mutanti')) {
   const M = [
     ['il filtro non toglie niente', '    if (Array.isArray(r[k])) r[k] = r[k].filter(function (p) { return !(p && p.uuid != null && v[String(p.uuid)]); });', ''],
-    ['la mesa vuota non si chiude', "  if (!quedan) _limpiarMesaLocal(String(mesa));", ''],
-    ['si chiude anche se resta un pedido', "  if (!quedan) _limpiarMesaLocal(String(mesa));", '  _limpiarMesaLocal(String(mesa));'],
+    ['la mesa vuota non prende il segno', "  if (!quedan) _limpiarUuidsLocal([String(uuid)], String(mesa));", ''],
+    ['segno anche se resta un pedido', "  if (!quedan) _limpiarUuidsLocal([String(uuid)], String(mesa));", '  _limpiarUuidsLocal([String(uuid)], String(mesa));'],
+    ['torna il segno di mesa (la finestra del café)', "  if (!quedan) _limpiarUuidsLocal([String(uuid)], String(mesa));", '  if (!quedan) _limpiarMesaLocal(String(mesa));'],
     ['il registro non scade', '  Object.keys(reg).forEach(function (u) { if (now - reg[u].ts < MARCA_SAFETY_MS) out[u] = reg[u]; else delete reg[u]; });', '  Object.keys(reg).forEach(function (u) { out[u] = reg[u]; });'],
     ['la leva ignorata (sempre accesa)', 'function _cancLocalOn() { return CANC_LOCAL_TEL !== null ? CANC_LOCAL_TEL : CANC_LOCAL_SRV; }', 'function _cancLocalOn() { return true; }'],
     ['il poll filtra DOPO la guardia', "    r = _cancLocalFiltra(r);   // [23-ott · TERZA]", "    //"],
