@@ -1,0 +1,60 @@
+// BANCO · TERZA PENNA V32 · CONTROLLO DELL'AUTRICE · un sì del GAS non diventa due corti (23-oct)
+// Reperto: 🎛 BKP `BKP V32 IL CORTE DI ARIANNA E CHIUSO DUE VOLTE NON RIPROVARE` (CM-261023-5IVI 19:19 + LNRI 19:20).
+// Gira `cierreEnviar` · `cierreAbrir` (solo l'ingresso) · `_cieUid` · `_cieOk*` · `_cieYaCerraste` VERI in vm, col GAS finto che dice sì e il riepilogo che lancia.
+// node test_sala_corte_no_doble_23OCT2026.mjs [sala.html] · --mutanti
+import fs from 'node:fs'; import vm from 'node:vm';
+const FILE = process.argv.find((a, i) => i > 1 && !a.startsWith('--')) || new URL('./sala.html', import.meta.url);
+const ORIG = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
+const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n}\n', i) + 3); };
+const fnRiga = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n', i) + 1); };
+async function banco(SRC, quieto) {
+  let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
+  const F = 'async ' + fnVin(SRC, 'cierreEnviar') + fnVin(SRC, '_cieUid') + fnRiga(SRC, '_cieUidKey') + fnRiga(SRC, '_cieOkKey') + fnRiga(SRC, '_cieOkSegna') +
+    fnVin(SRC, '_cieOkRecente') + fnVin(SRC, '_cieYaCerraste') + fnRiga(SRC, '_cieDeNuevo');
+  function mondo({ guardia = true, paso4Lancia = true } = {}) {
+    const LS = {}; const L = { gas: 0, render: [], toast: [], abrir: 0 };
+    let now = Date.parse('2026-10-23T19:19:00-03:00');
+    const ctx = { JSON, String, Math, Object, Number, Date: Object.assign(function (x) { return new globalThis.Date(x == null ? now : x); }, { now: () => now }),
+      localStorage: { getItem: (k) => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); }, removeItem: (k) => { delete LS[k]; } },
+      STATE: { codigo: '3805', nombre: 'Arianna' }, CIE: { paso: 2, data: null, uid: '', uidMonto: null, motivo: '', enviando: false, res: null, tol: 2000, franja: 'dia' },
+      CIE_GUARDIA_ON: guardia, CIE_OK_MS: 15 * 60000, CORTE_BORDE_ON: true, CAJA_ATTO1_ON: true, CORTE_TRAS_BORDE_ON: false, SALDO_SIN_PADRON_ON: false,
+      _fechaOpJS: () => '2026-10-23', _slugSalaJS: (s) => String(s).toLowerCase(), _cieMontoValor: () => 0, esc: (s) => String(s), fmtPrice: (n) => '$' + n,
+      $: () => ({ disabled: false, textContent: '' }), toast: (k, s) => L.toast.push([k, s]), _cieRender: (h) => L.render.push(h), bordeHecho: () => {},
+      _cerrarMeseroAlBorde: async () => null, gasPost: async () => { L.gas++; return { ok: true, id: 'CM-261023-' + (L.gas === 1 ? '5IVI' : 'LNRI'), mesero: 'Arianna' }; },
+      _ciePaso4: () => { if (paso4Lancia) throw new TypeError('x.map is not a function'); L.render.push('PASO4'); }, _ciePaso4Dedup: () => {}, _ciePaso3Motivo: () => {}, _cieSaldo: () => {},
+      cierreAbrir: () => { L.abrir++; } };
+    ctx.CIE.pasarMesas = true;   // come Arianna: mesas da passare ⇒ il GAS
+    vm.createContext(ctx); vm.runInContext(F, ctx);
+    return { ctx, L, LS, invia: () => vm.runInContext('cierreEnviar()', ctx), avanza: (ms) => { now += ms; } };
+  }
+  // A · la scena di Arianna: il GAS dice sì, il riepilogo lancia
+  { const w = mondo(); await w.invia();
+    t('A1 · il sì del GAS con il riepilogo che lancia: «Ya cerraste», mai «No entró — reintenta»', w.L.gas === 1 && w.L.render.some((h) => /Ya cerraste tu turno/.test(h) && /CM-261023-5IVI/.test(h)) && !w.L.toast.some((x) => /reintenta/.test(x[1])), w.L);
+    w.ctx.CIE.paso = 2; w.avanza(60000); await w.invia();
+    t('A2 · il secondo tocco un minuto dopo (le 19:20 di Arianna): NESSUN secondo corte, la schermata «Ya cerraste»', w.L.gas === 1 && w.L.render.filter((h) => /Ya cerraste/.test(h)).length === 2, w.L);
+    w.avanza(16 * 60000); w.ctx.CIE.paso = 2; await w.invia();
+    t('A3 · dopo 15 minuti un corte nuovo si può (il secondo turno del giorno)', w.L.gas === 2, w.L.gas); }
+  // B · «contaste mal — cerrar de nuevo» è una scelta esplicita e passa
+  { const w = mondo(); await w.invia(); vm.runInContext('_cieDeNuevo()', w.ctx); w.ctx.CIE.paso = 2; await w.invia();
+    t('B · «cerrar de nuevo» riapre il flusso e il corte nuovo entra (una dichiarazione nuova, voluta)', w.L.abrir === 1 && w.L.gas === 2 && w.ctx.CIE.deNuevo === false, w.L); }
+  // C · il riepilogo che non lancia: si vede come ieri
+  { const w = mondo({ paso4Lancia: false }); await w.invia();
+    t('C · senza eccezione il riepilogo è quello di sempre (_ciePaso4)', w.L.render.includes('PASO4') && !w.L.render.some((h) => /Ya cerraste/.test(h))); }
+  // D · ?cieg=0: il comportamento di ieri (il «prima», misurato)
+  { const w = mondo({ guardia: false }); let err = null; try { await w.invia(); } catch (e) { err = e; }
+    w.ctx.CIE.paso = 2; w.avanza(60000); try { await w.invia(); } catch (e) {}
+    t('D · il PRIMA, a guardia spenta: «No entró — reintenta» e un SECONDO corte al secondo tocco (5IVI + LNRI)', w.L.toast.some((x) => /No entró — reintenta/.test(x[1])) && w.L.gas === 2, w.L); }
+  t('E · cierreAbrir guarda il segno prima di ricominciare', /\{ const _ok = CIE\.deNuevo \? null : _cieOkRecente\(\); if \(_ok\) \{ _cieYaCerraste\(_ok\); return; \} \}   \/\/ \[23-ott\] un corte di pochi minuti fa/.test(fnVin(SRC, 'cierreAbrir')));
+  return { ok, ko };
+}
+if (process.argv.includes('--mutanti')) {
+  const M = [
+    ['il riepilogo fuori dal try', "        try { if (r.dedup) _ciePaso4Dedup(r); else _ciePaso4(r); }\n        catch (eP) {", "        { if (r.dedup) _ciePaso4Dedup(r); else _ciePaso4(r); }\n        if (0) {"],
+    ['il segno non nasce', "      if (CIE_GUARDIA_ON) { _cieOkSegna(r); CIE.deNuevo = false; }", ''],
+    ['il secondo tocco non guarda il segno', "  { const _ok = CIE.deNuevo ? null : _cieOkRecente(); if (_ok) { _cieYaCerraste(_ok); return; } }   // [23-ott] il secondo tocco dopo un sì", ''],
+    ['il segno non scade', '(o && o.ts && Date.now() - o.ts < CIE_OK_MS)', '(o && o.ts)'],
+    ['«de nuevo» ignorato', 'function _cieDeNuevo() { CIE.deNuevo = true; cierreAbrir(); }', 'function _cieDeNuevo() { cierreAbrir(); }'],
+  ];
+  let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.split(a).join(b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
+  console.log('\nmutanti ' + m + '/' + M.length); process.exitCode = m === M.length ? 0 : 1;
+} else { const r = await banco(ORIG, false); console.log('\n' + (r.ko ? '🔴 ' + r.ko + ' rossi su ' + (r.ok + r.ko) : '🟢 ' + r.ok + ' controlli, tutti verdi')); process.exitCode = r.ko ? 1 : 0; }

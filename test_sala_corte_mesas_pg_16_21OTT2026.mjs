@@ -7,7 +7,7 @@ const ORIG = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
 const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n}\n', i) + 3); };
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
-  const F = 'async ' + fnVin(SRC, '_cieMesasDalBorde') + 'async ' + fnVin(SRC, 'cierreAbrir') + 'async ' + fnVin(SRC, 'soltarRegalo__in');
+  const F = 'async ' + fnVin(SRC, '_cieMesasDalBorde') + 'async ' + fnVin(SRC, 'cierreAbrir') + 'async ' + fnVin(SRC, 'soltarRegalo__in') + '\nfunction _cieOkRecente() { return null; }\n';   // [23-ott] nessun corte recente: il flusso di sempre
   function mondo({ on = true, estado, locale = null, gas = { ok: true, mesas_abiertas: [], tolerancia: 3000 }, estadoOn = false, soltarOn = true, staff }) {
     const L = { gas: [], borde: [], fatti: [], render: [], paso1: 0, toasts: [] };
     const ctx = { CORTE_MESAS_PG_ON: on, CORTE_LOCAL_ON: true, SOLTAR2X1_BORDE_ON: soltarOn, STATE: { codigo: 'C1', nombre: 'Ray' }, CIE: {}, _CIE_INTENTO: 0, _CIE_FIRMADO: false,

@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.24 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.26 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3825,6 +3825,34 @@ function _cieUid(monto) {
   return CIE.uid;
 }
 function _cieCerrar() { CIE.paso = 0; CIE.res = null; CIE.motivo = ''; $('cierreWrap').innerHTML = ''; }
+/* ═══ [23-ott · AUT-EMERG · 🎛 BKP `BKP V32 IL CORTE DI ARIANNA E CHIUSO DUE VOLTE NON RIPROVARE`] UN SÌ NON DIVENTA DUE CORTI ═══
+   🩸 Arianna, 19:19 e 19:20: il GAS ha chiuso il corte DUE volte (CM-261023-5IVI e LNRI). Sul sì il vetro bruciava la chiave d'idempotenza PRIMA di
+   disegnare il riepilogo: se poi la schermata si interrompeva, il `catch` diceva «No entró — reintenta (no se duplica)» e il secondo tocco coniava una
+   chiave NUOVA ⇒ un secondo corte. Il «no se duplica» era falso proprio quando serviva.
+   La cura: ① il riepilogo si disegna dentro un try (un'eccezione mostra «quedó guardado», mai «reintenta») · ② sul sì nasce il segno `sala_corte_ok_<giorno>_<persona>`
+   · ③ per 15 minuti chi riapre il corte o ripreme vede «Ya cerraste a las HH:MM» e deve scegliere «Cerrar de nuevo» apposta (rifare il corte resta permesso:
+   «si contaste mal, vuelve a cerrar»). Freno per apparecchio: `?cieg=0`. */
+const CIE_GUARDIA_ON = (function () {
+  const q = QS.get('cieg');
+  try { if (q === '0') { localStorage.setItem('sala_cieg', '0'); return false; } if (q === '1') { localStorage.setItem('sala_cieg', '1'); return true; } return localStorage.getItem('sala_cieg') !== '0'; }
+  catch (e) { return q !== '0'; }
+})();
+const CIE_OK_MS = 15 * 60000;
+function _cieOkKey() { return 'sala_corte_ok_' + _fechaOpJS() + '_' + _slugSalaJS(STATE.nombre || ''); }
+function _cieOkSegna(r) { try { localStorage.setItem(_cieOkKey(), JSON.stringify({ ts: Date.now(), id: (r && r.id) || '', nombre: STATE.nombre || '' })); } catch (e) {} }
+function _cieOkRecente() {
+  if (!CIE_GUARDIA_ON) return null;
+  try { const o = JSON.parse(localStorage.getItem(_cieOkKey()) || 'null'); return (o && o.ts && Date.now() - o.ts < CIE_OK_MS) ? o : null; } catch (e) { return null; }
+}
+function _cieYaCerraste(o) {
+  const hh = new Date(o.ts).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false });
+  _cieRender('<div class="cie-h">✅ Ya cerraste tu turno</div>' +
+    '<div class="cie-sub">' + esc(o.nombre || STATE.nombre || '') + ' · a las ' + esc(hh) + (o.id ? ' · ' + esc(o.id) : '') + '</div>' +
+    '<div class="cie-nota">El corte quedó guardado. <b>No lo repitas</b>: un segundo corte es una declaración nueva.</div>' +
+    '<button class="btn" onclick="_cieListo()">Listo — me voy</button>' +
+    '<div class="cie-out" onclick="_cieDeNuevo()">Contaste mal — cerrar de nuevo</div>');
+}
+function _cieDeNuevo() { CIE.deNuevo = true; cierreAbrir(); }
 
 /* ═══ 🔴 [AUT-0284] · IL CORTE LASCIA UN FATTO, NON SOLO UN MESSAGGIO ═══════
    🩸 La notte 12→13, alle 02:46, Pedro scrive «el sistema no deja hacer el
@@ -3941,6 +3969,7 @@ async function cierreAbrir() {
      nemmeno se Pedro avesse riprovato una volta o dieci. */
   _CIE_INTENTO++;
   if (_CIE_INTENTO > 1) bordeHecho('corte_reintento', { intento: _CIE_INTENTO });
+  { const _ok = CIE.deNuevo ? null : _cieOkRecente(); if (_ok) { _cieYaCerraste(_ok); return; } }   // [23-ott] un corte di pochi minuti fa: si dice, non si rifà
   CIE.paso = 1; CIE.data = null; CIE.res = null; CIE.motivo = '';
   /* l'uid vive UN flusso: dentro (retry compresi) resta lo stesso — il server
      risponde `dedup` invece di sdoppiare; un cierre nuovo (es. turno noche
@@ -4289,6 +4318,7 @@ async function cierreEnviar() {
   const monto = CIE.paso === 2 ? _cieMontoValor() : CIE.uidMonto;
   if (monto == null) { toast('err', 'Escribe cuánto efectivo tienes'); return; }
   if (CIE.res && CIE.res.exige === 'motivo' && !CIE.motivo) { toast('err', 'Elige el motivo'); return; }
+  { const _ok = CIE.deNuevo ? null : _cieOkRecente(); if (_ok) { _cieYaCerraste(_ok); return; } }   // [23-ott] il secondo tocco dopo un sì
   CIE.enviando = true;
   const b = $('cieBtn'); if (b) { b.disabled = true; b.textContent = 'Cerrando…'; }
   try {
@@ -4354,6 +4384,7 @@ async function cierreEnviar() {
       try { localStorage.removeItem(_cieUidKey()); } catch (e2) {}
       CIE.uid = ''; CIE.uidMonto = null;
       CIE.res = r;
+      if (CIE_GUARDIA_ON) { _cieOkSegna(r); CIE.deNuevo = false; }   // [23-ott] il segno nasce INSIEME al bruciare della chiave
       /* 🔴 [11-set · caso Anthony, portato da Alberto] `r.dedup===true` tiene
          `r.ok===true` (entra qui) ma la forma è {ok,dedup,cierre:y} — y viene
          da _cierresDeHoy (GAS) e NON ha por_medio/boletas/efectivo_ventas/
@@ -4364,7 +4395,11 @@ async function cierreEnviar() {
          (Anthony quella notte: $164.030, 4 boletas) che sembrava sparito.
          Cura: un secondo tap sullo stesso uid è "ya cerraste", non "cerraste
          en cero" — vista propria, sugli unici campi che il server dà qui. */
-      if (r.dedup) _ciePaso4Dedup(r); else _ciePaso4(r);
+      if (!CIE_GUARDIA_ON) { if (r.dedup) _ciePaso4Dedup(r); else _ciePaso4(r); }
+      else {
+        try { if (r.dedup) _ciePaso4Dedup(r); else _ciePaso4(r); }
+        catch (eP) { _cieYaCerraste({ ts: Date.now(), id: r.id || '', nombre: r.mesero || STATE.nombre || '' }); }   // [23-ott] un sì non diventa mai «reintenta»
+      }
     }
     else if (r && r.exige === 'motivo') { CIE.res = r; _ciePaso3Motivo(r); }
     else if (r && r.error === 'mesas_abiertas') {

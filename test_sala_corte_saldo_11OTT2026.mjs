@@ -20,7 +20,7 @@ function mondo(SRC, o) {
     bordeHecho: (n, d) => ev.hechos.push([n, d]), _ciePaso4: (r) => ev.paso4.push(r), _ciePaso4Dedup() {}, _ciePaso3Motivo() {}, _cieRender: (h) => ev.render.push(h),
     _cieVoyACobrar() {}, _cieSalirSinCerrar() {}, _cieCerrar() {}, _CIE_INTENTO: 1 };
   vm.createContext(ctx);
-  vm.runInContext(['_cieSaldo', 'cierreEnviar'].map((n) => fnDe(SRC, n)).join('\n') + '\nthis.F = { cierreEnviar, _cieSaldo };', ctx);
+  vm.runInContext(['_cieSaldo', 'cierreEnviar'].map((n) => fnDe(SRC, n)).join('\n') + '\nfunction _cieOkRecente() { return null; }\nvar CIE_GUARDIA_ON = false; function _cieOkSegna() {}\nthis.F = { cierreEnviar, _cieSaldo };', ctx);   // [23-ott] la guardia del corte doppio neutra: il flusso di sempre
   return { ctx, ev };
 }
 const SALDO = (extra) => Object.assign({ ok: false, error: 'mesa_a_saldo', definitivo: true, borde: true, mesas: [{ mesa: '100', consumo: 161970, pagado: 41970, resto: 120000 }] }, extra || {});
