@@ -17,7 +17,7 @@ function paga({ on = true, mixto, propina = 0, medio = 'mixto', propMedio, monto
     _pagoMonto: () => monto, _pagoPropina: () => propina, toast: (k, s) => log.push([k, s]), renderPago: () => log.push(['render']),
     _fmtMiles: (n) => Math.round(n).toLocaleString('es-CL'), out: null };
   vm.createContext(ctx);
-  vm.runInContext(fnV('_mxMediosConMonto') + fnV('_mxPropMedio') + '(function () {\n' + BLOCCO + '\n out = { mixtoPartes: mixtoPartes }; })();', ctx);
+  vm.runInContext((SRC.includes('function _mxKeys(') ? SRC.slice(SRC.indexOf('const MX_LBL = '), SRC.indexOf(String.fromCharCode(10), SRC.indexOf('const MX_LBL = ')) + 1) + fnV('_mxKeys') + fnV('_mxMedio') : '') + fnV('_mxMediosConMonto') + fnV('_mxPropMedio') + '(function () {\n' + BLOCCO + '\n out = { mixtoPartes: mixtoPartes }; })();', ctx);
   return { righe: ctx.out && ctx.out.mixtoPartes, log, fermato: !ctx.out };
 }
 const ISA = { efectivo: '14926', debito: '35814', credito: '', transferencia: '' };
@@ -42,7 +42,7 @@ const ISA = { efectivo: '14926', debito: '35814', credito: '', transferencia: ''
 function chip({ on = true, mixto, prop, propMedio }) {
   const pg = { mixto, propMedio };
   const ctx = { Math, String, parseFloat, PROPINA_MIXTO_MEDIO_ON: on, STATE: { pago: pg }, _fmtMiles: (n) => Math.round(n).toLocaleString('es-CL'), renderPago: () => {} };
-  vm.createContext(ctx); vm.runInContext(fnV('_mxMediosConMonto') + fnV('_mxPropMedio') + fnV('_mxPropHtml') + fnV('bPropMedio'), ctx);
+  vm.createContext(ctx); vm.runInContext((SRC.includes('function _mxKeys(') ? SRC.slice(SRC.indexOf('const MX_LBL = '), SRC.indexOf(String.fromCharCode(10), SRC.indexOf('const MX_LBL = ')) + 1) + fnV('_mxKeys') + fnV('_mxMedio') : '') + fnV('_mxMediosConMonto') + fnV('_mxPropMedio') + fnV('_mxPropHtml') + fnV('bPropMedio'), ctx);   // [22-ott · TERZA] le chiavi del mixto e le etichette
   return { html: vm.runInContext('_mxPropHtml(STATE.pago, ' + prop + ')', ctx), ctx, pg };
 }
 { const { html } = chip({ mixto: ISA, prop: 5074 });
@@ -53,7 +53,7 @@ function chip({ on = true, mixto, prop, propMedio }) {
   t('H · toccare Efectivo lo sceglie: «entra en:» e il chip è sel', pg.propMedio === 'efectivo' && /entra en:/.test(h2) && /cs-chip sel" onclick="bPropMedio\('efectivo'\)/.test(h2), h2); }
 t('I · leva spenta ⇒ nessun chip', chip({ on: false, mixto: ISA, prop: 5074 }).html === '');
 t('I · propina 0 ⇒ nessun chip', chip({ mixto: ISA, prop: 0 }).html === '');
-t('J · il chip è dentro il pannello del mixto (bMedio), dopo le quattro righe', /fila\('transferencia', 'Transfer'\) \+\n\s+(\(_v2 \? '<div id="bmxProp">' \+ _mxPropHtml\(pg, prop\) \+ '<\/div>' : _mxPropHtml\(pg, prop\)\)|_mxPropHtml\(pg, prop\)) \+/.test(fnV('bMedio'))   /* [21-ott] anche col contenitore bmxProp della leva mixto v2 */);
+t('J · il chip è dentro il pannello del mixto (bMedio), dopo le quattro righe', /fila\('transferencia', 'Transfer'\) \+( _mxExtraHtml\(pg, fila\) \+)?\n\s+(\(_v2 \? '<div id="bmxProp">' \+ _mxPropHtml\(pg, prop\) \+ '<\/div>' : _mxPropHtml\(pg, prop\)\)|_mxPropHtml\(pg, prop\)) \+/.test(fnV('bMedio'))   /* [21-ott] anche col contenitore bmxProp della leva mixto v2 */);
 t('J · la leva si legge dal /salud come le altre', /PROPINA_MIXTO_MEDIO_ON = String\(cercaK\(j, 'propina_mixto_medio_on'\)\) === '1';/.test(SRC) && /var PROPINA_MIXTO_MEDIO_ON = false;/.test(SRC));
 console.log('\n' + (ko ? '🔴 ' + ko + ' rossi su ' + (ok + ko) : '🟢 ' + ok + ' controlli, tutti verdi'));
 process.exitCode = ko ? 1 : 0;

@@ -10,14 +10,16 @@ const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0)
 function elFinto(id) { return { id, value: '', placeholder: '', innerHTML: '', textContent: '', disabled: false, style: {}, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } }; }
 function mondo(SRC, { v2 = true, pg, monto = 3190, prop = 319 }) {
   const dom = {}; const w = { innerHTML: '', querySelector: () => null };
-  const fns = ['bMedio', '_mxMediosConMonto', '_mxPropMedio', '_mxPropHtml'].concat(SRC.includes('function _bMxPinta(') ? ['_bMxNum', '_bMxPinta', 'bMxIn', 'bMxBlur2'] : []);
+  const fns = ['bMedio', '_mxMediosConMonto', '_mxPropMedio', '_mxPropHtml'].concat(SRC.includes('function _bMxPinta(') ? ['_bMxNum', '_bMxPinta', 'bMxIn', 'bMxBlur2'] : [])
+    .concat(SRC.includes('function _mxKeys(') ? ['_mxKeys', '_mxMedio', '_mxExtraHtml', '_mxCuadraTxt'] : []);   // [22-ott · TERZA] il mixto con la seconda carta
+  const LBL = SRC.includes('const MX_LBL = ') ? SRC.slice(SRC.indexOf('const MX_LBL = '), SRC.indexOf('\n', SRC.indexOf('const MX_LBL = ')) + 1) : '';
   const ctx = { STATE: { pago: pg, nombre: 'Wilbert' }, PROPINA_MIXTO_MEDIO_ON: true, PAGO_BLOQUEA_ON: false, Math, String, parseFloat,
     mxV2On: () => v2, c4Css: () => {}, _bMonto: () => monto, _pagoPropina: () => prop, c4Resta: () => 0, _pagadaAviso: () => null, _yaMontoTxt: () => '',
     esc: (s) => String(s == null ? '' : s), fmtPrice: (n) => '$' + Math.round(n), _fmtMiles: (n) => String(Math.round(n)), _pgRelojOff: () => {},
     _pagoQuiereVoucher: () => !!(pg.mixto && (_n(pg.mixto.debito) > 0 || _n(pg.mixto.credito) > 0)),
     $: (id) => dom[id] || null, dom, w, renderPago: () => { ctx.ridisegni = (ctx.ridisegni || 0) + 1; }, ridisegni: 0 };
   function _n(v) { return Math.round(parseFloat(String(v).replace(/[^0-9]/g, '')) || 0); }
-  vm.createContext(ctx); vm.runInContext(fns.map((n) => fnVin(SRC, n)).join('\n'), ctx);
+  vm.createContext(ctx); vm.runInContext(LBL + fns.map((n) => fnVin(SRC, n)).join('\n'), ctx);
   return { ctx, w, dom };
 }
 async function banco(SRC, quieto) {
@@ -29,8 +31,12 @@ async function banco(SRC, quieto) {
     const diversi = stati.filter((p) => { const a = mondo(SRC, { v2: false, pg: JSON.parse(JSON.stringify(p)) }), b = mondo(HEAD, { v2: false, pg: JSON.parse(JSON.stringify(p)) });
       vm.runInContext('bMedio(w, STATE.pago)', a.ctx); vm.runInContext('bMedio(w, STATE.pago)', b.ctx);
       /* [21-ott · mesa 47] l'unica differenza voluta da allora: il chip «➗ Dividir» della propina (dietro PROPINA_MIXTO_MEDIO_ON, non dietro la leva v2) */
-      const senzaDiv = (h) => h.replace(/<div class="cs-chip( sel)?" onclick="bPropMedio\('_div'\)">➗ Dividir<\/div>/, '');
-      return senzaDiv(a.w.innerHTML) !== b.w.innerHTML; }).length;
+      const senzaDiv = (h) => h.replace(/<div class="cs-chip( sel)?" onclick="bPropMedio\('_div'\)">➗ Dividir<\/div>/, '')
+        /* [22-ott · mesa 47] e le due differenze volute dopo: i chip «＋ otra de crédito / débito» e il testo del sobran/faltan (che dice dove sta la differenza) */
+        .replace(/<div class="c4chips" style="margin-top:6px">(<div class="cs-chip" onclick="mxOtra\('(credito2|debito2)'\)">[^<]*<\/div>)+<\/div>/, '')
+        .replace(/(✓ cuadra: \$\d+|faltan <b>|sobran <b>)[\s\S]*?<\/div><\/div>/, 'CUADRA</div></div>');
+      const norm = (h) => h.replace(/(✓ cuadra: \$\d+|faltan <b>|sobran <b>)[\s\S]*?<\/div><\/div>/, 'CUADRA</div></div>');
+      return senzaDiv(a.w.innerHTML) !== norm(b.w.innerHTML); }).length;
     t('⓪ leva spenta: l HTML di bMedio è IDENTICO a quello di 6bb39de su 4 stati (mixto, débito, mixto quadrato, senza medio)', diversi === 0, diversi);
   } else t('⓪ (git show 6bb39de non disponibile: confronto saltato)', true);
   // ① la riga sola
@@ -49,7 +55,7 @@ async function banco(SRC, quieto) {
   { const pg = PG(); const m = mondo(SRC, { pg }); ['efectivo', 'debito', 'credito', 'transferencia'].forEach((k) => { m.dom['bmx_' + k] = elFinto('bmx_' + k); });
     ['bmxCuadra', 'bmxProp', 'c4Pagar'].forEach((k) => { m.dom[k] = elFinto(k); });
     vm.runInContext('_bMxPinta()', m.ctx);
-    t('② ancora 1.690 da ripartire: «faltan», PAGAR spento «La suma no cuadra», il placeholder dice «$1690 — toca y listo»', /faltan <b>\$1690<\/b> de \$3190/.test(m.dom.bmxCuadra.innerHTML) && m.dom.c4Pagar.disabled && /no cuadra/.test(m.dom.c4Pagar.textContent) && /\$1690 — toca y listo/.test(m.dom.bmx_debito.placeholder), m.dom); }
+    t('② ancora 1.690 da ripartire: «faltan», PAGAR spento «La suma no cuadra», il placeholder dice «$1690 — toca y listo»', /faltan <b>\$1690<\/b> en los montos · deben sumar <b>\$3190<\/b>/.test(m.dom.bmxCuadra.innerHTML) && m.dom.c4Pagar.disabled && /no cuadra/.test(m.dom.c4Pagar.textContent) && /\$1690 — toca y listo/.test(m.dom.bmx_debito.placeholder), m.dom); }
   { const pg = PG(); const m = mondo(SRC, { pg }); const el = elFinto('bmx_debito'); m.dom.bmx_debito = el; ['bmxCuadra', 'bmxProp', 'c4Pagar'].forEach((k) => { m.dom[k] = elFinto(k); });
     vm.runInContext('bMxBlur2(dom.bmx_debito, "debito")', m.ctx);
     t('② lasciare il campo vuoto ⇒ «toca y listo» scrive 1.690 DENTRO il campo e nello stato, senza ridisegno', pg.mixto.debito === '1690' && el.value === '1690' && m.ctx.ridisegni === 0 && /cuadra/.test(m.dom.bmxCuadra.innerHTML), { pg: pg.mixto, el: el.value, r: m.ctx.ridisegni }); }

@@ -7,8 +7,9 @@ const ORIG = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
 const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n}\n', i) + 3); };
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
-  const NOMI = ['_fmtMiles', '_mxMediosConMonto', '_mxPropMedio', '_mxPropNum', '_mxPropDiv', '_mxPropDivCuadra', 'bPropDivIn', 'bPropDivBlur', '_mxPropHtml', 'bPropMedio'];
-  const F = NOMI.map((n) => fnVin(SRC, n)).join('');
+  const NOMI = ['_fmtMiles'].concat(SRC.includes('function _mxKeys(') ? ['_mxKeys', '_mxMedio'] : []).concat(['_mxMediosConMonto', '_mxPropMedio', '_mxPropNum', '_mxPropDiv', '_mxPropDivCuadra', 'bPropDivIn', 'bPropDivBlur', '_mxPropHtml', 'bPropMedio']);
+  const LBL = SRC.includes('const MX_LBL = ') ? SRC.slice(SRC.indexOf('const MX_LBL = '), SRC.indexOf('\n', SRC.indexOf('const MX_LBL = ')) + 1) : '';
+  const F = LBL + NOMI.map((n) => fnVin(SRC, n)).join('');
   const i0 = SRC.indexOf('    const _propMx = PROPINA_MIXTO_MEDIO_ON'); const i1 = SRC.indexOf('  /* v3.7.2 · AUT-0007', i0);
   if (i0 < 0 || i1 < 0) throw new Error('regione invio');
   const INV = SRC.slice(i0, i1).replace(/\n  \}\s*$/, '\n');
@@ -24,7 +25,7 @@ async function banco(SRC, quieto) {
     vm.runInContext('(function () { let mixtoPartes = this.mixtoPartes; const pg = this.pg; ' + INV + ' this.mixtoPartes = mixtoPartes; this.uscito = true; }).call(this)', ctx);
     return ctx;
   }
-  const P47 = [{ medio: 'efectivo', monto: 16340 }, { medio: 'debito', monto: 16340 }];
+  const P47 = [{ k: 'efectivo', medio: 'efectivo', monto: 16340 }, { k: 'debito', medio: 'debito', monto: 16340 }];   // [22-ott] le righe vere portano la chiave fino all invio
   // la mesa 47
   { const c = mondo({ efectivo: '16340', debito: '16340' }, 3268);
     const h = vm.runInContext('_mxPropHtml(STATE.pago, 3268)', c);
@@ -57,7 +58,7 @@ if (process.argv.includes('--mutanti')) {
   const M = [
     ['senza chip Dividir', "(ms.length >= 2 ? '<div class=\"cs-chip' + (sel === '_div' ? ' sel' : '') + '\" onclick=\"bPropMedio(\\'_div\\')\">➗ Dividir</div>' : '')", "''"],
     ['la somma non si controlla', "if (suD !== _propMx) {", 'if (false) {'],
-    ['divisa ignorata all invio (tutta su un mezzo)', "propina: dv[x.medio] || 0 }", "propina: x.medio === 'efectivo' ? _propMx : 0 }"],
+    ['divisa ignorata all invio (tutta su un mezzo)', "propina: dv[x.k] || 0 }", "propina: x.medio === 'efectivo' ? _propMx : 0 }"],
     ['default non in efectivo', "ms.indexOf('efectivo') >= 0 ? 'efectivo' : ms[0]", 'ms[ms.length - 1]'],
     ['niente resto automatico', "if (ms.length === 2 && String(pg.propDiv[k] == null ? '' : pg.propDiv[k]).trim() !== '') {", 'if (false) {'],
     ['resto anche con tre mezzi', 'if (ms.length === 2 && String', 'if (ms.length >= 2 && String'],

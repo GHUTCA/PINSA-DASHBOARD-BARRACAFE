@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.20 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.21 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -13513,7 +13513,7 @@ function mxBlur(el, k2) {
   const pg = STATE.pago; if (!pg || !pg.mixto) return;
   if (!String(pg.mixto[k2] || '').trim()) {
     const objetivo = _pagoMonto();
-    const suma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k3) {
+    const suma = _mxKeys(pg).reduce(function (s, k3) {
       return s + (Math.round(parseFloat(String(pg.mixto[k3]).replace(/[^0-9]/g, '')) || 0)); }, 0);
     const resto = objetivo - suma;
     if (resto > 0) pg.mixto[k2] = String(resto);
@@ -14098,9 +14098,40 @@ function _bMonto() {
    🩹 Il mesero lo sceglie con un chip, fra i mezzi GIÀ nel mixto (monto > 0): v1 = un mezzo solo per tutta la propina. Il contratto
       (`propina` su ogni riga di `medios_json`, somma = propina del pago) regge anche la divisa; il vetro non la offre ancora.
    ⚖️ A leva accesa e propina > 0 il chip è obbligatorio: senza, il pago non parte. A leva spenta: niente chip, body identico a ieri. */
+/* ═══ [22-ott · 🎛 V32 `V32 MESA 47 I DUE PESOS ERANO NELLA MACCHINA` ② · TERZA] DUE CARTE DELLO STESSO TIPO NEL MIXTO ═══════════════════════
+   Mesa 47: due voucher di crédito (uno senza sconto, uno Falabella) e il mixto ne aveva uno solo ⇒ Alberto ha messo un débito al posto di un crédito.
+   Le chiavi del mixto restano le quattro di sempre; «＋ otra de crédito / débito» aggiunge `credito2` / `debito2`, solo su richiesta. Al bordo e al
+   GAS la riga va col mezzo VERO (`credito2` ⇒ `credito`): il bordo somma per riga (contanti e propina) e il GAS valida solo ≥ 2 righe, monti
+   positivi e somma — due righe `credito` sono lecite per entrambi (letto in caja_atti.js e MENU_GAS r.20976). La propina per riga resta legata
+   alla CHIAVE, così due crediti non si confondono. */
+const MX_LBL = { efectivo: 'Efectivo', debito: 'Débito', credito: 'Crédito', transferencia: 'Transfer', debito2: 'Débito 2', credito2: 'Crédito 2' };
+function _mxKeys(pg) {
+  const mx = (pg && pg.mixto) || {}, ks = ['efectivo', 'debito', 'credito', 'transferencia'];
+  ['debito2', 'credito2'].forEach(function (k) { if (Object.prototype.hasOwnProperty.call(mx, k)) ks.push(k); });
+  return ks;
+}
+function _mxMedio(k) { return String(k || '').replace(/2$/, ''); }
+function mxOtra(k) { const pg = STATE.pago; if (!pg || !pg.mixto || (k !== 'debito2' && k !== 'credito2')) return; if (!(k in pg.mixto)) pg.mixto[k] = ''; renderPago(); }
+function _mxExtraHtml(pg, fila) {   // le righe della seconda carta (se aggiunte) e i due chip per aggiungerle
+  const mx = (pg && pg.mixto) || {};
+  let h = ['debito2', 'credito2'].filter(function (k) { return k in mx; }).map(function (k) { return fila(k, MX_LBL[k]); }).join('');
+  const add = ['credito2', 'debito2'].filter(function (k) { return !(k in mx); });
+  if (add.length) h += '<div class="c4chips" style="margin-top:6px">' + add.map(function (k) {
+    return '<div class="cs-chip" onclick="mxOtra(\'' + k + '\')">＋ otra de ' + (k === 'credito2' ? 'crédito' : 'débito') + '</div>'; }).join('') + '</div>';
+  return h;
+}
+/* ═══ [22-ott · stesso blocco, ①] IL «SOBRAN / FALTAN» DICE DOVE STA LA DIFFERENZA ═════════════════════════════════════════════════
+   Mesa 47: «sobran $2 — baja alguna cifra», e Alberto l'ha rifatto 20 volte cambiando la PROPINA, che è un'altra somma. Ora la riga dice che la
+   differenza sta nei montos dei mezzi, non nella propina, e mostra accanto la cifra da raggiungere. Una funzione sola per i tre disegni del mixto. */
+function _mxCuadraTxt(suma, resto, objetivo) {
+  if (resto === 0 && suma > 0) return '✓ cuadra: $' + _fmtMiles(suma);
+  return (resto > 0 ? 'faltan <b>$' + _fmtMiles(resto) + '</b>' : 'sobran <b>$' + _fmtMiles(-resto) + '</b>') +
+    ' en los montos · deben sumar <b>$' + _fmtMiles(objetivo) + '</b>' +
+    '<br><span style="font-size:11.5px">la diferencia está en los montos de los medios, <b>no en la propina</b></span>';
+}
 function _mxMediosConMonto(pg) {
   const mx = (pg && pg.mixto) || {};
-  return ['efectivo', 'debito', 'credito', 'transferencia'].filter(function (k) {
+  return _mxKeys(pg).filter(function (k) {
     return (Math.round(parseFloat(String(mx[k]).replace(/[^0-9]/g, '')) || 0)) > 0; });
 }
 function _mxPropMedio(pg) {   // il mezzo scelto, solo se è ancora uno dei mezzi del mixto
@@ -14143,7 +14174,7 @@ function _mxPropHtml(pg, prop) {
   if (!PROPINA_MIXTO_MEDIO_ON || !(prop > 0)) return '';
   const ms = _mxMediosConMonto(pg);
   if (!ms.length) return '';
-  const L = { efectivo: 'Efectivo', debito: 'Débito', credito: 'Crédito', transferencia: 'Transfer' };
+  const L = MX_LBL;
   const sel = _mxPropMedio(pg);
   return '<div class="c4lab" style="margin-top:10px' + (sel ? '' : ';color:#f5a623') + '">' +
       (sel ? 'La propina de <b>$' + _fmtMiles(prop) + '</b> entra en:' : '¿La propina de <b>$' + _fmtMiles(prop) + '</b> en qué medio?') + '</div>' +
@@ -14171,7 +14202,7 @@ function bPropMedio(k) {
 function bMxBlur(el, k2) {
   var pg = STATE.pago; if (!pg || !pg.mixto) return;
   if (!String(pg.mixto[k2] || '').trim()) {
-    var suma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k3) {
+    var suma = _mxKeys(pg).reduce(function (s, k3) {
       return s + (Math.round(parseFloat(String(pg.mixto[k3]).replace(/[^0-9]/g, '')) || 0)); }, 0);
     var resto = _bMonto() - suma;
     if (resto > 0) pg.mixto[k2] = String(resto);
@@ -14195,7 +14226,7 @@ function mxV2On() { return MXV2_QS === '0' ? false : (MXV2_QS === '1' || MXV2_SR
 function _bMxNum(v) { return Math.round(parseFloat(String(v).replace(/[^0-9]/g, '')) || 0); }
 function _bMxPinta() {
   const pg = STATE.pago; if (!pg || pg.medio !== 'mixto' || !pg.mixto) return;
-  const ks = ['efectivo', 'debito', 'credito', 'transferencia'];
+  const ks = _mxKeys(pg);
   const mB = _bMonto(), prop = _pagoPropina();
   const suma = ks.reduce(function (s, k) { return s + _bMxNum(pg.mixto[k]); }, 0), resto = mB - suma;
   ks.forEach(function (k) {
@@ -14206,9 +14237,7 @@ function _bMxPinta() {
   if (cu) {
     const ok = resto === 0 && suma > 0;
     cu.style.color = ok ? '#3db876' : '#f5a623';
-    cu.innerHTML = ok ? '✓ cuadra: $' + _fmtMiles(suma)
-      : resto > 0 ? 'faltan <b>$' + _fmtMiles(resto) + '</b> de $' + _fmtMiles(mB)
-      : 'sobran <b>$' + _fmtMiles(-resto) + '</b> — baja alguna cifra';
+    cu.innerHTML = _mxCuadraTxt(suma, resto, mB);
   }
   const pp = $('bmxProp'); if (pp) pp.innerHTML = _mxPropHtml(pg, prop);
   const bt = $('c4Pagar');
@@ -14225,7 +14254,7 @@ function bMxIn(el, k2) { const pg = STATE.pago; if (!pg || !pg.mixto) return; pg
 function bMxBlur2(el, k2) {
   const pg = STATE.pago; if (!pg || !pg.mixto) return;
   if (!String(pg.mixto[k2] || '').trim()) {
-    const suma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k3) { return s + _bMxNum(pg.mixto[k3]); }, 0);
+    const suma = _mxKeys(pg).reduce(function (s, k3) { return s + _bMxNum(pg.mixto[k3]); }, 0);
     const resto = _bMonto() - suma;
     if (resto > 0) { pg.mixto[k2] = String(resto); if (el) el.value = String(resto); }
   }
@@ -14299,7 +14328,7 @@ function bMedio(w, pg) {
   var mxResto = 0, mxSuma = 0;
   if (pg.medio === 'mixto') {
     pg.mixto = pg.mixto || { efectivo: '', debito: '', credito: '', transferencia: '' };
-    mxSuma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k2) {
+    mxSuma = _mxKeys(pg).reduce(function (s, k2) {
       return s + (Math.round(parseFloat(String(pg.mixto[k2]).replace(/[^0-9]/g, '')) || 0)); }, 0);
     mxResto = mB - mxSuma;
     var _v2 = mxV2On();   // [21-ott · nota ② di Alberto] a leva accesa scrivere un importo NON ridisegna il pannello: si aggiorna sul posto
@@ -14329,12 +14358,10 @@ function bMedio(w, pg) {
       '<div class="c4lab" style="margin-top:0">¿Cuánto con cada uno? · reparte <b>$' + _fmtMiles(mB) + '</b></div>' +
       (prop > 0 ? '<div style="font-size:11.5px;color:var(--cs-mut);margin:-2px 0 5px;line-height:1.45">' +
         'la propina de <b>$' + _fmtMiles(prop) + '</b> se suma sola al final — <b>no la repartas aquí</b></div>' : '') +
-      fila('efectivo', 'Efectivo') + fila('debito', 'Débito') + fila('credito', 'Crédito') + fila('transferencia', 'Transfer') +
+      fila('efectivo', 'Efectivo') + fila('debito', 'Débito') + fila('credito', 'Crédito') + fila('transferencia', 'Transfer') + _mxExtraHtml(pg, fila) +
       (_v2 ? '<div id="bmxProp">' + _mxPropHtml(pg, prop) + '</div>' : _mxPropHtml(pg, prop)) +   // [19-ott · AUT-0716] in che mezzo entra la propina
       '<div ' + (_v2 ? 'id="bmxCuadra" ' : '') + 'style="margin-top:8px;font-size:12.5px;' + (mxResto === 0 && mxSuma > 0 ? 'color:#3db876' : 'color:#f5a623') + '">' +
-      (mxResto === 0 && mxSuma > 0 ? '✓ cuadra: $' + _fmtMiles(mxSuma)
-        : mxResto > 0 ? 'faltan <b>$' + _fmtMiles(mxResto) + '</b> de $' + _fmtMiles(mB)
-        : 'sobran <b>$' + _fmtMiles(-mxResto) + '</b> — baja alguna cifra') + '</div></div>';
+      _mxCuadraTxt(mxSuma, mxResto, mB) + '</div></div>';
   }
   /* dove va la boleta — la stessa riga della ③, detta PRIMA di scegliere */
   b += '<div style="margin-top:10px;padding:8px 10px;border-radius:10px;font-size:11px;text-align:center;' +
@@ -15303,7 +15330,7 @@ function renderPago() {
     (pg.medio === 'mixto' ? (function () {
       const objetivo = _pagoMonto();
       const mx = pg.mixto = pg.mixto || { efectivo: '', debito: '', credito: '', transferencia: '' };
-      const suma = ['efectivo', 'debito', 'credito', 'transferencia'].reduce(function (s, k2) {
+      const suma = _mxKeys(pg).reduce(function (s, k2) {
         return s + (Math.round(parseFloat(String(mx[k2]).replace(/[^0-9]/g, '')) || 0)); }, 0);
       const resto = objetivo - suma;
       /* v3.4.3 · SENZA CALCOLATRICE (Alberto: «appena metto l'efectivo, il
@@ -15319,11 +15346,9 @@ function renderPago() {
           ' oninput="STATE.pago.mixto[\'' + k2 + '\']=this.value" onblur="mxBlur(this,\'' + k2 + '\')"></div>';
       };
       return '<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.35)">' +
-        fila('efectivo', 'Efectivo') + fila('debito', 'Débito') + fila('credito', 'Crédito') + fila('transferencia', 'Transfer') +
+        fila('efectivo', 'Efectivo') + fila('debito', 'Débito') + fila('credito', 'Crédito') + fila('transferencia', 'Transfer') + _mxExtraHtml(pg, fila) +
         '<div style="margin-top:8px;font-size:12.5px;' + (resto === 0 && suma > 0 ? 'color:#3db876' : 'color:#f5a623') + '">' +
-        (resto === 0 && suma > 0 ? '✓ cuadra: $' + _fmtMiles(suma)
-          : resto > 0 ? 'faltan <b>$' + _fmtMiles(resto) + '</b> de $' + _fmtMiles(objetivo)
-          : 'sobran <b>$' + _fmtMiles(-resto) + '</b> — la suma debe ser exacta') + '</div></div>';
+        _mxCuadraTxt(suma, resto, objetivo) + '</div></div>';
     })() : '') +
     /* ═══ v3.7.0 · AUT-0007 · IL SELLO DEL VOUCHER ═══════════════════════════
        La tarjeta lascia un numero: il voucher del POS. Da stanotte quel numero
@@ -15659,8 +15684,8 @@ async function pagoConfirmar(btn) {
   let mixtoPartes = null;
   if (pg.medio === 'mixto') {
     const mx = pg.mixto || {};
-    mixtoPartes = ['efectivo', 'debito', 'credito', 'transferencia'].map(function (k2) {
-      return { medio: k2, monto: Math.round(parseFloat(String(mx[k2]).replace(/[^0-9]/g, '')) || 0) };
+    mixtoPartes = _mxKeys(pg).map(function (k2) {   // [22-ott] `k` = la chiave (credito2), `medio` = il mezzo vero (credito)
+      return { k: k2, medio: _mxMedio(k2), monto: Math.round(parseFloat(String(mx[k2]).replace(/[^0-9]/g, '')) || 0) };
     }).filter(function (x) { return x.monto > 0; });
     const suma = mixtoPartes.reduce(function (s, x) { return s + x.monto; }, 0);
     if (mixtoPartes.length < 2) { toast('err', 'Mixto = al menos 2 medios con monto'); return; }
@@ -15674,10 +15699,11 @@ async function pagoConfirmar(btn) {
       if (pm === '_div') {   // [21-ott · mesa 47] la propina per mezzo, e la somma deve tornare
         const dv = _mxPropDiv(pg) || {}, suD = Object.keys(dv).reduce(function (a, k) { return a + dv[k]; }, 0);
         if (suD !== _propMx) { toast('warn', 'La propina dividida suma $' + _fmtMiles(suD) + ' y debe sumar $' + _fmtMiles(_propMx)); renderPago(); return; }
-        mixtoPartes = mixtoPartes.map(function (x) { return { medio: x.medio, monto: x.monto, propina: dv[x.medio] || 0 }; });
+        mixtoPartes = mixtoPartes.map(function (x) { return { k: x.k, medio: x.medio, monto: x.monto, propina: dv[x.k] || 0 }; });
       } else
-      mixtoPartes = mixtoPartes.map(function (x) { return { medio: x.medio, monto: x.monto, propina: x.medio === pm ? _propMx : 0 }; });
+      mixtoPartes = mixtoPartes.map(function (x) { return { k: x.k, medio: x.medio, monto: x.monto, propina: x.k === pm ? _propMx : 0 }; });
     }
+    mixtoPartes = mixtoPartes.map(function (x) { const o = { medio: x.medio, monto: x.monto }; if ('propina' in x) o.propina = x.propina; return o; });   // [22-ott] la chiave non esce dal telefono
   }
   /* v3.7.2 · AUT-0007 · decisione di Alberto (16-ago): STASERA il campo è
      INFORMATIVO — si manda quello che c'è, non si blocca nessuno. Da LUNEDÌ
