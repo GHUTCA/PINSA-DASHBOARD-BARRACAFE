@@ -66,6 +66,15 @@ async function banco(SRC, quieto) {
   t('F3 · il pannello a steppers (_corrAplicaLocal) segna anche lui', /if \(r\.cancelado\) _cancLocalSegna\(mesa, uuid\);/.test(fnVin(SRC, '_corrAplicaLocal')));
   t('F4 · la leva si legge da /salud', /CANC_LOCAL_SRV = String\(cercaK\(j, 'sala_cancelado_local_on'\)\) === '1';/.test(SRC));
   t('F5 · la riconciliazione confronta la mesa tollerante al tipo (a leva accesa)', /_cancLocalOn\(\) \? String\(x\.mesa\) === String\(e\.mesa\) : x\.mesa === e\.mesa/.test(fnVin(SRC, '_corrOptimistaReconcilia')));
+  // G · [23-ott · BKP 2f0c2e4] la correzione che aggiunge un prodotto 86: il ramo VERO di guardarCorreccion__in, coi suoi toast
+  { const i = SRC.indexOf("} else if (r && (r.need === 'items_agotados' || r.error === 'items_agotados')) {");
+    const corpo = i < 0 ? '' : SRC.slice(SRC.indexOf('{', i + 8) + 1, SRC.indexOf('    } else {', i));
+    const L = { toast: [], marca: null, btn: { disabled: true } };
+    const g = { _ago86Marca: (a) => { L.marca = a; }, toast: (k, s) => L.toast.push([k, s]) };
+    let ret = 'non uscito';
+    try { ret = new Function('r', 'btn', '_ago86Marca', 'toast', corpo + '\nreturn "caduto";')({ ok: false, borde: true, scritto: false, need: 'items_agotados', agotados: [{ id: 'pan', nombre: 'Pan de masa madre' }] }, L.btn, g._ago86Marca, g.toast); } catch (e) { ret = 'errore ' + e.message; }
+    t('G · need:items_agotados nella correzione: il nome del piatto, segnato 86, bottone riattivato, il pannello resta (return)', i > 0 && ret === undefined && L.marca && L.marca[0].id === 'pan' && /Se acabó: Pan de masa madre — no se agregó nada/.test((L.toast[0] || [])[1] || '') && L.btn.disabled === false, { ret, L });
+    t('G2 · «Qué cambió» ha la riga', /Agregar algo que se acabó/.test(fs.readFileSync(new URL('./que_cambio.html', import.meta.url), 'utf8'))); }
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
@@ -77,6 +86,7 @@ if (process.argv.includes('--mutanti')) {
     ['la leva ignorata (sempre accesa)', 'function _cancLocalOn() { return CANC_LOCAL_TEL !== null ? CANC_LOCAL_TEL : CANC_LOCAL_SRV; }', 'function _cancLocalOn() { return true; }'],
     ['il poll filtra DOPO la guardia', "    r = _cancLocalFiltra(r);   // [23-ott · TERZA]", "    //"],
     ['la tessera non si ridisegna', '  try { refrescarMapa(); } catch (e) {}', ''],
+    ['la correzione 86 non riconosciuta (torna «No se pudo: ?»)', "} else if (r && (r.need === 'items_agotados' || r.error === 'items_agotados')) {", "} else if (r && r.error === 'items_agotados_x') {"],
     ['il bordo muto su cancelado non segna', 'if (r.cancelado || r._cancelado_vetro) _cancLocalSegna(mesa, uuid);', 'if (r.cancelado) _cancLocalSegna(mesa, uuid);'],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.split(a).join(b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
