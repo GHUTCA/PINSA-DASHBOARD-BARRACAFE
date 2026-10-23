@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.27 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.28 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3874,9 +3874,13 @@ async function _cieDudaMira(monto) {
   try { r = await gasPost('getCierreMesero', { codigo: STATE.codigo, nombre: STATE.nombre }); } catch (e) { r = null; }
   CIE.dudaHasta = 0;
   const y = r && r.ok ? r.ya_cerrado : undefined;
-  if (y && (y.declarado == null || Math.round(Number(y.declarado)) === Math.round(Number(monto)))) {
+  /* [23-ott · ② di 💵 `EL GIRO V32 2D5C5FF IL CORTE AM A ZERO CHIUDE IL PM`] `ya_cerrado` è l'ULTIMO corte di oggi della persona, non questo: un AM a $0 farebbe
+     dire «Ya cerraste» a un PM a $0 mai entrato. Vale solo se è nato dopo l'inizio di questo tentativo (2 min di margine per gli orologi); senza `ts` ⇒
+     «no quedó guardado» e si riprova con la stessa chiave, il verso sicuro. */
+  const yNuovo = y && y.ts && new Date(y.ts).getTime() >= (CIE.envioTs || 0) - 120000;
+  if (yNuovo && (y.declarado == null || Math.round(Number(y.declarado)) === Math.round(Number(monto)))) {
     try { localStorage.removeItem(_cieUidKey()); } catch (e2) {}
-    CIE.uid = ''; CIE.uidMonto = null;
+    CIE.uid = ''; CIE.uidMonto = null; CIE.envioTs = 0;
     _cieOkSegna({ id: y.id || '' });
     _cieYaCerraste({ ts: Date.now(), id: y.id || '', nombre: STATE.nombre || '' });
     bordeHecho('corte_duda', { esito: 'ya' });
@@ -4016,7 +4020,7 @@ async function cierreAbrir() {
   /* l'uid vive UN flusso: dentro (retry compresi) resta lo stesso — il server
      risponde `dedup` invece di sdoppiare; un cierre nuovo (es. turno noche
      dopo il turno día, stesso monto) riparte da zero e ne conia un altro. */
-  CIE.uid = ''; CIE.uidMonto = null; CIE.pasarMesas = false;
+  CIE.uid = ''; CIE.uidMonto = null; CIE.envioTs = 0; CIE.pasarMesas = false;
   _cieRender('<div class="cie-msg">Mirando tus mesas…</div>');
   // [01-ott · AUT-EMERG-0537] la sala si rilegge ADESSO; senza, decide il libro
   const loc = CORTE_LOCAL_ON ? _cieDatosLocali(await _cieLeerFresco()) : null;
@@ -4362,7 +4366,7 @@ async function cierreEnviar() {
   if (monto == null) { toast('err', 'Escribe cuánto efectivo tienes'); return; }
   if (CIE.res && CIE.res.exige === 'motivo' && !CIE.motivo) { toast('err', 'Elige el motivo'); return; }
   { const _ok = CIE.deNuevo ? null : _cieOkRecente(); if (_ok) { _cieYaCerraste(_ok); return; } }   // [23-ott] il secondo tocco dopo un sì
-  CIE.enviando = true;
+  CIE.enviando = true; CIE.envioTs = CIE.envioTs || Date.now();   // [23-ott · ① di 💵 G8] l'ora del PRIMO invio di questo corte
   const b = $('cieBtn'); if (b) { b.disabled = true; b.textContent = 'Cerrando…'; }
   try {
     /* v3.0 · CAMBIO 8 + BLOCCO 7 (GAS v3.124.0): la franja viaggia col cierre —
@@ -4425,7 +4429,7 @@ async function cierreEnviar() {
          QUI, a fossile confermato: la prossima dichiarazione è un fatto
          nuovo e conia un uid nuovo, come promette la UI. */
       try { localStorage.removeItem(_cieUidKey()); } catch (e2) {}
-      CIE.uid = ''; CIE.uidMonto = null;
+      CIE.uid = ''; CIE.uidMonto = null; CIE.envioTs = 0;
       CIE.res = r;
       if (CIE_GUARDIA_ON) { _cieOkSegna(r); CIE.deNuevo = false; }   // [23-ott] il segno nasce INSIEME al bruciare della chiave
       /* 🔴 [11-set · caso Anthony, portato da Alberto] `r.dedup===true` tiene
