@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.35 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.36 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -8237,6 +8237,7 @@ async function refrescar(conSkeleton) {
        mesa calerebbe senza ragione, `r` diventa la versione con quella mesa
        restaurata dalla foto precedente. Leva spenta = `r` esce identico
        all'ingresso, bit per bit (mergeSalaGuardia lo ritorna intatto). */
+    r = _corrAttApplica(r);    // [24-ott · TERZA] una vista più vecchia della MIA correzione si corregge prima del disegno (pedido · résumé · venta_turno)
     r = _muertosFiltra(r);     // [24-ott · TERZA] le morti dichiarate dal bordo escono prima della guardia (assente = come oggi)
     r = _cancLocalFiltra(r);   // [23-ott · TERZA] il pedido cancellato da qui non torna, nemmeno col poll partito prima del gesto (leva spenta = identico)
     if (GUARDIA_SALA_ON) r = mergeSalaGuardia(STATE.sala, r);
@@ -10511,6 +10512,41 @@ function _dtPinta() {
    il ② (nessuna coda di riconciliazione: lì non c'è un item/qty solo da
    seguire, può cambiare l'intero pedido; la verità torna col prossimo poll
    vero, come già faceva prima di questo fix). */
+/* ═══ [24-ott · 🖐 TERZA · `TERZA V32 IL TOTALE VECCHIO DOPO LA CORREZIONE` · reperto 🖐 QUARTA `QUARTA V32 IL LAMPEGGIO ANCHE CON GUARDIA 0`] ═══
+   🩸 La 998 alle 10:38 (guardia spenta): tolto il pan, ~20 s dopo la mesa torna «$4.280» per ~5 s col pannello «1 línea · Cafe Ristretto $3.190».
+   Una vista PIÙ VECCHIA del gesto (la foto del GAS che il bordo serve quando i suoi fatti non sono freschi) porta il pedido e il résumé ancora interi;
+   la riconciliazione locale corregge le RIGHE nel modello DOPO il disegno, ma il résumé `mesas` e `venta_turno` restano vecchi, e `_vpTot` prende
+   max(résumé, righe): un cobro in quei secondi chiede di più. Qui la correzione di QUESTO telefono si applica alla risposta PRIMA della guardia e del
+   disegno: se la vista porta ancora il totale vecchio del pedido, si mette il nuovo e la stessa differenza si toglie dal résumé della mesa e da
+   `venta_turno.venta`. Quando la vista ha il totale nuovo, il registro si svuota da solo. 5 minuti. Accesa di fabbrica (denaro), freno `?corratt=0`. */
+const CORR_ATT_ON = (function () {
+  const q = QS.get('corratt');
+  try { if (q === '0') { localStorage.setItem('sala_corratt', '0'); return false; } if (q === '1') { localStorage.setItem('sala_corratt', '1'); return true; } return localStorage.getItem('sala_corratt') !== '0'; }
+  catch (e) { return q !== '0'; }
+})();
+function _corrAttSegna(mesa, uuid, r) {
+  if (!CORR_ATT_ON || !r || r.cancelado || r.sin_cambios || r.total == null || uuid == null) return;
+  STATE._corrAtteso = STATE._corrAtteso || {};
+  STATE._corrAtteso[String(uuid)] = { mesa: String(mesa), total: Number(r.total) || 0, items_json: r.items_json || null, ts: Date.now() };
+}
+function _corrAttApplica(r) {
+  if (!CORR_ATT_ON || !r || !STATE._corrAtteso) return r;
+  const reg = STATE._corrAtteso, now = Date.now();
+  Object.keys(reg).forEach(function (u) {
+    const e = reg[u];
+    if (!e || now - e.ts > 300000) { delete reg[u]; return; }
+    let p = null;
+    _ARRAYS_SALA_MESA.forEach(function (k) { if (!p) (r[k] || []).forEach(function (x) { if (!p && x && String(x.uuid) === u) p = x; }); });
+    if (!p) return;                                              // la vista non lo porta: niente da correggere (né da cancellare)
+    const vecchio = Number(p.total) || 0, delta = vecchio - e.total;
+    if (Math.abs(delta) < 1) { delete reg[u]; return; }          // la vista ha già il totale nuovo: il registro si svuota
+    p.total = e.total; if (e.items_json) p.items_json = e.items_json;
+    const rs = r.mesas || r.mesas_resumen;
+    if (Array.isArray(rs)) rs.forEach(function (m) { if (m && String(m.mesa) === e.mesa && typeof m.total === 'number') m.total = Math.max(0, m.total - delta); });
+    if (r.venta_turno && typeof r.venta_turno.venta === 'number') r.venta_turno.venta = Math.max(0, r.venta_turno.venta - delta);
+  });
+  return r;
+}
 function _corrAplicaLocal(mesa, uuid, r) {
   /* [25-set 13:4x · PASSAGGIO CONTROLLER BKP V28] `mesa` qui arriva già
      `String(...)`-ata (r.3941 ca., `_mesaCorr`) perché il resto del file
@@ -10539,6 +10575,7 @@ function _corrAplicaLocal(mesa, uuid, r) {
   }
   if (String(STATE.mesaAbierta) === String(mesa) && STATE.sala) renderMesaSheet(STATE.sala);
   if (r.cancelado) _cancLocalSegna(mesa, uuid);   // [23-ott · TERZA] leva spenta = niente
+  _corrAttSegna(mesa, uuid, r);                   // [24-ott · TERZA] il totale nuovo vale anche per una vista più vecchia del gesto
   /* [25-set 14:0x · MISURATO da CONTROLLER nella console di Alberto] la
      mesa 997 aveva `mios/pend/limpiar` GIÀ a 0/0/0 (questa mutazione aveva
      funzionato) e `STATE.mesaAbierta` era '' — Alberto non stava guardando
@@ -10627,6 +10664,7 @@ function _dtEliminarOptimista(mesa, uuid, itemId, qtyEsperada, r) {
   STATE._corrOptimista = STATE._corrOptimista || {};
   STATE._corrOptimista[uuid + ':' + itemId] = { mesa: mesa, uuid: uuid, itemId: itemId, qtyEsperada: qtyEsperada, ts: Date.now() };
   if (r.cancelado || r._cancelado_vetro) _cancLocalSegna(mesa, uuid);   // [23-ott · TERZA] leva spenta = niente
+  _corrAttSegna(mesa, uuid, r);                                          // [24-ott · TERZA] idem
   if (String(STATE.mesaAbierta) === String(mesa) && STATE.sala) renderMesaSheet(STATE.sala);
   renderPanel();   // [25-set 14:0x] stessa terza superficie di `_corrAplicaLocal` sopra
 }
