@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.33 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.34 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3131,6 +3131,7 @@ async function leerSala(codigo, nombre) {
           if (_edadV < _tettoEdad) {
             BORDE_SALA.fallos = 0;
             mia._edad_dato_s = Math.round(_edadV / 1000);
+            if (MUERTOS_ON && Array.isArray(j.datos.datos.muertos)) mia.muertos = j.datos.datos.muertos;   // [24-ott] le morti recenti: assente = «non so», [] = nessuna
             /* [AUT-0461 · 27-set] l ora VERA dei dati (quando il libro li ha letti): la junta la usa per decidere se una foto è nata prima o dopo il gesto. `_edad_dato_s` dal 26-set (AUT-0445) è l età del BORDO, fresca anche quando i dati dentro sono vecchi. */
             if (_tsD > 0) mia._ts_datos = _tsD;
             /* v3.23.0 · una sala vecchia si mostra, ma DICE quanto è vecchia.
@@ -8100,9 +8101,36 @@ function _cancLocalSegna(mesa, uuid) {
   try { renderPanel(); } catch (e) {}
   try { if (String(STATE.mesaAbierta) === String(mesa) && STATE.sala) renderMesaSheet(STATE.sala); } catch (e) {}
 }
+/* ═══ [24-ott · 🖐 TERZA · `TERZA V32 IL PEDIDO CANCELLATO RISORGE NEL COBRO` + «Sopravvive al RICARICO» · contratto 🎛 BKP `BKP V32 IL CAMPO MUERTOS`] ═══
+   🩸 La 998 (24-ott 10:03): caffè cancellato dal PC, restaurato dalla guardia su ogni ALTRO telefono a ogni poll, fino al pannello cobrar ($3.190), e
+   sopravvissuto alla ricarica perché la foto salvata lo conteneva e al primo poll la guardia lo rimetteva confrontando con la foto.
+   ① il bordo porta `muertos: [{uuid, mesa, ts, como}]` (leva del bordo SALA_MUERTOS_ON; ASSENTE = «non so», si fa come oggi · [] = nessuna morte): ogni uuid
+   lì dentro esce dalle liste PRIMA della guardia e la guardia non lo restaura mai — vale per TUTTI i telefoni, non solo per chi ha fatto il gesto.
+   ② la guardia NON restaura da una foto (`_foto_local`, `_vieja_s`): una foto non è «la vista di prima», è un ricordo e può contenere un restauro.
+   Freno per apparecchio `?muertos=0` (spegne ① e ②). */
+const MUERTOS_ON = (function () {
+  const q = QS.get('muertos');
+  try { if (q === '0') { localStorage.setItem('sala_muertos', '0'); return false; } if (q === '1') { localStorage.setItem('sala_muertos', '1'); return true; } return localStorage.getItem('sala_muertos') !== '0'; }
+  catch (e) { return q !== '0'; }
+})();
+function _muertosSet(r) {
+  const set = {};
+  if (MUERTOS_ON && r && Array.isArray(r.muertos)) r.muertos.forEach(function (m) { if (m && m.uuid != null) set[String(m.uuid)] = true; });
+  return set;
+}
+function _muertosFiltra(r) {
+  if (!r || !MUERTOS_ON || !Array.isArray(r.muertos) || !r.muertos.length) return r;
+  const mu = _muertosSet(r);
+  _ARRAYS_SALA_MESA.forEach(function (k) {
+    if (Array.isArray(r[k])) r[k] = r[k].filter(function (p) { return !(p && p.uuid != null && mu[String(p.uuid)]); });
+  });
+  return r;
+}
 function mergeSalaGuardia(prevR, respR) {
   if (!respR || respR.ok !== true) return prevR || respR;
   if (!prevR) return respR;                    // niente "prima" con cui confrontare: entra libera
+  if (MUERTOS_ON && (prevR._foto_local || prevR._vieja_s)) return respR;   // [24-ott] ② da una foto non si restaura: è un ricordo, non la vista di prima
+  const _mu = _muertosSet(respR);              // [24-ott] ① un morto dichiarato dal bordo non si restaura mai
 
   // ① tutto ciò che RISPONDE ADESSO, per uuid — è la fonte di verità, non si tocca mai
   const presentesAhora = {};
@@ -8124,6 +8152,7 @@ function mergeSalaGuardia(prevR, respR) {
       if (id == null || presentesAhora[id]) return;    // senza identità, o ancora presente: niente da fare
       const mesa = (p && p.mesa != null) ? String(p.mesa) : null;
       if (!mesa || justificadas[mesa]) return;          // senza mesa, o il calo è legittimo: non si restaura
+      if (_mu[id]) return;                              // [24-ott] morto dichiarato dal bordo: non si restaura
       mancanti.push({ k: k, row: p, mesa: mesa });
     });
   });
@@ -8205,6 +8234,7 @@ async function refrescar(conSkeleton) {
        mesa calerebbe senza ragione, `r` diventa la versione con quella mesa
        restaurata dalla foto precedente. Leva spenta = `r` esce identico
        all'ingresso, bit per bit (mergeSalaGuardia lo ritorna intatto). */
+    r = _muertosFiltra(r);     // [24-ott · TERZA] le morti dichiarate dal bordo escono prima della guardia (assente = come oggi)
     r = _cancLocalFiltra(r);   // [23-ott · TERZA] il pedido cancellato da qui non torna, nemmeno col poll partito prima del gesto (leva spenta = identico)
     if (GUARDIA_SALA_ON) r = mergeSalaGuardia(STATE.sala, r);
     /* ═══ v3.22.0 · [AUT-EMERG-0004] · LA JUNTA DICE DOVE È ANDATO IL CONTO ═══
