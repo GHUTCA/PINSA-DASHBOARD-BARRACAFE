@@ -22,9 +22,9 @@ async function banco(SRC, quieto) {
   }
   // A · il telefono che NON ha cancellato (la 998): il bordo dice la morte
   { const w = mondo(); w.poll({ mios: [P('u-cafe', 998, 3190)] });
-    w.poll({ mios: [], muertos: [{ uuid: 'u-cafe', mesa: '998', ts: 1, como: 'cancelado' }] });
+    w.poll({ mios: [], muertos: [{ uuid: 'u-cafe', mesa: '998', ts: 1, como: 'cancelado', fuente: 'pg' }] });
     t('A1 · un altro telefono: il pedido morto (muertos) NON si restaura', !w.vede('u-cafe') && w.L.rech === 0, w.L);
-    w.poll({ mios: [P('u-cafe', 998, 3190)], muertos: [{ uuid: 'u-cafe', mesa: '998' }] });
+    w.poll({ mios: [P('u-cafe', 998, 3190)], muertos: [{ uuid: 'u-cafe', mesa: '998', fuente: 'pg' }] });
     t('A2 · una vista che lo porta ancora (in ritardo) ma lo dichiara morto: fuori', !w.vede('u-cafe'));
     for (let i = 0; i < 5; i++) w.poll({ mios: [], muertos: [] });
     t('A3 · cinque poll dopo (muertos vuoto): non risorge', !w.vede('u-cafe')); }
@@ -41,9 +41,17 @@ async function banco(SRC, quieto) {
   { const w = mondo(); w.poll({ mios: [P('u-vivo', 30, 5000)] }); w.poll({ mios: [], muertos: [] });
     t('D · un pedido vivo che sparisce senza essere morto: la guardia lo restaura ancora (AUT-0396 intatta)', w.vede('u-vivo') && w.L.rech === 1); }
   // E · il freno ?muertos=0
-  { const w = mondo({ on: false }); w.poll({ mios: [P('u-cafe', 998, 3190)] }); w.poll({ mios: [], muertos: [{ uuid: 'u-cafe' }] });
+  { const w = mondo({ on: false }); w.poll({ mios: [P('u-cafe', 998, 3190)] }); w.poll({ mios: [], muertos: [{ uuid: 'u-cafe', fuente: 'pg' }] });
     const w2 = mondo({ on: false }); w2.ctx.STATE.sala = { ok: true, _foto_local: 120, mios: [P('u-cafe', 998, 3190)] }; w2.poll({ mios: [] });
     t('E · ?muertos=0: tutto come oggi (restaura col muertos e dalla foto)', w.vede('u-cafe') && w2.vede('u-cafe')); }
+  // G · [💵 EL GIRO] una voce del SOLO bordo (senza fuente:'pg') può essere un annullamento che il GAS rifiuterà: il vetro la ignora (il pedido vivo resta nel conto)
+  { const w = mondo(); w.poll({ mios: [P('u-vivo', 40, 2500)] });
+    w.poll({ mios: [P('u-vivo', 40, 2500)], muertos: [{ uuid: 'u-vivo', mesa: '40', como: 'cancelado' }] });
+    t('G1 · voce del solo bordo e il pedido ancora nella vista: NON si toglie (resta nel cobro)', w.vede('u-vivo'));
+    w.poll({ mios: [], muertos: [{ uuid: 'u-vivo', mesa: '40', como: 'cancelado' }] });
+    t('G2 · voce del solo bordo e il pedido sparito: la guardia fa come oggi (lo rimette) finché PG non conferma', w.vede('u-vivo') && w.L.rech === 1, w.L);
+    w.poll({ mios: [], muertos: [{ uuid: 'u-vivo', mesa: '40', como: 'cancelado', fuente: 'pg' }] });
+    t('G3 · PG conferma (fuente pg): esce e non torna', !w.vede('u-vivo')); }
   t('F1 · leerSala porta muertos nella fetta, e refrescar filtra PRIMA della guardia', /if \(MUERTOS_ON && Array\.isArray\(j\.datos\.datos\.muertos\)\) mia\.muertos = j\.datos\.datos\.muertos;/.test(SRC) &&
     SRC.indexOf('    r = _muertosFiltra(r);') > 0 && SRC.indexOf('    r = _muertosFiltra(r);') < SRC.indexOf('    if (GUARDIA_SALA_ON) r = mergeSalaGuardia(STATE.sala, r);'));
   return { ok, ko };
@@ -54,6 +62,7 @@ if (process.argv.includes('--mutanti')) {
     ['il filtro non toglie', "    if (Array.isArray(r[k])) r[k] = r[k].filter(function (p) { return !(p && p.uuid != null && mu[String(p.uuid)]); });\n  });\n  return r;\n}\nfunction mergeSalaGuardia", "  });\n  return r;\n}\nfunction mergeSalaGuardia"],
     ['dalla foto si restaura', "  if (MUERTOS_ON && (prevR._foto_local || prevR._vieja_s)) return respR;", ''],
     ['la guardia spenta del tutto coi muertos', "  if (!prevR) return respR;                    // niente \"prima\" con cui confrontare: entra libera", "  if (!prevR || respR.muertos) return respR;"],
+    ['accetta anche le voci senza fuente pg', "m.uuid != null && m.fuente === 'pg') set[String(m.uuid)] = true;", "m.uuid != null) set[String(m.uuid)] = true;"],
     ['il freno ignorato', "  if (MUERTOS_ON && r && Array.isArray(r.muertos))", "  if (r && Array.isArray(r.muertos))"],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.split(a).join(b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
