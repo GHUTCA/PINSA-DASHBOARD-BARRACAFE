@@ -24,7 +24,7 @@ async function banco(SRC, quieto) {
     const S2 = SRC.slice(SRC.indexOf('var SALUD_RILEGGE_ON'), SRC.indexOf('\n_saludLeggi();\n', SRC.indexOf('function _saludLeggi(')));
     vm.createContext(ctx); vm.runInContext(cercaK + S2.replace('const SALUD_RILEGGE_MS', 'var SALUD_RILEGGE_MS'), ctx);
     const leggi = async () => { vm.runInContext('_saludLeggi()', ctx); await vm.runInContext('SALUD_LEVE_P', ctx); };
-    return { ctx, L, leggi, set: (f) => { salud = { ok: true, flags: f }; } };
+    return { ctx, L, leggi, set: (f) => { salud = { ok: true, flags: f }; }, raw: (o) => { salud = o; } };
   }
   { const w = mondo(); await w.leggi();
     t('A · leva assente: una lettura sola, nessun giro (il vetro di ieri)', w.L.fetch === 1 && w.L.iv.length === 0 && w.ctx.SALUD_RILEGGE_ON === false, w.L); }
@@ -36,8 +36,15 @@ async function banco(SRC, quieto) {
     t('D · e anche il FRENO: la leva tirata arriva al giro dopo, senza ricaricare', w.ctx.CLOCKIN_VETRO_ON === false);
     w.L.vis(); await w.ctx.SALUD_LEVE_P;
     t('E · al ritorno in primo piano si rilegge subito', w.L.fetch === 4, w.L.fetch);
-    w.set({ clockin_vetro_borde_on: '0' }); w.L.iv[0].f(); await w.ctx.SALUD_LEVE_P;
-    t('F · la leva della rilettura spenta dal bordo: il giro si ferma', w.L.cleared === 1 && w.ctx.SALUD_RILEGGE_ON === false); }
+    w.set({ clockin_vetro_borde_on: '1', sala_salud_rilegge_on: '1' }); w.L.iv[0].f(); await w.ctx.SALUD_LEVE_P;
+    w.raw({ ok: false, error: 'worker' }); w.L.iv[0].f(); await w.ctx.SALUD_LEVE_P;
+    t('S1 · una rilettura {ok:false} NON spegne le leve e NON ferma il giro (💵)', w.ctx.CLOCKIN_VETRO_ON === true && w.ctx.SALUD_RILEGGE_ON === true && w.L.cleared === 0, { cl: w.ctx.CLOCKIN_VETRO_ON, re: w.ctx.SALUD_RILEGGE_ON });
+    w.raw({ ok: true, flags: { clockin_vetro_borde_on: '0' } }); w.L.iv[0].f(); await w.ctx.SALUD_LEVE_P;
+    t('S3 · una rilettura monca (senza la chiave della leva) è ignorata', w.ctx.CLOCKIN_VETRO_ON === true && w.L.cleared === 0);
+    w.set({ clockin_vetro_borde_on: '1', sala_salud_rilegge_on: '0' }); w.L.iv[0].f(); await w.ctx.SALUD_LEVE_P;
+    t('F · la leva della rilettura spenta dal bordo col "0": il giro si ferma', w.L.cleared === 1 && w.ctx.SALUD_RILEGGE_ON === false); }
+  { const w = mondo(); w.raw({ ok: false, error: 'worker' }); await w.leggi();
+    t('A2 · la PRIMA lettura resta quella di ieri anche con {ok:false} (nessuna leva accesa, nessun giro)', w.L.iv.length === 0 && w.ctx.CLOCKIN_VETRO_ON === false); }
   { const w = mondo('saludre=0'); w.set({ sala_salud_rilegge_on: '1' }); await w.leggi();
     t('G · ?saludre=0 ferma il giro su quell apparecchio', w.L.iv.length === 0); }
   t('H · la prima lettura parte da sola al caricamento, come prima', /\n_saludLeggi\(\);\n/.test(SRC) && !/\(function \(\) \{\n  try \{\n    if \(!BORDE_SALA \|\| !BORDE_SALA\.URL\) return;\n    SALUD_LEVE_P/.test(SRC));
@@ -48,6 +55,7 @@ if (process.argv.includes('--mutanti')) {
     ['la leva della rilettura non si legge', "      SALUD_RILEGGE_ON = String(cercaK(j, 'sala_salud_rilegge_on')) === '1';", ''],
     ['il giro non si programma', '    if (!_SALUD_IV) _SALUD_IV = setInterval(_saludLeggi, SALUD_RILEGGE_MS);', ''],
     ['il giro non si ferma', '  } else if (_SALUD_IV) { clearInterval(_SALUD_IV); _SALUD_IV = null; }', '  }'],
+    ['la rilettura monca o ok:false applicata', "      if (_SALUD_N++ > 0 && (!j || j.ok === false || cercaK(j, 'sala_salud_rilegge_on') == null)) return;", ''],
     ['il freno del telefono ignorato', "SALUD_RILEGGE_ON && QS.get('saludre') !== '0'", 'SALUD_RILEGGE_ON'],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.split(a).join(b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
