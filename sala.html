@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.38 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.39 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -10527,11 +10527,16 @@ const CORR_ATT_ON = (function () {
   catch (e) { return q !== '0'; }
 })();
 function _corrAttSegna(mesa, uuid, r, viejo) {
-  if (!CORR_ATT_ON || !r || r.cancelado || r.sin_cambios || r.total == null || uuid == null || viejo == null) return;
+  /* [24-ott · reperto 🖐 QUARTA `QUARTA V32 A0D5274 LAMPEGGIA ANCORA NEL COBRAR`] anche l'ANNULLAMENTO si registra (totale 0, `canc`): la 998 col solo
+     caffè, «Un producto» lo annulla, e una vista vecchia riportava pedido e résumé a $3.190 nel cobrar per ~10 s. Il registro locale (`?canc`) è spento e
+     i `muertos` contano solo PG (≤ 60 s): qui la vista che porta ancora il totale di prima perde il pedido, e la stessa somma esce da résumé e venta. */
+  const _canc = !!(r && (r.cancelado || r._cancelado_vetro));
+  if (!CORR_ATT_ON || !r || r.sin_cambios || uuid == null || viejo == null) return;
+  if (!_canc && r.total == null) return;
   STATE._corrAtteso = STATE._corrAtteso || {};
   const _prev = STATE._corrAtteso[String(uuid)], _v = Number(viejo) || 0;   // [24-ott · 🟡 di 💵 `EL GIRO V32 94E70B1 CORR ATTESO VERDE`] due correzioni di fila: si tengono TUTTI i totali di prima
   const _viejos = ((_prev && Date.now() - _prev.ts <= 300000 && Array.isArray(_prev.viejos)) ? _prev.viejos : []).filter(function (x) { return Math.abs(x - _v) >= 1; }).concat([_v]);
-  STATE._corrAtteso[String(uuid)] = { mesa: String(mesa), total: Number(r.total) || 0, viejo: _v, viejos: _viejos, items_json: r.items_json || null, ts: Date.now() };
+  STATE._corrAtteso[String(uuid)] = { mesa: String(mesa), total: _canc ? 0 : (Number(r.total) || 0), canc: _canc, viejo: _v, viejos: _viejos, items_json: _canc ? null : (r.items_json || null), ts: Date.now() };
 }
 function _corrAttApplica(r) {
   if (!CORR_ATT_ON || !r || !STATE._corrAtteso) return r;
@@ -10539,13 +10544,14 @@ function _corrAttApplica(r) {
   Object.keys(reg).forEach(function (u) {
     const e = reg[u];
     if (!e || now - e.ts > 300000) { delete reg[u]; return; }
-    let p = null;
-    _ARRAYS_SALA_MESA.forEach(function (k) { if (!p) (r[k] || []).forEach(function (x) { if (!p && x && String(x.uuid) === u) p = x; }); });
+    let p = null, pk = null;
+    _ARRAYS_SALA_MESA.forEach(function (k) { if (!p) (r[k] || []).forEach(function (x) { if (!p && x && String(x.uuid) === u) { p = x; pk = k; } }); });
     if (!p) return;                                              // la vista non lo porta: niente da correggere (né da cancellare)
     const vecchio = Number(p.total) || 0, delta = vecchio - e.total;
     const _vv = Array.isArray(e.viejos) ? e.viejos : [e.viejo];
     if (!_vv.some(function (x) { return Math.abs(vecchio - x) < 1; }) || Math.abs(delta) < 1) return;   // solo la vista che porta ancora il totale DI PRIMA; il nuovo o un terzo non si toccano
-    p.total = e.total; if (e.items_json) p.items_json = e.items_json;
+    if (e.canc) r[pk] = r[pk].filter(function (x) { return !(x && String(x.uuid) === u); });   // annullato: la vista vecchia lo perde
+    else { p.total = e.total; if (e.items_json) p.items_json = e.items_json; }
     const rs = r.mesas || r.mesas_resumen;
     if (Array.isArray(rs)) rs.forEach(function (m) { if (m && String(m.mesa) === e.mesa && typeof m.total === 'number') m.total = Math.max(0, m.total - delta); });
     if (r.venta_turno && typeof r.venta_turno.venta === 'number') r.venta_turno.venta = Math.max(0, r.venta_turno.venta - delta);

@@ -35,8 +35,15 @@ async function banco(SRC, quieto) {
     t('B4 · senza il totale di prima non si registra (non si indovina)', !w.ctx.STATE._corrAtteso); }
   { const w = mondo(); w.segna('998', 'u-998', { ok: true, scritto: true });
     t('C · la risposta senza total (il bordo a leva spenta): niente registro, la vista com è', !w.ctx.STATE._corrAtteso && w.applica(VISTA_VECCHIA).mesas[0].total === 4280); }
-  { const w = mondo(); w.segna('998', 'u-998', { ok: true, cancelado: true, total: 0 });
-    t('D · un annullamento non si registra qui (lo tolgono il registro locale e i muertos)', !w.ctx.STATE._corrAtteso); }
+  // D · [QUARTA 11:1x] l'ANNULLAMENTO: la 998 col solo caffè, «Un producto» lo annulla; una vista vecchia lo riportava a $3.190 nel cobrar
+  { const w = mondo(); w.segna('998', 'u-998', { ok: true, cancelado: true }, 3190); w.avanza(15000);
+    const VV = { ok: true, mios: [{ uuid: 'u-998', mesa: 998, total: 3190 }, { uuid: 'u-50', mesa: 50, total: 9000 }], mesas: [{ mesa: '998', total: 3190 }, { mesa: '50', total: 9000 }], venta_turno: { venta: 12190 } };
+    const r = w.applica(VV);
+    t('D1 · annullato: la vista vecchia PERDE il pedido, résumé della mesa a 0, venta −3.190; l altra mesa intatta', !r.mios.some((x) => x.uuid === 'u-998') && r.mesas.find((x) => x.mesa === '998').total === 0 && r.venta_turno.venta === 9000 && r.mios.some((x) => x.uuid === 'u-50'), r);
+    const r2 = w.applica({ ok: true, mios: [{ uuid: 'u-998', mesa: 998, total: 1500 }], mesas: [{ mesa: '998', total: 1500 }] });
+    t('D2 · una vista col pedido a un TERZO totale (non quello di prima): non si tocca', r2.mios.length === 1 && r2.mesas[0].total === 1500); }
+  { const w = mondo(); w.segna('998', 'u-998', { ok: true, _cancelado_vetro: true }, 3190);
+    t('D3 · «tutte le qty a zero» senza cancelado del bordo (_cancelado_vetro) si registra come annullamento', w.ctx.STATE._corrAtteso['u-998'].canc === true && w.ctx.STATE._corrAtteso['u-998'].total === 0); }
   { const w = mondo(); w.segna('998', 'u-998', { ok: true, total: 3190 }); w.avanza(301000);
     t('E · oltre 5 minuti la voce scade e la vista non si tocca', w.applica(VISTA_VECCHIA).mesas[0].total === 4280 && !Object.keys(w.ctx.STATE._corrAtteso).length); }
   { const w = mondo({ on: false }); w.segna('998', 'u-998', { ok: true, total: 3190 });
@@ -59,7 +66,9 @@ if (process.argv.includes('--mutanti')) {
     ['due correzioni di fila: si tiene solo l ultimo totale di prima', "    const _vv = Array.isArray(e.viejos) ? e.viejos : [e.viejo];", "    const _vv = [e.viejo];"],
     ['si registra senza il totale di prima', "|| uuid == null || viejo == null) return;", "|| uuid == null) return;"],
     ['la voce non scade', "    if (!e || now - e.ts > 300000) { delete reg[u]; return; }", "    if (!e) { return; }"],
-    ['si registra anche senza total', "|| r.total == null ||", "||"],
+    ['si registra anche senza total', "  if (!_canc && r.total == null) return;", ''],
+    ['l annullamento non toglie il pedido', "    if (e.canc) r[pk] = r[pk].filter(function (x) { return !(x && String(x.uuid) === u); });", "    if (false) {}"],
+    ['l annullamento non si registra', "  if (!_canc && r.total == null) return;", "  if (_canc || r.total == null) return;"],
     ['il freno ignorato', "  if (!CORR_ATT_ON || !r || !STATE._corrAtteso) return r;", "  if (!r || !STATE._corrAtteso) return r;"],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.split(a).join(b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
