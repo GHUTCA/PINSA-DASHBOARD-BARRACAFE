@@ -9,9 +9,9 @@ const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0)
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const F = "const _ARRAYS_SALA_MESA = ['mios', 'pendientes', 'por_limpiar', 'sin_dueno'];\n" + fnVin(SRC, '_corrAttSegna') + fnVin(SRC, '_corrAttApplica');
-  function mondo({ on = true } = {}) {
+  function mondo({ on = true, mu = true } = {}) {
     let now = Date.parse('2026-10-24T10:38:01-03:00');
-    const ctx = { String, Number, Math, Object, Array, JSON, Date: Object.assign(function (x) { return new globalThis.Date(x == null ? now : x); }, { now: () => now }), CORR_ATT_ON: on, STATE: {} };
+    const ctx = { String, Number, Math, Object, Array, JSON, Date: Object.assign(function (x) { return new globalThis.Date(x == null ? now : x); }, { now: () => now }), CORR_ATT_ON: on, MUERTOS_ON: mu, STATE: {} };
     vm.createContext(ctx); vm.runInContext(F, ctx);
     return { ctx, avanza: (ms) => { now += ms; }, segna: (m, u, r, v = 4280) => ctx._corrAttSegna(m, u, r, v), applica: (r) => ctx._corrAttApplica(JSON.parse(JSON.stringify(r))) };
   }
@@ -44,6 +44,19 @@ async function banco(SRC, quieto) {
     t('D2 · una vista col pedido a un TERZO totale (non quello di prima): non si tocca', r2.mios.length === 1 && r2.mesas[0].total === 1500); }
   { const w = mondo(); w.segna('998', 'u-998', { ok: true, _cancelado_vetro: true }, 3190);
     t('D3 · «tutte le qty a zero» senza cancelado del bordo (_cancelado_vetro) si registra come annullamento', w.ctx.STATE._corrAtteso['u-998'].canc === true && w.ctx.STATE._corrAtteso['u-998'].total === 0); }
+  // D4-D6 · [💵 EL GIRO] il NO del GAS all'annullamento: il bordo toglie l'uuid dai muertos ⇒ il pedido è VIVO e non si nasconde
+  { const w = mondo(); w.segna('998', 'u-998', { ok: true, cancelado: true }, 3190); w.avanza(15000);
+    const VIVO = { ok: true, mios: [{ uuid: 'u-998', mesa: 998, total: 3190 }], mesas: [{ mesa: '998', total: 3190 }], venta_turno: { venta: 3190 }, muertos: [] };
+    const r5 = w.applica(Object.assign({}, VIVO, { muertos: [{ uuid: 'u-998', mesa: '998', como: 'cancelado' }] }));
+    t('D5 · il bordo lo elenca ancora fra i muertos (prima del verdetto): esce', !r5.mios.some((x) => x.uuid === 'u-998') && r5.mesas[0].total === 0);
+    const r4 = w.applica(VIVO);
+    t('D4 · il GAS ha detto NO (muertos senza di lui): il pedido VIVO resta nella mesa e nel cobro, e la voce si chiude', r4.mios.some((x) => x.uuid === 'u-998') && r4.mesas[0].total === 3190 && r4.venta_turno.venta === 3190 && !w.ctx.STATE._corrAtteso['u-998'], r4);
+    const r4b = w.applica(Object.assign({}, VIVO, { muertos: undefined }));
+    t('D4b · e dopo, una vista vecchia senza muertos non lo toglie più (la voce è chiusa)', r4b.mios.some((x) => x.uuid === 'u-998')); }
+  { const w = mondo({ mu: false }); w.segna('998', 'u-998', { ok: true, cancelado: true }, 3190);
+    t('D6 · ?muertos=0: gli annullamenti non si registrano (senza muertos il NO non si vedrebbe)', !w.ctx.STATE._corrAtteso);
+    w.segna('998', 'u-998', { ok: true, total: 2000 }, 3190);
+    t('D6b · le correzioni parziali sì, anche a muertos spento', w.ctx.STATE._corrAtteso['u-998'].total === 2000); }
   { const w = mondo(); w.segna('998', 'u-998', { ok: true, total: 3190 }); w.avanza(301000);
     t('E · oltre 5 minuti la voce scade e la vista non si tocca', w.applica(VISTA_VECCHIA).mesas[0].total === 4280 && !Object.keys(w.ctx.STATE._corrAtteso).length); }
   { const w = mondo({ on: false }); w.segna('998', 'u-998', { ok: true, total: 3190 });
@@ -69,6 +82,8 @@ if (process.argv.includes('--mutanti')) {
     ['si registra anche senza total', "  if (!_canc && r.total == null) return;", ''],
     ['l annullamento non toglie il pedido', "    if (e.canc) r[pk] = r[pk].filter(function (x) { return !(x && String(x.uuid) === u); });", "    if (false) {}"],
     ['l annullamento non si registra', "  if (!_canc && r.total == null) return;", "  if (_canc || r.total == null) return;"],
+    ['il NO del GAS ignorato (pedido vivo nascosto)', "    if (e.canc && Array.isArray(r.muertos) && !r.muertos.some(function (x) { return x && String(x.uuid) === u; })) { delete reg[u]; return; }", ''],
+    ['annullamenti registrati anche a muertos spento', "  if (_canc && !MUERTOS_ON) return;", ''],
     ['il freno ignorato', "  if (!CORR_ATT_ON || !r || !STATE._corrAtteso) return r;", "  if (!r || !STATE._corrAtteso) return r;"],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.split(a).join(b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
