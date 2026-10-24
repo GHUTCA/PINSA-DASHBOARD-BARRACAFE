@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.31 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.32 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -15866,7 +15866,9 @@ function _pagoFallaBanner(rec) {
    Qui la stessa domanda nasce nel TELEFONO: se questo telefono ha un pago della stessa mesa negli ultimi `PAGO_DOBLE_MS` con un uid DIVERSO, ① se è ancora
    in volo PAGAR si ferma; ② se ha lo stesso medio e lo stesso importo (lo stesso criterio del bordo) si chiede «¿Es OTRO pago?» prima di mandare.
    Un pago a parti con un importo diverso non è toccato. Riusare l'uid fra due aperture NO: un secondo pago legittimo verrebbe deduplicato e sparirebbe.
-   Esiti: sì ⇒ «ok» · nessuna risposta ⇒ «ok» (si chiederà: il verso prudente) · NO definitivo ⇒ il segno si toglie. Un «volo» oltre 60 s vale «ok».
+   Esiti: sì ⇒ «ok» (il prossimo uguale si chiede) · NO definitivo ⇒ il segno si toglie · [24-ott · 🔴 di 💵 `EL GIRO V32 E21FC02 SENZA RISPOSTA NON E GIA
+   REGISTRATO`] nessuna risposta ⇒ «nose»: il telefono NON SA se è entrato, quindi niente domanda («ya se registró» sarebbe un ricordo spacciato per fatto) e il
+   prossimo uguale si RIMANDA col SUO uid: se era entrato il bordo deduplica, se no entra adesso. Un «volo» oltre 60 s vale «nose».
    Accesa di fabbrica (è una riparazione di denaro), freno per apparecchio `?pdoble=0`. */
 const PAGO_DOBLE_ON = (function () {
   const q = QS.get('pdoble');
@@ -15882,7 +15884,7 @@ function _pagoRecSalva() { try { localStorage.setItem('sala_pago_rec', JSON.stri
 function _pagoRecDe(mesa) {
   const o = _pagoRecMappa()[String(mesa)];
   if (!o || Date.now() - o.ts >= PAGO_DOBLE_MS) return null;
-  if (o.estado === 'volo' && Date.now() - o.ts > 60000) o.estado = 'ok';   // un volo che non torna non blocca per sempre
+  if (o.estado === 'volo' && Date.now() - o.ts > 60000) o.estado = 'nose';   // un volo che non torna non blocca per sempre, e non è un sì
   return o;
 }
 function _pagoRecSegna(mesa, uid, importe, medio, estado) {
@@ -15892,7 +15894,7 @@ function _pagoRecSegna(mesa, uid, importe, medio, estado) {
 function _pagoRecEsito(mesa, uid, esito) {
   const m = _pagoRecMappa(), o = m[String(mesa)];
   if (!o || o.uid !== String(uid)) return;
-  if (esito === 'no') delete m[String(mesa)]; else o.estado = 'ok';
+  if (esito === 'no') delete m[String(mesa)]; else o.estado = (esito === 'nose' ? 'nose' : 'ok');
   _pagoRecSalva();
 }
 async function pagoConfirmar(btn) {
@@ -16169,7 +16171,9 @@ async function pagoConfirmar(btn) {
           toast('warn', '⏳ El pago anterior de la mesa ' + pg.mesa + ' todavía se está registrando — espera un momento antes de cobrar de nuevo');
           return;
         }
-        if (_pr.medio === String(pg.medio) && _pr.importe === _imp) {
+        if (_pr.estado === 'nose' && _pr.medio === String(pg.medio) && _pr.importe === _imp) {
+          body.pago_uid = _pr.uid; pg.uid = _pr.uid;   // lo STESSO gesto, col suo uid: il bordo deduplica se era entrato
+        } else if (_pr.medio === String(pg.medio) && _pr.importe === _imp) {
           const _esOtro = await _repetidoAsk({ hace_s: (Date.now() - _pr.ts) / 1000, monto: _imp });
           if (!_esOtro) {
             _pagoEsito(pg, 'ok', 'repetido_local_era_el_mismo');
@@ -16534,7 +16538,7 @@ async function pagoConfirmar(btn) {
     else _rech('No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
     _pagoEsito(pg, 'sin_respuesta', (e && e.message) || '?');
-    _prFin = 'nose'; if (PAGO_DOBLE_ON) _pagoRecEsito(pg.mesa, pg.uid, 'ok');   // [24-ott] nessuna risposta: il pago può essere entrato, il prossimo si chiede
+    _prFin = 'nose'; if (PAGO_DOBLE_ON) _pagoRecEsito(pg.mesa, pg.uid, 'nose');   // [24-ott] nessuna risposta: non si sa se è entrato ⇒ il prossimo uguale si rimanda col suo uid
     bordeHecho('pago_normal_sin_respuesta', { mesa: (pg && pg.mesa) || '', motivo: (e && e.message) || '?', monto: (pg && pg.tot) || 0 });
     /* 🚨 [AUT-0403] 23-set · IL COMMENTO QUI SOTTO DICEVA GIÀ «dopo un timeout
        SI VERIFICA, non si insiste» — e la riga sotto non verificava affatto,
