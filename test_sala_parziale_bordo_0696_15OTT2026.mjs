@@ -17,7 +17,8 @@ function gira(SRC, { pg, body, rB, propina = 0 }) {
     _marcarCierreInstante: (m) => log.push(['cierre', m]), _marcarPagoParcial: (m, x) => log.push(['parcial', m, x]),
     toast: (k, s) => log.push(['toast', s]), fmtPrice: (n) => '$' + Number(n).toLocaleString('es-CL'), _recibo: (o) => log.push(['recibo', o.monto]),
     renderPago: () => {}, cerrarMesa: () => log.push(['cerrarMesa']), refrescar: () => {}, setTimeout: (f) => f(),
-    c4Resta: (p) => p.c4._resta, pg, body, rB, propina, esCort: false };
+    c4Resta: (p) => p.c4._resta, pg, body, rB, propina, esCort: false,
+    PAGO_DOBLE_ON: false, _pagoRecEsito: () => {} };   // [24-ott] la guardia del pago doppio neutra: il ramo di ieri
   vm.createContext(ctx);
   vm.runInContext('(function(){' + ramo(SRC) + '\n log.push(["fuori"]); })()'.replace('log.push', 'this.__l.push'), Object.assign(ctx, { __l: log }));
   return log;
