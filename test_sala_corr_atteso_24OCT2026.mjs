@@ -28,6 +28,9 @@ async function banco(SRC, quieto) {
     t('B2 · (S2 di 💵) poll fresco, POI la foto vecchia a $4.280: si corregge lo stesso', r3.mesas.find((x) => x.mesa === '998').total === 3190 && r3.venta_turno.venta === 12190);
     const r4 = w.applica({ ok: true, mios: [{ uuid: 'u-998', mesa: 998, total: 1500 }], mesas: [{ mesa: '998', total: 1500 }], venta_turno: { venta: 10500 } });
     t('B3 · (S3 di 💵) un TERZO totale (un altro telefono ha corretto ancora): non si tocca, niente denaro rimesso', r4.mios[0].total === 1500 && r4.mesas[0].total === 1500 && r4.venta_turno.venta === 10500, r4); }
+  { const w = mondo(); w.segna('998', 'u-998', { ok: true, total: 3190 }, 4280); w.avanza(10000); w.segna('998', 'u-998', { ok: true, total: 2000 }, 3190); w.avanza(10000);
+    const r5 = w.applica(VISTA_VECCHIA), r6 = w.applica({ ok: true, mios: [{ uuid: 'u-998', mesa: 998, total: 3190 }], mesas: [{ mesa: '998', total: 3190 }] });
+    t('B5 · (🟡 di 💵) due correzioni di fila 4.280 → 3.190 → 2.000: la foto a 4.280 E quella a 3.190 si correggono a 2.000', r5.mios.find((x) => x.uuid === 'u-998').total === 2000 && r5.mesas.find((x) => x.mesa === '998').total === 2000 && r6.mesas[0].total === 2000, { r5: r5.mesas, r6: r6.mesas }); }
   { const w = mondo(); w.segna('998', 'u-998', { ok: true, total: 3190 }, null);
     t('B4 · senza il totale di prima non si registra (non si indovina)', !w.ctx.STATE._corrAtteso); }
   { const w = mondo(); w.segna('998', 'u-998', { ok: true, scritto: true });
@@ -38,7 +41,7 @@ async function banco(SRC, quieto) {
     t('E · oltre 5 minuti la voce scade e la vista non si tocca', w.applica(VISTA_VECCHIA).mesas[0].total === 4280 && !Object.keys(w.ctx.STATE._corrAtteso).length); }
   { const w = mondo({ on: false }); w.segna('998', 'u-998', { ok: true, total: 3190 });
     t('F · ?corratt=0: niente, come ieri', !w.ctx.STATE._corrAtteso && w.applica(VISTA_VECCHIA).mesas[0].total === 4280);
-    w.ctx.STATE._corrAtteso = { 'u-998': { mesa: '998', total: 3190, items_json: null, ts: Date.parse('2026-10-24T10:38:01-03:00') } };
+    w.ctx.STATE._corrAtteso = { 'u-998': { mesa: '998', total: 3190, viejo: 4280, viejos: [4280], items_json: null, ts: Date.parse('2026-10-24T10:38:01-03:00') } };
     t('F2 · ?corratt=0 col registro già pieno (spento dopo il gesto): la vista non si tocca', w.applica(VISTA_VECCHIA).mesas[0].total === 4280); }
   { const w = mondo(); w.segna('998', 'u-998', { ok: true, total: 3190 }); const r = w.applica({ ok: true, mios: [], mesas: [{ mesa: '998', total: 4280 }] });
     t('G · la vista non porta il pedido: niente si corregge (né si toglie)', r.mesas[0].total === 4280 && !!w.ctx.STATE._corrAtteso['u-998']); }
@@ -51,8 +54,9 @@ if (process.argv.includes('--mutanti')) {
   const M = [
     ['il résumé non si corregge', "    if (Array.isArray(rs)) rs.forEach(function (m) { if (m && String(m.mesa) === e.mesa && typeof m.total === 'number') m.total = Math.max(0, m.total - delta); });", ''],
     ['venta_turno non si corregge', "    if (r.venta_turno && typeof r.venta_turno.venta === 'number') r.venta_turno.venta = Math.max(0, r.venta_turno.venta - delta);", ''],
-    ['si corregge anche un terzo totale (S3)', "    if (Math.abs(vecchio - e.viejo) >= 1 || Math.abs(delta) < 1) return;", "    if (Math.abs(delta) < 1) return;"],
-    ['il poll fresco svuota la voce (S2)', "    if (Math.abs(vecchio - e.viejo) >= 1 || Math.abs(delta) < 1) return;", "    if (Math.abs(delta) < 1) { delete reg[u]; return; }\n    if (Math.abs(vecchio - e.viejo) >= 1) return;"],
+    ['si corregge anche un terzo totale (S3)', "    if (!_vv.some(function (x) { return Math.abs(vecchio - x) < 1; }) || Math.abs(delta) < 1) return;", "    if (Math.abs(delta) < 1) return;"],
+    ['il poll fresco svuota la voce (S2)', "    if (!_vv.some(function (x) { return Math.abs(vecchio - x) < 1; }) || Math.abs(delta) < 1) return;", "    if (Math.abs(delta) < 1) { delete reg[u]; return; }\n    if (!_vv.some(function (x) { return Math.abs(vecchio - x) < 1; })) return;"],
+    ['due correzioni di fila: si tiene solo l ultimo totale di prima', "    const _vv = Array.isArray(e.viejos) ? e.viejos : [e.viejo];", "    const _vv = [e.viejo];"],
     ['si registra senza il totale di prima', "|| uuid == null || viejo == null) return;", "|| uuid == null) return;"],
     ['la voce non scade', "    if (!e || now - e.ts > 300000) { delete reg[u]; return; }", "    if (!e) { return; }"],
     ['si registra anche senza total', "|| r.total == null ||", "||"],
