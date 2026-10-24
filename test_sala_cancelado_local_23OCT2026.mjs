@@ -11,7 +11,7 @@ const P = (uuid, mesa, total) => ({ uuid, mesa, total, estado: 'digitado', items
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const F = "const _ARRAYS_SALA_MESA = ['mios', 'pendientes', 'por_limpiar', 'sin_dueno'];\n" + fnRiga(SRC, '_idPedido') + fnVin(SRC, '_mesasJustificadasCalo') +
-    fnRiga(SRC, '_cancLocalOn') + fnVin(SRC, '_cancLocalVivi') + fnVin(SRC, '_cancLocalFiltra') + fnVin(SRC, '_cancLocalSegna') + fnVin(SRC, 'mergeSalaGuardia') +
+    fnRiga(SRC, '_cancLocalOn') + fnVin(SRC, '_cancLocalVivi') + fnVin(SRC, '_cancLocalFiltra') + fnVin(SRC, '_cancLocalSegna') + fnVin(SRC, 'mergeSalaGuardia') + (SRC.includes('function _muertosSet(') ? '\nvar MUERTOS_ON = false; function _muertosSet() { return {}; }\n' : '') +   // [24-ott] muertos neutro: la guardia di ieri
     (SRC.includes('function _cancTraza(') ? fnVin(SRC, '_cancTraza') + fnRiga(SRC, '_cancTrazaMesas') + fnVin(SRC, '_cancTrazaConta') + fnVin(SRC, '_cancTrazaRes') : '');
   function mondo({ leva = true, tel = null } = {}) {
     const L = { limpiar: [], mappa: 0, panel: 0, rech: 0 };

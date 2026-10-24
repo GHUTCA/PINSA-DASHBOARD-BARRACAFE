@@ -7,7 +7,7 @@ const ORIG = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
 const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n}\n', i) + 3); };
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
-  const F = 'var _PENNA_N = {};\n' + fnVin(SRC, '_pennaConta') + 'async ' + fnVin(SRC, 'leerSala');
+  const F = 'var _PENNA_N = {}; var MUERTOS_ON = false;\n' + fnVin(SRC, '_pennaConta') + 'async ' + fnVin(SRC, 'leerSala');   // [24-ott] muertos neutro: la lettura di ieri
   async function leggi({ fallos = 0, status = 200, body, lancia = null, ultima = null }) {
     const L = { gas: 0, dice: [] };
     const ctx = { JSON, Object, Number, Math, Date, String, AbortController, setTimeout, clearTimeout, encodeURIComponent,
