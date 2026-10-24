@@ -13,7 +13,7 @@ async function banco(SRC, quieto) {
     let now = Date.parse('2026-10-24T10:38:01-03:00');
     const ctx = { String, Number, Math, Object, Array, JSON, Date: Object.assign(function (x) { return new globalThis.Date(x == null ? now : x); }, { now: () => now }), CORR_ATT_ON: on, STATE: {} };
     vm.createContext(ctx); vm.runInContext(F, ctx);
-    return { ctx, avanza: (ms) => { now += ms; }, segna: (m, u, r) => ctx._corrAttSegna(m, u, r), applica: (r) => ctx._corrAttApplica(JSON.parse(JSON.stringify(r))) };
+    return { ctx, avanza: (ms) => { now += ms; }, segna: (m, u, r, v = 4280) => ctx._corrAttSegna(m, u, r, v), applica: (r) => ctx._corrAttApplica(JSON.parse(JSON.stringify(r))) };
   }
   const VISTA_VECCHIA = { ok: true, mios: [{ uuid: 'u-998', mesa: 998, total: 4280, items_json: '[{"n":"Cafe"},{"n":"Pan"}]' }, { uuid: 'u-50', mesa: 50, total: 9000 }],
     mesas: [{ mesa: '998', total: 4280 }, { mesa: '50', total: 9000 }], venta_turno: { venta: 13280, cuentas: 2 } };
@@ -23,9 +23,13 @@ async function banco(SRC, quieto) {
     t('A · LA 998: la vista vecchia (pedido e résumé a $4.280) si corregge a $3.190 PRIMA del disegno, righe comprese', p.total === 3190 && /Cafe/.test(p.items_json) && !/Pan/.test(p.items_json) && m998.total === 3190, { p, m998 });
     t('A2 · venta_turno toglie la stessa differenza ($1.090); l altra mesa non si tocca', r.venta_turno.venta === 12190 && m50.total === 9000 && r.mios.find((x) => x.uuid === 'u-50').total === 9000, r.venta_turno);
     const r2 = w.applica({ ok: true, mios: [{ uuid: 'u-998', mesa: 998, total: 3190 }], mesas: [{ mesa: '998', total: 3190 }] });
-    t('B · la vista arriva col totale nuovo: niente da correggere e il registro si svuota', r2.mesas[0].total === 3190 && !Object.keys(w.ctx.STATE._corrAtteso).length);
-    const r3 = w.applica(VISTA_VECCHIA);
-    t('B2 · dopo che il registro si è svuotato, una vista vecchia non viene più toccata (non si indovina)', r3.mesas.find((x) => x.mesa === '998').total === 4280); }
+    t('B · la vista arriva col totale nuovo: niente da correggere, e la voce RESTA (la foto vecchia può ancora arrivare)', r2.mesas[0].total === 3190 && !!w.ctx.STATE._corrAtteso['u-998']);
+    w.avanza(20000); const r3 = w.applica(VISTA_VECCHIA);
+    t('B2 · (S2 di 💵) poll fresco, POI la foto vecchia a $4.280: si corregge lo stesso', r3.mesas.find((x) => x.mesa === '998').total === 3190 && r3.venta_turno.venta === 12190);
+    const r4 = w.applica({ ok: true, mios: [{ uuid: 'u-998', mesa: 998, total: 1500 }], mesas: [{ mesa: '998', total: 1500 }], venta_turno: { venta: 10500 } });
+    t('B3 · (S3 di 💵) un TERZO totale (un altro telefono ha corretto ancora): non si tocca, niente denaro rimesso', r4.mios[0].total === 1500 && r4.mesas[0].total === 1500 && r4.venta_turno.venta === 10500, r4); }
+  { const w = mondo(); w.segna('998', 'u-998', { ok: true, total: 3190 }, null);
+    t('B4 · senza il totale di prima non si registra (non si indovina)', !w.ctx.STATE._corrAtteso); }
   { const w = mondo(); w.segna('998', 'u-998', { ok: true, scritto: true });
     t('C · la risposta senza total (il bordo a leva spenta): niente registro, la vista com è', !w.ctx.STATE._corrAtteso && w.applica(VISTA_VECCHIA).mesas[0].total === 4280); }
   { const w = mondo(); w.segna('998', 'u-998', { ok: true, cancelado: true, total: 0 });
@@ -39,14 +43,17 @@ async function banco(SRC, quieto) {
   { const w = mondo(); w.segna('998', 'u-998', { ok: true, total: 3190 }); const r = w.applica({ ok: true, mios: [], mesas: [{ mesa: '998', total: 4280 }] });
     t('G · la vista non porta il pedido: niente si corregge (né si toglie)', r.mesas[0].total === 4280 && !!w.ctx.STATE._corrAtteso['u-998']); }
   t('H · il poll corregge PRIMA dei muertos e della guardia; i due punti che correggono segnano', SRC.indexOf('    r = _corrAttApplica(r);') > 0 && SRC.indexOf('    r = _corrAttApplica(r);') < SRC.indexOf('    if (GUARDIA_SALA_ON) r = mergeSalaGuardia(STATE.sala, r);') &&
-    /_corrAttSegna\(mesa, uuid, r\);/.test(fnVin(SRC, '_corrAplicaLocal')) && /_corrAttSegna\(mesa, uuid, r\);/.test(fnVin(SRC, '_dtEliminarOptimista')));
+    /_corrAttSegna\(mesa, uuid, r, _viejoAtt\);/.test(fnVin(SRC, '_corrAplicaLocal')) && /_corrAttSegna\(mesa, uuid, r, _viejoAtt\);/.test(fnVin(SRC, '_dtEliminarOptimista')) &&
+    /const _viejoAtt = arr\[idx\]\.total;[\s\S]*arr\[idx\]\.total = r\.total;/.test(fnVin(SRC, '_corrAplicaLocal')) && /const _viejoAtt = arr\[idx\]\.total;[\s\S]*arr\[idx\]\.total = r\.total;/.test(fnVin(SRC, '_dtEliminarOptimista')));   // il totale DI PRIMA letto prima di sovrascriverlo
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
   const M = [
     ['il résumé non si corregge', "    if (Array.isArray(rs)) rs.forEach(function (m) { if (m && String(m.mesa) === e.mesa && typeof m.total === 'number') m.total = Math.max(0, m.total - delta); });", ''],
     ['venta_turno non si corregge', "    if (r.venta_turno && typeof r.venta_turno.venta === 'number') r.venta_turno.venta = Math.max(0, r.venta_turno.venta - delta);", ''],
-    ['il registro non si svuota quando la vista è nuova', "    if (Math.abs(delta) < 1) { delete reg[u]; return; }", "    if (Math.abs(delta) < 1) { return; }"],
+    ['si corregge anche un terzo totale (S3)', "    if (Math.abs(vecchio - e.viejo) >= 1 || Math.abs(delta) < 1) return;", "    if (Math.abs(delta) < 1) return;"],
+    ['il poll fresco svuota la voce (S2)', "    if (Math.abs(vecchio - e.viejo) >= 1 || Math.abs(delta) < 1) return;", "    if (Math.abs(delta) < 1) { delete reg[u]; return; }\n    if (Math.abs(vecchio - e.viejo) >= 1) return;"],
+    ['si registra senza il totale di prima', "|| uuid == null || viejo == null) return;", "|| uuid == null) return;"],
     ['la voce non scade', "    if (!e || now - e.ts > 300000) { delete reg[u]; return; }", "    if (!e) { return; }"],
     ['si registra anche senza total', "|| r.total == null ||", "||"],
     ['il freno ignorato', "  if (!CORR_ATT_ON || !r || !STATE._corrAtteso) return r;", "  if (!r || !STATE._corrAtteso) return r;"],
