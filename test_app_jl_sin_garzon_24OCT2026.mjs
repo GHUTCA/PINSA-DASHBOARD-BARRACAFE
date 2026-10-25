@@ -24,7 +24,7 @@ function banco(JL, SA, quieto) {
     const f = (tr) => vm.runInContext('(function(r){ let h = ""; ' + blocco + ' return h; })', vm.createContext({ esc: (s) => String(s), fmtPrice: (n) => '$' + n }))({ traspasos: tr });
     let h1 = '', h2 = ''; try { h1 = f([{ mesa: '107', a: 'JL', al_jl: true, consumo: 36080 }]); h2 = f([{ mesa: '31', a: 'Isa', consumo: 5000 }]); } catch (e) { h1 = 'ERR ' + e.message; }
     t('F · corte con al_jl: «Mesa 107 → el JL (no había garzón…)»; un traspaso normale resta «→ Isa»', /Mesa 107 → <b>el JL<\/b>/.test(h1) && /la asigna el JL/.test(h1) && /Mesa 31 → <b>Isa<\/b>/.test(h2) && !/el JL/.test(h2), { h1, h2 }); }
-  t('G · «Qué cambió» NON la annuncia: il vetro è muto finché la leva del bordo è "0", la riga va col giorno della leva', !/Mesas sin garzón/.test(QC));
+  t('G · «Qué cambió» la annuncia col gesto vero (ramo della card: si spedisce SOLO con la leva "1")', /Mesas sin garzón/.test(QC) && /las mesas le pasan a él/.test(QC) && !/cóbralas/.test(QC));
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
