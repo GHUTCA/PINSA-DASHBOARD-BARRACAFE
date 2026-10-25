@@ -29,18 +29,18 @@ async function banco(SRC, quieto) {
     const ctx = { JSON, Object, Number, Math, Date, String, AbortController, setTimeout, clearTimeout, encodeURIComponent,
       MURO_ON: true, PENNA_TETTO: 999, _pennaSalva: () => {}, _pennaDice: (v) => L.dice.push(v),
       BORDE_SALA: { ON: true, fallos: 0, fallosTs: 0, URL: 'https://b', T: 't', MAX_EDAD_MS: 900000, MAX_EDAD_BORDE_MS: 900000 },
-      BORDE_FALLBACK_ON: bfb, BANNER_EDAD_BORDE_ON: false, CFG: { LOCAL: 'BKS' },
+      BORDE_FALLBACK_ON: bfb, BANNER_EDAD_BORDE_ON: false, BORDE_FALLBACK_TEL: null, _saludAttendi: async () => {}, CFG: { LOCAL: 'BKS' },
       STATE: { sala: { ok: true, mesas: [{ mesa: '12' }] }, salaTs: salaTs }, _slugSalaJS: (n) => String(n).toLowerCase(),
       fetch: async () => { const e = new Error('x'); e.name = lancia; throw e; },
       gasGet: async () => { L.gas++; return { ok: true, via: 'gas' }; } };
     vm.createContext(ctx); vm.runInContext(F, ctx);
-    const r = await vm.runInContext('leerSala("C1", "Ruth")', ctx);
+    let r; try { r = await vm.runInContext('leerSala("C1", "Ruth")', ctx); } catch (e) { r = { lanciato: e.message }; }   // [25-ott · 1.1] a leva accesa senza vista si lancia
     return { r, L, N: JSON.parse(JSON.stringify(ctx._PENNA_N)) };
   }
   { const x = await leggi({ bfb: false }); t('E · leva spenta: il timeout va a Google (la sera di Ruth)', x.L.gas === 1 && x.N['leer:d:gas'] === 1, x); }
   { const x = await leggi({ bfb: true }); t('F · leva accesa: il timeout mostra l ultima vista con la sua età, ZERO Google', x.L.gas === 0 && x.r.mesas && x.r._vieja_s >= 29 && x.L.dice.indexOf('leer:fallback-vieja') >= 0, x); }
   { const x = await leggi({ bfb: true, lancia: 'TypeError' }); t('F2 · leva accesa: anche la rete morta', x.L.gas === 0 && x.r._vieja_s >= 29, x); }
-  { const x = await leggi({ bfb: true, salaTs: Date.now() - 20 * 60000 }); t('G · ultima vista oltre i 15 min ⇒ Google come prima (il tetto di sempre)', x.L.gas === 1, x); }
+  { const x = await leggi({ bfb: true, salaTs: Date.now() - 20 * 60000 }); t('G · ultima vista oltre i 15 min ⇒ [25-ott · 1.1] niente Google: si lancia come la rete morta (il catch del poll mostra la foto salvata dichiarata)', x.L.gas === 0 && x.r && x.r.lanciato === 'sin_red', x); }
   // ③ la catena di 💵 (`EL GIRO V32 57C6174 … L ETA SI AZZERA`): rete giù per N minuti, un giro ogni 20 s, con le righe VERE del poll dopo la lettura
   const iP = SRC.indexOf('    STATE.sala = r;\n'); const iQ = SRC.indexOf('    STATE.salaTs = ', iP);
   if (iP < 0 || iQ < 0 || iQ - iP > 1200) throw new Error('righe del poll');
@@ -52,7 +52,7 @@ async function banco(SRC, quieto) {
     const ctx = { JSON, Object, Number, Math, Date: D, String, AbortController, setTimeout, clearTimeout, encodeURIComponent,
       MURO_ON: true, PENNA_TETTO: 999, _pennaSalva: () => {}, _pennaDice: () => {},
       BORDE_SALA: { ON: true, fallos: 0, fallosTs: 0, URL: 'https://b', T: 't', MAX_EDAD_MS: 900000, MAX_EDAD_BORDE_MS: 900000 },
-      BORDE_FALLBACK_ON: true, BANNER_EDAD_BORDE_ON: false, CFG: { LOCAL: 'BKS' }, STATE: { sala: { ok: true, mesas: [] }, salaTs: ora },
+      BORDE_FALLBACK_ON: true, BANNER_EDAD_BORDE_ON: false, BORDE_FALLBACK_TEL: null, _saludAttendi: async () => {}, CFG: { LOCAL: 'BKS' }, STATE: { sala: { ok: true, mesas: [] }, salaTs: ora },
       _slugSalaJS: (n) => String(n).toLowerCase(),
       fetch: async () => { const e = new Error('x'); e.name = 'AbortError'; throw e; },
       gasGet: async () => { L.gas++; return { ok: true, via: 'gas' }; } };
@@ -60,15 +60,15 @@ async function banco(SRC, quieto) {
     const t0 = ora;
     for (let s = passo; s <= minuti * 60; s += passo) {
       ora = t0 + s * 1000; ctx.BORDE_SALA.fallos = 0;   // il respiro dei 90 s non conta qui: ogni giro arriva al ripiego
-      const r = await vm.runInContext('giro()', ctx);
-      L.giri.push({ s, via: r.via === 'gas' ? 'gas' : 'vieja', dich: r._vieja_s });
+      let r; try { r = await vm.runInContext('giro()', ctx); } catch (e) { r = { via: 'lancia' }; }   // [25-ott · 1.1] oltre il tetto si lancia, non si va a Google
+      L.giri.push({ s, via: r.via === 'gas' ? 'gas' : r.via === 'lancia' ? 'lancia' : 'vieja', dich: r._vieja_s });
     }
     return L;
   }
   { const L = await catena(2); const male = L.giri.filter((g) => g.via === 'vieja' && Math.abs(g.dich - g.s) > 1);
     t('H · 2 min di rete giù: l età DICHIARATA è quella VERA a ogni giro (N4), non riparte da 20 s', male.length === 0 && L.gas === 0, male.slice(0, 4)); }
-  { const L = await catena(25); const primoGas = L.giri.find((g) => g.via === 'gas');
-    t('I · 25 min di rete giù: oltre i 15 min si torna a Google (il tetto scatta)', !!primoGas && primoGas.s > 880 && primoGas.s <= 920, primoGas || L.giri.slice(-2)); }
+  { const L = await catena(25); const primo = L.giri.find((g) => g.via !== 'vieja');
+    t('I · 25 min di rete giù: oltre i 15 min il tetto scatta e [25-ott · 1.1] si lancia (il catch del poll dichiara la sala morta), MAI Google', !!primo && primo.via === 'lancia' && primo.s > 880 && primo.s <= 920 && L.gas === 0, primo || L.giri.slice(-2)); }
   { // il giallo di 💵: passo 17,3 s, l'arrotondamento al secondo non si accumula
     const L = await catena2(14.9, 17.3); const ult = L.giri.filter((g) => g.via === 'vieja').pop();
     t('J · passo 17,3 s per ~15 min: l età dichiarata non resta indietro (≤ 1 s)', !!ult && Math.abs(ult.dich - ult.s) <= 1, ult); }
