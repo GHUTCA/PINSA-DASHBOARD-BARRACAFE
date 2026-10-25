@@ -10,15 +10,16 @@ async function banco(SRC, quieto) {
   // ① la leva
   const iT = SRC.indexOf('const BORDE_FALLBACK_TEL = (function () {'); if (iT < 0) throw new Error('leva');
   const TEL = SRC.slice(iT, SRC.indexOf('})();', iT) + 5) + '\n' + SRC.slice(SRC.indexOf('let BORDE_FALLBACK_ON = '), SRC.indexOf('\n', SRC.indexOf('let BORDE_FALLBACK_ON = ')));
-  const iR = SRC.indexOf('      if (BORDE_FALLBACK_TEL === null) {'); if (iR < 0) throw new Error('riga salud');
+  const iR = SRC.indexOf('      if (BORDE_FALLBACK_TEL === null');   // [25-ott] la riga ora porta anche «chiave presente» if (iR < 0) throw new Error('riga salud');
   const RS = SRC.slice(iR, SRC.indexOf('\n', iR));
   const leva = (q, mem, salud) => { const st = Object.assign({}, mem); let badge = 0;
     const ctx = { String, QS: { get: (k) => (k === 'bfb' ? q : null) }, localStorage: { getItem: (k) => (k in st ? st[k] : null), setItem: (k, v) => { st[k] = v; } },
       cercaK: (j, k) => j[k], _pintarGuardiaBadge: () => { badge++; } };
     vm.createContext(ctx); vm.runInContext(TEL + '\nthis.prima = BORDE_FALLBACK_ON;\nvar j = ' + JSON.stringify(salud) + ';\n' + RS + '\nthis.dopo = BORDE_FALLBACK_ON;', ctx);
     return { prima: ctx.prima, dopo: ctx.dopo, badge }; };
-  { const x = leva(null, {}, {}); t('A · telefono muto, /salud senza la chiave ⇒ spenta (come oggi)', x.prima === false && x.dopo === false && x.badge === 0, x); }
-  { const x = leva(null, {}, { borde_fallback_on: '1' }); t('B · telefono muto, borde_fallback_on "1" ⇒ accesa su tutta la flotta, e il badge si ridipinge', x.dopo === true && x.badge === 1, x); }
+  { const x = leva(null, {}, {}); t('A · [25-ott · V33 1.1] telefono muto, /salud senza la chiave ⇒ ACCESA di nascita, e la chiave assente non la tocca (un telefono che non raggiunge il bordo resta senza Google)', x.prima === true && x.dopo === true && x.badge === 0, x); }
+  { const x = leva(null, {}, { borde_fallback_on: '0' }); t('A2 · /salud dice "0" esplicito ⇒ spenta su tutta la flotta (il freno di BKP), e il badge si ridipinge', x.prima === true && x.dopo === false && x.badge === 1, x); }
+  { const x = leva(null, {}, { borde_fallback_on: '1' }); t('B · telefono muto, borde_fallback_on "1" ⇒ accesa, nessun cambio (era già accesa)', x.dopo === true && x.badge === 0, x); }
   { const x = leva('0', {}, { borde_fallback_on: '1' }); t('C · ?bfb=0 vince sulla leva accesa', x.dopo === false, x); }
   { const x = leva(null, { sala_bfb: '0' }, { borde_fallback_on: '1' }); t('C2 · un telefono spento a mano in passato resta spento', x.dopo === false, x); }
   { const x = leva(null, { sala_bfb: '1' }, { borde_fallback_on: '0' }); t('D · un telefono acceso a mano resta acceso a leva spenta', x.prima === true && x.dopo === true, x); }
@@ -77,8 +78,9 @@ async function banco(SRC, quieto) {
 if (process.argv.includes('--mutanti')) {
   const M = [
     ['il /salud ignorato', "const _bfb = String(cercaK(j, 'borde_fallback_on')) === '1';", 'const _bfb = BORDE_FALLBACK_ON;'],
-    ['il telefono non vince', 'if (BORDE_FALLBACK_TEL === null) {', 'if (true) {'],
-    ['accesa di fabbrica', "let BORDE_FALLBACK_ON = BORDE_FALLBACK_TEL === '1';", "let BORDE_FALLBACK_ON = BORDE_FALLBACK_TEL !== '0';"],
+    ['il telefono non vince', "if (BORDE_FALLBACK_TEL === null && cercaK(j, 'borde_fallback_on') != null) {", "if (cercaK(j, 'borde_fallback_on') != null) {"],
+    ['spenta di fabbrica (il buco di pranzo)', "let BORDE_FALLBACK_ON = BORDE_FALLBACK_TEL !== '0';", "let BORDE_FALLBACK_ON = BORDE_FALLBACK_TEL === '1';"],
+    ['la chiave assente spegne', "if (BORDE_FALLBACK_TEL === null && cercaK(j, 'borde_fallback_on') != null) {", 'if (BORDE_FALLBACK_TEL === null) {'],
     ['il badge non si ridipinge', 'BORDE_FALLBACK_ON = _bfb; _pintarGuardiaBadge();', 'BORDE_FALLBACK_ON = _bfb;'],
     ['l età si azzera a ogni giro (il rosso di 💵)', "STATE.salaTs = Date.now() - (typeof r._vieja_ms", 'STATE.salaTs = Date.now() - 0 * (typeof r._vieja_ms'],
     ['i ms non viaggiano (il giallo di 💵)', 'vieja._vieja_ms = edad;', ''],
