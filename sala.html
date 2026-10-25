@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.41 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.42 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -7167,7 +7167,10 @@ async function nuevoEnviar__in(btn) {
       renderNuevo();
       return;
     }
-    toast('err', 'No se pudo: ' + (r && r.error || '?'));
+    /* [25-ott · 🎛 `BKP V32 CUCINA CERRADA NON E RETE` ①] la cucina chiusa: il bordo (leva `ESTACION_CERRADA_TIMBRO_ON`) manda la frase per il mesero
+       («La cocina está cerrada: <piatto> no se puede pedir ahora.»). Si dice quella, non «No se pudo: estacion_cerrada»; la libreta resta. */
+    if (r && r.error === 'estacion_cerrada') { toast('err', '🚫 ' + (r.mensaje || 'La cocina está cerrada: ese producto no se puede pedir ahora.'), 8000); }
+    else toast('err', 'No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
     // v2.2 · MODO PUENTE: la captura NO depende del pulgar que reintenta.
     // El pedido entra a la cola local (uuid fijo = dedup GAS, jamás doble)
@@ -7563,6 +7566,7 @@ function _cola86Get() { try { return JSON.parse(localStorage.getItem('sala_cola_
 function _cola86NoVisti() { return _cola86Get().filter(function (x) { return x && !x.visto; }); }
 function _cola86Txt(x) {
   const nomi = (x.agotados || []).map(function (a) { return a.nombre || a.id; }).join(' · ');
+  if (x.cerrada) return 'Mesa ' + ((x.body && x.body.mesa) || '?') + ': la cocina está cerrada' + (nomi ? ' (' + nomi + ')' : '');   // [25-ott] la cucina chiusa, non un 86
   return 'Mesa ' + ((x.body && x.body.mesa) || '?') + ': se acabó ' + (nomi || 'un producto');
 }
 function _cola86Mostra() {
@@ -7612,6 +7616,14 @@ async function _colaFlush() {
         try { _ago86Marca(r.agotados || []); } catch (x) {}
         try { const s86 = JSON.parse(localStorage.getItem('sala_cola_86') || '[]'); s86.push({ ts: Date.now(), action: e86.action, body: e86.body, agotados: r.agotados || [] }); while (s86.length > 20) s86.shift(); localStorage.setItem('sala_cola_86', JSON.stringify(s86)); } catch (x) {}
         no86.push(_cola86Txt({ body: e86.body, agotados: r.agotados || [] }));
+        continue;
+      }
+      /* [25-ott · 🎛 `BKP V32 CUCINA CERRADA NON E RETE` ②] la cucina chiusa, timbrata dal bordo (`borde:true`), esce come l'86: altrimenti fermava
+         la coda fino alla riapertura, e alla riapertura sarebbe entrata da sola su una mesa che nel frattempo è cambiata. Messa da parte come l'86. */
+      if (r && r.error === 'estacion_cerrada' && r.borde === true) {
+        const eC = a.shift(); _colaSave(a);
+        try { const s86 = JSON.parse(localStorage.getItem('sala_cola_86') || '[]'); s86.push({ ts: Date.now(), action: eC.action, body: eC.body, cerrada: r.estacion || true, agotados: r.producto ? [{ nombre: r.producto }] : [] }); while (s86.length > 20) s86.shift(); localStorage.setItem('sala_cola_86', JSON.stringify(s86)); } catch (x) {}
+        no86.push('Mesa ' + ((eC.body && eC.body.mesa) || '?') + ': la cocina está cerrada' + (r.producto ? ' (' + r.producto + ')' : ''));
         continue;
       }
       _colaSave(a); break;
