@@ -7,7 +7,7 @@ const ORIG = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
 const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n}\n', i) + 3); };
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
-  const F = fnVin(SRC, '_gestoUid') + fnVin(SRC, '_salirProsegui') + 'async ' + fnVin(SRC, 'seguirEnSala');
+  const F = fnVin(SRC, '_gestoUid') + fnVin(SRC, '_salirProsegui') + 'async ' + fnVin(SRC, 'seguirEnSala') + (SRC.includes('function _saludAttendi(') ? '\nvar SALUD_LEVE_P = null;\nasync ' + fnVin(SRC, '_saludAttendi') : '');   // [25-ott] l'attesa di /salud, senza promessa = nessuna attesa
   function mondo(risp, on = true) {
     const L = { staff: [], gas: [], entrada: [], fatti: [], toasts: [] };
     const banner = { classList: { add: () => {} } };

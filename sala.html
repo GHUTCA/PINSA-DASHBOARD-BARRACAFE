@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.44 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.45 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3738,8 +3738,12 @@ function _salirProsegui(finTurno) {
      da solo, come ieri. La risposta ha la forma del GAS (`filas` · `no_vencidas` · `celdas_dobles`): il resto qui sotto non cambia. */
   /* [21-ott · nota di 💵 EL GIRO `EL GIRO V32 RAMO TERZA VETRI 23 OTTO PEZZI VERDI A LEVA 0`] senza una leva nel vetro ogni tocco faceva un giro di
      rete in più finché il bordo non ha il gestore: ora si bussa al bordo SOLO se lui stesso dice che la sua leva è accesa (`salida_borde_on`). */
-  if (finTurno && STATE.codigo && STATE.nombre) (SALIDA_BORDE_V ? staffPost('salidaMesero', { codigo: STATE.codigo, nombre: STATE.nombre, gesto_uid: _gestoUid('sal') })
-    : gasPost('salidaMesero', { codigo: STATE.codigo, nombre: STATE.nombre }))
+  /* [25-ott · 🎛 `V32 IL METRO DEL 24 CHI VA ANCORA A GOOGLE` · TERZA] la leva si legge DOPO /salud (al più 1,5 s): una salida subito dopo un
+     caricamento trovava `SALIDA_BORDE_V` ancora al valore di nascita (spenta) e andava al GAS a leva accesa. */
+  /* 🔴 codigo e nombre si fissano QUI, prima dell'attesa: il resto di questa funzione svuota la sessione subito (il banco 16b l'ha visto). */
+  const _salCod = STATE.codigo, _salNom = STATE.nombre;
+  if (finTurno && _salCod && _salNom) _saludAttendi(SALIDA_BORDE_V ? 0 : 1500).then(function () { return SALIDA_BORDE_V ? staffPost('salidaMesero', { codigo: _salCod, nombre: _salNom, gesto_uid: _gestoUid('sal') })
+    : gasPost('salidaMesero', { codigo: _salCod, nombre: _salNom }); })
     .then(function (r) {
       const filas = r && (r.filas != null ? r.filas : (r.ok ? null : 0));
       /* [02-ott · v3.217.2 · collaudo C] filas=0 senza nessuna franja viva = il mesero non ha
@@ -17495,7 +17499,15 @@ let _vdRetry = false;
    il bordo risponde nella forma del GAS (ok · nombre · plazas · tg_link, AUT-0424 Fase C) e non scrive due ingressi per la stessa chiave.
    `staffPost` ripiega da solo sul GAS se il bordo non è suo (need:gas: replica assente, contratto incompleto, codice non verificabile): a leva
    spenta, o col bordo che non sa, la verifica è quella di ieri. */
+/* [25-ott · 🎛 `V32 IL METRO DEL 24 CHI VA ANCORA A GOOGLE` · TERZA] la causa dei `clockIn` diretti a leva accesa: la PORTA 1 (sessione viva)
+   chiama `_verificaDetras()` al caricamento, PRIMA che /salud risponda ⇒ `CLOCKIN_VETRO_ON` era ancora `false` (valore di nascita) ⇒ GAS, a ogni
+   apertura della pagina. Ora si aspetta /salud (al più 2,5 s: la verifica è dietro le quinte, nessun dito aspetta); se non risponde, il GAS come ieri. */
+async function _saludAttendi(ms) {
+  if (!ms || !SALUD_LEVE_P) return;
+  try { await Promise.race([SALUD_LEVE_P, new Promise(function (ok) { setTimeout(ok, ms); })]); } catch (e) {}
+}
 async function _clockInDetras() {
+  await _saludAttendi(CLOCKIN_VETRO_ON ? 0 : 2500);
   if (!CLOCKIN_VETRO_ON) return gasPost('clockIn', { codigo: STATE.codigo, nombre: STATE.nombre });
   const k = STATE.codigo + '|' + STATE.nombre;
   if (!_CLOCKIN_UID || _CLOCKIN_UID.k !== k) _CLOCKIN_UID = { k: k, u: 'ci-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7) };
