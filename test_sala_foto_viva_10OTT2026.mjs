@@ -16,7 +16,7 @@ function mondo(SRC, o) {
   const els = {}; const el = (id) => (els[id] || (els[id] = { id, innerHTML: '', textContent: '', _cl: new Set(), classList: { add: (...c) => c.forEach((x) => els[id]._cl.add(x)), remove: (...c) => c.forEach((x) => els[id]._cl.delete(x)), contains: (c) => els[id]._cl.has(c) } }));
   const rendered = []; const now = Date.now();
   const ls = {}; if (o.foto) ls.sala_foto_v1 = JSON.stringify({ ts: now - o.foto.edad, nombre: o.foto.nombre || 'Ary', local: 'BKS', r: { mios: [{ uuid: 'pm-x', mesa: '100', estado: 'atendido', total: 135780 }] } });
-  const ctx = { JSON, Math, Date, String, Number, Object, Array, Set, console, PINTA_ON: true, CFG: { LOCAL: 'BKS' }, QS: new URLSearchParams(o.qs || ''),
+  const ctx = { JSON, Math, Date, String, Number, Object, Array, Set, console, PINTA_ON: true, _cargando: false /* [25-ott · V33 1.1] neutro: il catch di ieri */, CFG: { LOCAL: 'BKS' }, QS: new URLSearchParams(o.qs || ''),
     STATE: { nombre: 'Ary', sala: o.sala || null, salaTs: o.salaTs || 0, mesasModel: [{ mesa: '100' }], pollProxOk: 5 }, localStorage: { getItem: (k) => (k in ls ? ls[k] : null) },
     $: el, document: { querySelector: () => (o.hayTessere ? {} : null) }, render: (r) => { rendered.push(r); }, refrescar() {}, _of: el('offline'), FOTO_VIVA_ON: !!o.leva, FOTO_VIVA_LEIDA: o.leida !== false, cerrada: 0, cerrarMesa() { ctx.cerrada++; } };
   el('secMesas').innerHTML = o.tessere ? '<div class="mtile">100</div>' : '';
