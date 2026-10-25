@@ -14,7 +14,7 @@ function banco(JL, SA, quieto) {
     const sg = vm.runInContext('_sinGarzon()', w.ctx);
     t('A · le mesas della fetta jl con consumo, ordinate (la 20 a $0 no, quelle di Ruth no)', JSON.stringify(sg) === '["34","107"]', sg);
     vm.runInContext('sinGarzonVer()', w.ctx);
-    t('B · il tocco dice quali, e non promette un gesto che oggi non le sposta', /Mesas sin garzón: 34 · 107/.test((w.L.toast[0] || [])[1] || '') && /primero asigna su plaza en «Turno»/.test(w.L.toast[0][1]) && !/Asígnalas a un garzón|cóbralas tú/.test(w.L.toast[0][1])); }
+    t('B · il tocco dice quali, e il gesto vero col bordo 187d1b7 (la plaza in Turno), mai «cóbralas tú»', /Mesas sin garzón: 34 · 107/.test((w.L.toast[0] || [])[1] || '') && /Asigna su plaza a un garzón en «Turno» y le pasan a él/.test(w.L.toast[0][1]) && !/cóbralas tú/.test(w.L.toast[0][1])); }
   { const w = mondo({ meseros: { ruth: { mesas: [{ mesa: '50', total: 9000 }] } } });
     t('C · senza la fetta jl (leva del bordo spenta): niente, e il tocco non fa niente', vm.runInContext('_sinGarzon()', w.ctx).length === 0 && (vm.runInContext('sinGarzonVer()', w.ctx), w.L.toast.length === 0)); }
   { const w = mondo(null); t('D · senza vista: niente, mai un errore', vm.runInContext('_sinGarzon()', w.ctx).length === 0); }
