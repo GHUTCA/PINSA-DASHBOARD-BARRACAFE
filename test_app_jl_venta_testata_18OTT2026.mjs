@@ -16,7 +16,7 @@ function testa({ serv = null, tsServ = 0, caja = null, salud = SAL_ON, servErr =
     pintaSalud: () => {}, _rechazosHoy: () => null, _sinPapel: () => null, _enSalaDaVista: () => enSala, edadVistaTxt: () => 'hace 10 s',
     _cajaVista: () => caja };
   vm.createContext(ctx);
-  vm.runInContext(riga('const esc = ') + riga('const fmt = ') + ['edadS', '_fmtEdadS', 'edadTxt', 'cjFlag', 'cjAtto1On', '_servOn', '_servFresco', '_testaVenta', 'fmtTesta', 'pintaTesta'].map(fnV).join('\n') + '\npintaTesta();', ctx);
+  vm.runInContext(riga('const esc = ') + riga('const fmt = ') + ['edadS', '_fmtEdadS', 'edadTxt', 'cjFlag', 'cjAtto1On', '_servOn', '_servFresco', '_testaVenta', 'fmtTesta', 'pintaTesta'].map(fnV).join('\n') + '\nfunction _sinGarzon() { return []; }\npintaTesta();', ctx);   // [24-ott] le mesas sin garzón neutre: la testa di ieri
   const h = el.hKpi.innerHTML; const kpi = [...h.matchAll(/<span class="kpi([^"]*)"><b>([^<]*)<\/b><small>([^<]*)<\/small>/g)].map((m) => ({ cls: m[1].trim(), b: m[2], s: m[3] }));
   return { kpi, h };
 }
