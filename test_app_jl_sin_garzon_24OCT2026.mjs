@@ -14,7 +14,7 @@ function banco(JL, SA, quieto) {
     const sg = vm.runInContext('_sinGarzon()', w.ctx);
     t('A · le mesas della fetta jl con consumo, ordinate (la 20 a $0 no, quelle di Ruth no)', JSON.stringify(sg) === '["34","107"]', sg);
     vm.runInContext('sinGarzonVer()', w.ctx);
-    t('B · il tocco dice quali e cosa fare', /Mesas sin garzón: 34 · 107/.test((w.L.toast[0] || [])[1] || '') && /Asígnalas a un garzón/.test(w.L.toast[0][1])); }
+    t('B · il tocco dice quali, e non promette un gesto che oggi non le sposta', /Mesas sin garzón: 34 · 107/.test((w.L.toast[0] || [])[1] || '') && /a tu nombre hasta que se cobren/.test(w.L.toast[0][1]) && !/Asígnalas|«Turno»/.test(w.L.toast[0][1])); }
   { const w = mondo({ meseros: { ruth: { mesas: [{ mesa: '50', total: 9000 }] } } });
     t('C · senza la fetta jl (leva del bordo spenta): niente, e il tocco non fa niente', vm.runInContext('_sinGarzon()', w.ctx).length === 0 && (vm.runInContext('sinGarzonVer()', w.ctx), w.L.toast.length === 0)); }
   { const w = mondo(null); t('D · senza vista: niente, mai un errore', vm.runInContext('_sinGarzon()', w.ctx).length === 0); }
@@ -24,7 +24,7 @@ function banco(JL, SA, quieto) {
     const f = (tr) => vm.runInContext('(function(r){ let h = ""; ' + blocco + ' return h; })', vm.createContext({ esc: (s) => String(s), fmtPrice: (n) => '$' + n }))({ traspasos: tr });
     let h1 = '', h2 = ''; try { h1 = f([{ mesa: '107', a: 'JL', al_jl: true, consumo: 36080 }]); h2 = f([{ mesa: '31', a: 'Isa', consumo: 5000 }]); } catch (e) { h1 = 'ERR ' + e.message; }
     t('F · corte con al_jl: «Mesa 107 → el JL (no había garzón…)»; un traspaso normale resta «→ Isa»', /Mesa 107 → <b>el JL<\/b>/.test(h1) && /la asigna el JL/.test(h1) && /Mesa 31 → <b>Isa<\/b>/.test(h2) && !/el JL/.test(h2), { h1, h2 }); }
-  t('G · «Qué cambió» ha la riga', /Mesas sin garzón/.test(QC));
+  t('G · «Qué cambió» NON la annuncia: il vetro è muto finché la leva del bordo è "0", la riga va col giorno della leva', !/Mesas sin garzón/.test(QC));
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
