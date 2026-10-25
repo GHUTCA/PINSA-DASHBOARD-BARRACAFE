@@ -8,12 +8,12 @@ const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0)
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const F = 'var _PENNA_N = {}; var MUERTOS_ON = false;\n' + fnVin(SRC, '_pennaConta') + 'async ' + fnVin(SRC, 'leerSala');   // [24-ott] muertos neutro: la lettura di ieri
-  async function leggi({ fallos = 0, status = 200, body, lancia = null, ultima = null }) {
+  async function leggi({ fallos = 0, status = 200, body, lancia = null, ultima = null, bfb = true }) {
     const L = { gas: 0, dice: [] };
     const ctx = { JSON, Object, Number, Math, Date, String, AbortController, setTimeout, clearTimeout, encodeURIComponent,
       MURO_ON: true, PENNA_TETTO: 999, _pennaSalva: () => {}, _pennaDice: (v) => L.dice.push(v),
       BORDE_SALA: { ON: true, fallos: fallos, fallosTs: Date.now(), URL: 'https://b', T: 't', MAX_EDAD_MS: 360000, MAX_EDAD_BORDE_MS: 600000 },
-      BORDE_FALLBACK_ON: true, BANNER_EDAD_BORDE_ON: false, BORDE_FALLBACK_TEL: null, _saludAttendi: async () => {}, CFG: { LOCAL: 'BKS' }, STATE: {},
+      BORDE_FALLBACK_ON: bfb, BANNER_EDAD_BORDE_ON: false, BORDE_FALLBACK_TEL: null, _saludAttendi: async () => {}, CFG: { LOCAL: 'BKS' }, STATE: {},
       _slugSalaJS: (n) => String(n).toLowerCase(), _fallbackUltimaVista: () => ultima,
       fetch: async () => { if (lancia) { const e = new Error('x'); e.name = lancia; throw e; } return { ok: status >= 200 && status < 300, status, json: async () => body }; },
       gasGet: async () => { L.gas++; return { ok: true, via: 'gas' }; } };
@@ -26,7 +26,7 @@ async function banco(SRC, quieto) {
   { const x = await leggi({ body: vista({ ana: { ok: true, mesas: [] } }, ora - 5000) });
     t('A · lettura buona dal bordo ⇒ nessun contatore, niente GAS', Object.keys(x.N).length === 0 && x.L.gas === 0, x); }
   { const x = await leggi({ body: vista({ pedro: { ok: true } }, ora) });
-    t('B · nome non nella foto ⇒ leer:d:sin_nombre + leer:d:gas, etichetta del mesero intatta', x.N['leer:d:sin_nombre'] === 1 && x.N['leer:d:gas'] === 1 && x.L.dice.length === 0, x); }
+    t('B · nome non nella foto ⇒ leer:d:sin_nombre, e senza vista [25-ott · V33 1.1] «cargando», MAI gas; etichetta del mesero intatta', x.N['leer:d:sin_nombre'] === 1 && x.N['leer:d:cargando'] === 1 && !x.N['leer:d:gas'] && x.L.gas === 0 && x.r.lanciato === 'cargando' && x.L.dice.length === 0, x); }
   { const x = await leggi({ body: vista({ ana: { ok: true } }, ora - 3 * 3600000) });
     t('C · foto oltre il tetto ⇒ leer:d:foto_vieja, e a leva accesa la foto dichiarata, MAI gas [25-ott · 1.1]', x.N['leer:d:foto_vieja'] === 1 && x.N['leer:d:foto_vieja_sin_gas'] === 1 && !x.N['leer:d:gas'] && x.L.gas === 0 && x.r && x.r._vieja_s > 0, x); }
   { const x = await leggi({ status: 503, body: { ok: false } });
@@ -38,11 +38,13 @@ async function banco(SRC, quieto) {
   { const x = await leggi({ lancia: 'SyntaxError' });
     t('E3 · JSON illeggibile ⇒ leer:d:json', x.N['leer:d:json'] === 1, x); }
   { const x = await leggi({ body: { ok: true, datos: null } });
-    t('F · 200 senza dati ⇒ leer:d:sin_datos + gas', x.N['leer:d:sin_datos'] === 1 && x.N['leer:d:gas'] === 1, x); }
+    t('F · 200 senza dati ⇒ leer:d:sin_datos, e senza vista [25-ott · V33 1.1] «cargando», MAI gas', x.N['leer:d:sin_datos'] === 1 && x.N['leer:d:cargando'] === 1 && !x.N['leer:d:gas'] && x.L.gas === 0, x); }
   { const x = await leggi({ fallos: 3 });
     t('G · pausa dei 3 fallimenti senza ultima vista ⇒ leer:d:pausa, e a leva accesa si lancia come la rete morta, MAI gas [25-ott · 1.1]', x.N['leer:d:pausa'] === 1 && x.N['leer:d:sin_gas'] === 1 && !x.N['leer:d:gas'] && x.L.gas === 0 && x.r && x.r.lanciato === 'sin_red', x); }
   { const x = await leggi({ lancia: 'TypeError', ultima: { ok: true, vieja: 1 } });
     t('H · rete morta con ultima vista ⇒ niente leer:d:gas (non va a Google)', !x.N['leer:d:gas'] && x.L.gas === 0, x); }
+  { const x = await leggi({ body: vista({ pedro: { ok: true } }, ora), bfb: false });   // [25-ott] a leva spenta il GAS resta, e si conta
+    t('I · leva spenta: nome non nella foto ⇒ leer:d:sin_nombre + leer:d:gas, come ieri', x.N['leer:d:sin_nombre'] === 1 && x.N['leer:d:gas'] === 1 && x.L.gas === 1, x); }
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {

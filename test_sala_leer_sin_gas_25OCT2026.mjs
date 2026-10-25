@@ -36,7 +36,13 @@ async function banco(SRC, quieto) {
   { const x = await leggi({ bfb: true, fetchK: 'sin_nombre', vista: true });
     t('D · il mio nome non c è nella foto ma ho una vista ⇒ l ultima vista, ZERO Google', x.L.gas === 0 && x.r._vieja_s >= 39, x); }
   { const x = await leggi({ bfb: true, fetchK: 'sin_nombre' });
-    t('E · il mio nome non c è e nessuna vista (appena entrato) ⇒ Google, contato a parte (gas_sin_vista)', x.L.gas === 1 && x.N['leer:d:gas_sin_vista'] === 1 && x.N['leer:d:gas'] === 1, x); }
+    t('E · [V33] il mio nome non c è e nessuna vista (appena entrato) ⇒ «cargando», ZERO Google', x.L.gas === 0 && x.r.lanciato === 'cargando' && x.N['leer:d:cargando'] === 1 && !x.N['leer:d:gas'], x); }
+  { // il catch del poll: «cargando» non è un guasto di rete (non conta i fallos) e dice «Cargando tu sala…»
+    const i = SRC.indexOf("    const _cargando = !!(e && e.message === 'cargando');"); const j = i < 0 ? -1 : SRC.indexOf('    } else if (STATE.pollFallos >= 2) {', i);
+    let of = { textContent: '', classList: { add() {}, remove() {} } }, st = { pollFallos: 0 };
+    if (i >= 0 && j > i) vm.runInContext('(function(e){ ' + SRC.slice(i, j) + ' } })', vm.createContext({ STATE: st, $: () => of }))(new Error('cargando'));
+    t('E2 · il poll: «⏳ Cargando tu sala…», pollFallos fermo', of.textContent === '⏳ Cargando tu sala…' && st.pollFallos === 0, { of: of.textContent, st });
+    t('E3 · lo schermo vuoto dice «Cargando tu sala…» e di avvisare il JL', /Cargando tu sala…<\/div>/.test(SRC) && /Si en un minuto sigue así, avísale al JL/.test(SRC)); }
   { const x = await leggi({ salud: 'muta' });
     t('F · /salud muto e leva spenta ⇒ dopo l attesa, Google come ieri', x.L.gas === 1 && !x.r.lanciato, x); }
   { const x = await leggi({ tel: '0', salud: 'tarda' });
@@ -48,6 +54,8 @@ if (process.argv.includes('--mutanti')) {
     ['non aspetta /salud', "  if ((bordoFalloRed || fotoVieja) && !BORDE_FALLBACK_ON && BORDE_FALLBACK_TEL === null) await _saludAttendi(1500);\n", ''],
     ['senza vista va a Google', "    if (bordoFalloRed) { _pennaConta('leer:d:sin_gas'); throw new Error('sin_red'); }\n", ''],
     ['sin_nombre non usa la vista', "    const ultima = _fallbackUltimaVista();\n    if (ultima) { _pennaDice('leer:fallback-vieja'); return ultima; }\n    if (bordoFalloRed)", "    if (bordoFalloRed)"],
+    ['senza nome e senza vista torna a Google', "    _pennaConta('leer:d:cargando');\n    throw new Error('cargando');\n", ''],
+    ['cargando conta come guasto', 'if (!_cargando) STATE.pollFallos', 'STATE.pollFallos'],
     ['aspetta anche col freno', '!BORDE_FALLBACK_ON && BORDE_FALLBACK_TEL === null) await', '!BORDE_FALLBACK_ON) await'],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r;

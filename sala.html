@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.47 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.48 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3231,7 +3231,11 @@ async function leerSala(codigo, nombre) {
     const ultima = _fallbackUltimaVista();
     if (ultima) { _pennaDice('leer:fallback-vieja'); return ultima; }
     if (bordoFalloRed) { _pennaConta('leer:d:sin_gas'); throw new Error('sin_red'); }
-    _pennaConta('leer:d:gas_sin_vista');
+    /* [25-ott · 🎛 V33 `V33 AL COMANDO SOLO 1.1` ①] anche «il mio nome non c'è» / «200 senza dati» senza nessuna vista NON va più al GAS: il poll
+       dice «Cargando tu sala…» e il giro dopo ribussa al bordo. 🔴 Prezzo dichiarato: un mesero che il bordo non mette MAI nella foto (nome scritto
+       diverso, nessuna plaza) resta su «Cargando…» invece di vedere la sala del GAS — il testo gli dice di avvisare il JL. Freno: la leva stessa. */
+    _pennaConta('leer:d:cargando');
+    throw new Error('cargando');
   } else if (!fotoVieja && bordoFalloRed) {
     const ultima = _fallbackUltimaVista();
     if (ultima) { _pennaDice('leer:fallback-vieja'); return ultima; }
@@ -8475,9 +8479,14 @@ async function refrescar(conSkeleton) {
        giallo calmo che dice la verità: si sta riprovando, i gestos restano
        in coda comunque. Un allarme che suona a ogni respiro si impara a
        ignorare — e poi non lo sente più nessuno quando dice il vero. */
-    STATE.pollFallos = (STATE.pollFallos || 0) + 1;
+    const _cargando = !!(e && e.message === 'cargando');   // [25-ott · V33 1.1] il bordo risponde, la mia fila non c'è ancora: non è un guasto di rete
+    if (!_cargando) STATE.pollFallos = (STATE.pollFallos || 0) + 1;
     const _of = $('offline');
-    if (STATE.pollFallos >= 4) {
+    if (_cargando) {
+      _of.classList.remove('vieja');
+      _of.textContent = '⏳ Cargando tu sala…';
+      _of.classList.add('show');
+    } else if (STATE.pollFallos >= 4) {
       _of.classList.remove('vieja');
       _of.textContent = 'Sin conexión — mostrando lo último recibido. Reintento solo.';
       _of.classList.add('show');
@@ -8524,7 +8533,14 @@ async function refrescar(conSkeleton) {
              verità e si dà un dito da premere — l'attesa cieca è la cosa che
              fa riaprire l'app, e riaprire non cura niente. */
           const _g = $('secPend');
-          if (_g) _g.innerHTML =
+          if (_g && _cargando) {   // [25-ott · V33 1.1] il bordo c'è, la mia fila non ancora: si dice questo, non «sin conexión»
+            _g.innerHTML = '<div style="padding:26px 18px;text-align:center;color:#c2bcae">' +
+              '<div style="font-size:34px;margin-bottom:8px">⏳</div>' +
+              '<div style="font-size:15px;font-weight:800;margin-bottom:5px">Cargando tu sala…</div>' +
+              '<div style="font-size:13px;opacity:.8;line-height:1.5">Aparece en unos segundos.<br>Si en un minuto sigue así, avísale al JL.</div>' +
+              '<button class="btn" style="margin-top:14px" onclick="STATE.pollProxOk=0;refrescar(true)">Reintentar</button>' +
+              '</div>';
+          } else if (_g) _g.innerHTML =
             '<div style="padding:26px 18px;text-align:center;color:#c2bcae">' +
             '<div style="font-size:34px;margin-bottom:8px">📡</div>' +
             '<div style="font-size:15px;font-weight:800;margin-bottom:5px">No logro ver la sala</div>' +
@@ -8532,7 +8548,7 @@ async function refrescar(conSkeleton) {
             '<b>Lo que toques igual queda guardado</b> y entra al volver la señal.</div>' +
             '<button class="btn" style="margin-top:14px" onclick="STATE.pollProxOk=0;refrescar(true)">Reintentar</button>' +
             '</div>';
-          _of.textContent = 'Sin conexión — reintentando sola.';
+          if (!_cargando) _of.textContent = 'Sin conexión — reintentando sola.';
           _of.classList.add('show');
         }
       }
