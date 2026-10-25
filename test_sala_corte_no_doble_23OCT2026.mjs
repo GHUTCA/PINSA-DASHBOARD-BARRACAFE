@@ -12,7 +12,7 @@ async function banco(SRC, quieto) {
   const F = 'async ' + fnVin(SRC, 'cierreEnviar') + fnVin(SRC, '_cieUid') + fnRiga(SRC, '_cieUidKey') + fnRiga(SRC, '_cieOkKey') + fnRiga(SRC, '_cieOkSegna') +
     fnVin(SRC, '_cieOkRecente') + fnVin(SRC, '_cieYaCerraste') + fnRiga(SRC, '_cieDeNuevo') +
     (SRC.includes('function _cieDuda(') ? fnVin(SRC, '_cieDuda') + 'async ' + fnVin(SRC, '_cieDudaMira') : '');
-  function mondo({ guardia = true, paso4Lancia = true, timeout = false, mira = 'ya' } = {}) {
+  function mondo({ guardia = true, paso4Lancia = true, timeout = false, mira = 'ya', rb = null, pasar = true } = {}) {
     const LS = {}; const L = { gas: 0, render: [], toast: [], abrir: 0 };
     let now = Date.parse('2026-10-23T19:19:00-03:00');
     const ctx = { JSON, String, Math, Object, Number, Date: Object.assign(function (x) { return new globalThis.Date(x == null ? now : x); }, { now: () => now }),
@@ -21,18 +21,21 @@ async function banco(SRC, quieto) {
       CIE_GUARDIA_ON: guardia, CIE_OK_MS: 15 * 60000, CORTE_UNICO_ON: false /* [26-ott] neutro: la guardia di 15 min del 23 */, CORTE_BORDE_ON: true, CAJA_ATTO1_ON: true, CORTE_TRAS_BORDE_ON: false, SALDO_SIN_PADRON_ON: false,
       _fechaOpJS: () => '2026-10-23', _slugSalaJS: (s) => String(s).toLowerCase(), _cieMontoValor: () => 0, esc: (s) => String(s), fmtPrice: (n) => '$' + n,
       $: () => ({ disabled: false, textContent: '' }), toast: (k, s) => L.toast.push([k, s]), _cieRender: (h) => L.render.push(h), bordeHecho: () => {},
-      _cerrarMeseroAlBorde: async () => null, CIE_DUDA_MS: 30, setTimeout, setInterval, clearInterval,
+      _cerrarMeseroAlBorde: async () => rb, CIE_DUDA_MS: 30, setTimeout, setInterval, clearInterval,
       gasPost: async (act, body) => {
         if (act === 'getCierreMesero') { L.mira = (L.mira || 0) + 1; if (mira === 'muto') throw new Error('rete'); if (mira === 'ya') return { ok: true, ya_cerrado: { declarado: 0, id: 'CM-261023-5IVI', ts: new globalThis.Date(now).toISOString() } };
           if (mira === 'am') return { ok: true, ya_cerrado: { declarado: 0, id: 'CM-261023-AM01', ts: new globalThis.Date(L.amTs || (now - 5 * 3600000)).toISOString() } };
           return { ok: true, ya_cerrado: null }; }
         L.gas++; (L.uids = L.uids || []).push(body.uid); if (timeout === true && L.gas === 1) throw new Error('AbortError'); if (typeof timeout === 'number' && L.gas === timeout) throw new Error('AbortError'); if (L.gas === 1) L.amTs = now; return { ok: true, id: 'CM-261023-' + (L.gas === 1 ? '5IVI' : 'LNRI'), mesero: 'Arianna' }; },
-      _ciePaso4: () => { if (paso4Lancia) throw new TypeError('x.map is not a function'); L.render.push('PASO4'); }, _ciePaso4Dedup: () => {}, _ciePaso3Motivo: () => {}, _cieSaldo: () => {},
+      _ciePaso4: () => { if (paso4Lancia) throw new TypeError('x.map is not a function'); L.render.push('PASO4'); }, _ciePaso4Dedup: (r) => { L.dedup = r; }, _ciePaso3Motivo: () => {}, _cieSaldo: () => {},
       cierreAbrir: () => { L.abrir++; } };
-    ctx.CIE.pasarMesas = true;   // come Arianna: mesas da passare ⇒ il GAS
+    ctx.CIE.pasarMesas = pasar;   // come Arianna: mesas da passare ⇒ il GAS
     vm.createContext(ctx); vm.runInContext(F, ctx);
     return { ctx, L, LS, invia: () => vm.runInContext('cierreEnviar()', ctx), avanza: (ms) => { now += ms; } };
   }
+  // N · [26-ott · ARQ ccb65e0] il bordo rifiuta timbrato `corte_ya_cerrado`: «ya cerraste» col corte esistente, MAI il GAS (prima: secondo corte sul GAS)
+  { const w = mondo({ pasar: false, rb: { ok: false, borde: true, definitivo: true, error: 'corte_ya_cerrado', cierre: { id: 'CM-1', mesero: 'Arianna', declarado: 42000, diferencia: 0 } } }); await w.invia();
+    t('N · corte_ya_cerrado del bordo ⇒ niente GAS, la schermata del corte esistente, chiave bruciata', w.L.gas === 0 && w.L.dedup && w.L.dedup.cierre.id === 'CM-1' && w.ctx.CIE.uid === '' && w.ctx.CIE.enviando === false, w.L); }
   // A · la scena di Arianna: il GAS dice sì, il riepilogo lancia
   { const w = mondo({ mira: 'no' }); await w.invia();   // il libro «no»: se il riepilogo uscisse dal try, si vedrebbe «no quedó guardado»
     t('A1 · il sì del GAS con il riepilogo che lancia: «Ya cerraste», mai «No entró — reintenta»', w.L.gas === 1 && w.L.render.some((h) => /Ya cerraste tu turno/.test(h) && /CM-261023-5IVI/.test(h)) && !w.L.toast.some((x) => /reintenta/.test(x[1])), w.L);
@@ -79,6 +82,7 @@ if (process.argv.includes('--mutanti')) {
     ['il segno non nasce', "      if (CIE_GUARDIA_ON) { _cieOkSegna(r); CIE.deNuevo = false; }", ''],
     ['il secondo tocco non guarda il segno', "  { const _ok = CIE.deNuevo ? null : _cieOkRecente(); if (_ok) { _cieYaCerraste(_ok); return; } }   // [23-ott] il secondo tocco dopo un sì", ''],
     ['il segno non scade', '(o && o.ts && Date.now() - o.ts < CIE_OK_MS)', '(o && o.ts)'],
+    ['il rifiuto del bordo va al GAS', "      else if (rb && rb.borde === true && rb.error === 'corte_ya_cerrado') {", "      else if (false) {"],
     ['il timeout torna a dire reintenta', "    if (CIE_GUARDIA_ON) { CIE.enviando = false; await _cieDuda(monto); return; }", ''],
     ['nell attesa il bottone manda', "  if (CIE.dudaHasta && Date.now() < CIE.dudaHasta) return;   // [23-ott] nella finestra del dubbio non parte niente", ''],
     ['il corte trovato non brucia la chiave', "    try { localStorage.removeItem(_cieUidKey()); } catch (e2) {}\n    CIE.uid = ''; CIE.uidMonto = null; CIE.envioTs = 0;\n    _cieOkSegna({ id: y.id || '' });", "    _cieOkSegna({ id: y.id || '' });"],
