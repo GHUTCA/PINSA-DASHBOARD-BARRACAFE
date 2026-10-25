@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.49 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.50 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3562,6 +3562,7 @@ async function checkInConToken() {
       STATE.codigo = r.codigo; STATE.nombre = r.nombre; STATE.tgLink = r.tg_link || '';
       try {
         localStorage.setItem(CFG.SK.COD, r.codigo);
+        localStorage.setItem('sala_entrada_ts', String(Date.now()));   // [26-ott · un corte per turno] l'ingresso di QUESTO turno
         localStorage.setItem(CFG.SK.NOM, r.nombre);
         localStorage.setItem(CFG.SK.LOC, CFG.LOCAL);
       } catch (e) {}
@@ -3667,6 +3668,7 @@ async function entrar() {
     STATE.codigo = codigo; STATE.nombre = r.nombre; STATE.tgLink = r.tg_link || '';
     try {
       localStorage.setItem(CFG.SK.COD, codigo);
+      localStorage.setItem('sala_entrada_ts', String(Date.now()));   // [26-ott · un corte per turno] l'ingresso di QUESTO turno
       localStorage.setItem(CFG.SK.NOM, r.nombre);
       localStorage.setItem(CFG.SK.LOC, CFG.LOCAL);
     } catch (e) {}
@@ -3874,19 +3876,33 @@ const CIE_GUARDIA_ON = (function () {
   catch (e) { return q !== '0'; }
 })();
 const CIE_OK_MS = 15 * 60000;
+/* ═══ [26-ott · 🎛 V33 `V33 UN CORTE SOLO PER TURNO` · decisione di Alberto] UN CORTE PER MESERO PER TURNO, NON SI RIAPRE ═══
+   Dopo il corte resta solo «Listo — me voy»: via «Contaste mal — cerrar de nuevo», e «MI CORTE» mostra il corte fatto senza un nuovo cierre.
+   Una correzione la fa il JL. La guardia VERA è del bordo (⚙️ ARQ, `corte_ya_cerrado`); qui il vetro non invita più a rifarlo.
+   🔑 «Questo turno» = un corte nato DOPO l'ingresso di questa sessione (`sala_entrada_ts`, scritto al login): il `turno` del bordo è l'orologio
+   (dalle 17 «noche»), e un AM che chiude alle 18:40 bloccherebbe il PM di chi fa due turni. Senza l'ora d'ingresso (sessione nata prima di questo
+   pezzo) vale la finestra di 15 minuti di ieri. Leva: nasce accesa; `corte_unico_on` "0" su /salud la spegne; `?corte1=0` per apparecchio. */
+var CORTE_UNICO_ON = (function () { try { return QS.get('corte1') !== '0'; } catch (e) { return true; } })();
+function _cieDelTurno(o) {
+  if (!o || !o.ts) return false;
+  let e = 0; try { e = Number(localStorage.getItem('sala_entrada_ts')) || 0; } catch (x) {}
+  return e > 0 ? Number(o.ts) >= e : (Date.now() - Number(o.ts) < CIE_OK_MS);
+}
 function _cieOkKey() { return 'sala_corte_ok_' + _fechaOpJS() + '_' + _slugSalaJS(STATE.nombre || ''); }
 function _cieOkSegna(r) { try { localStorage.setItem(_cieOkKey(), JSON.stringify({ ts: Date.now(), id: (r && r.id) || '', nombre: STATE.nombre || '' })); } catch (e) {} }
 function _cieOkRecente() {
   if (!CIE_GUARDIA_ON) return null;
-  try { const o = JSON.parse(localStorage.getItem(_cieOkKey()) || 'null'); return (o && o.ts && Date.now() - o.ts < CIE_OK_MS) ? o : null; } catch (e) { return null; }
+  try { const o = JSON.parse(localStorage.getItem(_cieOkKey()) || 'null'); if (o && o.ts && CORTE_UNICO_ON) return _cieDelTurno(o) ? o : null; return (o && o.ts && Date.now() - o.ts < CIE_OK_MS) ? o : null; } catch (e) { return null; }   // [26-ott] un corte per turno: vale per tutto il turno
 }
 function _cieYaCerraste(o) {
   const hh = new Date(o.ts).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false });
   _cieRender('<div class="cie-h">✅ Ya cerraste tu turno</div>' +
     '<div class="cie-sub">' + esc(o.nombre || STATE.nombre || '') + ' · a las ' + esc(hh) + (o.id ? ' · ' + esc(o.id) : '') + '</div>' +
-    '<div class="cie-nota">El corte quedó guardado. <b>No lo repitas</b>: un segundo corte es una declaración nueva.</div>' +
+    (CORTE_UNICO_ON ? '<div class="cie-nota">Tu corte ya está cerrado. Si hay un error, avísale al JL.</div>' +
+      '<button class="btn" onclick="_cieListo()">Listo — me voy</button>'   // [26-ott] un corte per turno: niente «cerrar de nuevo»
+    : '<div class="cie-nota">El corte quedó guardado. <b>No lo repitas</b>: un segundo corte es una declaración nueva.</div>' +
     '<button class="btn" onclick="_cieListo()">Listo — me voy</button>' +
-    '<div class="cie-out" onclick="_cieDeNuevo()">Contaste mal — cerrar de nuevo</div>');
+    '<div class="cie-out" onclick="_cieDeNuevo()">Contaste mal — cerrar de nuevo</div>'));
 }
 function _cieDeNuevo() { CIE.deNuevo = true; cierreAbrir(); }
 /* ═══ [23-ott · 🚨 ⓐ di 💵 `EL GIRO V32 257710C INNOCUO MA NON CURA IL DOPPIO DI ARIANNA`] IL TIMEOUT NON INVITA A RIPROVARE ═══
@@ -4139,6 +4155,15 @@ function _ciePaso1() {
   let h = '<div class="cie-h">🧾 Cerrar mi turno</div><div class="cie-sub">' + esc(d.mesero) +
     (d.turno ? ' · ' + (d.turno === 'noche' ? 'noche' : 'día') : '') +
     (d.regimen ? ' · propina ' + (d.regimen === 'individual' ? 'individual' : 'al pozo') : '') + '</div>';   // [30-set] senza il libro non si indovina
+  if (CORTE_UNICO_ON && d.ya_cerrado && _cieDelTurno(d.ya_cerrado)) {   // [26-ott] MI CORTE mostra il corte fatto, senza un nuovo cierre
+    const _hh = new Date(Number(d.ya_cerrado.ts)).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false });
+    h += '<div class="cie-box ok"><b>✅ Tu corte ya está cerrado</b>' +
+      '<div class="cie-row"><span>A las ' + esc(_hh) + (d.ya_cerrado.id ? ' · ' + esc(d.ya_cerrado.id) : '') + '</span><b>' + (d.ya_cerrado.declarado == null ? '' : fmtPrice(d.ya_cerrado.declarado)) + '</b></div></div>' +
+      '<div class="cie-nota">Tu corte ya está cerrado. Si hay un error, avísale al JL.</div>' +
+      '<button class="btn" onclick="_cieListo()">Listo — me voy</button>';
+    _cieRender(h);
+    return;
+  }
   if (d.ya_cerrado) {
     h += '<div class="cie-warn">Ya cerraste hoy (entregaste ' + fmtPrice(d.ya_cerrado.declarado) +
       '). Si vuelves a cerrar se guarda una declaración NUEVA — la anterior no se borra.</div>';
@@ -4599,7 +4624,8 @@ function _ciePaso4(r) {
       ' — no había nadie en esa plaza. El JL ya lo sabe.</div>';
   }
   h += '<button class="btn" onclick="_cieListo()">Listo — me voy</button>' +
-    '<div class="cie-nota">Quedó firmado a tu nombre. Si contaste mal, vuelve a cerrar: se guarda una declaración nueva, no se borra nada.</div>';
+    '<div class="cie-nota">' + (CORTE_UNICO_ON ? 'Quedó firmado a tu nombre. Si hay un error, avísale al JL.'   // [26-ott] un corte per turno
+      : 'Quedó firmado a tu nombre. Si contaste mal, vuelve a cerrar: se guarda una declaración nueva, no se borra nada.') + '</div>';
   _cieRender(h);
 }
 function _cieListo() { _CIE_FIRMADO = true; _cieCerrar(); salir(); }   // [30-set] il corte firmato apre il «Salgo»
@@ -9845,6 +9871,7 @@ function _saludLeggi() {
       COLA_BORDE_ON = String(cercaK(j, 'cola_borde_on')) === '1';             // [21-ott · pezzo 1.16]
       COLN_STAFF_BORDE_ON = String(cercaK(j, 'colacion_staff_borde_on')) === '1';   // [21-ott · pezzo 2.6b]
       SOLTAR2X1_BORDE_ON = String(cercaK(j, 'soltar2x1_borde_on')) === '1';         // [21-ott · pezzo 1.7]
+      if (String(cercaK(j, 'corte_unico_on')) === '0') CORTE_UNICO_ON = false;   // [26-ott] un corte per turno: /salud la può solo spegnere
       CORTE_MESAS_PG_ON = String(cercaK(j, 'corte_mesas_pg_on')) === '1';           // [21-ott · pezzo 1.6]
       if (BORDE_FALLBACK_TEL === null && cercaK(j, 'borde_fallback_on') != null) { const _bfb = String(cercaK(j, 'borde_fallback_on')) === '1'; if (_bfb !== BORDE_FALLBACK_ON) { BORDE_FALLBACK_ON = _bfb; _pintarGuardiaBadge(); } }   // [21-ott] l'ultima vista, non Google
       CLOCKIN_VETRO_ON = String(cercaK(j, 'clockin_vetro_borde_on')) === '1';   // [23-ott] il clockIn dietro le quinte dal bordo
@@ -17262,7 +17289,7 @@ async function marcarLlamada(idLlamada, btn) {
 const DEMO = QS.get('demo') === '1';
 if (QS.get('salir') === 'local') {
   try {
-    ['sala_codigo', 'sala_nombre', 'sala_local', 'sala_foto_v1'].forEach(function (k) { localStorage.removeItem(k); });
+    ['sala_codigo', 'sala_nombre', 'sala_local', 'sala_foto_v1', 'sala_entrada_ts'].forEach(function (k) { localStorage.removeItem(k); });
   } catch (e) {}
   try { history.replaceState(null, '', location.pathname); } catch (e) {}
   STATE.codigo = ''; STATE.nombre = '';

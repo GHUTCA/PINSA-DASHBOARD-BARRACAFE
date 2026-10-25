@@ -18,7 +18,7 @@ async function banco(SRC, quieto) {
     const ctx = { JSON, String, Math, Object, Number, Date: Object.assign(function (x) { return new globalThis.Date(x == null ? now : x); }, { now: () => now }),
       localStorage: { getItem: (k) => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); }, removeItem: (k) => { delete LS[k]; } },
       STATE: { codigo: '3805', nombre: 'Arianna' }, CIE: { paso: 2, data: null, uid: '', uidMonto: null, motivo: '', enviando: false, res: null, tol: 2000, franja: 'dia' },
-      CIE_GUARDIA_ON: guardia, CIE_OK_MS: 15 * 60000, CORTE_BORDE_ON: true, CAJA_ATTO1_ON: true, CORTE_TRAS_BORDE_ON: false, SALDO_SIN_PADRON_ON: false,
+      CIE_GUARDIA_ON: guardia, CIE_OK_MS: 15 * 60000, CORTE_UNICO_ON: false /* [26-ott] neutro: la guardia di 15 min del 23 */, CORTE_BORDE_ON: true, CAJA_ATTO1_ON: true, CORTE_TRAS_BORDE_ON: false, SALDO_SIN_PADRON_ON: false,
       _fechaOpJS: () => '2026-10-23', _slugSalaJS: (s) => String(s).toLowerCase(), _cieMontoValor: () => 0, esc: (s) => String(s), fmtPrice: (n) => '$' + n,
       $: () => ({ disabled: false, textContent: '' }), toast: (k, s) => L.toast.push([k, s]), _cieRender: (h) => L.render.push(h), bordeHecho: () => {},
       _cerrarMeseroAlBorde: async () => null, CIE_DUDA_MS: 30, setTimeout, setInterval, clearInterval,

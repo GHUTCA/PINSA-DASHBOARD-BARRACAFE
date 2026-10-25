@@ -12,7 +12,7 @@ function banco(SRC, quieto) {
     const ctx = { CIE: { data: { mesero: 'Wilbert', n_abiertas: mesas.length, monto_abierto: mesas.reduce((a, m) => a + m.consumo, 0), mesas_abiertas: mesas } },
       esc: String, fmtPrice: (n) => '$' + n, _cieRender: (x) => { h = x; }, String };
     vm.createContext(ctx);
-    vm.runInContext('var CORTE_JL_ON = ' + jl + '; var CORTE_TRAS_BORDE_ON = ' + tras + '; var FINTURNO_BLOQUEO_ON = ' + bloqueo + ';\n' + fnVin(SRC, '_ciePaso1') + '\n_ciePaso1();', ctx);
+    vm.runInContext('var CORTE_UNICO_ON = false; var CORTE_JL_ON = ' + jl + '; var CORTE_TRAS_BORDE_ON = ' + tras + '; var FINTURNO_BLOQUEO_ON = ' + bloqueo + ';\n' + fnVin(SRC, '_ciePaso1') + '\n_ciePaso1();', ctx);
     return h; };
   const M998 = [{ mesa: '998', consumo: 3190, pasa_a: '' }];
   { const h = paso1(M998);
