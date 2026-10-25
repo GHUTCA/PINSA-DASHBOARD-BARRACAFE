@@ -41,14 +41,35 @@ async function banco(SRC, quieto) {
     t('G · un estacion_cerrada SENZA borde:true si ferma come ieri (non è un no definitivo)', w.cola.length === 2 && w.L.post.join(',') === 'q1' && w.s86.length === 0, { cola: w.cola, post: w.L.post }); }
   { const w = await coda({ ok: false, borde: true, need: 'items_agotados', agotados: [{ id: 'pan', nombre: 'Pan' }] });
     t('H · l 86 resta com era («se acabó Pan»)', w.cola.length === 0 && w.L.toast.some((x) => /Mesa 42: se acabó Pan/.test(x[1])), w.L.toast); }
+  // ⓪ staffPost VERO: il no della cucina SENZA timbro (il bordo vivo di oggi) non è rete
+  { const F = 'let STAFFPOST_SOLO = "";\n' + fnVin(SRC, '_soloBorde') + 'async ' + fnVin(SRC, 'staffPost');
+    const chiama = async (solo, body) => { const L = { gas: [], penna: [] };
+      const ctx = { BORDE_W: { QS: '', ok: {} }, STATE: { sala: { bw: true } }, BORDE_SALA: { URL: 'https://b', T: 't' }, CFG: { LOCAL: 'BKS' }, APP_ID: 'sala',
+        JSON, Object, String, setTimeout, clearTimeout, AbortController, encodeURIComponent, Date,
+        bordeWriteOn: () => true, _salaVer: () => 'v', _muroCampi: () => ({}), _vediNoAsignado: (j) => j, _pennaSvuota: () => {}, _pennaDice: (s) => L.penna.push(s), _cadutaMarca: (a, r) => r,
+        fetch: async () => ({ status: 200, json: async () => body }), gasPost: async (a) => { L.gas.push(a); return { ok: true, via: 'gas' }; } };
+      vm.createContext(ctx); vm.runInContext(F, ctx); vm.runInContext('STAFFPOST_SOLO = ' + JSON.stringify(solo) + ';', ctx);
+      try { return { r: await vm.runInContext('staffPost("crearPedidoMesero", { uuid: "u1" })', ctx), L }; } catch (e) { return { lanciato: e.message, L }; } };
+    const NUDO = { ok: false, error: 'estacion_cerrada', producto: 'Lomo saltado' };
+    const x = await chiama('crearPedidoMesero', NUDO);
+    t('J · solo bordo, cucina chiusa SENZA timbro ⇒ no definitivo con la frase, non lancia (niente coda), niente GAS', x.r && x.r.ok === false && x.r.definitivo === true && x.r.mensaje === MSJ && !x.lanciato && x.L.gas.length === 0, x);
+    const y = await chiama('', NUDO);
+    t('K · leva solo-bordo spenta: lo stesso no non scivola sul GAS', y.r && y.r.definitivo === true && y.L.gas.length === 0, y);
+    const z = await chiama('crearPedidoMesero', { ok: false, error: 'sin_gate' });
+    t('L · un altro no senza timbro resta guasto ⇒ lancia come ieri', z.lanciato === 'sin_red', z);
+    // e la catena: la risposta di staffPost entra nella coda e ne esce
+    const w = await coda(x.r);
+    t('M · catena: la risposta di staffPost (senza borde:true) esce dalla coda con «la cocina está cerrada»', w.cola.length === 0 && w.s86.length === 1 && w.L.toast.some((q) => /Mesa 42: la cocina está cerrada \(Lomo saltado\)/.test(q[1])), w.L.toast); }
   t('I · «Qué cambió» ha la riga', /Cocina cerrada/.test(QC));
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
   const M = [
     ['il toast torna al codice', "if (r && r.error === 'estacion_cerrada') { toast('err', '🚫 ' + (r.mensaje", "if (false) { toast('err', '🚫 ' + (r.mensaje"],
-    ['la coda si ferma sulla cucina chiusa', "if (r && r.error === 'estacion_cerrada' && r.borde === true) {", "if (false) {"],
-    ['la coda non guarda il timbro', "if (r && r.error === 'estacion_cerrada' && r.borde === true) {", "if (r && r.error === 'estacion_cerrada') {"],
+    ['la coda si ferma sulla cucina chiusa', "if (r && r.error === 'estacion_cerrada' && (r.borde === true || r.definitivo === true)) {", "if (false) {"],
+    ['la coda non guarda il timbro', "if (r && r.error === 'estacion_cerrada' && (r.borde === true || r.definitivo === true)) {", "if (r && r.error === 'estacion_cerrada') {"],
+    ['staffPost la tratta come rete', "if (j && j.ok !== true && j.error === 'estacion_cerrada') {", 'if (false) {'],
+    ['la coda ignora il definitivo', "(r.borde === true || r.definitivo === true)", 'r.borde === true'],
     ['il badge dice se acabó', "  if (x.cerrada) return 'Mesa '", "  if (false) return 'Mesa '"],
   ];
   let m = 0; for (const [n, a, b] of M) { if (!ORIG.includes(a)) { console.log('⚠ non applicabile: ' + n); continue; } let r; try { r = await banco(ORIG.split(a).join(b), true); } catch (e) { r = { ko: 1 }; } console.log((r.ko ? '☠ muore  ' : '😐 VIVE   ') + n); if (r.ko) m++; }
