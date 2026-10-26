@@ -75,8 +75,8 @@ async function banco(SRC) {
     const out = m.ctx.F.anfAplicaSeatsLocales(r); const mm = (n) => out.plazas[0].mesas.find((x) => x.mesa === n);
     t('④ ter la seduta che il bordo non mostra: mesa 2 libre -> ocupada con 6 pax (non si siede due volte)', mm('2').estado === 'ocupada' && mm('2').pax === 6, mm('2'));
     t('④ quater una seduta di 40 min fa (oltre i 25) NON conta e si butta', mm('3').estado === 'libre' && m.ctx.STATE.seatsLoc.length === 2, [mm('3'), m.ctx.STATE.seatsLoc]);
-    t('④ quinto una mesa che il bordo gia dice ocupada (con il suo pedido) NON si tocca', mm('1').estado === 'ocupada' && mm('1').pendiente === true && mm('1').pax !== 9, mm('1')); }
-  t('⑦ versione e fuente: v1.8, e la riga «fuente» esiste', />v1\.8 · 10ott</.test(SRC) && /id="fuente"/.test(SRC));
+    t('④ quinto una mesa che il bordo gia dice ocupada (con il suo pedido) NON si tocca', mm('1').estado === 'ocupada' && mm('1').pax !== 9, mm('1')); }   // [26-ott] il contratto vero del bordo non porta più `pendiente`: conta che la seduta locale non la sovrascriva
+  t('⑦ versione e fuente: v1.8 o successiva, e la riga «fuente» esiste', />v1\.(8|9|1\d) · \d+(ott|oct)</.test(SRC) && /id="fuente"/.test(SRC));   // [26-ott] il vetro vivo è v1.11
   t('⑦ bis la seduta riuscita si ricorda (seatsLoc.push) e render ne riceve la versione con le sedute', /seatsLoc = STATE\.seatsLoc \|\| \[\]\)\.push/.test(SRC) && /render\(anfAplicaSeatsLocales\(rB\)\)/.test(SRC));
 }
 await banco(SRC0);
@@ -85,12 +85,12 @@ const mut = async (nome, da, a) => { if (!SRC0.includes(da)) { ko++; console.log
   t('⑧ mutante «' + nome + '» => banco ROSSO', rossi > 0, rossi); };
 await mut('la leva e ignorata', "ANF_BORDE.on = !!(j && j.flags && String(j.flags.anfitriona_borde_on) === '1') && !_anfFreno();", "ANF_BORDE.on = true;");
 await mut('il freno non frena', "&& !_anfFreno();", ";");
-await mut('/salud muto = accesa', "} catch (e) { ANF_BORDE.on = false; }", "} catch (e) { ANF_BORDE.on = true; }");
-await mut('il dato vecchio passa', "if (edad == null || edad > ANF_FRESCO_S) return null;", "");
+await mut('/salud muto = accesa', "if (!ANF_BORDE.sinGas) ANF_BORDE.on = false;", "if (!ANF_BORDE.sinGas) ANF_BORDE.on = true;");   // [26-ott] la forma della v1.10
+await mut('il dato vecchio passa', "const vieja = edad == null || edad > ANF_FRESCO_S;", "const vieja = false;");   // [26-ott] la forma della v1.10
 await mut('senza anfitriona si va avanti', "if (!d || !d.anfitriona || !Array.isArray(d.anfitriona.plazas)) return null;", "if (!d) return null;");
 await mut('il codigo non viaggia', "'?seccion=sala_vista&codigo=' + encodeURIComponent(STATE.codigo)", "'?seccion=sala_vista'");
 await mut('il token non viaggia', "{ headers: { 'X-Borde-Token': BORDE_SALA.T }, signal", "{ signal");
-await mut('la fonte non si dichiara', "el.textContent = r && r._fuente === 'bordo' ? '· bordo hace ' + (r._edad_s || 0) + ' s' : '· google';", "el.textContent = '';");
+await mut('la fonte non si dichiara', "el.textContent = r && r._fuente === 'bordo'", "el.textContent = r && r._fuente === 'mai'");   // [26-ott] la forma della v1.10
 await mut('le sedute passano dal bordo solo col vecchio flag', "if (!SENTARBORDE_ON && !(await anfSaludLeva())) return null;", "if (!SENTARBORDE_ON) return null;");
 await mut('la seduta locale e eterna', "Date.now() - x.ts <= ANF_SEAT_VIGENCIA_MS", "true");
 await mut('la seduta locale sovrascrive il bordo', "if (m.estado === 'libre' || m.estado === 'presunta') {", "if (true) {");
