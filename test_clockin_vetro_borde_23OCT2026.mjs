@@ -23,6 +23,16 @@ async function banco(S, quieto) {
     t('C · sala: la verifica riusa la chiave dell ingresso (il bordo non scrive due ingressi)', x.L.staff[0][1].clockin_uid === 'ci-ingresso1', x.L.staff); }
   { const x = await sala({ leva: true, uidPrima: { k: '9999|Otro', u: 'ci-vecchio' } });
     t('C2 · sala: chiave di un altro turno/nome ⇒ una nuova', x.L.staff[0][1].clockin_uid !== 'ci-vecchio' && x.uid.k === '3474|Ruth', x.L.staff); }
+  { // B0 · [26-ott · 🟡 di 💵 `EL GIRO V32 A4712E1 VERDE CON UNA LEVA DA AGGIUNGERE`] la leva al valore di NASCITA (la riga vera), /salud mai arrivato:
+    // il caricamento con la rete lenta di ARQ (porta ①). Deve passare da staffPost, mai gasPost diretto. Rosso su 617bd1e (nasceva spenta).
+    const i = S.sala.indexOf('var CLOCKIN_VETRO_ON ='); const riga = i < 0 ? 'var CLOCKIN_VETRO_ON = false;' : S.sala.slice(i, S.sala.indexOf('\n', i));
+    const L = { gas: [], staff: [] };
+    const ctx = { STATE: { codigo: '3474', nombre: 'Ruth' }, QS: new URLSearchParams(''), SALUD_LEVE_P: null, Date, Math, Promise, setTimeout,
+      gasPost: async (a) => { L.gas.push(a); return { ok: true }; }, staffPost: async (a) => { L.staff.push(a); return { ok: true, borde: true }; } };
+    vm.createContext(ctx);
+    vm.runInContext(riga + '\nvar _CLOCKIN_UID = null;\n' + (S.sala.includes('function _saludAttendi(') ? 'async ' + fnVin(S.sala, '_saludAttendi') : 'async function _saludAttendi() {}') + 'async ' + fnVin(S.sala, '_clockInDetras') + '\nthis.go = _clockInDetras;', ctx);
+    await ctx.go();
+    t('B0 · sala: leva al valore di nascita e /salud mai arrivato ⇒ staffPost, MAI gasPost diretto (la porta ① di ARQ)', L.gas.length === 0 && L.staff[0] === 'clockIn', L); }
   t('D · sala: _verificaDetras passa da _clockInDetras e la leva si legge dal /salud', /const r = await _clockInDetras\(\);/.test(S.sala) && /const _civ = cercaK\(j, 'clockin_vetro_borde_on'\); if \(_civ != null && QS\.get\('civ'\) !== '0'\) CLOCKIN_VETRO_ON = String\(_civ\) === '1';/.test(S.sala) && /var CLOCKIN_VETRO_ON = \(function \(\) \{ try \{ return QS\.get\('civ'\) !== '0'; \}/.test(S.sala));   // [26-ott · ARQ porta ①] nasce ACCESA, /salud la spegne solo con "0"
   // ── l'anfitriona: _clockInAlBorde
   async function anf({ leva, risposta, lancia = false }) {
