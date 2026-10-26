@@ -44,7 +44,7 @@ async function banco(SRC, quieto) {
     w.set({ clockin_vetro_borde_on: '1', sala_salud_rilegge_on: '0' }); w.L.iv[0].f(); await w.ctx.SALUD_LEVE_P;
     t('F · la leva della rilettura spenta dal bordo col "0": il giro si ferma', w.L.cleared === 1 && w.ctx.SALUD_RILEGGE_ON === false); }
   { const w = mondo(); w.raw({ ok: false, error: 'worker' }); await w.leggi();
-    t('A2 · la PRIMA lettura resta quella di ieri anche con {ok:false} (nessuna leva accesa, nessun giro)', w.L.iv.length === 0 && w.ctx.CLOCKIN_VETRO_ON === false); }
+    t('A2 · la PRIMA lettura resta quella di ieri anche con {ok:false} (nessuna leva accesa, nessun giro)', w.L.iv.length === 0 && !w.ctx.CLOCKIN_VETRO_ON); }   // [26-ott] la chiave assente non tocca la leva: resta quella di nascita (qui null)
   { const w = mondo('saludre=0'); w.set({ sala_salud_rilegge_on: '1' }); await w.leggi();
     t('G · ?saludre=0 ferma il giro su quell apparecchio', w.L.iv.length === 0); }
   t('H · la prima lettura parte da sola al caricamento, come prima', /\n_saludLeggi\(\);\n/.test(SRC) && !/\(function \(\) \{\n  try \{\n    if \(!BORDE_SALA \|\| !BORDE_SALA\.URL\) return;\n    SALUD_LEVE_P/.test(SRC));
