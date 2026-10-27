@@ -56,7 +56,7 @@ async function banco(SRC, quieto) {
     t('L2 · tutti need:gas ⇒ un solo passaggio per entrata, nessun giro infinito, nessuno perso', x.vie.length === 2 && x.mem.length === 2, x); }
   { const x = await svuota({ solo: 'crearPedidoMesero', risposte: { A: { ok: false, error: 'codigo_invalid', borde: true }, B: { ok: true, borde: true } } });
     t('L3 · un rifiuto timbrato ferma il giro come ieri (B aspetta il prossimo)', x.vie.length === 1 && x.mem.length === 2 && x.mem[0].intentos === 1, x); }
-  t('J · la leva si legge dal /salud e nasce vuota', /STAFFPOST_SOLO = String\(cercaK\(j, 'staffpost_solo_borde'\) == null \? '' : cercaK\(j, 'staffpost_solo_borde'\)\);/.test(SRC) && /let STAFFPOST_SOLO = '';/.test(SRC));
+  t('J · la leva si legge dal /salud (solo se porta la chiave) e [27-ott · 6.5] NASCE PIENA coi verbi già solo bordo', /\{ const _sp = cercaK\(j, 'staffpost_solo_borde'\); if \(_sp != null\) STAFFPOST_SOLO = String\(_sp\); \}/.test(SRC) && /let STAFFPOST_SOLO = 'crearPedidoMesero,marcarPedido,moverMesa,emitirPreCuenta,clockIn';/.test(SRC));
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
