@@ -11,7 +11,7 @@ async function banco(SRC, quieto) {
     const L = { fetch: 0, gas: [], penna: [] };
     const ctx = { BORDE_W: { QS: qs, ok: {} }, STATE: { sala: { bw: bw } }, BORDE_SALA: { URL: 'https://b', T: 't' }, CFG: { LOCAL: 'BKS' }, APP_ID: 'sala',
       JSON, Object, String, setTimeout, clearTimeout, AbortController, encodeURIComponent, Date,
-      bordeWriteOn: () => (qs === '0' ? false : qs === '1' ? true : bw), _salaVer: () => 'v', _muroCampi: () => ({}), _vediNoAsignado: (j) => j,
+      _saludAttendi: async () => {} /* [27-ott] neutro */, bordeWriteOn: () => (qs === '0' ? false : qs === '1' ? true : bw), _salaVer: () => 'v', _muroCampi: () => ({}), _vediNoAsignado: (j) => j,
       _pennaSvuota: () => {}, _pennaDice: (s) => L.penna.push(s), _cadutaMarca: (a, r) => r,
       fetch: async () => { L.fetch++; if (lancia) { const e = new Error('x'); e.name = 'AbortError'; throw e; } return { status, json: async () => body }; },
       gasPost: async (a) => { L.gas.push(a); return { ok: true, via: 'gas' }; } };
