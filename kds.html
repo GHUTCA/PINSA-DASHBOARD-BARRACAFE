@@ -305,7 +305,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.29</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.30</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -582,7 +582,12 @@ async function entrar(){
   if (!/^\d{4}$/.test(codigo)) { $('entErr').textContent = 'El código son 4 números (lo abre el JL).'; return; }
   $('entBtn').disabled = true;
   try {
-    const r = await gasGet('getKds', { codigo, estacion: STATE.estacion });
+    /* [27-ott · 4.3] a leva il codice si valida sul bordo: `codigo_invalid` arriva come dal GAS; «cargando» = codice buono, coda non ancora pronta */
+    let r;
+    if (KDS_SIN_GAS_ON && BORDE.ON) {
+      try { r = await leerKds(codigo, STATE.estacion); }
+      catch (eB) { if (eB && eB.message === 'cargando') r = { ok: true, _cargando: true }; else throw eB; }
+    } else r = await gasGet('getKds', { codigo, estacion: STATE.estacion });
     if (!r.ok) {
       $('entErr').textContent = r.error === 'codigo_invalid' ? 'Código inválido o turno cerrado — pide el de hoy al JL.'
         : 'No se pudo entrar: ' + (r.error || '?');
@@ -593,7 +598,7 @@ async function entrar(){
     localStorage.setItem(CFG.SK.EST, STATE.estacion);
     localStorage.setItem(CFG.SK.LOC, CFG.LOCAL);
     bautizarSilencioso(codigo);   // v1.11 · da qui il turno nuovo entra da solo
-    aplicar(r);
+    if (!r._cargando) aplicar(r);
     showTablero();
   } catch (e) {
     $('entErr').textContent = 'Sin conexión con el sistema — revisa el Wi-Fi y reintenta.';
@@ -630,6 +635,17 @@ function showTablero(){
    Y se apaga solo — cualquier fallo cae al GAS sin que la cocina lo note.
    El LOGIN sigue yendo al GAS a propósito: si el turno acaba de abrir y
    nadie escribió todavía, el borde está vacío y entrar tiene que funcionar. */
+/* ═══ [27-ott · 🎛 V33 `V33 MAR 27 MATTINA` · pezzo 4.3 · TERZA] IL KDS NON CHIEDE PIÙ A GOOGLE COME È LA CODA ═══
+   Il modello della sala 1.1 (`f02b3ef` · `07b7d42` · `d24e2f7`): la lettura della coda NON ricade su `getKds` del GAS.
+   · bordo irraggiungibile ⇒ si lancia come la rete morta: il poll tiene la coda che ha e dice «sin conexión», e il giro dopo ribussa;
+   · bordo che risponde ma senza la coda (vuota all'apertura del turno, o la sezione non ancora pronta) ⇒ «cargando»: il tablet entra e aspetta;
+   · foto del bordo oltre il tetto ⇒ si mostra DICHIARATA (il banner ambra di sempre), mai Google;
+   · l'ingresso col codice si valida sul bordo (`/estado` risponde `codigo_invalid` come il GAS).
+   Restano su Google, dichiarati: il rinnovo del codice del tablet battezzato (`salaCheckIn`: il bordo dà il codice solo con 1.15) e il ripiego dei
+   due tocchi `marcarKds*` quando il bordo non timbra (la lista «solo bordo» è di ⚙️ ARQ).
+   Leva: NASCE ACCESA (la lezione del 25: una leva che vive solo sul bordo non arriva al tablet che non lo raggiunge). `?kdsgas=1` per apparecchio = il
+   mondo di ieri; `?borde=0` (il freno di sempre) spegne tutto il bordo e quindi anche questa. */
+const KDS_SIN_GAS_ON = (function () { try { return QS.get('kdsgas') !== '1'; } catch (e) { return true; } })();
 const BORDE = {
   URL: 'https://pinsita-borde.alberto-agostini.workers.dev',
   T: '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ',
@@ -726,6 +742,7 @@ async function leerKds(codigo, estacion) {
      ora è la riserva: la cucina vede la sala di qualche minuto fa (con i tap
      del bordo già dentro, via eco) invece di uno schermo cieco. */
   let fotoVieja = null;
+  let bordoRispose = false;   // [27-ott · 4.3] il bordo ha risposto con un JSON (anche vuoto): non è rete morta
   /* v1.27 · [AUT-0399] IL RESPIRO. 90 s e si riprova. Tre raffiche di WiFi in
      venti secondi non sono un bordo rotto: sono un locale pieno. Senza questa
      riga quel tablet resta sulla via lenta fino al mattino dopo.
@@ -755,6 +772,7 @@ async function leerKds(codigo, estacion) {
       const r = await fetch(u, { signal: ctrl.signal, cache: 'no-store' });
       clearTimeout(to);
       const j = await r.json();
+      if (r.ok) bordoRispose = true;
       // Un código equivocado es una respuesta VÁLIDA del borde: se devuelve
       // tal cual, para que el tablet renueve el código como siempre.
       if (j && j.error === 'codigo_invalid') return { ok: false, error: 'codigo_invalid' };
@@ -779,6 +797,11 @@ async function leerKds(codigo, estacion) {
   // v1.21 · il gradino senza attesa (come mesero v3.9): GAS caduto da <25s
   // + foto-ombra in mano = niente fila davanti a una porta morta.
   if (fotoVieja && Date.now() < (STATE.gasCaidoHasta || 0)) return fotoVieja;
+  /* [27-ott · 4.3] a leva accesa niente getKds: la foto vecchia dichiarata, oppure si lancia («cargando» se il bordo ha risposto, se no «sin_red») */
+  if (KDS_SIN_GAS_ON && BORDE.ON) {
+    if (fotoVieja) return fotoVieja;
+    throw new Error(bordoRispose ? 'cargando' : 'sin_red');
+  }
   try {
     const rG = await gasGet('getKds', { codigo, estacion });
     STATE.gasCaidoHasta = 0;
@@ -822,6 +845,10 @@ async function poll(){
     aplicar(r);
     render();
   } catch (e) {
+    if (e && e.message === 'cargando') {   // [27-ott · 4.3] il bordo c'è, la coda non ancora: si dice questo, non «sin conexión»
+      const offC = $('offline'); offC.classList.remove('vieja'); offC.textContent = '⏳ Cargando la cola…'; offC.classList.add('show');
+      return;
+    }
     STATE.fallos++;
     if (STATE.fallos >= 2) {
       const offE = $('offline');
@@ -1305,6 +1332,7 @@ if (DEMO === '1') {
     (async function(){
       if (await renovarCodigo()) {
         try {
+          if (KDS_SIN_GAS_ON && BORDE.ON) { showTablero(); poll(); return; }   // [27-ott · 4.3] il codice nuovo c'è: la coda la porta il poll dal bordo
           const r = await gasGet('getKds', { codigo: STATE.codigo, estacion: STATE.estacion });
           if (r.ok) { aplicar(r); showTablero(); return; }
         } catch (e) {}
@@ -1326,10 +1354,13 @@ if (DEMO === '1') {
           // leerKds valida el código contra el gate del borde, cae al GAS con
           // el peldaño, y sirve la foto vieja como reserva (que el banner
           // ámbar de hoy declara con su edad). ?borde=0 la vuelve al de antes.
-          const r = await leerKds(STATE.codigo, STATE.estacion);
+          let r;
+          try { r = await leerKds(STATE.codigo, STATE.estacion); }
+          catch (eC) { if (eC && eC.message === 'cargando') { showTablero(); return; } throw eC; }   // [27-ott · 4.3] codice buono, coda non ancora: dentro, il poll la porta
           if (r.ok) { aplicar(r); showTablero(); return; }
           // v1.11 · código rechazado: il tablet battezzato prova a rinnovarselo
           if (await renovarCodigo()) {
+            if (KDS_SIN_GAS_ON && BORDE.ON) { showTablero(); poll(); return; }   // [27-ott · 4.3] idem: niente getKds
             const r2 = await gasGet('getKds', { codigo: STATE.codigo, estacion: STATE.estacion });
             if (r2.ok) { aplicar(r2); showTablero(); return; }
           }
