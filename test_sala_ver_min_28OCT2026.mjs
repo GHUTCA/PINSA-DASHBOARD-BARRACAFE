@@ -9,10 +9,10 @@ async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const i0 = SRC.indexOf('var SALA_VER_MIN = '); const decl = SRC.slice(i0, SRC.indexOf('function _verNum(', i0));
   const F = decl + fnVin(SRC, '_verNum') + fnVin(SRC, '_verSotto') + fnVin(SRC, '_verMinMomentoSicuro') + fnVin(SRC, '_verMinControlla');
-  function giro({ mio = 'sala v3.228.58 · vetro', min = '3.228.59', entrada = false, entBtnDis = false, mesa = '', cola = 0, flushing = false, ovl = false, qs = {}, mem = {}, ora = 1e12 } = {}) {
+  function giro({ mio = 'sala v3.228.58 · vetro', min = '3.228.59', entrada = false, entBtnDis = false, mesa = '', cola = 0, flushing = false, ovl = false, qs = {}, mem = {}, ora = 1e12, st = {} } = {}) {
     const L = { reload: 0, timer: 0 }; const el = { ver: { textContent: mio }, verBanner: { innerHTML: '', classList: { h: true, remove() { this.h = false; } } }, entBtn: { disabled: entBtnDis } };
     const ls = Object.assign({}, mem);
-    const ctx = { $: (id) => el[id], STATE: { mesaAbierta: mesa }, COLA_FLUSHING: flushing, _colaGet: () => new Array(cola).fill({}), _entradaVisible: () => entrada,
+    const ctx = { $: (id) => el[id], STATE: Object.assign({ mesaAbierta: mesa, enVuelo: {}, tomando: {}, nuevo: null, pago: null, editando: null, agregando: null, coln: null }, st), COLA_FLUSHING: flushing, _colaGet: () => new Array(cola).fill({}), _entradaVisible: () => entrada,
       _salaVer: () => el.ver.textContent.trim(), QS: { get: (k) => (qs[k] == null ? null : qs[k]) }, JSON, String, Math,
       Date: { now: () => ora }, document: { querySelector: (q) => (ovl && q === '[id$="Ovl"].on' ? {} : null) },
       localStorage: { getItem: (k) => (k in ls ? ls[k] : null), setItem: (k, v) => { ls[k] = String(v); } },
@@ -27,6 +27,13 @@ async function banco(SRC, quieto) {
   { const x = giro({ cola: 2 }); t('C2 · coda offline non vuota ⇒ non ora', x.L.reload === 0 && x.banner, x); }
   { const x = giro({ flushing: true }); t('C3 · coda in svuotamento ⇒ non ora', x.L.reload === 0 && x.banner, x); }
   { const x = giro({ ovl: true }); t('C4 · una finestra aperta (cobro/precuenta) ⇒ non ora', x.L.reload === 0 && x.banner, x); }
+  // [28-ott · 🔴 di 💵 EL GIRO] il lavoro aperto che vive con la mesa CHIUSA e fuori dalle …Ovl
+  for (const [n, st] of [['un pedido in composizione (STATE.nuevo)', { nuevo: { mesa: '12', lineas: [{}] } }], ['un cobro aperto (STATE.pago)', { pago: { mesa: '12' } }],
+    ['una correzione (STATE.editando)', { editando: 'u1' }], ['agregar aperto', { agregando: 'u1' }], ['la colación', { coln: { mesa: '3' } }],
+    ['Fintoc che invia', { fintocEnviando: true }], ['Fintoc che verifica', { fintocVerificando: true }], ['un tap in volo', { enVuelo: { u1: true } }], ['un MÍO in attesa del poll', { tomando: { u1: 1 } }]]) {
+    const x = giro({ st }); t('C5 · ' + n + ' ⇒ MAI ricarica: avviso + riprova', x.L.reload === 0 && x.banner && x.L.timer === 1, x);
+  }
+  { const x = giro({ st: { enVuelo: { u1: false }, tomando: {} } }); t('C6 · mappe vuote o spente non bloccano', x.L.reload === 1, x); }
   { const x = giro({ mio: 'sala v3.228.59 · vetro' }); t('D · uguale al minimo ⇒ niente', x.L.reload === 0 && !x.banner, x); }
   { const x = giro({ mio: 'sala v3.229.0 · vetro' }); t('D2 · sopra il minimo ⇒ niente', x.L.reload === 0 && !x.banner, x); }
   { const x = giro({ mio: 'sala v3.228.9 · vetro', min: '3.228.59' }); t('D3 · confronto per NUMERI: .9 è sotto .59', x.L.reload === 1, x); }
@@ -48,6 +55,8 @@ if (process.argv.includes('--mutanti')) {
   const M = [
     ['confronto come testo', "for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i];", "if (String(mio) !== String(min)) return String(a) < String(b);"],
     ['ricarica anche con la mesa aperta', '    if (STATE.mesaAbierta) return false;\n', ''],
+    ['ricarica col pedido/cobro/correzione aperti', '    if (STATE.nuevo || STATE.pago || STATE.editando || STATE.agregando || STATE.coln || STATE.fintocEnviando || STATE.fintocVerificando) return false;\n', ''],
+    ['ricarica con un tap in volo', '    if (_vivi(STATE.enVuelo) || _vivi(STATE.tomando)) return false;\n', ''],
     ['ricarica con la coda piena', '    if (COLA_FLUSHING || _colaGet().length > 0) return false;\n', ''],
     ['ricarica con una finestra aperta', "    if (document.querySelector('[id$=\"Ovl\"].on')) return false;   // una finestra aperta (cobro, mesa, precuenta…)\n", ''],
     ['niente tregua (giro in tondo)', "    if (k && k.min === SALA_VER_MIN && Date.now() - k.ts < VERMIN_TREGUA_MS) { avviso(); return; }\n", ''],
