@@ -305,7 +305,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.30</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.31</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -585,8 +585,23 @@ async function entrar(){
     /* [27-ott · 4.3] a leva il codice si valida sul bordo: `codigo_invalid` arriva come dal GAS; «cargando» = codice buono, coda non ancora pronta */
     let r;
     if (KDS_SIN_GAS_ON && BORDE.ON) {
-      try { r = await leerKds(codigo, STATE.estacion); }
-      catch (eB) { if (eB && eB.message === 'cargando') r = { ok: true, _cargando: true }; else throw eB; }
+      const leggi = async function () {
+        try { return await leerKds(codigo, STATE.estacion); }
+        catch (eB) { if (eB && eB.message === 'cargando') return { ok: true, _cargando: true }; throw eB; }
+      };
+      r = await leggi();
+      /* ═══ [28-ott · 🎛 V33 `CONTROLLER V33 su EL GIRO V32 D4DAF5A` ② · cura ⓐ] LA FINESTRA DELL'APERTURA DEL TURNO ═══
+         Il JL apre il turno e il bordo riceve il codice nuovo solo al primo battito (~1 min): in quel minuto il codice GIUSTO risponde `codigo_invalid`
+         (`EL GIRO V32 3A618EA KDS SIN GAS` 🟡). Il vetro non torna al GAS: dice «Espera un minuto» e ritenta da solo ogni `KDS_ESPERA_PASO_MS` per
+         `KDS_ESPERA_MS`. Se il bordo dice l'età del gate (`edad_gate_s`) ed è fresca (sotto `KDS_GATE_FRESCO_S`), il codice è sbagliato davvero: niente attesa. */
+      const t0 = Date.now();
+      while (r && !r.ok && r.error === 'codigo_invalid' && Date.now() - t0 < KDS_ESPERA_MS
+             && !(r.edad_gate_s != null && r.edad_gate_s < KDS_GATE_FRESCO_S)) {
+        $('entErr').textContent = '⏳ Espera un minuto, se está abriendo el turno… (reintentando sola)';
+        await new Promise(function (ok) { setTimeout(ok, KDS_ESPERA_PASO_MS); });
+        r = await leggi();
+      }
+      if (r && r.ok) $('entErr').textContent = '';
     } else r = await gasGet('getKds', { codigo, estacion: STATE.estacion });
     if (!r.ok) {
       $('entErr').textContent = r.error === 'codigo_invalid' ? 'Código inválido o turno cerrado — pide el de hoy al JL.'
@@ -646,6 +661,7 @@ function showTablero(){
    Leva: NASCE ACCESA (la lezione del 25: una leva che vive solo sul bordo non arriva al tablet che non lo raggiunge). `?kdsgas=1` per apparecchio = il
    mondo di ieri; `?borde=0` (il freno di sempre) spegne tutto il bordo e quindi anche questa. */
 const KDS_SIN_GAS_ON = (function () { try { return QS.get('kdsgas') !== '1'; } catch (e) { return true; } })();
+const KDS_ESPERA_MS = 120000, KDS_ESPERA_PASO_MS = 15000, KDS_GATE_FRESCO_S = 90;   // [28-ott · 4.3 ⓐ] l'attesa del codice nuovo all'apertura del turno
 const BORDE = {
   URL: 'https://pinsita-borde.alberto-agostini.workers.dev',
   T: '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ',
@@ -775,7 +791,7 @@ async function leerKds(codigo, estacion) {
       if (r.ok) bordoRispose = true;
       // Un código equivocado es una respuesta VÁLIDA del borde: se devuelve
       // tal cual, para que el tablet renueve el código como siempre.
-      if (j && j.error === 'codigo_invalid') return { ok: false, error: 'codigo_invalid' };
+      if (j && j.error === 'codigo_invalid') return { ok: false, error: 'codigo_invalid', edad_gate_s: (j.edad_gate_s == null ? null : Number(j.edad_gate_s)) };   // [28-ott · 4.3 ⓐ] l'età del gate, se il bordo la porta
       if (r.ok && j && j.ok && j.datos && j.datos.datos && j.datos.datos.ok) {
         if (j.datos.edad_ms < BORDE.MAX_EDAD_MS) {
           BORDE.fallos = 0;
