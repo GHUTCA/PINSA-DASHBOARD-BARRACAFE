@@ -46,7 +46,7 @@ async function banco(SRC, quieto) {
     const chiama = async (solo, body) => { const L = { gas: [], penna: [] };
       const ctx = { BORDE_W: { QS: '', ok: {} }, STATE: { sala: { bw: true } }, BORDE_SALA: { URL: 'https://b', T: 't' }, CFG: { LOCAL: 'BKS' }, APP_ID: 'sala',
         JSON, Object, String, setTimeout, clearTimeout, AbortController, encodeURIComponent, Date,
-        _saludAttendi: async () => {} /* [27-ott] neutro */, bordeWriteOn: () => true, _salaVer: () => 'v', _muroCampi: () => ({}), _vediNoAsignado: (j) => j, _pennaSvuota: () => {}, _pennaDice: (s) => L.penna.push(s), _cadutaMarca: (a, r) => r,
+        bordeWriteOn: () => true, _salaVer: () => 'v', _muroCampi: () => ({}), _vediNoAsignado: (j) => j, _pennaSvuota: () => {}, _pennaDice: (s) => L.penna.push(s), _cadutaMarca: (a, r) => r,
         fetch: async () => ({ status: 200, json: async () => body }), gasPost: async (a) => { L.gas.push(a); return { ok: true, via: 'gas' }; } };
       vm.createContext(ctx); vm.runInContext(F, ctx); vm.runInContext('STAFFPOST_SOLO = ' + JSON.stringify(solo) + ';', ctx);
       try { return { r: await vm.runInContext('staffPost("crearPedidoMesero", { uuid: "u1" })', ctx), L }; } catch (e) { return { lanciato: e.message, L }; } };

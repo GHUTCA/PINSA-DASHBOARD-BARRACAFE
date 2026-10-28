@@ -38,7 +38,7 @@ async function banco(SRC) {
   const k0 = ko;
   t('① APP_ID nasce dal JL: `const APP_ID = JL ? \'jl\' : \'sala\'`', /const APP_ID = JL \? 'jl' : 'sala';/.test(SRC));
   t('③ nessun `app: \'sala\'` letterale resta nei corpi', !/app: 'sala'/.test(SRC), (SRC.match(/app: 'sala'/g) || []).length);
-  t('① bis gli otto punti che si presentano al bordo/GAS usano APP_ID (il 7° è fetchYaPagado al bordo, 21-ott · TERZA 468000e; l 8° _letturaBordeOGas, 1.8, 27-ott)', (SRC.match(/app: APP_ID/g) || []).length === 8, (SRC.match(/app: APP_ID/g) || []).length);
+  t('① bis i sette punti che si presentano al bordo/GAS usano APP_ID (il 7° è fetchYaPagado al bordo, 21-ott · TERZA 468000e)', (SRC.match(/app: APP_ID/g) || []).length === 7, (SRC.match(/app: APP_ID/g) || []).length);
   { const mm = mondo(SRC, { user: 'Eduardo' }); await mm.ctx.P({ pago_uid: 'PU-1', mesa: '200', medio: 'efectivo', propina: 219 }, 2190);
     t('① in JL il pago al bordo porta app:jl', mm.fetches.length === 1 && mm.fetches[0].app === 'jl', mm.fetches); }
   { const mm = mondo(SRC, null); await mm.ctx.P({ pago_uid: 'PU-1', mesa: '55', medio: 'efectivo', propina: 0 }, 2190);

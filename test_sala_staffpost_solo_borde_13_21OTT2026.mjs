@@ -11,7 +11,7 @@ async function banco(SRC, quieto) {
     const L = { fetch: 0, gas: [], penna: [] };
     const ctx = { BORDE_W: { QS: qs, ok: {} }, STATE: { sala: { bw: bw } }, BORDE_SALA: { URL: 'https://b', T: 't' }, CFG: { LOCAL: 'BKS' }, APP_ID: 'sala',
       JSON, Object, String, setTimeout, clearTimeout, AbortController, encodeURIComponent, Date,
-      _saludAttendi: async () => {} /* [27-ott] neutro */, bordeWriteOn: () => (qs === '0' ? false : qs === '1' ? true : bw), _salaVer: () => 'v', _muroCampi: () => ({}), _vediNoAsignado: (j) => j,
+      bordeWriteOn: () => (qs === '0' ? false : qs === '1' ? true : bw), _salaVer: () => 'v', _muroCampi: () => ({}), _vediNoAsignado: (j) => j,
       _pennaSvuota: () => {}, _pennaDice: (s) => L.penna.push(s), _cadutaMarca: (a, r) => r,
       fetch: async () => { L.fetch++; if (lancia) { const e = new Error('x'); e.name = 'AbortError'; throw e; } return { status, json: async () => body }; },
       gasPost: async (a) => { L.gas.push(a); return { ok: true, via: 'gas' }; } };
@@ -56,7 +56,7 @@ async function banco(SRC, quieto) {
     t('L2 · tutti need:gas ⇒ un solo passaggio per entrata, nessun giro infinito, nessuno perso', x.vie.length === 2 && x.mem.length === 2, x); }
   { const x = await svuota({ solo: 'crearPedidoMesero', risposte: { A: { ok: false, error: 'codigo_invalid', borde: true }, B: { ok: true, borde: true } } });
     t('L3 · un rifiuto timbrato ferma il giro come ieri (B aspetta il prossimo)', x.vie.length === 1 && x.mem.length === 2 && x.mem[0].intentos === 1, x); }
-  t('J · la leva si legge dal /salud (solo se porta la chiave) e [27-ott · 6.5] NASCE PIENA coi verbi già solo bordo', /\{ const _sp = cercaK\(j, 'staffpost_solo_borde'\); if \(_sp != null\) STAFFPOST_SOLO = String\(_sp\); \}/.test(SRC) && /let STAFFPOST_SOLO = 'crearPedidoMesero,marcarPedido,moverMesa,emitirPreCuenta';/.test(SRC));
+  t('J · la leva si legge dal /salud e nasce vuota', /STAFFPOST_SOLO = String\(cercaK\(j, 'staffpost_solo_borde'\) == null \? '' : cercaK\(j, 'staffpost_solo_borde'\)\);/.test(SRC) && /let STAFFPOST_SOLO = '';/.test(SRC));
   return { ok, ko };
 }
 if (process.argv.includes('--mutanti')) {
