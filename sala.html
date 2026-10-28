@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.60 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.61 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3389,6 +3389,49 @@ async function _verCheck() {
       $('verBanner').classList.remove('hide');
     }
   } catch (e) { /* silencioso: ver §comentario arriba */ }
+}
+/* ═══ [28-ott · 🎛 V33 `Correggo la mia riga delle 16:44` · TERZA] LA VERSIONE MINIMA: un vetro difettoso si toglie dal centro ═══
+   Il 28 la .58 è rimasta aperta sui telefoni dopo il revert, e chi non ricaricava non entrava nel turno: un vetro sbagliato lo toglieva solo una
+   persona, telefono per telefono. Leva `sala_ver_min` dal /salud ("3.228.59"; assente o "" = nessun minimo). Un vetro SOTTO si ricarica da solo,
+   ma solo in un MOMENTO SICURO (il veto di AUT-0372 🅒 resta: mai sotto le mani di chi incassa): schermata d'ingresso ferma, oppure in sala senza
+   mesa aperta, senza finestre, senza coda offline e senza svuotarla. Altrimenti avviso rosso e si riprova ogni `VERMIN_RIPROVA_MS`.
+   Una ricarica per minimo ogni `VERMIN_TREGUA_MS` (se Pages serve ancora il file vecchio non si gira in tondo: resta l'avviso). Freno: `?vermin=0`.
+   🟡 Cura solo i vetri che nascono con questo codice: quelli già aperti senza di lui non lo sanno leggere. */
+var SALA_VER_MIN = '', _VERMIN_T = null;
+const VERMIN_RIPROVA_MS = 20000, VERMIN_TREGUA_MS = 10 * 60000;
+function _verNum(s) { const m = String(s || '').match(/(\d+)\.(\d+)\.(\d+)/); return m ? [+m[1], +m[2], +m[3]] : null; }
+function _verSotto(mio, min) {
+  const a = _verNum(mio), b = _verNum(min);
+  if (!a || !b) return false;   // una versione illeggibile non fa ricaricare nessuno
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i];
+  return false;
+}
+function _verMinMomentoSicuro() {
+  try {
+    if (_entradaVisible()) { const b = $('entBtn'); return !(b && b.disabled); }   // all'ingresso: non mentre «ENTRANDO…»
+    if (STATE.mesaAbierta) return false;
+    if (COLA_FLUSHING || _colaGet().length > 0) return false;
+    if (document.querySelector('[id$="Ovl"].on')) return false;   // una finestra aperta (cobro, mesa, precuenta…)
+    return true;
+  } catch (e) { return false; }   // nel dubbio non si ricarica
+}
+function _verMinControlla() {
+  try {
+    if (_VERMIN_T) { clearTimeout(_VERMIN_T); _VERMIN_T = null; }
+    if (!SALA_VER_MIN || QS.get('vermin') === '0') return;
+    if (!_verSotto(_salaVer(), SALA_VER_MIN)) return;
+    const avviso = function () {
+      const vb = $('verBanner'); if (!vb) return;
+      vb.innerHTML = '⚠️ Esta versión ya no sirve. Termina lo que estás haciendo y toca ' +
+        '<button class="btn tg" onclick="location.reload()">Actualizar</button>';
+      vb.classList.remove('hide');
+    };
+    let k = null; try { k = JSON.parse(localStorage.getItem('sala_vermin_rl') || 'null'); } catch (e) {}
+    if (k && k.min === SALA_VER_MIN && Date.now() - k.ts < VERMIN_TREGUA_MS) { avviso(); return; }
+    if (!_verMinMomentoSicuro()) { avviso(); _VERMIN_T = setTimeout(_verMinControlla, VERMIN_RIPROVA_MS); return; }
+    try { localStorage.setItem('sala_vermin_rl', JSON.stringify({ min: SALA_VER_MIN, ts: Date.now() })); } catch (e) {}
+    location.reload();
+  } catch (e) { /* una guardia che si rompe non rompe la sala */ }
 }
 let toastT = null;
 /* [25-set · reperto di Alberto su mesa 997] `ms` opzionale — di default resta
@@ -9935,6 +9978,7 @@ function _saludLeggi() {
       CANC_LOCAL_SRV = String(cercaK(j, 'sala_cancelado_local_on')) === '1';       // [23-ott · TERZA] il pedido cancellato da qui
       MXV2_SRV = String(cercaK(j, 'cobro_mixto_v2_on')) === '1';                    // [21-ott · le note di Alberto sul mixto] vedi `mxV2On`
       { const _sp = cercaK(j, 'staffpost_solo_borde'); if (_sp != null) STAFFPOST_SOLO = String(_sp); }   // [27-ott] la chiave assente non svuota la lista   // [21-ott · 1.3] vedi `_soloBorde`
+      { const _vm = cercaK(j, 'sala_ver_min'); if (_vm != null) { SALA_VER_MIN = String(_vm).trim(); _verMinControlla(); } }   // [28-ott] vedi `_verMinControlla`
       SALIDA_BORDE_V = (function (v) { v = String(v == null ? '' : v).trim().toUpperCase();   // [21-ott · 1.6b] la stessa regola di `levaSalidaBorde` del bordo
         if (v === '' || v === '0' || v === 'FALSE') return false; if (v === '1' || v === 'TRUE') return true;
         return v.split(',').map(function (x) { return x.trim(); }).indexOf(String(CFG.LOCAL || 'BKS').toUpperCase()) >= 0; })(cercaK(j, 'salida_borde_on'));
@@ -17715,6 +17759,7 @@ document.addEventListener('visibilitychange', () => {
     if (STATE.pollTimer) clearInterval(STATE.pollTimer);
     STATE.pollTimer = setInterval(_pollTick, CFG.POLL_MS);
     _verCheck();   // [AUT-0372 🅒] el teléfono vuelve a foreground: es cuando más vale mirar
+    _verMinControlla();   // [28-ott] la versione minima, col valore dell'ultimo /salud
     _wakeLock();
   }
 });
