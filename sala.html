@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.54 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.59 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2248,7 +2248,13 @@ function bordeWriteOn() {
    Leva `staffpost_solo_borde` dal /salud: "" = come ieri · "1" = tutti i verbi · oppure l'elenco dei verbi ("crearPedidoMesero,marcarPedido").
    A leva accesa per un verbo: il bordo si chiama SEMPRE (anche con bw spento); una risposta senza timbro `borde:true` torna come `ok:false`
    col suo motivo (`sin_borde`); la rete morta lancia «timeout» come gasPost. Freno per telefono: `?bordew=0` rimette il cammino di ieri. */
-let STAFFPOST_SOLO = '';
+/* [27-ott · 🎛 V33 `CONTROLLER V33 su ARQ V32 6.5 I CLOCKIN`] la lista «solo bordo» NASCE PIENA nel vetro, con i verbi che sul vivo sono già solo bordo:
+   prima nasceva '' e un gesto subito dopo un caricamento (o con /salud lento) ripiegava sul GAS. /salud la cambia solo se porta la chiave; il freno
+   del telefono resta `?bordew=0` (vedi `_soloBorde`).
+   [28-ott · 🎛 V33 `V33 EMERGENZA NESSUNO ENTRA NEL TURNO` · ARQ `ARQ V32 CAUSA NESSUNO ENTRA SIN GATE` ⓐ] `clockIn` NON nasce nella lista: il suo
+   cancello (il codice contro il gate replicato da Google, le asignaciones) risponde `sin_gate`/`need:'gas'` apposta per ripiegare, e nella lista
+   quei rifiuti diventavano un muro muto all'ingresso (v3.228.58, servizio fermo alle 15:35). Entra solo quando il suo `need:'gas'` non esiste più. */
+let STAFFPOST_SOLO = 'crearPedidoMesero,marcarPedido,moverMesa,emitirPreCuenta';
 function _soloBorde(action) {
   if (BORDE_W.QS === '0') return false;   // il freno del telefono vince sempre
   const v = String(STAFFPOST_SOLO || '').trim();
@@ -2274,7 +2280,9 @@ async function staffPost(action, body, opts) {   // [01-ott] opts.ingreso: vedi 
      freno `?bordew=0`): il bordo rifiuta da sé e si ripiega sul libro. */
   const _ingreso = !!(opts && opts.ingreso) && BORDE_W.QS !== '0';
   /* [21-ott · pezzo 1.3 · 🎛 BKP `BKP V32 1.3 ZERO NEI FATTI`] a leva `staffpost_solo_borde` il verbo NON ha più ripiego verso Google: vedi `_soloBorde` */
-  const _solo = _soloBorde(action);
+  /* [28-ott · ARQ ⓑ su `V33 EMERGENZA NESSUNO ENTRA NEL TURNO`] l'INGRESSO non è mai «solo bordo», qualunque cosa dica la lista: ogni risposta
+     senza `borde:true` (sin_gate del codice nuovo, need:'gas') ripiega sul libro come in v3.228.54. Un rifiuto muto all'ingresso non deve esistere. */
+  const _solo = _soloBorde(action) && !_ingreso;
   if (!_solo && !bordeWriteOn() && !_ingreso) { _pennaDice('gas:leva-off'); return _cadutaMarca(action, await gasPost(action, body)); }
   const _VOLO_B = {};   // [AUT-0273 ①] la scatola di QUESTA chiamata, non del modulo
   try {
@@ -2350,6 +2358,26 @@ async function staffPost(action, body, opts) {   // [01-ott] opts.ingreso: vedi 
    Dichiarato: un ricarico della pagina lo azzera (nessun tempo, nessun timer:
    il segno non sparisce «a tempo»). Il conteggio dei caduti NON va sul vetro del
    mesero: è del JL e del controllo della serata. */
+/* ═══ [21-ott · 🖐 QUARTA V32 · pezzo 1.7] LE LETTURE DEL 1.7 DAL BORDO, SENZA IL RIPIEGO DI staffPost ═══
+   `getModificadores` e `getFrecuentes` nel GAS vivono in `doGet` (MENU_GAS r.629-630): il ripiego di `staffPost`
+   è `gasPost`, che per loro risponde «azione sconosciuta». ⇒ qui il bordo si chiede da `/pedido-staff` e si crede
+   SOLO a `borde:true` (come staffPost); tutto il resto, rete compresa, torna a `gasGet` come ieri.
+   La leva è del chiamante: spenta = non si bussa nemmeno al bordo. */
+async function _letturaBordeOGas(levaOn, action, bodyBorde, paramsGas) {
+  if (levaOn && BORDE_SALA && BORDE_SALA.URL) {
+    try {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?t=' + encodeURIComponent(BORDE_SALA.T), {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctrl.signal, cache: 'no-store',
+        body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL, cli_ver: _salaVer(), app: APP_ID }, bodyBorde || {})) });
+      clearTimeout(to);
+      const j = await r.json();
+      if (j && j.borde === true) return j;
+    } catch (e) { /* rete o timeout: la via di sempre */ }
+  }
+  return gasGet(action, paramsGas || {});
+}
 const CADUTA_RIGA = 'Salió, pero tardará en aparecer en la cuenta.';
 const CADUTA_CHIP = 'tardará';
 const _CAIDOS = {};
@@ -5467,7 +5495,9 @@ function novEntendida(id){
   novActualizar(STATE.novedades);
   novAbrir();   // re-render: la card scivola nell'ayuda
   // il fossile — best-effort, mai blocca il gesto
-  try { gasPost('novedadEntendida', { codigo: STATE.codigo, nombre: STATE.nombre, id: id, app: 'mesero' }).catch(function(){}); } catch(e){}
+  /* [21-ott · QUARTA V32 · 1.7] a leva `novedad_borde_on` la ricevuta entra da /pedido-staff (doPost nel GAS: il ripiego di staffPost vale) */
+  try { const _bN = { codigo: STATE.codigo, nombre: STATE.nombre, id: id, app: 'mesero' };
+    (NOVEDAD_BORDE_ON ? staffPost('novedadEntendida', _bN) : gasPost('novedadEntendida', _bN)).catch(function(){}); } catch(e){}
 }
 
 /* v2.5 · 🔀 MOVER MESA — el cliente se cambió (caso 86→82 del 23-jul).
@@ -5896,7 +5926,8 @@ async function mods2Cargar(rCat){
   mods2Cancello(rCat);        // v3.14.0 · il cancello del foglio PRIMA del no-op
   if (!MODS2_ON) return;
   try {
-    const r = await gasGet('getModificadores', {});
+    await _saludAttendi(MODS2_BORDE_ON ? 0 : 1500);   // [27-ott · TERZA] la lettura dell'avvio aspetta /salud (≤1,5 s) se la leva non è ancora nota: la corsa del 25 (5e7eab2)
+    const r = await _letturaBordeOGas(MODS2_BORDE_ON, 'getModificadores', { codigo: STATE.codigo, nombre: STATE.nombre }, {});   // [21-ott · QUARTA V32 · 1.7] stessa forma del GAS: { ok, grupos }
     if (r && r.ok) {
       MODS2_VOC = r;
       try { localStorage.setItem('mesero_mods2_voc', JSON.stringify(r)); } catch(e){}
@@ -7781,7 +7812,8 @@ function entrarSala() {
   pushEstado();  // v1.14 · riflette lo stato del bottone avisos
   _colaBadge(); _colaFlush();   // v2.2 · pedidos rimasti in cola da un turno interrotto → atterrano subito
   // v2.3 · F3 · frecuentes de ahora: il cervello, non l'alfabeto (cache GAS 5min)
-  gasGet('getFrecuentes', { codigo: STATE.codigo }).then(function(r){ if (r && r.ok && Array.isArray(r.ids)) STATE.frecuentes = r.ids; }).catch(function(){});
+  /* [21-ott · QUARTA V32 · 1.7] a leva `frecuentes_borde_on` dal bordo, altrimenti (o se il bordo non timbra) il GAS come ieri */
+  _saludAttendi(FRECUENTES_BORDE_ON ? 0 : 1500).then(function () { return _letturaBordeOGas(FRECUENTES_BORDE_ON, 'getFrecuentes', { codigo: STATE.codigo, nombre: STATE.nombre }, { codigo: STATE.codigo }); }).then(   // [27-ott · TERZA] aspetta /salud ≤1,5 sfunction(r){ if (r && r.ok && Array.isArray(r.ids)) STATE.frecuentes = r.ids; }).catch(function(){});
   /* v1.15 · LA CARTA SI PRECALIENTA AL BOOT (VB Alberto, collaudo D-day):
      il catalogo si scarica in silenzio appena entri — il primo ➕ PEDIDO
      apre all'istante invece di pagare la chiamata GAS davanti al cliente.
@@ -9790,6 +9822,12 @@ var CORTE_TRAS_BORDE_ON = false;   // [21-ott · ⚙️ `ARQ V32 CORTE CON TRASP
    dalla lista «solo bordo»). Come `d24e2f7` e `165a9d1`: ora NASCE ACCESA nel vetro; /salud la spegne solo con "0" esplicito; `?civ=0` per apparecchio. */
 var CLOCKIN_VETRO_ON = (function () { try { return QS.get('civ') !== '0'; } catch (e) { return true; } })();   // [26-ott] nasce accesa
 var CORTE_MESAS_PG_ON = false;   // [21-ott · pezzo 1.6] /salud → corte_mesas_pg_on: il corte e il fin turno senza `getCierreMesero` (mesas da PG). Nasce "0". Vedi `_cieMesasDalBorde`.
+/* [21-ott · QUARTA V32 · pezzo 1.7] le tre leve dei vetri del 1.7, da /salud. Nascono "0". `getFrecuentes` e `getModificadores` girano
+   all'avvio, PRIMA che /salud risponda: il telefono ricorda l'ultima risposta (`sala_lett17`), come fa il check-in (`sala_checkinb`). */
+var _lett17 = (function () { try { return localStorage.getItem('sala_lett17') || ''; } catch (e) { return ''; } })();
+var FRECUENTES_BORDE_ON = _lett17.indexOf('f') >= 0;   // /salud → frecuentes_borde_on
+var MODS2_BORDE_ON = _lett17.indexOf('m') >= 0;        // /salud → mods2_borde_on
+var NOVEDAD_BORDE_ON = false;                          // /salud → novedad_borde_on
 var SOLTAR2X1_BORDE_ON = false;   // [21-ott · pezzo 1.7] /salud → soltar2x1_borde_on: «suelta el regalo» da /pedido-staff. Nasce "0".
 var COLN_STAFF_BORDE_ON = false;   // [21-ott · pezzo 2.6b] /salud → colacion_staff_borde_on: la lista della colación da /turno/estado (PG). Nasce "0". Vedi `_staffDalBorde`.
 var CONTO_APERTURA_ON = false;   // [10-ott · AUT-0646] /salud → conto_apertura_on: il bordo sa chi ha aperto il conto (plaza condivisa). Nasce spenta.
@@ -9885,6 +9923,10 @@ function _saludLeggi() {
       COLN_STAFF_BORDE_ON = String(cercaK(j, 'colacion_staff_borde_on')) === '1';   // [21-ott · pezzo 2.6b]
       SOLTAR2X1_BORDE_ON = String(cercaK(j, 'soltar2x1_borde_on')) === '1';         // [21-ott · pezzo 1.7]
       if (String(cercaK(j, 'corte_unico_on')) === '0') CORTE_UNICO_ON = false;   // [26-ott] un corte per turno: /salud la può solo spegnere
+      FRECUENTES_BORDE_ON = String(cercaK(j, 'frecuentes_borde_on')) === '1';       // [21-ott · QUARTA V32 · 1.7]
+      MODS2_BORDE_ON = String(cercaK(j, 'mods2_borde_on')) === '1';                 // [21-ott · QUARTA V32 · 1.7]
+      NOVEDAD_BORDE_ON = String(cercaK(j, 'novedad_borde_on')) === '1';             // [21-ott · QUARTA V32 · 1.7]
+      try { localStorage.setItem('sala_lett17', (FRECUENTES_BORDE_ON ? 'f' : '') + (MODS2_BORDE_ON ? 'm' : '')); } catch (e) {}   // le due letture girano all avvio, prima di /salud
       CORTE_MESAS_PG_ON = String(cercaK(j, 'corte_mesas_pg_on')) === '1';           // [21-ott · pezzo 1.6]
       if (BORDE_FALLBACK_TEL === null && cercaK(j, 'borde_fallback_on') != null) { const _bfb = String(cercaK(j, 'borde_fallback_on')) === '1'; if (_bfb !== BORDE_FALLBACK_ON) { BORDE_FALLBACK_ON = _bfb; _pintarGuardiaBadge(); } }   // [21-ott] l'ultima vista, non Google
       { const _civ = cercaK(j, 'clockin_vetro_borde_on'); if (_civ != null && QS.get('civ') !== '0') CLOCKIN_VETRO_ON = String(_civ) === '1'; }   // [26-ott] la chiave assente non la spegne
@@ -9892,7 +9934,7 @@ function _saludLeggi() {
       if (YAPAG3_TEL === null) YAPAG3_ON = String(cercaK(j, 'ya_pagado_ack_on')) === '1';   // [21-ott · ②] la guardia segue la leva del bordo
       CANC_LOCAL_SRV = String(cercaK(j, 'sala_cancelado_local_on')) === '1';       // [23-ott · TERZA] il pedido cancellato da qui
       MXV2_SRV = String(cercaK(j, 'cobro_mixto_v2_on')) === '1';                    // [21-ott · le note di Alberto sul mixto] vedi `mxV2On`
-      STAFFPOST_SOLO = String(cercaK(j, 'staffpost_solo_borde') == null ? '' : cercaK(j, 'staffpost_solo_borde'));   // [21-ott · 1.3] vedi `_soloBorde`
+      { const _sp = cercaK(j, 'staffpost_solo_borde'); if (_sp != null) STAFFPOST_SOLO = String(_sp); }   // [27-ott] la chiave assente non svuota la lista   // [21-ott · 1.3] vedi `_soloBorde`
       SALIDA_BORDE_V = (function (v) { v = String(v == null ? '' : v).trim().toUpperCase();   // [21-ott · 1.6b] la stessa regola di `levaSalidaBorde` del bordo
         if (v === '' || v === '0' || v === 'FALSE') return false; if (v === '1' || v === 'TRUE') return true;
         return v.split(',').map(function (x) { return x.trim(); }).indexOf(String(CFG.LOCAL || 'BKS').toUpperCase()) >= 0; })(cercaK(j, 'salida_borde_on'));
