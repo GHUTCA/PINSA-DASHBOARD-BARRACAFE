@@ -311,7 +311,7 @@ var app = document.getElementById('app');
 function barra(titulo) {
   return senzaEsitoHtml() + (PROVA ? '<div class="note bad" style="margin:0 0 8px;text-align:center"><b>🧪 MODO PRUEBA</b> · día de prueba 2099 · nada de esto es real</div>' : '') +
     '<div class="bar"><span>' + new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) +
-    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.10.9</small></span></div>' +
+    '</span><span>· <b>Caja</b> · ' + (SES ? esc(SES.user) : '') + ' <small id="ver" style="opacity:.45;font-size:.7em">caja 1.11.0</small></span></div>' +
     (titulo ? '<div class="pasos">' + [1,2,3,4].map(function(i){return '<i class="' + (i<=PASO?'on':'') + '"></i>';}).join('') + '</div>' : '');
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -366,6 +366,28 @@ async function noEncOn() {
     NOENC_ON = !!(j && j.flags && String(j.flags.caja_no_encontrada_on) === '1');
   } catch (e) { NOENC_ON = false; }   // /salud mudo = apagado: ningún botón sin que el bordo lo diga
   return NOENC_ON;
+}
+/* [29-ott · caja 1.11.0 · 🖐 TERZA V32 · 🎛 V33 `PROGRAMMA SOBRE MOTIVO JL` + sì a `TERZA V32 · su PROGRAMMA SOBRE MOTIVO JL`] EL MOTIVO DEL JL.
+   El bordo trae `motivo_jl` ({texto, firma_jl, ts} o null) en cada sobre. Se muestra SOLO DESPUÉS del conteo de la cajera («Revisar conteo»,
+   o un sobre ya contado en la lista): antes le diría que el sobre viene corto y el conteo dejaría de ser ciego.
+   Palanca: /salud → flags.sobre_motivo_on (mudo = apagado) · ?motivojl=1 en el teléfono (prueba) / ?motivojl=0 freno. */
+var MOTJL_ON = null, MOTJL_TS = 0;
+var MOTJL_QS = null;
+function motivoJlQs() { if (MOTJL_QS === null) { try { MOTJL_QS = (new URLSearchParams(location.search).get('motivojl') || '').trim(); } catch (e) { MOTJL_QS = ''; } } return MOTJL_QS; }
+async function motivoJlOn() {
+  if (motivoJlQs() === '0') return false;
+  if (motivoJlQs() === '1') return true;
+  if (MOTJL_ON !== null && Date.now() - MOTJL_TS < 60000) return MOTJL_ON;
+  MOTJL_TS = Date.now();
+  try { var r = await fetch(BORDE[LOCAL] + '/salud', { cache: 'no-store' }); var j = await r.json(); MOTJL_ON = !!(j && j.flags && String(j.flags.sobre_motivo_on) === '1'); }
+  catch (e) { MOTJL_ON = false; }
+  return MOTJL_ON;
+}
+function motivoJlYa() { var q = motivoJlQs(); return q === '1' ? true : q === '0' ? false : MOTJL_ON === true; }   // la lista no espera la red (N1): lo que ya se sabe
+function motivoJlHtml(s) {
+  var m = s && s.motivo_jl; var t = m && String(m.texto == null ? '' : m.texto).trim();
+  if (!t) return '';
+  return '<div class="note"><b>Motivo (JL)</b><br>«' + esc(t) + '»' + (m.firma_jl ? '<br><small>' + esc(m.firma_jl) + '</small>' : '') + '</div>';
 }
 var NOENC_TXT = {
   gia_contata: 'Ese sobre ya tiene un conteo — no se puede marcar como no encontrado.',
@@ -571,6 +593,7 @@ async function pantallaEnCamino() {
 }
 
 async function pantalla6() {
+  motivoJlOn();   // [1.11.0] se pide sin esperar: la lista de hoy no aguarda a /salud
   if (!CAJA_DIA && await unaOn()) { pantallaCajas(); return; }   // [AUT-0667] con la leva: primero la lista de cajas, nunca todo sumado
   app.innerHTML = barra(true) + '<p style="text-align:center;color:var(--ink2);padding:40px 0">Cargando la caja fuerte…</p>';
   var NOTA_UNA_NOCHE = '';
@@ -630,7 +653,8 @@ async function pantalla6() {
       (MULTI && s.dia ? fechaCorta(s.dia) + ' · ' : '') +
       (s.ts_hecho ? new Date(s.ts_hecho).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) + ' · ' : '') +
       esc(s.firma_jl||'') + '</small></span><span class="v' + (s.conteo ? ' ok' : '') + '">' +
-      (s.conteo ? '✓ Contado' : 'Por contar ›') + '</span></div>';
+      (s.conteo ? '✓ Contado' : 'Por contar ›') + '</span></div>' +
+      (s.conteo && motivoJlYa() && s.motivo_jl && String(s.motivo_jl.texto || '').trim() ? '<div class="r" style="opacity:.8"><small>Motivo (JL): «' + esc(String(s.motivo_jl.texto).trim()) + '»</small></div>' : '');   // [1.11.0] solo ya contado
   }).join('');
   var MOTIVO_TXT = { limite_sala: 'pasó el límite de la sala', limite_persona: 'pasó el límite por persona', tiempo: 'demasiado tiempo con plata encima' };
   var avisoHtml = MANANA.aviso_sin_respuesta
@@ -732,12 +756,13 @@ function pantalla7() {
     document.getElementById('revisar').style.display = 'none';
     var dif = contado - (s.declarado || 0);
     var box = document.getElementById('extra');
+    var motJl = (await motivoJlOn()) ? motivoJlHtml(s) : '';   // [1.11.0] el motivo del JL: recién ahora, con el conteo ya fijo
     if (dif === 0) {
-      box.innerHTML = '<div class="note ok">El sello estaba ' + (selloIntacto?'intacto':'roto') + ' y cuadra. <b>Nada que declarar.</b></div>' +
+      box.innerHTML = '<div class="note ok">El sello estaba ' + (selloIntacto?'intacto':'roto') + ' y cuadra. <b>Nada que declarar.</b></div>' + motJl +
         '<button class="btn ok" id="confirmar">Confirmar · siguiente sobre</button>';
     } else {
       box.innerHTML = '<div class="note bad"><b>' + (selloIntacto ? 'El sello estaba intacto.' : 'El sello estaba roto.') + '</b><br>' +
-        (selloIntacto ? 'Entonces pasó <b>antes</b> de cerrarlo: lo firmaron el JL y el garzón.<br>No lo resuelves tú — queda anotado.' : 'Pudo pasar en cualquier momento. Queda anotado.') + '</div>' +
+        (selloIntacto ? 'Entonces pasó <b>antes</b> de cerrarlo: lo firmaron el JL y el garzón.<br>No lo resuelves tú — queda anotado.' : 'Pudo pasar en cualquier momento. Queda anotado.') + '</div>' + motJl +
         '<p class="lb">Qué viste al abrirlo</p><input class="inp" id="nota" placeholder="En tus palabras">' +
         '<button class="btn acc" id="confirmar">Dejar anotado y seguir</button>';
     }
