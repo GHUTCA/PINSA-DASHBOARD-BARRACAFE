@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.63 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.64 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9894,6 +9894,7 @@ var COLA_BORDE_ON = false;
 var SALUD_LEVE_P = null;   // [21-ott · 6.5] la lettura di /salud qui sotto: il check-in d'avvio parte PRIMA che risponda, e senza aspettarla la sua leva non conterebbe mai
 var SALIDA_BORDE_V = false;   // [21-ott · pezzo 1.6b] la leva DEL BORDO `salida_borde_on` letta da /salud ("1" o la lista dei locali): spenta ⇒ GAS diretto
 var CHECKIN_BORDE_ON = false;   // [21-ott · pezzo 6.5 · AUT-0719] /salud → checkin_borde_on: il check-in del telefono battezzato dal bordo. Nasce "0". Vedi `_checkInDalBorde`.
+var PORCONTO_SRV = false;       // [29-ott · TERZA · il vetro per conto, fetta 1] /salud → sala_por_conto_on. Nasce "0" (chiave assente = spenta). Vedi `_contiDeMesa`.
 var CORTE_JL_ON = false;   // [25-ott · 🖐 QUARTA `QUARTA V32 LA PROVA DEL CORTE SULLA 998 IL VETRO BLOCCA`] /salud → corte_senza_erede_jl_on: con il corte al bordo, la mesa senza erede la passa il bordo al JL
 var CORTE_TRAS_BORDE_ON = false;   // [21-ott · ⚙️ `ARQ V32 CORTE CON TRASPASO 363D394 E IL VETRO`] /salud → corte_traspaso_borde_on: il corte CON mesas da passare lo fa il bordo. Nasce "0".
 /* [26-ott · ⚙️ `ARQ V32 su FERMO PERCHE clockIn nella lista solo-bordo` · TERZA] la porta ① del clockIn diretto: con la rete lenta /salud non risponde
@@ -10010,6 +10011,7 @@ function _saludLeggi() {
       if (BORDE_FALLBACK_TEL === null && cercaK(j, 'borde_fallback_on') != null) { const _bfb = String(cercaK(j, 'borde_fallback_on')) === '1'; if (_bfb !== BORDE_FALLBACK_ON) { BORDE_FALLBACK_ON = _bfb; _pintarGuardiaBadge(); } }   // [21-ott] l'ultima vista, non Google
       { const _civ = cercaK(j, 'clockin_vetro_borde_on'); if (_civ != null && QS.get('civ') !== '0') CLOCKIN_VETRO_ON = String(_civ) === '1'; }   // [26-ott] la chiave assente non la spegne
       CHECKIN_BORDE_ON = String(cercaK(j, 'checkin_borde_on')) === '1';             // [21-ott · pezzo 6.5]
+      PORCONTO_SRV = String(cercaK(j, 'sala_por_conto_on')) === '1';               // [29-ott · il vetro per conto] vedi `_contiDeMesa`
       { const _lv = function (v) { v = String(v == null ? '' : v).trim().toUpperCase();   // [29-ott · 6.5b] la stessa regola di `levaGateDevice`/`levaBautizo` del bordo: "1" · "0" · elenco di locali
           if (v === '' || v === '0' || v === 'FALSE') return false; if (v === '1' || v === 'TRUE') return true;
           return v.split(',').map(function (x) { return x.trim(); }).indexOf(String(CFG.LOCAL || 'BKS').toUpperCase()) >= 0; };
@@ -13358,6 +13360,41 @@ setInterval(function () {
 function _entradaVisible() {
   try { const e = $('vEntrada'); return !!e && !e.classList.contains('hide'); } catch (x) { return false; }
 }
+/* ═══ [29-ott · 🖐 TERZA V32 · IL VETRO PER CONTO, fetta 1: la vista · `TERZA V32 DATE CONTO E 6.5B` · ordine di Alberto `LA A NON PASSA A NOVEMBRE`] ═══
+   «Pedidos de la misma mesa, dolor de cabeza»: due gruppi alla stessa mesa sono DUE conti, ma la scheda li mescolava. Il bordo dà (contratto di 🎛 BKP,
+   `BKP FATTO CONTO SOPRA 3D89AB8: 8BF0161`, dietro `CONTO_VISTA_ON`) il `conto_id` su ogni pedido della vista e `conti` = [{id, mesa, nato, origen,
+   aperto_da, total, pagado, resta, vivi}]. Qui i pedidos si raggruppano per conto, il più vecchio per primo.
+   Si raggruppa SOLO se tutto torna: leva accesa · `r.conti` presente · ogni pedido della mesa ha il suo `conto_id` · ogni conto è nell'elenco ·
+   almeno DUE conti. Un pezzo che manca (sala ricaduta sul GAS, foto, conto non ancora annotato) ⇒ `null` ⇒ la scheda di oggi, identica: un gruppo
+   sbagliato è peggio di nessun gruppo. Questa fetta NON cambia nessun gesto: precuenta e cobro restano della mesa (fetta 2).
+   Leva: `sala_por_conto_on` (/salud, "0") · per telefono `?porconto=1` / `?porconto=0` (vince sempre). */
+const PORCONTO_QS = (QS.get('porconto') || '').trim();
+function _porContoOn() { return PORCONTO_QS === '0' ? false : (PORCONTO_QS === '1' || PORCONTO_SRV); }
+function _contiDeMesa(m, r) {
+  if (!_porContoOn() || !m || !r || !Array.isArray(r.conti)) return null;
+  const tutti = m.pend.map(function (p) { return { p: p, t: 'pend' }; })
+    .concat(m.mios.map(function (p) { return { p: p, t: 'mio' }; }), m.limpiar.map(function (p) { return { p: p, t: 'lib' }; }));
+  if (!tutti.length || tutti.some(function (c) { return !c.p || c.p.conto_id == null || String(c.p.conto_id).trim() === ''; })) return null;
+  const info = {}; r.conti.forEach(function (c) { if (c && c.id != null) info[String(c.id)] = c; });
+  const per = {};
+  tutti.forEach(function (c) { const id = String(c.p.conto_id); (per[id] = per[id] || []).push(c); });
+  const ids = Object.keys(per);
+  if (ids.length < 2 || ids.some(function (id) { return !info[id]; })) return null;
+  const nato = function (c) { const v = c && c.nato; const n = typeof v === 'number' ? v : Date.parse(v); return isNaN(n) ? Infinity : n; };
+  ids.sort(function (a, b) { return nato(info[a]) - nato(info[b]) || (a < b ? -1 : 1); });
+  return ids.map(function (id) { return { id: id, c: info[id], cards: per[id] }; });
+}
+function _contoTesta(g, i, n) {
+  const c = g.c || {}; const num = function (v) { if (v == null || v === '') return null; const x = Number(v); return isNaN(x) ? null : x; };   // vuoto ≠ zero: «non so» non si stampa $0
+  const tot = num(c.total), pag = num(c.pagado), res = num(c.resta);
+  const da = c.origen === 'qr' ? 'pidió desde el QR' : c.origen === 'separado' ? 'separada de otra cuenta'
+    : (c.aperto_da ? 'la abrió ' + String(c.aperto_da).replace(/^[a-z]+:/i, '') : '');
+  return '<div class="msh-cta" style="margin:14px 0 6px;padding:8px 12px;border-radius:12px;border:1px solid var(--acc);background:rgba(255,255,255,.04)">' +
+    '<b>🧾 Cuenta ' + (i + 1) + ' de ' + n + '</b>' + (da ? ' <span style="opacity:.75">· ' + esc(da) + '</span>' : '') +
+    '<div style="font-size:12.5px;margin-top:2px">' + (tot != null ? 'Total <b class="tab">' + fmtPrice(tot) + '</b>' : 'Total —') +
+    (pag ? ' · pagado <b class="tab">' + fmtPrice(pag) + '</b>' : '') +
+    (pag && res != null ? ' · falta <b class="tab">' + fmtPrice(res) + '</b>' : '') + '</div></div>';
+}
 function renderMesaSheet(r) {
   // [24-set 22:0x · stesso reperto] LA GUARDIA VERA: senza sessione, questo
   // sheet non si disegna e non resta acceso — qualunque sia la strada che
@@ -13471,15 +13508,18 @@ function renderMesaSheet(r) {
   /* v1.12 · LA STORIA INVERTITA (VB Alberto): il primo che vedi è l'ULTIMO
      arrivato — hace_s piccolo in alto. Ogni card conserva il suo mestiere
      (pend/mio/liberar); cambia solo l'ordine di lettura. */
-  m.pend.map(function (p) { return { p: p, t: 'pend' }; })
-    .concat(m.mios.map(function (p) { return { p: p, t: 'mio' }; }),
-            m.limpiar.map(function (p) { return { p: p, t: 'lib' }; }))
-    .sort(function (a, b) { return (a.p.hace_s || 0) - (b.p.hace_s || 0); })
-    .forEach(function (c) {
-      h += c.t === 'pend' ? cardPedido(c.p, umb)
-         : c.t === 'mio' ? cardMio(c.p, umb)
-         : cardLiberar(c.p);
-    });
+  const _card = function (c) { return c.t === 'pend' ? cardPedido(c.p, umb) : c.t === 'mio' ? cardMio(c.p, umb) : cardLiberar(c.p); };
+  const _recenti = function (a, b) { return (a.p.hace_s || 0) - (b.p.hace_s || 0); };
+  const _gruppi = _contiDeMesa(m, r);   // [29-ott · il vetro per conto] null = la scheda di oggi
+  if (_gruppi) {
+    _gruppi.forEach(function (g, i) { h += _contoTesta(g, i, _gruppi.length); g.cards.slice().sort(_recenti).forEach(function (c) { h += _card(c); }); });
+  } else {
+    m.pend.map(function (p) { return { p: p, t: 'pend' }; })
+      .concat(m.mios.map(function (p) { return { p: p, t: 'mio' }; }),
+              m.limpiar.map(function (p) { return { p: p, t: 'lib' }; }))
+      .sort(_recenti)
+      .forEach(function (c) { h += _card(c); });
+  }
   // v2.3 · F1 comandera: la mesa parla — otra ronda (73% dei pedidos) e
   // precuenta a un tap. L'ultimo pedido della mesa precompila, mods inclusi.
   const ultP = m.pend.concat(m.mios).concat(m.limpiar).sort(function(a,b){ return (a.hace_s||9e9) - (b.hace_s||9e9); })[0];
