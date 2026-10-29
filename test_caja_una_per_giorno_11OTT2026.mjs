@@ -36,7 +36,9 @@ function mondo(SRC, o) {
   const NOMI = ['unaOn', 'enCaminoLocal', 'enCaminoGuardar', 'enCaminoAgregar', 'enCaminoQuitar', 'enCaminoTodas', 'pantallaCajas', 'abrirCaja', 'trasSalida', 'vueltaErrorTxt', 'salidaErrorTxt', 'pantallaEnCamino', 'pantalla6', 'pantalla9', 'diasDeCorte', 'desgloseDeposito', 'desgloseHtml', 'legamiHtml',
     'diaAnterior', 'pantallaRojaError', 'rojaPendLeer', 'rojaPendGuardar', 'rojaPendLimpiar', 'rojaSiguiente', 'pantallaRojaNotte', 'pantallaReservaSobre', 'uidGestoEstable', 'rPrimaOn', 'uidGesto2'].filter((n) => n !== 'uidGesto2');
   // [15-ott · TERZA] la leva «R prima della salida» spenta: questo banco prova il cammino di ieri
-  vm.runInContext(NOMI.map((n) => fnDe(SRC, n)).join('\n') + '\nvar RPRIMA_QS = "", RPRIMA_ON = false, RPRIMA_TS = Date.now();\nthis.F = { ' + NOMI.join(', ') + ' };', ctx);
+  // [29-ott · TERZA · caja 1.11.0] il motivo del JL, a leva spenta e già nota (nessuna /salud in più): questo banco prova il cammino di ieri
+  const MOTJL = SRC.includes('function motivoJlOn(') ? ['motivoJlQs', 'motivoJlOn', 'motivoJlYa', 'motivoJlHtml'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar MOTJL_ON = false, MOTJL_TS = Date.now(), MOTJL_QS = "";\n' : '';
+  vm.runInContext(NOMI.map((n) => fnDe(SRC, n)).join('\n') + '\n' + MOTJL + 'var RPRIMA_QS = "", RPRIMA_ON = false, RPRIMA_TS = Date.now();\nthis.F = { ' + NOMI.join(', ') + ' };', ctx);
   return { ctx, mk, toasts, posts, llamadas, app, ls };
 }
 const click = async (m, id) => { await m.mk(id).onclick(); };

@@ -27,6 +27,8 @@ function mondo(SRC, o) {
   vm.createContext(ctx); vm.runInContext("var CAJA_DIA = null, UNA_ON = null; async function unaOn() { return false; } function pantallaCajas() {} function enCaminoAgregar() {} function trasSalida() { return pantalla9(); }", ctx);
   vm.runInContext(['noEncOn', 'marcarNoEncontrada', 'noEncHtml', 'noEncBind', 'dejadasHtml', 'dejadasBind', 'claveSobre', 'pantalla6', 'pantalla7', 'uidGestoEstable'].map((n) => fnDe(SRC, n)).join('\n') + '\n' +
     SRC.slice(SRC.indexOf('var DEJADAS'), SRC.indexOf('function claveSobre')) + SRC.slice(SRC.indexOf('var NOENC_ON'), SRC.indexOf('async function noEncOn')) + SRC.slice(SRC.indexOf('var NOENC_TXT'), SRC.indexOf('async function marcarNoEncontrada')) +
+    // [29-ott · TERZA · caja 1.11.0] il motivo del JL, a leva spenta e già nota (nessuna /salud in più): questo banco prova la busta persa
+    (SRC.includes('function motivoJlOn(') ? '\n' + ['motivoJlQs', 'motivoJlOn', 'motivoJlYa', 'motivoJlHtml'].map((n) => fnDe(SRC, n)).join('\n') + '\nvar MOTJL_ON = false, MOTJL_TS = Date.now(), MOTJL_QS = "";\n' : '') +
     '\nthis.F = { noEncOn, marcarNoEncontrada, noEncHtml, noEncBind, dejadasHtml, dejadasBind, pantalla6, pantalla7, NOENC_TXT };', ctx);
   return { ctx, posts, toasts, els, app, calls, el };
 }
