@@ -24,7 +24,8 @@ async function banco(SRC) {
     t('② un corpo che non arriva va in timeout (non resta appeso per sempre)', abortato && err && err.message === 'timeout', err && err.message); }
   // ③ la guardia dei 20 s (sul codice) e ⑥ i sei gesti
   t('③ cjAtto1Html libera un «…» oltre 20 s', /function cjAtto1Html\(\) \{\n  if \(CJ1\.enviando && CJ1\.enviandoTs && Date\.now\(\) - CJ1\.enviandoTs > 20000\) CJ1\.enviando = false;/.test(SRC));
-  t('⑥ i sei gesti finiscono con _cjFine e partono con enviandoTs', (SRC.match(/finally \{ _cjFine\(\); \}/g) || []).length === 6 && (SRC.match(/CJ1\.enviando = true; CJ1\.enviandoTs = Date\.now\(\);/g) || []).length === 6 && !/finally \{ CJ1\.enviando = false; pintaTab\(\); \}/.test(SRC));
+  // [29-ott · TERZA · app_jl v1.43.10] il SETTIMO gesto, «Guardar» il motivo del sobre rosso (cjSobMotivo), nasce con la stessa regola
+  t('⑥ i sette gesti finiscono con _cjFine e partono con enviandoTs', (SRC.match(/finally \{ _cjFine\(\); \}/g) || []).length === 7 && (SRC.match(/CJ1\.enviando = true; CJ1\.enviandoTs = Date\.now\(\);/g) || []).length === 7 && !/finally \{ CJ1\.enviando = false; pintaTab\(\); \}/.test(SRC));
   // ④ il campo
   { const e = { value: '26500' }; const ctx = { Number, String }; vm.createContext(ctx); vm.runInContext(fnDe(SRC, 'cjMilesIn'), ctx); ctx.cjMilesIn(e);
     t('④ mentre si scrive: 26500 ⇒ 26.500', e.value === '26.500', e.value); }

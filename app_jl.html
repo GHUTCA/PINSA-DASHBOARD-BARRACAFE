@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.43.13</span>
+<span class="ver" id="ver">app_jl v1.43.14</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -396,6 +396,12 @@ const CJ_MOTIVI = {
   sobre_nro_mancante: 'Falta el número del sobre (el que escribiste a mano)',
   suma_ritiri_mancante: 'Falta la suma de lo que contaste',
   suma_ritiri_negativa: 'La suma no puede ser negativa',
+  // [29-ott · v1.43.10 · TERZA] el motivo del sobre rojo
+  texto_vacio: 'Está en blanco: no se guarda nada',
+  texto_largo: 'El motivo es muy largo (máximo 140 letras)',
+  sobre_sin_faltante: 'Ese sobre no tiene faltante: no lleva motivo',
+  sobre_desconocido: 'No encuentro ese sobre de esta noche',
+  sobre_motivo_spento: 'El motivo del sobre todavía no está activo',
 };
 function cjMotivoTxt(m) { return CJ_MOTIVI[m] || ('Rechazado: ' + (m || '?')); }
 /* la respuesta {scritto:false, motivo:'gate_spento'} NO es un error: el
@@ -863,6 +869,25 @@ async function cjRetEnviar(btn) {
 /* ③ la busta: si manda SOLO il contato. Se quadra il bordo dà il numero; se no si riconta (al 3° il
    numero arriva «con diferencia»). L'uid della busta vive finché non arriva un numero. */
 function cjSobListo() { CJ1.sob = null; cjAtto1Giro(); pintaTab(); }
+/* [29-ott · v1.43.10 · 🖐 TERZA V32 · 🎛 V33 `PROGRAMMA SOBRE MOTIVO JL`] Alberto: «se il JL sa perché manca, scrive una riga; se non lo sa la lascia in bianco».
+   La casella c'è SOLO sulla busta che il bordo dice rossa e in meno (`pide_motivo`). NON è un cancello: «A la caja fuerte» resta lì, e il bianco non spedisce
+   niente. Il testo vive in CJ1.sob mentre si scrive (un ridisegno non lo perde); l'uid del gesto vive finché il motivo non è guardato (il ritento non ne fa due). */
+function cjSobMotivoIn(e) { if (CJ1.sob) CJ1.sob.mtx = String((e && e.value) || '').slice(0, 140); }
+async function cjSobMotivo(btn) {
+  const sob = CJ1.sob; if (!sob || !sob.nro || !sob.pm || sob.mok || CJ1.enviando) return;
+  const texto = String((($('cj1SobMotivo') || {}).value != null ? $('cj1SobMotivo').value : sob.mtx) || '').trim().slice(0, 140);
+  if (!texto) { toast('warn', 'Está en blanco: no se guarda nada'); return; }
+  if (btn) btn.disabled = true;
+  if (!sob.muid) sob.muid = cajaNuevoUid('CJ-MOT');
+  CJ1.enviando = true; CJ1.enviandoTs = Date.now();
+  try {
+    const r = await cajaPost1({ verbo: 'sobre_motivo', pin_jl: STATE.pin, sobre_nro: sob.nro, texto: texto, uid_gesto: sob.muid });
+    if (r && r.ok) { if (CJ1.sob === sob) { sob.mok = texto; sob.muid = null; } toast('ok', 'Motivo guardado'); }
+    else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
+    else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) { toast('err', '⏳ No sé si llegó: toca «Guardar» de nuevo, no se duplica.'); }
+  finally { _cjFine(); }
+}
 function cjSinPagoMesa(mesa) { _SP.mesa = String(mesa); _SP.motivo = ''; tab(0); setTimeout(function () { const e = $('spMesa'); if (e) { e.scrollIntoView({ block: 'center' }); spVer(); } }, 50); }
 async function cjSobEnviar(btn) {
   if (CJ1.enviando) return;
@@ -873,7 +898,7 @@ async function cjSobEnviar(btn) {
   CJ1.enviando = true; CJ1.enviandoTs = Date.now();
   try {
     const r = await cajaPost1({ verbo: 'sobre', pin_jl: STATE.pin, contado: contado, uid_gesto: CJ1.sobUid });
-    if (r && r.ok && r.sobre_nro) { CJ1.sob = { nro: r.sobre_nro, dif: !!r.con_diferencia, fascia: _cjFascia(r), diferencia: _cjNum(r.diferencia) }; CJ1.sobUid = null; }
+    if (r && r.ok && r.sobre_nro) { CJ1.sob = { nro: r.sobre_nro, dif: !!r.con_diferencia, fascia: _cjFascia(r), diferencia: _cjNum(r.diferencia), pm: r.pide_motivo === true }; CJ1.sobUid = null; }   // [29-ott · v1.43.10] pm: lo decide il bordo (busta rossa in meno, leva SOBRE_MOTIVO_ON)
     else if (r && r.ok && r.cuadra === false) { CJ1.sob = { intento: r.intento, de: r.de }; CJ1.sobUid = null; /* [08-ott · EMERG BUSTA CONTEO RIPETUTO] un conteo UMANO nuevo es un gesto nuevo: con el uid viejo el bordo lo toma por un retry de red y no avanza al 3º intento */ const e = $('cj1SobContado'); if (e) e.value = ''; }
     else if (r && r.error === 'rifiutato') toast('err', cjMotivoTxt(r.motivo));
     else toast('err', '✋ ' + (CJ1_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
@@ -993,6 +1018,10 @@ function cjAtto1Html() {
       '<p style="font-size:34px;font-weight:900;text-align:center;letter-spacing:4px;margin:6px 0;color:' + _col + '">' + esc(sob.nro) + '</p>' +
       '<p style="text-align:center;font-weight:800;color:' + _col + ';margin:0 0 4px">' + _txt +
         (sob.diferencia != null && sob.diferencia !== 0 ? ' · ' + (sob.diferencia > 0 ? '+' : '−') + fmt(Math.abs(sob.diferencia)) : '') + '</p>' +
+      (sob.pm ? (sob.mok ? '<p class="mini" style="text-align:center;margin:8px 0">Motivo guardado: «' + esc(sob.mok) + '»</p>'   // [29-ott · v1.43.10] la riga del motivo, solo rossa in meno
+        : '<p style="font-size:15px;font-weight:800;margin:10px 0 4px">¿Sabes por qué falta? <span style="font-weight:400;opacity:.75">(opcional)</span></p>' +
+          '<input class="busca" id="cj1SobMotivo" type="text" maxlength="140" autocomplete="off" placeholder="Si no sabes, déjalo en blanco" value="' + esc(sob.mtx || '') + '" oninput="cjSobMotivoIn(this)" style="margin-bottom:6px">' +
+          '<button class="btn" onclick="cjSobMotivo(this)"' + (CJ1.enviando ? ' disabled' : '') + '>' + (CJ1.enviando ? '…' : 'Guardar') + '</button>') : '') +
       '<p class="mini" style="text-align:center">número del sobre — escríbelo en el sobre</p>' +
       '<button class="btn acc" onclick="cjSobListo()">A la caja fuerte</button></div>';
   } else if (di.n && sobAuto) {
