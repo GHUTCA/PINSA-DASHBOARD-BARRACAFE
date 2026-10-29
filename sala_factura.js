@@ -58,5 +58,69 @@
     } catch (e) { return { ok: false, error: 'sin_bordo' }; }
   }
 
-  window.SalaFactura = { rutValidoCl: rutValidoCl, costruisciFactura: costruisciFactura, inviaFactura: inviaFactura };
+  // Finestra di prova (solo con ?factura=1): PIN JL, cliente, invio al bordo, esito a schermo.
+  // Il conto id non è ancora nel vetro: lo scrive il tester, finché il bordo non lo consegna.
+  function campo(lab, id, tipo) {
+    var w = document.createElement('label');
+    w.style.cssText = 'display:block;margin:6px 0;font-size:13px';
+    w.textContent = lab;
+    var i = document.createElement('input');
+    i.id = id; i.type = tipo || 'text';
+    i.style.cssText = 'display:block;width:100%;padding:6px;margin-top:2px;box-sizing:border-box';
+    w.appendChild(i);
+    return w;
+  }
+  function abrir(opts) {
+    var o = opts || {};
+    var prev = document.getElementById('salaFacturaOverlay');
+    if (prev) prev.remove();
+    var box = document.createElement('div');
+    box.id = 'salaFacturaOverlay';
+    box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#fff;color:#111;max-width:420px;width:100%;border-radius:10px;padding:16px;max-height:90vh;overflow:auto;font-family:sans-serif';
+    var h = document.createElement('div');
+    h.style.cssText = 'font-weight:700;margin-bottom:6px';
+    h.textContent = 'Factura a fin de mes · mesa ' + (o.mesa || '?');
+    var esito = document.createElement('div');
+    esito.style.cssText = 'margin-top:10px;font-size:13px;white-space:pre-wrap';
+    var invia = document.createElement('button');
+    invia.textContent = 'Enviar';
+    invia.style.cssText = 'margin-top:10px;width:100%;padding:10px;font-weight:700';
+    card.appendChild(h);
+    card.appendChild(campo('Conto id (prova)', 'sfConto', 'text'));
+    card.appendChild(campo('Total', 'sfTotal', 'number'));
+    card.appendChild(campo('PIN del JL', 'sfPin', 'password'));
+    card.appendChild(campo('RUT del cliente', 'sfRut', 'text'));
+    card.appendChild(campo('Razón social', 'sfRazon', 'text'));
+    card.appendChild(campo('Giro', 'sfGiro', 'text'));
+    card.appendChild(campo('Email para la factura', 'sfEmail', 'email'));
+    card.appendChild(invia);
+    card.appendChild(esito);
+    box.appendChild(card);
+    document.body.appendChild(box);
+    document.getElementById('sfConto').value = o.conto || '';
+    document.getElementById('sfTotal').value = o.total || '';
+    invia.onclick = async function () {
+      var v = costruisciFactura({
+        pin_jl: document.getElementById('sfPin').value,
+        conto_id: document.getElementById('sfConto').value.trim(),
+        total: Number(document.getElementById('sfTotal').value),
+        rut: document.getElementById('sfRut').value,
+        razon_social: document.getElementById('sfRazon').value,
+        giro: document.getElementById('sfGiro').value,
+        email: document.getElementById('sfEmail').value
+      });
+      if (!v.ok) { esito.textContent = 'Fermato dal vetro: ' + v.error; return; }
+      if (!v.payload.conto_id) { esito.textContent = 'Fermato dal vetro: conto_id_requerido'; return; }
+      invia.disabled = true;
+      esito.textContent = 'Enviando al bordo…';
+      var r = await inviaFactura(o.local || (window.CFG && CFG.LOCAL) || 'BKS', v.payload);
+      invia.disabled = false;
+      esito.textContent = 'Risposta del bordo:\n' + JSON.stringify(r, null, 2);
+    };
+    box.onclick = function (e) { if (e.target === box) box.remove(); };
+  }
+
+  window.SalaFactura = { rutValidoCl: rutValidoCl, costruisciFactura: costruisciFactura, inviaFactura: inviaFactura, abrir: abrir };
 })();
