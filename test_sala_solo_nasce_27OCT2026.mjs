@@ -9,7 +9,7 @@ const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0)
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const i0 = SRC.indexOf('let STAFFPOST_SOLO = '); const riga = SRC.slice(i0, SRC.indexOf('\n', i0));
-  const F = riga + '\nvar SALUD_LEVE_P = null;\n' + fnVin(SRC, '_soloBorde') + (SRC.includes('function _saludAttendi(') ? 'async ' + fnVin(SRC, '_saludAttendi') : 'async function _saludAttendi() {}\n') + 'async ' + fnVin(SRC, 'staffPost');
+  const F = riga + '\nvar SALUD_LEVE_P = null;\n' + fnVin(SRC, '_soloBorde') + (SRC.includes('function _saludAttendi(') ? 'async ' + fnVin(SRC, '_saludAttendi') : 'async function _saludAttendi() {}\n') + 'async ' + fnVin(SRC, 'staffPost') + (SRC.includes('function _conDev(') ? 'var GATE_DEVICE_V = false;\n' + fnVin(SRC, '_conDev') : '');
   async function chiama({ lista, risposta, action = 'clockIn', qs = '', ingreso = true, status = 200 }) {
     const L = { gas: [], fetch: 0 };
     const ctx = { BORDE_W: { QS: qs, ok: {} }, STATE: { sala: { bw: true } }, BORDE_SALA: { URL: 'https://b', T: 't' }, CFG: { LOCAL: 'BKS' }, APP_ID: 'sala',

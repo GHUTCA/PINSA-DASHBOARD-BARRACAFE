@@ -156,7 +156,7 @@
   <div id="mapaPlazas"></div>
 
   <div class="foot">
-    <span class="ver" id="ver">v1.11 · 23oct</span>
+    <span class="ver" id="ver">v1.12 · 29oct</span>
     <span class="ver" id="fuente" style="margin-left:8px"></span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
@@ -291,6 +291,41 @@ async function _anfCheckinLeva() {
     return on;
   } catch (e) { return false; }   // /salud muto = spenta
 }
+/* ═══ [29-ott · 🖐 TERZA V32 · pezzo 6.5b `TERZA V32 6.5B DATA`] i nomi del battesimo, il battesimo e la revoca dal bordo — gemello di sala.html ═══
+   Leve del bordo, lette da /salud AL MOMENTO del gesto (il battesimo è raro: una lettura in più, 1,5 s al massimo; /salud muto = spente = GAS come
+   ieri): `staff_sala_borde_on` (i nomi) · `bautizo_borde_on` + `checkin_borde_on` (battesimo e revoca: un token nato solo in Postgres, presentato al
+   `salaCheckIn` del GAS, sarebbe «device_desconocido»). Si crede a `borde:true` o `fuente:'borde'` (il ponte del battesimo risponde senza timbro);
+   tutto il resto ⇒ gasPost. */
+function _anfLv(v) {
+  v = String(v == null ? '' : v).trim().toUpperCase();   // la stessa regola di `levaBautizo`/`levaStaffSala` del bordo
+  if (v === '' || v === '0' || v === 'FALSE') return false; if (v === '1' || v === 'TRUE') return true;
+  return v.split(',').map(function (x) { return x.trim(); }).indexOf(String(CFG.LOCAL || 'BKS').toUpperCase()) >= 0;
+}
+async function _anfLeveIdentita() {
+  try {
+    const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 1500);
+    const r = await fetch(BORDE_SALA.URL + '/salud', { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    const f = ((await r.json()) || {}).flags || {};
+    const cb = String(f.checkin_borde_on) === '1';
+    try { localStorage.setItem('anf_checkinb', cb ? '1' : '0'); } catch (e) {}
+    return { staff: _anfLv(f.staff_sala_borde_on), bautizo: _anfLv(f.bautizo_borde_on) && cb };
+  } catch (e) { return { staff: false, bautizo: false }; }
+}
+async function _identitaBordeOGas(levaOn, action, body) {
+  if (levaOn) {
+    const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
+    try {
+      const r = await fetch(BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?t=' + encodeURIComponent(BORDE_SALA.T), {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctrl.signal, cache: 'no-store',
+        body: JSON.stringify(Object.assign({ action: action, local: CFG.LOCAL, app: 'anfitriona' }, body || {})) });
+      const j = await r.json();
+      if (j && (j.borde === true || j.fuente === 'borde')) return j;
+    } catch (e) { /* rete o timeout: la via di sempre */ }
+    finally { clearTimeout(to); }
+  }
+  return gasPost(action, body);
+}
 async function checkInConToken() {
   try {
     let _cbVista = ''; try { _cbVista = localStorage.getItem('anf_checkinb') || ''; } catch (e) {}
@@ -328,7 +363,7 @@ async function bautismoElegir(nombre, codigo) {
   const btn = $('entBtn');
   btn.disabled = true; btn.textContent = 'BAUTIZANDO…'; btn.classList.add('cargando');
   try {
-    const b = await gasPost('bautizarDevice', { codigo: codigo, nombre: nombre, rol: 'anfitriona' });
+    const b = await _identitaBordeOGas((await _anfLeveIdentita()).bautizo, 'bautizarDevice', { codigo: codigo, nombre: nombre, rol: 'anfitriona' });   // [29-ott · 6.5b]
     if (!b || !b.ok) {
       $('entErr').textContent = b && b.error === 'mesero_desconocido'
         ? 'Ese nombre no está en la lista — díselo al JL' : ('Error: ' + (b && b.error || '?'));
@@ -346,7 +381,7 @@ async function bautismoElegir(nombre, codigo) {
 }
 
 async function bautismoNombres(codigo) {
-  const r = await gasPost('getStaffSala', { codigo: codigo });
+  const r = await _identitaBordeOGas((await _anfLeveIdentita()).staff, 'getStaffSala', { codigo: codigo });   // [29-ott · 6.5b]
   if (!r || !r.ok) {
     const msgs = { codigo_invalid: 'Código incorrecto — pídelo al JL', no_turno_abierto: 'No hay turno abierto todavía' };
     $('entErr').textContent = msgs[r && r.error] || ('Error: ' + (r && r.error || '?'));
@@ -403,7 +438,8 @@ async function entrar() {
 function salir() {
   // v1.4 · il battesimo si scioglie SOLO se lo chiedi (pattern mesero v1.20)
   if (deviceToken && confirm('¿Quitar también el bautismo de este teléfono?\n\nOK = este teléfono deja de entrar solo (para teléfonos prestados o nombre equivocado).\nCancelar = solo cerrar sesión: mañana entras sola igual.')) {
-    gasPost('revocarDevice', { device_token: deviceToken }).catch(() => {});
+    const _tokR = deviceToken;   // [29-ott · 6.5b] la revoca parte dopo la lettura delle leve: il token si prende ADESSO, prima che si azzeri qui sotto
+    _anfLeveIdentita().then(function (lv) { return _identitaBordeOGas(lv.bautizo, 'revocarDevice', { device_token: _tokR }); }).catch(() => {});
     try { localStorage.removeItem(CFG.SK.TOK); } catch (e) {}
     deviceToken = '';
     toast('ok', 'Bautismo quitado — este teléfono vuelve al código');

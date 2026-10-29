@@ -11,7 +11,7 @@ async function banco(SRC, quieto) {
     const ctx = { JSON, Object, String, Promise, setTimeout, clearTimeout, AbortController, encodeURIComponent, BORDE_SALA: { URL: 'https://b', T: 'tok' }, CFG: { LOCAL: 'BKS' }, APP_ID: 'sala', _salaVer: () => 'v',
       fetch: async (u, o) => { L.fetch.push({ u, b: JSON.parse(o.body) }); if (lancia) throw new Error('rete'); return { json: async () => risp }; },
       gasGet: async (a, p) => { L.gas.push([a, p]); return { ok: true, via: 'gas', ids: ['g'] }; } };
-    vm.createContext(ctx); vm.runInContext('async ' + fnVin(SRC, '_letturaBordeOGas'), ctx); return { ctx, L }; };
+    vm.createContext(ctx); vm.runInContext('async ' + fnVin(SRC, '_letturaBordeOGas') + (SRC.includes('function _conDev(') ? 'var GATE_DEVICE_V = false;\n' + fnVin(SRC, '_conDev') : ''), ctx); return { ctx, L }; };
   const go = (w, leva, action) => vm.runInContext('_letturaBordeOGas(' + leva + ', ' + JSON.stringify(action) + ', { codigo: "C1", nombre: "Ruth" }, { codigo: "C1" })', w.ctx);
   { const w = mondo({ ok: true, borde: true, ids: ['p1', 'p2'] }); const r = await go(w, true, 'getFrecuentes');
     t('A · leva accesa, bordo timbrato ⇒ la risposta del bordo, ZERO GAS', r.ids.join() === 'p1,p2' && w.L.gas.length === 0 && /\/pedido-staff\/BKS\?t=tok$/.test(w.L.fetch[0].u) && w.L.fetch[0].b.action === 'getFrecuentes', w.L); }

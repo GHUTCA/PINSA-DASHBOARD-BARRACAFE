@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.62 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.63 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2302,7 +2302,7 @@ async function staffPost(action, body, opts) {   // [01-ott] opts.ingreso: vedi 
       /* [AUT-0273 ①] `_VOLO_B` è la scatola di QUESTA chiamata: prima era una
          variabile di modulo, e col secondo chiamante si sarebbero scambiati
          lo snapshot. */
-      body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL, cli_ver: _salaVer(), app: APP_ID }, body || {}, _muroCampi(_VOLO_B))),
+      body: JSON.stringify(_conDev(Object.assign({ action, local: CFG.LOCAL, cli_ver: _salaVer(), app: APP_ID }, body || {}, _muroCampi(_VOLO_B)))),   // [29-ott · 6.5b] _conDev
       signal: ctrl.signal, cache: 'no-store',
     });
     clearTimeout(to);
@@ -2370,7 +2370,7 @@ async function _letturaBordeOGas(levaOn, action, bodyBorde, paramsGas) {
       const to = setTimeout(() => ctrl.abort(), 6000);
       const r = await fetch(BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?t=' + encodeURIComponent(BORDE_SALA.T), {
         method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctrl.signal, cache: 'no-store',
-        body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL, cli_ver: _salaVer(), app: APP_ID }, bodyBorde || {})) });
+        body: JSON.stringify(_conDev(Object.assign({ action, local: CFG.LOCAL, cli_ver: _salaVer(), app: APP_ID }, bodyBorde || {}))) });   // [29-ott · 6.5b] _conDev
       clearTimeout(to);
       const j = await r.json();
       if (j && j.borde === true) return j;
@@ -3603,6 +3603,37 @@ function showEntrada(msg) {
    sovrascriveva la sessione di chi era già dentro. entrarSala() la bumpa. */
 let AUTH_EPOCH = 0;
 var _CLOCKIN_UID = null;   // [30-set] la chiave dell'ingresso al bordo
+/* ═══ [29-ott · 🖐 TERZA V32 · pezzo 6.5b `TERZA V32 6.5B DATA`] L'IDENTITÀ DEL TELEFONO DAL BORDO: i nomi del battesimo, il battesimo, la revoca ═══
+   Il bordo li ha dal 21-ott (ponte di ⚙️ ARQ, registro in Postgres `acceso_dispositivo`) dietro le SUE leve, lette da /salud: `staff_sala_borde_on`
+   (i nomi) e `bautizo_borde_on` (battesimo e revoca). Leva spenta = non si bussa nemmeno: `gasPost` come ieri, byte per byte.
+   Si crede al bordo con `borde:true` OPPURE `fuente:'borde'`: il ponte del battesimo risponde `{ok:true, token, fuente:'borde'}` SENZA timbro, e col
+   criterio di staffPost un battesimo riuscito si sarebbe rifatto sul GAS (due righe, due token). Tutto il resto (`need:'gas'`, rete, timeout) ⇒ gasPost.
+   Il battesimo al bordo vuole anche `checkin_borde_on`: un token nato solo in Postgres, presentato al `salaCheckIn` del GAS, è «device_desconocido»
+   e il telefono lo butterebbe. Freno del telefono: `?bordew=0`. */
+var STAFF_SALA_BORDE_ON = false, BAUTIZO_BORDE_ON = false, GATE_DEVICE_V = false;
+function _bautizoAlBorde() { return BAUTIZO_BORDE_ON && CHECKIN_BORDE_ON; }
+async function _identitaBordeOGas(levaOn, action, body) {
+  if (levaOn && BORDE_W.QS !== '0' && BORDE_SALA && BORDE_SALA.URL) {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 6000);
+    try {
+      const r = await fetch(BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?t=' + encodeURIComponent(BORDE_SALA.T), {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctrl.signal, cache: 'no-store',
+        body: JSON.stringify(Object.assign({ action, local: CFG.LOCAL, cli_ver: _salaVer(), app: APP_ID }, body || {})) });
+      const j = await r.json();
+      if (j && (j.borde === true || j.fuente === 'borde')) return j;
+    } catch (e) { /* rete o timeout: la via di sempre */ }
+    finally { clearTimeout(to); }
+  }
+  return gasPost(action, body);
+}
+/* [6.5b] ogni gesto verso il bordo porta l'identità del telefono (`device_token` + `session_tok` di /deviceCheckin), SOLO con `gate_device_on` acceso
+   per questo locale: a leva spenta il corpo è quello di ieri, byte per byte. Il codigo resta: il cancello del bordo prova prima lui (`_cancelloOk`). */
+function _conDev(o) {
+  if (!GATE_DEVICE_V || !deviceToken || !STATE.sessionTok || !o || o.device_token) return o;
+  o.device_token = deviceToken; o.session_tok = STATE.sessionTok;
+  return o;
+}
 /* ═══ [21-ott · pezzo 6.5 · AUT-0719 `V32 AUT-0719 STRADA DUE`] IL CHECK-IN DEL TELEFONO BATTEZZATO DAL BORDO ═══════════════════════════════
    `POST /deviceCheckin/<local>` {device_token}: a un device battezzato del SUO locale il bordo dà `codigo` (la stessa esposizione di oggi: il GAS lo
    dà allo stesso token) più `nombre` e `session_tok`. Il codigo finisce in `STATE.codigo` COME OGGI, così i ripieghi `gasPost` restano vivi.
@@ -3669,7 +3700,7 @@ async function bautismoElegir(nombre, codigo) {
   const btn = $('entBtn');
   btn.disabled = true; btn.textContent = 'BAUTIZANDO…'; btn.classList.add('cargando');
   try {
-    const b = await gasPost('bautizarDevice', { codigo: codigo, nombre: nombre });
+    const b = await _identitaBordeOGas(_bautizoAlBorde(), 'bautizarDevice', { codigo: codigo, nombre: nombre });   // [29-ott · 6.5b]
     if (!b || !b.ok) {
       $('entErr').textContent = b && b.error === 'mesero_desconocido'
         ? 'Ese nombre no está en la lista — díselo al JL' : ('Error: ' + (b && b.error || '?'));
@@ -3688,7 +3719,7 @@ async function bautismoElegir(nombre, codigo) {
 
 async function bautismoNombres(codigo) {
   // código validato dal server → lista nomi dall'anagrafica, mai digitati
-  const r = await gasPost('getStaffSala', { codigo: codigo });
+  const r = await _identitaBordeOGas(STAFF_SALA_BORDE_ON, 'getStaffSala', { codigo: codigo });   // [29-ott · 6.5b]
   if (!r || !r.ok) {
     const msgs = { codigo_invalid: 'Código incorrecto — pídelo al JL', no_turno_abierto: 'No hay turno abierto todavía' };
     $('entErr').textContent = msgs[r && r.error] || ('Error: ' + (r && r.error || '?'));
@@ -3860,7 +3891,7 @@ function _salirProsegui(finTurno) {
   // v1.20 · il battesimo si scioglie SOLO se lo chiedi (telefono prestato,
   // nome sbagliato): «Salgo» normale chiude la sessione, non il battesimo.
   if (deviceToken && confirm('¿Quitar también el bautismo de este teléfono?\n\nOK = este teléfono deja de entrar solo (para teléfonos prestados o nombre equivocado).\nCancelar = solo cerrar sesión: mañana entras solo igual.')) {
-    gasPost('revocarDevice', { device_token: deviceToken }).catch(() => {});
+    _identitaBordeOGas(_bautizoAlBorde(), 'revocarDevice', { device_token: deviceToken }).catch(() => {});   // [29-ott · 6.5b]
     try { localStorage.removeItem(CFG.SK.TOK); } catch (e) {}
     deviceToken = '';
     toast('ok', 'Bautismo quitado — este teléfono vuelve al código');
@@ -9979,6 +10010,10 @@ function _saludLeggi() {
       if (BORDE_FALLBACK_TEL === null && cercaK(j, 'borde_fallback_on') != null) { const _bfb = String(cercaK(j, 'borde_fallback_on')) === '1'; if (_bfb !== BORDE_FALLBACK_ON) { BORDE_FALLBACK_ON = _bfb; _pintarGuardiaBadge(); } }   // [21-ott] l'ultima vista, non Google
       { const _civ = cercaK(j, 'clockin_vetro_borde_on'); if (_civ != null && QS.get('civ') !== '0') CLOCKIN_VETRO_ON = String(_civ) === '1'; }   // [26-ott] la chiave assente non la spegne
       CHECKIN_BORDE_ON = String(cercaK(j, 'checkin_borde_on')) === '1';             // [21-ott · pezzo 6.5]
+      { const _lv = function (v) { v = String(v == null ? '' : v).trim().toUpperCase();   // [29-ott · 6.5b] la stessa regola di `levaGateDevice`/`levaBautizo` del bordo: "1" · "0" · elenco di locali
+          if (v === '' || v === '0' || v === 'FALSE') return false; if (v === '1' || v === 'TRUE') return true;
+          return v.split(',').map(function (x) { return x.trim(); }).indexOf(String(CFG.LOCAL || 'BKS').toUpperCase()) >= 0; };
+        STAFF_SALA_BORDE_ON = _lv(cercaK(j, 'staff_sala_borde_on')); BAUTIZO_BORDE_ON = _lv(cercaK(j, 'bautizo_borde_on')); GATE_DEVICE_V = _lv(cercaK(j, 'gate_device_on')); }
       if (YAPAG3_TEL === null) YAPAG3_ON = String(cercaK(j, 'ya_pagado_ack_on')) === '1';   // [21-ott · ②] la guardia segue la leva del bordo
       CANC_LOCAL_SRV = String(cercaK(j, 'sala_cancelado_local_on')) === '1';       // [23-ott · TERZA] il pedido cancellato da qui
       MXV2_SRV = String(cercaK(j, 'cobro_mixto_v2_on')) === '1';                    // [21-ott · le note di Alberto sul mixto] vedi `mxV2On`

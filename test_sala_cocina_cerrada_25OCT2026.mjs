@@ -42,7 +42,7 @@ async function banco(SRC, quieto) {
   { const w = await coda({ ok: false, borde: true, need: 'items_agotados', agotados: [{ id: 'pan', nombre: 'Pan' }] });
     t('H · l 86 resta com era («se acabó Pan»)', w.cola.length === 0 && w.L.toast.some((x) => /Mesa 42: se acabó Pan/.test(x[1])), w.L.toast); }
   // ⓪ staffPost VERO: il no della cucina SENZA timbro (il bordo vivo di oggi) non è rete
-  { const F = 'let STAFFPOST_SOLO = "";\n' + fnVin(SRC, '_soloBorde') + 'async ' + fnVin(SRC, 'staffPost');
+  { const F = 'let STAFFPOST_SOLO = "";\n' + fnVin(SRC, '_soloBorde') + 'async ' + fnVin(SRC, 'staffPost') + (SRC.includes('function _conDev(') ? 'var GATE_DEVICE_V = false;\n' + fnVin(SRC, '_conDev') : '');
     const chiama = async (solo, body) => { const L = { gas: [], penna: [] };
       const ctx = { BORDE_W: { QS: '', ok: {} }, STATE: { sala: { bw: true } }, BORDE_SALA: { URL: 'https://b', T: 't' }, CFG: { LOCAL: 'BKS' }, APP_ID: 'sala',
         JSON, Object, String, setTimeout, clearTimeout, AbortController, encodeURIComponent, Date,
