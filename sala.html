@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.65 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.66 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9899,6 +9899,7 @@ var SALUD_LEVE_P = null;   // [21-ott · 6.5] la lettura di /salud qui sotto: il
 var SALIDA_BORDE_V = false;   // [21-ott · pezzo 1.6b] la leva DEL BORDO `salida_borde_on` letta da /salud ("1" o la lista dei locali): spenta ⇒ GAS diretto
 var CHECKIN_BORDE_ON = false;   // [21-ott · pezzo 6.5 · AUT-0719] /salud → checkin_borde_on: il check-in del telefono battezzato dal bordo. Nasce "0". Vedi `_checkInDalBorde`.
 var PORCONTO_SRV = false;       // [29-ott · TERZA · il vetro per conto, fetta 1] /salud → sala_por_conto_on. Nasce "0" (chiave assente = spenta). Vedi `_contiDeMesa`.
+var C4SOLO_SRV = false;         // [30-ott · TERZA · AUT-0780] /salud → c4_solo_borde_on. Nasce "0" (chiave assente = spenta). Vedi `c4SoloBordeOn`.
 var CORTE_JL_ON = false;   // [25-ott · 🖐 QUARTA `QUARTA V32 LA PROVA DEL CORTE SULLA 998 IL VETRO BLOCCA`] /salud → corte_senza_erede_jl_on: con il corte al bordo, la mesa senza erede la passa il bordo al JL
 var CORTE_TRAS_BORDE_ON = false;   // [21-ott · ⚙️ `ARQ V32 CORTE CON TRASPASO 363D394 E IL VETRO`] /salud → corte_traspaso_borde_on: il corte CON mesas da passare lo fa il bordo. Nasce "0".
 /* [26-ott · ⚙️ `ARQ V32 su FERMO PERCHE clockIn nella lista solo-bordo` · TERZA] la porta ① del clockIn diretto: con la rete lenta /salud non risponde
@@ -10016,6 +10017,7 @@ function _saludLeggi() {
       { const _civ = cercaK(j, 'clockin_vetro_borde_on'); if (_civ != null && QS.get('civ') !== '0') CLOCKIN_VETRO_ON = String(_civ) === '1'; }   // [26-ott] la chiave assente non la spegne
       CHECKIN_BORDE_ON = String(cercaK(j, 'checkin_borde_on')) === '1';             // [21-ott · pezzo 6.5]
       PORCONTO_SRV = String(cercaK(j, 'sala_por_conto_on')) === '1';               // [29-ott · il vetro per conto] vedi `_contiDeMesa`
+      C4SOLO_SRV = String(cercaK(j, 'c4_solo_borde_on')) === '1';                  // [30-ott · AUT-0780] vedi `c4SoloBordeOn`
       { const _lv = function (v) { v = String(v == null ? '' : v).trim().toUpperCase();   // [29-ott · 6.5b] la stessa regola di `levaGateDevice`/`levaBautizo` del bordo: "1" · "0" · elenco di locali
           if (v === '' || v === '0' || v === 'FALSE') return false; if (v === '1' || v === 'TRUE') return true;
           return v.split(',').map(function (x) { return x.trim(); }).indexOf(String(CFG.LOCAL || 'BKS').toUpperCase()) >= 0; };
@@ -16256,6 +16258,27 @@ function _pagoFallaBanner(rec) {
    REGISTRATO`] nessuna risposta ⇒ «nose»: il telefono NON SA se è entrato, quindi niente domanda («ya se registró» sarebbe un ricordo spacciato per fatto) e il
    prossimo uguale si RIMANDA col SUO uid: se era entrato il bordo deduplica, se no entra adesso. Un «volo» oltre 60 s vale «nose».
    Accesa di fabbrica (è una riparazione di denaro), freno per apparecchio `?pdoble=0`. */
+/* ═══ [30-ott · 🖐 TERZA V32 · AUT-0780 · 🛎 SALA V33 `MESA 103: IL QUARTO PAGO NON È UN SECONDO TAP`] UNA PARTE DI CONTO NASCE E MUORE AL BORDO ═══
+   🩸 Mesa 103, 14:06: tre parti iguales da $12.720. La terza (`PU-mvv84r11`) non ha preso il bordo ed è andata dritta al GAS, che
+      non conosceva ancora il credito di 1,3 s prima ⇒ un pago in più su Google, mai visto da PG né dal bordo, e la mesa «falta $12.720»
+      per 2,5 ore fino a un debito che l'ha chiusa.
+   🔑 La radice: una parte (`body.parcial && pg.c4`) ha DUE strade e UNA guardia — quella del bordo, «parte contro resto». La guardia
+      del telefono la salta apposta (r. della guardia del doppio qui sotto, `!(body.parcial && pg.c4)`), perché la guarda il bordo.
+      Quando `_pagoAlBorde` torna `null` la parte usciva dalla porta laterale, e lì non la guardava nessuno.
+   ✅ La cura: con la leva accesa una parte NON ripiega sul GAS. Se il bordo non la prende, il vetro si ferma con «reintenta» e tiene
+      il SUO uid (nasce all'apertura del pannello e il pannello resta aperto): se il primo tentativo era entrato, il bordo deduplica.
+      La pausa del bordo (60 s dopo un timeout, 5 min dopo «apagado») per una parte non vale: serviva a risparmiare 200 ms prima
+      di andare al GAS, e qui il GAS non c'è più.
+   ⚠️ Con la leva accesa si fermano TUTTI i `null` di una parte, anche quelli strutturali (`pago:leva-off`, `?bordep=0`, una porta,
+      `pago:gas:<motivo>`): il motivo va nel banner del JL. È voluto: «nasce e muore al bordo» non ha un'eccezione silenziosa.
+   🎚 Leva `c4_solo_borde_on` (/salud, NASCE "0": chiave assente = spenta) · per telefono `?c4solo=1` / `?c4solo=0` (vince sempre).
+      Ritorno: "0" sul bordo, nessun deploy del vetro. */
+function c4SoloBordeOn() {
+  const q = QS.get('c4solo');
+  if (q === '1') return true;
+  if (q === '0') return false;
+  return C4SOLO_SRV === true;
+}
 const PAGO_DOBLE_ON = (function () {
   const q = QS.get('pdoble');
   try { if (q === '0') { localStorage.setItem('sala_pdoble', '0'); return false; } if (q === '1') { localStorage.setItem('sala_pdoble', '1'); return true; } return localStorage.getItem('sala_pdoble') !== '0'; }
@@ -16572,6 +16595,8 @@ async function pagoConfirmar(btn) {
       }
       _pagoRecSegna(pg.mesa, pg.uid, _imp, pg.medio, 'volo');
     }
+    const _c4Solo = !!(body.parcial && pg.c4) && c4SoloBordeOn();   // [AUT-0780] vedi `c4SoloBordeOn`
+    if (_c4Solo) BORDE_PAGO.pausaHasta = 0;   // [AUT-0780] una parte bussa sempre: la pausa esisteva per andare al GAS
     let rB = await _pagoAlBorde(body, pg.tot);
     if (rB && rB.ok === false && rB.error === 'pago_repetido' && !body.confirmo_repetido) {
       const x = await _repetidoManeja(rB, body, pg);
@@ -16583,6 +16608,14 @@ async function pagoConfirmar(btn) {
         return;
       }
       rB = x.rB;
+    }
+    if (!rB && _c4Solo) {
+      /* [AUT-0780] il bordo non l'ha presa (anche dopo «¿Es OTRO pago?»): NON si va al GAS. Il pannello resta aperto con lo stesso
+         uid ⇒ il ritento è lo stesso gesto, e se il primo era entrato il bordo deduplica. */
+      _pagoEsito(pg, 'no', 'parte_sin_borde:' + (_PENNA_ULT || '?'));
+      pg.enviando = false; renderPago();
+      toast('err', '⛔ Esta parte no se pudo registrar — reintenta (es el mismo cobro, no se duplica)');
+      return;
     }
     if (rB && rB.ok !== false) {
       _pagoEsito(pg, 'ok', 'bordo');
