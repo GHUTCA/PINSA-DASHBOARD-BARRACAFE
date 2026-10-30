@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.43.9</span>
+<span class="ver" id="ver">app_jl v1.43.11</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -2467,6 +2467,52 @@ function _franjaAdesso(lista) {
   }
   return lista[0] || '';
 }
+/* ═══ [30-ott · v1.43.11 · 🖐 TERZA · 🎛 V33 `L'APP JL NON PERMETTE UN ORARIO DI TURNO FUORI DALLA LISTA` ②] LA FRANJA SI COMPONE: ENTRADA E SALIDA ═══════════
+   Alberto, assegnando Wilbert alle 09:3x: la prima ora possibile era le 10:00, e con un brunch alle 9 il mesero non vende. Cura: due selettori da una TABELLA
+   di ore fisse (ogni 30 minuti, 06:00 → 04:00 del giorno dopo), mai testo libero: la forma esce sempre `HH:MM-HH:MM`, quella che il bordo già accetta
+   (`RE_FRANJA` di turno.js) e che il gate e la caja già leggono (salida dopo mezzanotte compresa: la durata si calcola mod 24 h). La Salida offre SOLO
+   le ore dopo l'Entrada nella tabella, quindi una franja rovesciata non si può comporre. Le franjas di sempre restano scorciatoie in cima.
+   Leva `franja_compuesta_on` da /salud (BKP), NASCE "0": spenta, il selettore è quello di ieri, byte per byte. Ritorno: "0" + deploy del bordo. */
+function franjaCompuestaOn() { return cjFlag('franja_compuesta_on'); }
+const HORAS_FRANJA = (function () { const o = []; for (let i = 0; i <= 44; i++) { const t = (6 * 60 + i * 30) % 1440; o.push(String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0')); } return o; })();   // 06:00 … 23:30, 00:00 … 04:00
+let _FRC = null;   // { ent, sal }: vive fuori dal DOM, così il battito che ridisegna la scheda non riporta la franja a «ahora»
+function _frcScorciatoie() {   // le franjas di sempre (e quelle di oggi) che la tabella sa comporre
+  return _franjasJL().filter(function (f) { const x = f.split('-'); if (x.length !== 2) return false; const a = HORAS_FRANJA.indexOf(x[0]), b = HORAS_FRANJA.indexOf(x[1]); return a >= 0 && b > a; });
+}
+function _frcIni() {
+  if (_FRC) return _FRC;
+  const fs = _frcScorciatoie(), ora = _franjaAdesso(fs).split('-');
+  _FRC = (ora.length === 2) ? { ent: ora[0], sal: ora[1] } : { ent: '10:00', sal: '18:30' };
+  return _FRC;
+}
+function _frcSalOpts() {
+  const a = HORAS_FRANJA.indexOf(_FRC.ent);
+  return HORAS_FRANJA.slice(a + 1).map(function (h) { return '<option value="' + h + '"' + (h === _FRC.sal ? ' selected' : '') + '>' + h + (HORAS_FRANJA.indexOf(h) >= 36 ? ' (madrugada)' : '') + '</option>'; }).join('');
+}
+function _frcRiga() {
+  const a = HORAS_FRANJA.indexOf(_FRC.ent), b = HORAS_FRANJA.indexOf(_FRC.sal), m = (b - a) * 30;
+  return 'Franja: <b>' + esc(_FRC.ent + '-' + _FRC.sal) + '</b> · ' + Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
+}
+function _frcPinta() { const s = $('asSal'), e = $('asEnt'), r = $('asFrcRiga'); if (e) e.value = _FRC.ent; if (s) s.innerHTML = _frcSalOpts(); if (r) r.innerHTML = _frcRiga(); }
+function _frcEnt(v) {
+  _frcIni(); if (HORAS_FRANJA.indexOf(v) < 0 || HORAS_FRANJA.indexOf(v) >= HORAS_FRANJA.length - 1) return;
+  _FRC.ent = v;
+  if (HORAS_FRANJA.indexOf(_FRC.sal) <= HORAS_FRANJA.indexOf(v)) _FRC.sal = HORAS_FRANJA[Math.min(HORAS_FRANJA.indexOf(v) + 17, HORAS_FRANJA.length - 1)];   // salida già passata ⇒ 8 h 30 dopo (o le 04:00)
+  _frcPinta();
+}
+function _frcSal(v) { _frcIni(); if (HORAS_FRANJA.indexOf(v) > HORAS_FRANJA.indexOf(_FRC.ent)) _FRC.sal = v; _frcPinta(); }
+function _frcSet(f) { const x = (f || '').split('-'); _frcIni(); if (x.length === 2 && HORAS_FRANJA.indexOf(x[0]) >= 0 && HORAS_FRANJA.indexOf(x[1]) > HORAS_FRANJA.indexOf(x[0])) { _FRC.ent = x[0]; _FRC.sal = x[1]; } _frcPinta(); }
+function _frcHtml() {
+  _frcIni();
+  const opt = HORAS_FRANJA.slice(0, -1).map(function (h, i) { return '<option value="' + h + '"' + (h === _FRC.ent ? ' selected' : '') + '>' + h + (i >= 36 ? ' (madrugada)' : '') + '</option>'; }).join('');
+  return '<div id="asFrc" style="margin:6px 0">' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">' + _frcScorciatoie().map(function (f) { return '<button type="button" class="btn" style="padding:4px 10px;font-size:13px" onclick="_frcSet(\'' + esc(f) + '\')">' + esc(f) + '</button>'; }).join('') + '</div>' +
+    '<div style="display:flex;gap:8px">' +
+      '<label class="mini" style="flex:1">Entrada<select class="busca" id="asEnt" onchange="_frcEnt(this.value)">' + opt + '</select></label>' +
+      '<label class="mini" style="flex:1">Salida<select class="busca" id="asSal" onchange="_frcSal(this.value)">' + _frcSalOpts() + '</select></label>' +
+    '</div><p class="mini" id="asFrcRiga" style="margin:2px 0 0">' + _frcRiga() + '</p></div>';
+}
+function _franjaElegida() { if (franjaCompuestaOn()) { _frcIni(); return _FRC.ent + '-' + _FRC.sal; } return (($('asFranja') || {}).value || '').trim(); }
 function tabAsig(ridisegno) {
   const t = STATE.turno;
   _ASIG_ON = true;
@@ -2480,9 +2526,10 @@ function tabAsig(ridisegno) {
     (_STAFF_JL ? '' : (_STAFF_JL_ERR ? '<p class="mini" style="color:#E8B23A">⚠️ No pude traer la lista de meseros (' + esc(_STAFF_JL_ERR) + ') · reintento solo — por ahora salen solo los del turno de hoy.</p>' : '<p class="mini">Cargando el personal… (ya están los del turno de hoy)</p>')) +
     '<select class="busca" id="asPlaza"><option value="">— plaza —</option>' +
       pls.map(function (p) { return opt(p.plaza, p.plaza + (p.mesas ? ' · ' + p.mesas : '')); }).join('') + '</select>' +
+    (franjaCompuestaOn() ? _frcHtml() :   // [30-ott · v1.43.11] leva accesa: Entrada + Salida; spenta: il selettore di ieri
     '<select class="busca" id="asFranja">' + (function () { const fs = _franjasJL(), ora = _franjaAdesso(fs);
       return fs.length ? fs.map(function (f) { return '<option value="' + esc(f) + '"' + (f === ora ? ' selected' : '') + '>' + esc(f) + (f === ora ? ' · ahora' : '') + '</option>'; }).join('')
-        : '<option value="">— sin franjas hoy —</option>'; })() + '</select>' +
+        : '<option value="">— sin franjas hoy —</option>'; })() + '</select>') +
     (_STAFF_JL_FONTE === 'bordo' ? '<label class="mini" style="display:block;margin:6px 0"><input type="checkbox" id="asAgregar"> ＋ agregar a la plaza (no reemplazar) — para dos meseros juntos</label>' : '') +
     '<button class="btn acc" onclick="asignar()">Guardar</button>' +
     '<p class="mini">Queda firmado a tu nombre en el fósil.</p></div>';
@@ -2566,7 +2613,7 @@ function _porQueNoBordo(por, franja) {
   return 'No encuentro a esa persona en el sistema nuevo: recarga la lista o avisa a RRHH. No se escribió nada';
 }
 async function asignar() {
-  const m = ($('asMesero').value || '').trim(), p = ($('asPlaza').value || '').trim(), f = (($('asFranja') || {}).value || '').trim();
+  const m = ($('asMesero').value || '').trim(), p = ($('asPlaza').value || '').trim(), f = _franjaElegida();   // [30-ott · v1.43.11] composta se la leva è accesa
   if (!m || !p || !f) { toast('warn', 'Elige el mesero, la plaza y la franja'); return; }
   const _prima = (((STATE.turno && STATE.turno.asignaciones) || []).find(x => x.plaza === p && (x.franja || '') === f && x.mesero && !x._pendiente) || {}).mesero || '';
   /* [30-set] N1: la schermata non aspetta la rete — l'assegnazione compare
