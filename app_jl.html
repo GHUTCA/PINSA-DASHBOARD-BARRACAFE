@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.43.11</span>
+<span class="ver" id="ver">app_jl v1.43.12</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -2474,10 +2474,13 @@ function _franjaAdesso(lista) {
    le ore dopo l'Entrada nella tabella, quindi una franja rovesciata non si può comporre. Le franjas di sempre restano scorciatoie in cima.
    Leva `franja_compuesta_on` da /salud (BKP), NASCE "0": spenta, il selettore è quello di ieri, byte per byte. Ritorno: "0" + deploy del bordo. */
 function franjaCompuestaOn() { return cjFlag('franja_compuesta_on'); }
-const HORAS_FRANJA = (function () { const o = []; for (let i = 0; i <= 44; i++) { const t = (6 * 60 + i * 30) % 1440; o.push(String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0')); } return o; })();   // 06:00 … 23:30, 00:00 … 04:00
+const HORAS_FRANJA = (function () { const o = []; for (let i = 0; i <= 44; i++) { const t = (6 * 60 + i * 30) % 1440; o.push(String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0')); } return o; })(), ENT_FIN = 36;   // 06:00 … 23:30, 00:00 … 04:00 · ENT_FIN: HORAS_FRANJA[36] = '00:00', la prima entrada NON offerta (Z1)
+/* [30-ott · v1.43.12 · 💵 EL GIRO `EL GIRO B03077E ROSSO SULLE ENTRADAS DELLA MADRUGADA` Z1] l'ENTRADA si ferma alle 23:30 (indice 36 escluso). Il gate (`venceMsDeFranja`)
+   fa scadere «01:00-04:00» alle 04:00 dello STESSO giorno operativo, cioè prima che cominci: un'assegnazione nata già scaduta. TAMPONE dichiarato: lo uccide la ⓑ di 🎛 BKP
+   (il giorno si aggiunge quando l'inizio è prima delle 06:00), con la sua data in bacheca; allora questo tetto si toglie. La SALIDA resta fino alle 04:00. */
 let _FRC = null;   // { ent, sal }: vive fuori dal DOM, così il battito che ridisegna la scheda non riporta la franja a «ahora»
 function _frcScorciatoie() {   // le franjas di sempre (e quelle di oggi) che la tabella sa comporre
-  return _franjasJL().filter(function (f) { const x = f.split('-'); if (x.length !== 2) return false; const a = HORAS_FRANJA.indexOf(x[0]), b = HORAS_FRANJA.indexOf(x[1]); return a >= 0 && b > a; });
+  return _franjasJL().filter(function (f) { const x = f.split('-'); if (x.length !== 2) return false; const a = HORAS_FRANJA.indexOf(x[0]), b = HORAS_FRANJA.indexOf(x[1]); return a >= 0 && a < ENT_FIN && b > a; });
 }
 function _frcIni() {
   if (_FRC) return _FRC;
@@ -2495,16 +2498,16 @@ function _frcRiga() {
 }
 function _frcPinta() { const s = $('asSal'), e = $('asEnt'), r = $('asFrcRiga'); if (e) e.value = _FRC.ent; if (s) s.innerHTML = _frcSalOpts(); if (r) r.innerHTML = _frcRiga(); }
 function _frcEnt(v) {
-  _frcIni(); if (HORAS_FRANJA.indexOf(v) < 0 || HORAS_FRANJA.indexOf(v) >= HORAS_FRANJA.length - 1) return;
+  _frcIni(); if (HORAS_FRANJA.indexOf(v) < 0 || HORAS_FRANJA.indexOf(v) >= ENT_FIN) return;
   _FRC.ent = v;
   if (HORAS_FRANJA.indexOf(_FRC.sal) <= HORAS_FRANJA.indexOf(v)) _FRC.sal = HORAS_FRANJA[Math.min(HORAS_FRANJA.indexOf(v) + 17, HORAS_FRANJA.length - 1)];   // salida già passata ⇒ 8 h 30 dopo (o le 04:00)
   _frcPinta();
 }
 function _frcSal(v) { _frcIni(); if (HORAS_FRANJA.indexOf(v) > HORAS_FRANJA.indexOf(_FRC.ent)) _FRC.sal = v; _frcPinta(); }
-function _frcSet(f) { const x = (f || '').split('-'); _frcIni(); if (x.length === 2 && HORAS_FRANJA.indexOf(x[0]) >= 0 && HORAS_FRANJA.indexOf(x[1]) > HORAS_FRANJA.indexOf(x[0])) { _FRC.ent = x[0]; _FRC.sal = x[1]; } _frcPinta(); }
+function _frcSet(f) { const x = (f || '').split('-'); _frcIni(); if (x.length === 2 && HORAS_FRANJA.indexOf(x[0]) >= 0 && HORAS_FRANJA.indexOf(x[0]) < ENT_FIN && HORAS_FRANJA.indexOf(x[1]) > HORAS_FRANJA.indexOf(x[0])) { _FRC.ent = x[0]; _FRC.sal = x[1]; } _frcPinta(); }
 function _frcHtml() {
   _frcIni();
-  const opt = HORAS_FRANJA.slice(0, -1).map(function (h, i) { return '<option value="' + h + '"' + (h === _FRC.ent ? ' selected' : '') + '>' + h + (i >= 36 ? ' (madrugada)' : '') + '</option>'; }).join('');
+  const opt = HORAS_FRANJA.slice(0, ENT_FIN).map(function (h) { return '<option value="' + h + '"' + (h === _FRC.ent ? ' selected' : '') + '>' + h + '</option>'; }).join('');
   return '<div id="asFrc" style="margin:6px 0">' +
     '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">' + _frcScorciatoie().map(function (f) { return '<button type="button" class="btn" style="padding:4px 10px;font-size:13px" onclick="_frcSet(\'' + esc(f) + '\')">' + esc(f) + '</button>'; }).join('') + '</div>' +
     '<div style="display:flex;gap:8px">' +
