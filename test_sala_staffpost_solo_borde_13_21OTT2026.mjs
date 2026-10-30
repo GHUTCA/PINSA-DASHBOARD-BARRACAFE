@@ -6,7 +6,7 @@ const ORIG = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
 const fnVin = (S, n) => { const i = S.indexOf('function ' + n + '('); if (i < 0) throw new Error(n); return S.slice(i, S.indexOf('\n}\n', i) + 3); };
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
-  const F = 'let STAFFPOST_SOLO = "";\n' + fnVin(SRC, '_soloBorde') + 'async ' + fnVin(SRC, 'staffPost');
+  const F = 'let STAFFPOST_SOLO = "";\n' + fnVin(SRC, '_soloBorde') + 'async ' + fnVin(SRC, 'staffPost') + (SRC.includes('function _conDev(') ? 'var GATE_DEVICE_V = false;\n' + fnVin(SRC, '_conDev') : '');
   async function chiama(action, { solo = '', bw = true, qs = '', status = 200, body, lancia = false } = {}) {
     const L = { fetch: 0, gas: [], penna: [] };
     const ctx = { BORDE_W: { QS: qs, ok: {} }, STATE: { sala: { bw: bw } }, BORDE_SALA: { URL: 'https://b', T: 't' }, CFG: { LOCAL: 'BKS' }, APP_ID: 'sala',

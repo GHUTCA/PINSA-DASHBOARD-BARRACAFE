@@ -19,7 +19,7 @@ const PRIMO_MINUTO = [
 async function banco(SRC, quieto) {
   let ok = 0, ko = 0; const t = (n, c, i) => { c ? ok++ : ko++; if (!quieto) console.log((c ? '✓ ' : '✗ ') + n + (c || i === undefined ? '' : '  → ' + JSON.stringify(i).slice(0, 300))); };
   const i0 = SRC.indexOf('let STAFFPOST_SOLO = '); const riga = SRC.slice(i0, SRC.indexOf('\n', i0));
-  const F = riga + '\nlet _CLOCKIN_UID = null;\n' + fnVin(SRC, '_soloBorde') + 'async ' + fnVin(SRC, 'staffPost') + 'async ' + fnVin(SRC, 'entrar');
+  const F = riga + '\nlet _CLOCKIN_UID = null;\n' + fnVin(SRC, '_soloBorde') + 'async ' + fnVin(SRC, 'staffPost') + (SRC.includes('function _conDev(') ? 'var GATE_DEVICE_V = false;\n' + fnVin(SRC, '_conDev') : '') + 'async ' + fnVin(SRC, 'entrar');
   async function entra({ status, body, lista }) {
     const L = { gas: [], fetch: 0, sala: 0 }; const el = {};
     const $ = (id) => (el[id] = el[id] || { value: id === 'entCodigo' ? '3946' : id === 'entNombre' ? 'Wilbert' : '', textContent: '', disabled: false, classList: { add() {}, remove() {} } });
