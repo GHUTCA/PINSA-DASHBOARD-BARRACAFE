@@ -3627,7 +3627,6 @@ async function _identitaBordeOGas(levaOn, action, body) {
     } catch (e) { /* rete o timeout: la via di sempre */ }
     finally { clearTimeout(to); }
   }
-  if (turnoTelOn()) return { ok: false, error: 'sin_borde' };   // [31-ott] col telefono del turno un battesimo nato su Google il bordo non lo conosce: niente ripiego
   return gasPost(action, body);
 }
 /* [6.5b] ogni gesto verso il bordo porta l'identità del telefono (`device_token` + `session_tok` di /deviceCheckin), SOLO con `gate_device_on` acceso
@@ -3719,6 +3718,7 @@ async function _checkInDalBorde() {
       headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE_SALA.T }, body: JSON.stringify({ device_token: deviceToken }), cache: 'no-store', signal: ctrl.signal });
     const j = await r.json();
     if (j && j.ok === true && j.codigo) return j;
+    if (j && j.ok === true && j.session_tok && turnoTelOn()) return j;   // [31-ott · ARQ] il sì del JL senza codigo (turno aperto nel GAS): il codigo lo dà salaCheckIn, DOPO
     if (j && j.ok === false && j.error === 'device_revocado') return j;
     if (j && j.ok === false && turnoTelOn() && (j.error === 'tel_no_habilitado' || j.error === 'turno_cerrado_tel')) return j;   // [31-ott] definitivi: mai al GAS
     return null;
@@ -3739,7 +3739,10 @@ async function checkInConToken() {
     if (_telTurnoVede(rB)) return true;                              // [31-ott] aspetta il JL o il turno è finito: niente salaCheckIn
     if (!rB && turnoTelOn()) { _telEspera(null, 'Sin conexión con la sala — reintento solo cada 10 segundos'); return true; }   // [31-ott] il GAS non sa del JL: non è una strada
     if (rB && rB.session_tok) STATE.sessionTok = rB.session_tok;     // per la strada ③: oggi nessuno lo legge
-    const r = rB || await gasPost('salaCheckIn', { device_token: deviceToken });
+    let r = rB || await gasPost('salaCheckIn', { device_token: deviceToken });
+    /* [31-ott · ⚙️ ARQ `IL CHECK-IN DEL BORDO NON PUÒ DARE IL CODIGO`] finché il turno si apre nel GAS il bordo ha solo lo sha del codice: il suo sì
+       (telefono abilitato dal JL) arriva senza `codigo`. Si tiene il session_tok e il codigo si chiede al GAS — solo DOPO il sì, mai al posto del sì. */
+    if (rB && rB.ok === true && !rB.codigo && turnoTelOn()) r = await gasPost('salaCheckIn', { device_token: deviceToken });
     // risposta di un mondo vecchio: qualcuno è già entrato — non si tocca niente
     if (AUTH_EPOCH !== epoca0 && STATE.codigo) return true;
     if (r && r.ok) {
@@ -3777,11 +3780,10 @@ async function bautismoElegir(nombre, codigo) {
   const btn = $('entBtn');
   btn.disabled = true; btn.textContent = 'BAUTIZANDO…'; btn.classList.add('cargando');
   try {
-    const b = await _identitaBordeOGas(_bautizoAlBorde() || turnoTelOn(), 'bautizarDevice', { codigo: codigo, nombre: nombre });   // [29-ott · 6.5b] · [31-ott] telefono del turno
+    const b = await _identitaBordeOGas(_bautizoAlBorde(), 'bautizarDevice', { codigo: codigo, nombre: nombre });   // [29-ott · 6.5b] · [31-ott · ARQ] il battesimo segue la SUA leva anche col telefono del turno: il cancello è il sì del JL al check-in
     if (!b || !b.ok) {
       $('entErr').textContent = b && b.error === 'mesero_desconocido'
-        ? 'Ese nombre no está en la lista — díselo al JL'
-        : (b && b.error === 'sin_borde' ? 'Sin conexión con la sala — reintenta' : ('Error: ' + (b && b.error || '?')));
+        ? 'Ese nombre no está en la lista — díselo al JL' : ('Error: ' + (b && b.error || '?'));
       return;
     }
     deviceToken = b.token;
@@ -3797,9 +3799,9 @@ async function bautismoElegir(nombre, codigo) {
 
 async function bautismoNombres(codigo) {
   // código validato dal server → lista nomi dall'anagrafica, mai digitati
-  const r = await _identitaBordeOGas(STAFF_SALA_BORDE_ON || turnoTelOn(), 'getStaffSala', { codigo: codigo });   // [29-ott · 6.5b] · [31-ott] telefono del turno
+  const r = await _identitaBordeOGas(STAFF_SALA_BORDE_ON, 'getStaffSala', { codigo: codigo });   // [29-ott · 6.5b]
   if (!r || !r.ok) {
-    const msgs = { codigo_invalid: 'Código incorrecto — pídelo al JL', no_turno_abierto: 'No hay turno abierto todavía', sin_borde: 'Sin conexión con la sala — reintenta' };
+    const msgs = { codigo_invalid: 'Código incorrecto — pídelo al JL', no_turno_abierto: 'No hay turno abierto todavía' };
     $('entErr').textContent = msgs[r && r.error] || ('Error: ' + (r && r.error || '?'));
     return;
   }
