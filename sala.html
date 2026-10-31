@@ -3052,7 +3052,7 @@ async function _pagoAlBorde(body, consumo, action) {
         const bB = Object.assign({ action: action || 'registrarPago', local: CFG.LOCAL, app: APP_ID },
           body, { consumo: Math.round(consumo) });
         delete bB.folio_pc;
-        return bB;
+        return _conDev(bB);   // [31-ott · ⚙️ ARQ d4eb907] registrarPago è nel cancello del telefono: senza device_token+session_tok il garzón non cobra
       })()),
       signal: ctrl.signal, cache: 'no-store',
     });
@@ -3062,6 +3062,8 @@ async function _pagoAlBorde(body, consumo, action) {
        (stessa regola di staffPost). `need:'gas'`, un errore senza need, un 403
        sul token, un 503 sin_gate: tutto quanto è la via di sempre. */
     if (j && j.ok === true && j.borde === true) return j;
+    /* [31-ott · telefono del turno] il no al TELEFONO è finale anche senza `definitivo`: il GAS non conosce il JL, ripiegare sarebbe passare il cancello */
+    if (j && j.ok === false && (j.error === 'tel_no_habilitado' || j.error === 'turno_cerrado_tel')) { _telTurnoVede(j); return Object.assign({}, j, { borde: true, definitivo: true }); }
     if (j && j.ok === false && j.borde === true && j.definitivo === true) return j;   // [SCONTI AL BORDO] il bordo ha giudicato: NO
     /* [09-ott · mesa 55 · BKP `PAGO REPETIDO`] «pago_repetido» e una risposta FINALE del bordo anche senza il timbro: il GAS registrerebbe PROPRIO il doppio. NON si ripiega: si chiede al mesero. */
     if (j && j.ok === false && j.error === 'pago_repetido') return j;
@@ -5187,11 +5189,12 @@ async function _cerrarMeseroAlBorde(body) {
     const r = await fetch(u, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE_SALA.T },
-      body: JSON.stringify(Object.assign({ action: 'cerrarMesero', local: CFG.LOCAL }, body)),
+      body: JSON.stringify(_conDev(Object.assign({ action: 'cerrarMesero', local: CFG.LOCAL }, body))),   // [31-ott · ARQ d4eb907] cerrarMesero è nel cancello del telefono
       signal: ctrl.signal, cache: 'no-store',
     });
     clearTimeout(to);
     const j = await r.json();
+    if (j && j.borde === true) _telTurnoVede(j);
     return (j && j.borde === true) ? j : null;
   } catch (e) { return null; }
 }
@@ -5239,11 +5242,12 @@ async function _corregirAlBorde(bodyBorde) {
     const r = await fetch(u, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE_SALA.T },
-      body: JSON.stringify(Object.assign({ verbo: 'correccion', dispositivo_id: _dispositivoId(), app: APP_ID }, bodyBorde)),
+      body: JSON.stringify(_conDev(Object.assign({ verbo: 'correccion', dispositivo_id: _dispositivoId(), app: APP_ID }, bodyBorde))),   // [31-ott · ARQ d4eb907] corregir è nel cancello del telefono
       signal: ctrl.signal, cache: 'no-store',
     });
     clearTimeout(to);
     const j = _vediNoAsignado(await r.json());   // [29-set] solo chi è nel turno
+    _telTurnoVede(j);   // [31-ott] il no del telefono: la schermata giusta, e il no resta FINALE come ogni rifiuto con merito
     if (j && j.scritto === false && j.motivo === 'gate_spento') return CORR_SIN_GAS_ON ? { ok: false, error: 'borde_cerrado' } : null;   // leva del bordo spenta: vai di là [1.5: niente più «di là»]
     return j;   // {ok:true,scritto:true,...} O un rifiuto con merito — sempre FINALE
   } catch (e) {
