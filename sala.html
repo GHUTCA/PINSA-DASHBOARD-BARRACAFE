@@ -3697,9 +3697,13 @@ function _telFuera() {   // [③] dopo il corte: il bordo non accetta più gesti
   showEntrada('Tu turno de hoy terminó — este teléfono vuelve a la sala en tu próximo turno.');
   if (deviceToken) _telEsperaVista(true, { fin: true });   // battezzato: il prossimo turno entra da solo, la tastiera non serve. Senza battesimo resta la via del codice
 }
-function _telTurnoVede(j) {   // chiamata solo su risposte TIMBRATE dal bordo
+function _telTurnoVede(j) {   // chiamata su risposte del bordo
   try {
-    if (!j || j.ok === true || !turnoTelOn()) return false;
+    if (!j || j.ok === true || QS.get('telturno') === '0') return false;
+    if (j.error !== 'tel_no_habilitado' && j.error !== 'turno_cerrado_tel') return false;
+    /* [31-ott · 🎛 V33 punto ②] il bordo dice questi due no SOLO a leva accesa: un telefono rimasto aperto da prima dell'accensione (cache "0")
+       si rimette in riga qui, al primo gesto rifiutato, invece di mostrare un errore muto. */
+    if (!TURNO_TEL_V) { TURNO_TEL_V = true; try { localStorage.setItem('sala_telturno', '1'); } catch (e) {} }
     if (j.error === 'tel_no_habilitado') { _telEspera(j); return true; }
     if (j.error === 'turno_cerrado_tel') { _telFuera(); return true; }
   } catch (e) { /* mai in mezzo a un gesto */ }
@@ -3720,7 +3724,8 @@ async function _checkInDalBorde() {
     if (j && j.ok === true && j.codigo) return j;
     if (j && j.ok === true && j.session_tok && turnoTelOn()) return j;   // [31-ott · ARQ] il sì del JL senza codigo (turno aperto nel GAS): il codigo lo dà salaCheckIn, DOPO
     if (j && j.ok === false && j.error === 'device_revocado') return j;
-    if (j && j.ok === false && turnoTelOn() && (j.error === 'tel_no_habilitado' || j.error === 'turno_cerrado_tel')) return j;   // [31-ott] definitivi: mai al GAS
+    if (j && j.ok === false && (j.error === 'tel_no_habilitado' || j.error === 'turno_cerrado_tel')) return j;   // [31-ott] definitivi: mai al GAS (li dice solo un bordo a leva accesa)
+    if (j && j.ok === false && j.borde === true && j.need !== 'gas') return j;   // [31-ott · 🎛 V33 punto ①] un NO timbrato dal bordo è un no: mai salaCheckIn al suo posto
     return null;
   } catch (e) { return null; }
   finally { clearTimeout(to); }
@@ -3729,11 +3734,9 @@ async function checkInConToken() {
   // ritorna true se è entrato; false = prosegui col flusso normale
   const epoca0 = AUTH_EPOCH;
   try {
-    /* [6.5] all'avvio /salud può non aver ancora risposto: si aspetta al massimo 1,2 s, MA solo se questo telefono ha già visto la leva accesa
-       (`sala_checkinb`). A leva spenta nessuna attesa: l'avvio è quello di ieri. */
-    let _cbVista = ''; try { _cbVista = localStorage.getItem('sala_checkinb') || ''; } catch (e) {}
-    let _ttVista = ''; try { _ttVista = localStorage.getItem('sala_telturno') || ''; } catch (e) {}   // [31-ott] stessa attesa per il telefono del turno
-    if (SALUD_LEVE_P && (_cbVista === '1' || _ttVista === '1')) { try { await Promise.race([SALUD_LEVE_P, new Promise(function (ok) { setTimeout(ok, 1200); })]); } catch (e) {} }
+    /* [6.5] all'avvio /salud può non aver ancora risposto e le leve del check-in vengono da lì.
+       [31-ott · 🎛 V33 punto ②] le leve non si leggono dalla cache: si aspetta SEMPRE /salud, al massimo 1,2 s (prima solo con `sala_checkinb` "1") */
+    if (SALUD_LEVE_P) { try { await Promise.race([SALUD_LEVE_P, new Promise(function (ok) { setTimeout(ok, 1200); })]); } catch (e) {} }
     const rB = (CHECKIN_BORDE_ON || turnoTelOn()) ? await _checkInDalBorde() : null;   // [6.5 · AUT-0719] · [31-ott] col telefono del turno il check-in è SEMPRE del bordo
     if (AUTH_EPOCH !== epoca0 && STATE.codigo) return true;
     if (_telTurnoVede(rB)) return true;                              // [31-ott] aspetta il JL o il turno è finito: niente salaCheckIn
@@ -3766,6 +3769,10 @@ async function checkInConToken() {
     }
     if (r && r.error === 'no_turno_abierto') {
       showEntrada('No hay turno abierto todavía — tu teléfono ya está bautizado: cuando el JL abra, entras solo.');
+      return true;
+    }
+    if (r && r === rB && r.ok === false && r.borde === true) {   // [31-ott · 🎛 V33 punto ①] il no del bordo si dice, non si ripiega
+      showEntrada(r.mensaje || 'No puedes entrar ahora — pídeselo al JL');
       return true;
     }
     return false;
