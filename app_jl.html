@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.43.9</span>
+<span class="ver" id="ver">app_jl v1.44.0</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1146,6 +1146,7 @@ async function giroVeloce() {
   if (cod && STATE.turno && (TAB === 1 || _tick % 3 === 1)) {
     try { await giroAsigBorde(cod); } catch (e) { /* resta la foto del libro */ }
   }
+  if (STATE.turno && turnoTelOn() && (TAB === 1 || _tick % 3 === 1)) { try { await giroTelefonos(); } catch (e) {} }   // [31-ott] i telefoni che aspettano il JL
   if (_tick % 3 === 1) {   // un tick su tre: le letture di contorno
     try { const s = await bordeGet('/salud'); STATE.salud = s; STATE.ts.salud = Date.now(); } catch (e) { STATE.salud = null; }
     try {
@@ -2152,6 +2153,7 @@ function vTurno() {
     faltan.forEach(n => { h += '<div class="cob">' + esc(n) + (per[n].plazas.length ? ' · ' + esc(per[n].plazas.join('+')) : '') + '<span class="st2 dn">no llegó</span></div>'; });
     if (faltan.length) h += '<div class="row2"><button class="btn" onclick="tabAsig()">Reasignar</button><button class="btn gh" disabled>Avisar RRHH · próx.</button></div>';
     h += '<p class="mini">El clock-in escribe solo — nadie rellena nada. La cadena RRHH → Inspección: cantiere aparte, en camino.</p></div>';
+    h += _telHtml();   // [31-ott] il telefono del turno: vuoto a leva spenta
     /* plazas */
     const sinD = (t.plazas || []).filter(p => !(t.asignaciones || []).some(a => a.plaza === p.plaza && a.mesero));
     h += '<div class="card"><h4>👥 Plazas <span class="pill ' + (sinD.length ? 'amb' : 'on') + '">' + ((t.plazas || []).length - sinD.length) + ' asignadas · ' + sinD.length + ' sin dueño</span></h4>' +
@@ -2558,6 +2560,76 @@ function turnoEscribeOn() {
     const loc = String(LOC_PG[CFG.LOCAL] || CFG.LOCAL || '').toUpperCase();
     return v.split(',').map(function (x) { return x.trim(); }).filter(Boolean).indexOf(loc) >= 0;
   } catch (e) { return false; }
+}
+/* ═══ [31-ott · 🛎 SALA V33 · `DECISO: LA SALA SI CHIUDE COL TURNO E SI LEGA AL TELEFONO DEL TURNO`] IL JL ABILITA IL TELEFONO DEL GARZÓN ═══════════════════
+   Con la leva del bordo `turno_tel_on` accesa, un telefono battezzato che fa check-in resta fermo su «pide al JL» finché il JL non tocca HABILITAR qui.
+   Lettura: `POST /turno/telefonos/<local>` {pin_jl} (il PIN mai nell'URL) → `{ok, telefonos:[{nombre, tel_corto, desde_ms, estado:'espera'|'habilitado'|'cerrado'}]}`.
+   Gesto: `POST /turno/gesto/<local>` {accion:'habilitar_tel'|'revocar_tel', nombre, tel_corto, pin_jl, uid_gesto}, la stessa strada di `_asignarPorBordo`.
+   `uid_gesto` lo conia il telefono UNA volta per gesto e lo riusa nei ritocchi: il bordo non abilita due volte. Su timeout non si sa se ha scritto: si rilegge la lista.
+   Niente Google: a bordo muto la card lo dice e non c'è ripiego. Leva spenta ⇒ la card non esiste. */
+function turnoTelOn() {
+  try {
+    const m = /"turno_tel_on"\s*:\s*"?([^",}]*)"?/.exec(JSON.stringify(STATE.salud || {}));
+    const v = (m ? m[1] : '0').trim().toUpperCase();
+    if (v === '' || v === '0' || v === 'FALSE') return false;
+    if (v === '1' || v === 'TRUE') return true;
+    const loc = String(LOC_PG[CFG.LOCAL] || CFG.LOCAL || '').toUpperCase();
+    return v.split(',').map(function (x) { return x.trim(); }).filter(Boolean).indexOf(loc) >= 0;
+  } catch (e) { return false; }
+}
+const _TEL_UID = {};   // nombre|tel_corto|accion → uid_gesto, finché il bordo non risponde
+const _ERR_TEL = { tel_desconocido: 'Ese teléfono ya no está esperando', ya_habilitado: 'Ya estaba habilitado', turno_cerrado_tel: 'Ese mesero ya hizo su corte hoy' };
+async function giroTelefonos() {
+  if (!turnoTelOn() || !STATE.pin) return;
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 8000);
+  try {
+    const r = await fetch(CFG.BORDE + '/turno/telefonos/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T },
+      body: JSON.stringify({ pin_jl: STATE.pin }), signal: ctrl.signal, cache: 'no-store' });
+    const j = await r.json().catch(function () { return null; });
+    if (j && j.ok === true && Array.isArray(j.telefonos)) { STATE.telefonos = j.telefonos; STATE.ts.tel = Date.now(); STATE.telErr = ''; }
+    else STATE.telErr = (j && j.error) || ('http' + r.status);
+  } catch (e) { STATE.telErr = 'sin_red'; }
+  finally { clearTimeout(to); }
+}
+function _telHtml() {
+  if (!turnoTelOn()) return '';
+  const ls = STATE.telefonos || [];
+  const espera = ls.filter(function (t) { return t && t.estado === 'espera'; });
+  let h = '<div class="card' + (espera.length ? ' ambra' : '') + '"><h4>📱 Teléfonos del turno <span class="pill ' + (espera.length ? 'amb' : 'on') + '">' +
+    (espera.length ? espera.length + ' esperando' : 'todos habilitados') + '</span></h4>';
+  if (!STATE.ts.tel) h += '<p class="mini">' + (STATE.telErr ? 'El sistema no responde — reintento solo.' : 'Cargando…') + '</p>';
+  ls.forEach(function (t, i) {
+    if (!t) return;
+    const cod = t.tel_corto ? ' · <b style="letter-spacing:.1em">' + esc(t.tel_corto) + '</b>' : '';
+    if (t.estado === 'espera') h += '<div class="cob">' + esc(t.nombre) + cod + '<button class="btn acc" style="width:auto;margin-left:auto" onclick="telGesto(' + i + ',\'habilitar_tel\')">Habilitar</button></div>';
+    else if (t.estado === 'habilitado') h += '<div class="cob">' + esc(t.nombre) + cod + '<span class="st2">habilitado</span><button class="btn gh" style="width:auto;margin-left:8px" onclick="telGesto(' + i + ',\'revocar_tel\')">Quitar</button></div>';
+    else h += '<div class="cob">' + esc(t.nombre) + cod + '<span class="st2 dn">hizo su corte</span></div>';
+  });
+  h += '<p class="mini">Habilita solo el teléfono que tienes delante: mira que el código de la pantalla del mesero sea el mismo de aquí.</p></div>';
+  return h;
+}
+async function telGesto(i, accion) {
+  const t = (STATE.telefonos || [])[i];
+  if (!t || !STATE.pin) return;
+  if (accion === 'revocar_tel' && !confirm('¿Quitar el teléfono de ' + t.nombre + '? Ya no podrá tocar la sala hoy hasta que lo habilites de nuevo.')) return;
+  const k = t.nombre + '|' + (t.tel_corto || '') + '|' + accion;
+  if (!_TEL_UID[k]) _TEL_UID[k] = _uidGesto();
+  const g = { accion: accion, nombre: t.nombre, tel_corto: t.tel_corto || '', pin_jl: STATE.pin, uid_gesto: _TEL_UID[k] };
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 8000);
+  let j = null;
+  try {
+    const r = await fetch(CFG.BORDE + '/turno/gesto/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T }, body: JSON.stringify(g), signal: ctrl.signal, cache: 'no-store' });
+    j = await r.json().catch(function () { return null; });
+  } catch (e) { clearTimeout(to); toast('warn', 'Sin respuesta — puede que sí se guardó, reviso'); await giroTelefonos(); pintaTab(); return; }
+  clearTimeout(to);
+  if (j && j.ok === true) {
+    delete _TEL_UID[k];
+    toast('ok', accion === 'habilitar_tel' ? '✓ Teléfono de ' + t.nombre + ' habilitado' : 'Teléfono de ' + t.nombre + ' quitado');
+  } else {
+    if (j && j.ok === false) delete _TEL_UID[k];   // un NO del bordo è definitivo: il prossimo tocco è un gesto nuovo
+    toast('err', (j && (_ERR_TEL[j.error] || _ERR_TURNO[j.error] || j.error)) || 'El sistema no respondió — reintenta');
+  }
+  await giroTelefonos(); pintaTab();
 }
 function _porQueNoBordo(por, franja) {
   if (por === 'franja_vieja') return 'La franja «' + franja + '» está en un formato antiguo: avisa a RRHH, hay que corregirla. No se escribió nada';
