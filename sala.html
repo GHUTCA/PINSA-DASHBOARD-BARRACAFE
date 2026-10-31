@@ -3566,6 +3566,7 @@ function showEntrada(msg) {
      attivi (PEDIR/PRECUENTA/COBRAR/PEDIDOS/MOVER/ELIMINAR), senza sessione.
      Un punto solo, qui: ogni strada che riporta al login passa da
      showEntrada — cerrarMesa() è idempotente, sicura anche a mesa già chiusa. */
+  try { _telEsperaVista(false); } catch (e) {}   // [31-ott] l'attesa del JL la rimette chi la vuole, subito dopo
   cerrarMesa();
   setTimeout(function () { if (_entradaVisible()) cerrarMesa(); }, 400);    // [29-set] un'apertura in ritardo
   setTimeout(function () { if (_entradaVisible()) cerrarMesa(); }, 2500);
@@ -3654,9 +3655,33 @@ function _telEsperaMsg(j) {
   return c ? '📱 Este teléfono espera al JL — muéstrale el código ' + c + '. Entras solo apenas te habilite.'
            : '📱 Este teléfono espera al JL — dile tu nombre. Entras solo apenas te habilite.';
 }
+/* la vista dell'attesa: niente tastiera né ENTRAR (non c'è niente da scrivere), il codice del telefono grande per il JL. Ogni showEntrada la toglie. */
+function _telEsperaVista(on, j, msg) {
+  const v = $('vEntrada'); if (!v) return;
+  let b = $('entEspera');
+  if (!on) { if (b) b.remove(); v.classList.remove('tel-espera'); return; }
+  if (!$('telEsperaCss')) { const s = document.createElement('style'); s.id = 'telEsperaCss';
+    s.textContent = '#vEntrada.tel-espera .ent-field,#vEntrada.tel-espera .ent-sub,#vEntrada.tel-espera #entBtn,#vEntrada.tel-espera #entHint,#vEntrada.tel-espera #entErr,#vEntrada.tel-espera #entNombres{display:none!important}';
+    document.head.appendChild(s); }
+  if (!b) { b = document.createElement('div'); b.id = 'entEspera'; b.style.cssText = 'text-align:center;margin:18px 0 8px'; v.insertBefore(b, $('entErr')); }
+  v.classList.add('tel-espera');
+  const c = j && j.tel_corto ? String(j.tel_corto).trim() : '';
+  b.innerHTML = (j && j.fin)
+    ? '<div style="font-size:40px">👋</div><div style="font-size:19px;font-weight:700;margin:6px 0 10px">Tu turno de hoy terminó</div>' +
+      '<div style="font-size:15px">Este teléfono vuelve a la sala<br>en tu próximo turno.</div>'
+    : msg
+    ? '<div style="font-size:15px;line-height:1.5;color:var(--muted,#9aa)">' + esc(msg) + '</div>'
+    : '<div style="font-size:40px">📱</div>' +
+      '<div style="font-size:19px;font-weight:700;margin:6px 0 14px">Este teléfono espera al JL</div>' +
+      (c ? '<div style="font-size:44px;font-weight:800;letter-spacing:.22em;padding:12px 0;border:2px dashed currentColor;border-radius:16px;margin:0 8px">' + esc(c) + '</div>' +
+           '<div style="font-size:15px;margin-top:14px">Muéstrale este código al JL.<br>Entras solo apenas te habilite.</div>'
+         : '<div style="font-size:15px">Dile tu nombre al JL.<br>Entras solo apenas te habilite.</div>') +
+      '<div style="font-size:12px;opacity:.6;margin-top:18px">Reviso solo cada 10 segundos</div>';
+}
 function _telEspera(j, msg) {   // [②] il telefono non è abilitato oggi (o la rete tace): si aspetta, senza toccare niente
   STATE.sessionTok = '';
   showEntrada(msg || _telEsperaMsg(j));
+  _telEsperaVista(true, j, msg);
   if (_TEL_ESPERA_T) return;
   _TEL_ESPERA_T = setInterval(async function () {
     if (!_entradaVisible() || !deviceToken || !turnoTelOn()) { clearInterval(_TEL_ESPERA_T); _TEL_ESPERA_T = null; return; }
@@ -3671,6 +3696,7 @@ function _telFuera() {   // [③] dopo il corte: il bordo non accetta più gesti
   try { localStorage.removeItem(CFG.SK.COD); } catch (e) {}
   STATE.codigo = '';
   showEntrada('Tu turno de hoy terminó — este teléfono vuelve a la sala en tu próximo turno.');
+  if (deviceToken) _telEsperaVista(true, { fin: true });   // battezzato: il prossimo turno entra da solo, la tastiera non serve. Senza battesimo resta la via del codice
 }
 function _telTurnoVede(j) {   // chiamata solo su risposte TIMBRATE dal bordo
   try {
