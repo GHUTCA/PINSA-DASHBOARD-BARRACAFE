@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.69 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.70 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -5847,6 +5847,76 @@ function _gestoAvvisoHtml() {
   }).join('');
 }
 function _gestoVisto(gid) { delete _gFail[gid]; _gFailSalva(); refrescar(false); }
+/* ═══ [01-nov · TERZA · D-431] IL QR SU MESA LIBERA ASPETTA IL GARZÓN ═══════════════
+   Contratto di 🎛 BKP (bacheca «IL CONTRATTO DI D-431», 21:47): il bordo trattiene il primo pedido del QR su una mesa senza conto vivo
+   (`qrc:<uuid>`, non va in cucina) e lo mette in `sala_vista.qr_espera` = [{uuid, mesa, ts, total, productos:[{nombre,qty,op}], motivo}].
+   Conferma qualsiasi garzón col telefono valido del turno, e il JL (⑤ deciso dal CONTROLLER V33). Il gesto va a `/pedido-staff` con
+   `confirmarQr`/`rechazarQr` e un `uid_gesto` coniato UNA volta per tocco: un retry rimanda lo stesso.
+   🔑 SOLO AL BORDO: niente `staffPost`, che senza timbro ricade su Google col corpo intero — il GAS non conosce questo gesto. Senza risposta
+   timbrata si dice «reintenta», e il prossimo tocco rimanda lo stesso `uid_gesto`.
+   LEVA: è il campo stesso. Con `QR_CONFERMA_ON` "0" il bordo non manda `qr_espera` e questo riquadro non esiste: vetro di ieri. */
+const _qrUid = {};     // uuid -> uid_gesto del tocco in corso (stesso uid sui retry finché non c'è un esito)
+const _qrVolo = {};    // uuid -> true mentre la chiamata è in volo (niente doppio tocco)
+function _qrEsperaHtml(r) {
+  const l = (r && Array.isArray(r.qr_espera)) ? r.qr_espera : [];
+  if (!l.length) return '';
+  return '<div class="h">📱 Pedidos del QR esperando — ' + l.length + '</div>' + l.map(function (q) {
+    const u = esc(String(q.uuid || ''));
+    const min = q.ts ? Math.max(0, Math.round((Date.now() - (+new Date(q.ts) || +q.ts || Date.now())) / 60000)) : 0;
+    const prods = (q.productos || []).map(function (p) { return esc(String((p.qty || 1) + '× ' + (p.nombre || ''))) + (p.op ? ' <i style="opacity:.75">' + esc(String(p.op)) + '</i>' : ''); }).join(' · ');
+    const volo = !!_qrVolo[q.uuid];
+    return '<div style="background:#1e3a5f;color:#fff;border-radius:10px;padding:10px;margin:0 0 8px">' +
+      '<div style="font-weight:800;font-size:14px">Mesa ' + esc(String(q.mesa || '')) + ' · ¿hay gente en la mesa?' +
+        '<span style="float:right;font-weight:600;opacity:.8">' + (min > 0 ? 'hace ' + min + ' min' : 'ahora') + '</span></div>' +
+      (q.motivo === 'conto_cerrado' ? '<div style="font-size:11px;opacity:.85">La cuenta anterior de esta mesa ya se cerró: es un pedido nuevo.</div>' : '') +
+      '<div style="font-size:12px;margin:6px 0">' + (prods || '—') + (q.total ? ' · <b>$' + _fmtMiles(+q.total || 0) + '</b>' : '') + '</div>' +
+      '<div style="display:flex;gap:8px">' +
+        '<button ' + (volo ? 'disabled ' : '') + 'onclick="_qrGesto(\'confirmarQr\',\'' + u + '\')" style="flex:1;padding:10px;border:0;border-radius:8px;background:#16a34a;color:#fff;font-weight:800">✓ Sí, confirmar</button>' +
+        '<button ' + (volo ? 'disabled ' : '') + 'onclick="_qrGesto(\'rechazarQr\',\'' + u + '\')" style="flex:1;padding:10px;border:0;border-radius:8px;background:#7f1d1d;color:#fff;font-weight:800">✕ No, no hay nadie</button>' +
+      '</div></div>';
+  }).join('');
+}
+async function _qrGesto(action, uuid) {
+  if (!uuid || _qrVolo[uuid]) return;
+  const q = (((STATE.sala && STATE.sala.qr_espera) || []).find(function (x) { return String(x.uuid) === String(uuid); })) || {};
+  if (!_qrUid[uuid]) _qrUid[uuid] = _gid('qr');
+  _qrVolo[uuid] = true; refrescarMapa();
+  let j = null;
+  try {
+    if (!BORDE_SALA || !BORDE_SALA.URL) throw new Error('sin_borde');
+    const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?t=' + encodeURIComponent(BORDE_SALA.T);
+    const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
+    const res = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, cache: 'no-store', signal: ctrl.signal,
+      body: JSON.stringify(_conDev({ action: action, local: CFG.LOCAL, cli_ver: _salaVer(), app: APP_ID,
+        uuid: uuid, mesa: String(q.mesa || ''), uid_gesto: _qrUid[uuid], mesero: STATE.nombre || '' })) });
+    clearTimeout(to);
+    j = await res.json();
+  } catch (e) { j = null; }
+  delete _qrVolo[uuid];
+  const _telVisto = !!(j && j.borde === true && _telTurnoVede(j));   // il no del telefono del turno: la sua schermata, come per gli altri gesti
+  if (!(j && j.borde === true)) {
+    toast('warn', '📶 No llegó al servidor — reintenta (no se repite el pedido).');   // stesso uid_gesto al prossimo tocco
+  } else if (j.ok) {
+    delete _qrUid[uuid];
+    toast('ok', j.esito === 'rifiutato' ? '✕ Mesa ' + (j.mesa || q.mesa || '') + ': pedido rechazado, el cliente ya lo ve.'
+      : '✓ Mesa ' + (j.mesa || q.mesa || '') + ' confirmada: el pedido va a cocina.');
+  } else if (j.need === 'qr_ya_resuelto') {
+    delete _qrUid[uuid];
+    toast('warn', 'Ese pedido ya lo ' + (j.esito === 'confermato' ? 'confirmó' : j.esito === 'rifiutato' ? 'rechazó' : 'cerró') + ' otra persona' + (j.esito === 'scaduto' ? ' (pasaron 20 min sin respuesta)' : '') + '.');
+  } else if (j.need === 'qr_no_encontrado') {
+    delete _qrUid[uuid];
+    toast('warn', 'Ese pedido ya no está esperando.');
+  } else if (j.error === 'apagado') {
+    delete _qrUid[uuid];
+    toast('warn', 'La confirmación del QR está apagada: el pedido sigue como siempre.');
+  } else if (!_telVisto) {
+    toast('err', 'No se pudo: ' + (j.mensaje || j.error || j.need || 'error') + '.');
+  }
+  if (STATE.sala && Array.isArray(STATE.sala.qr_espera) && j && j.borde === true && (j.ok || j.need === 'qr_ya_resuelto' || j.need === 'qr_no_encontrado')) {
+    STATE.sala.qr_espera = STATE.sala.qr_espera.filter(function (x) { return String(x.uuid) !== String(uuid); });   // esce subito; il poll lo conferma
+  }
+  refrescarMapa();
+}
 /* 🔴 `ok` CON ZERO MOVIMENTI NON È UN SUCCESSO (requisito del collaudo di 🍳).
    Due meseros sulla stessa mesa: il primo sposta le righe, il secondo non trova
    più niente e riceve `ok:true` con ZERO mosse. Se il vetro disegna, quel
@@ -12890,6 +12960,7 @@ function renderMesas(r) {
   Object.keys(STATE.pcYaPag || {}).forEach(function (m) { if (!vivos[m]) delete STATE.pcYaPag[m]; });
   const todas = _plazaLista();
   list.forEach(function (m) { if (todas.indexOf(m.mesa) < 0) todas.push(m.mesa); });
+  h += _qrEsperaHtml(r);   // [01-nov · D-431] sopra la plaza e fuori dal suo if: conferma qualsiasi garzón del turno, anche senza plaza
   if (todas.length) {
     h += '<div class="h">Mi plaza — ' + list.length + ' con gente</div>' +
       /* v3.17.0 · [AUT-0034] · se il DISEGNO tronca, lo dice. Il diritto di
