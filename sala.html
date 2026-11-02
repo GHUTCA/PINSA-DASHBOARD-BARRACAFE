@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.68 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.73 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2980,6 +2980,9 @@ function _esFamColn(action, body) {
   if (b.sin_pago === 1 || b.sin_pago === '1' || b.sin_pago === true) return false;
   return action === 'registrarColacion' || b.fam === 1 || b.fam === '1' || b.fam === true || String(b.pin_fam || '').trim() !== '';
 }
+/* [02-nov · C2/C3] la leva del pago senza Google: `pago_sin_gas_on` dal /salud ("1" o l'elenco dei locali), più la lista e senza freni del telefono */
+var PAGO_SIN_GAS_ON = false;
+function _pagoSinGasOn() { return PAGO_SIN_GAS_ON === true && _soloBorde('registrarPago') && BORDE_PAGO.QS !== '0'; }
 async function _pagoAlBorde(body, consumo, action) {
   /* v3.19.0 · [AUT-EMERG 22-ago] · stessa sganciata di staffPost: il pago al
      bordo era incatenato a BORDE_SALA.ON (la foto) e quindi spento per tutti
@@ -3017,6 +3020,23 @@ async function _pagoAlBorde(body, consumo, action) {
         ancora al GAS. Un no secco lì sarebbe il muro muto dell'ingresso del 28-ott (clockIn): il bordo decide, il vetro non indovina.
      🧯 Leva: `registrarPago` assente dalla lista = la riga di ieri. Freno del telefono `?bordew=0` (vince in `_soloBorde`) o `?bordep=0`. */
   const _pagoSolo = _soloBorde('registrarPago') && BORDE_PAGO.QS !== '0';
+  /* ═══ [02-nov · 🛎 SALA V33 · 🎛 V33 `I PROPRIETARI E LE DATE DI OGNI BUCO` C2/C3] DOPO IL BORDO NON SI VA A GOOGLE ═══════════════════
+     🩸 Il buco: con `registrarPago` nella lista il pago bussa al bordo, ma ogni risposta senza timbro (`need:'gas'`, sin_gate, apagado,
+        senza-timbro), il timeout e la rete morta tornavano `null` ⇒ il chiamante faceva `gasPost('registrarPago')` (pagoConfirmar e
+        `_scontoVia`). A T8 Google non riceve più la sala: un pago lì è un pago fuori dal conto.
+     🔑 A leva `pago_sin_gas_on` (dal /salud, nasce spenta) e con la lista accesa, il bordo è l'unica strada DOPO che si è bussato:
+        `need:'gas'` e senza-timbro → un no visibile (`sin_gas:true`, il motivo del bordo); timeout → `error:'timeout'`, rete → `'sin_red'`
+        (pagoConfirmar li rilancia come oggi: il timeout si VERIFICA prima di riprovare, con lo stesso `pago_uid`).
+     🚪 Cosa resta fuori, dichiarato: le uscite PRIMA di bussare (`pago:porta:forzar_nuevo_pago`, `pago:no-uid`, `pago:consumo-0`) vanno ancora
+        al GAS e si contano già in `muro_via`; il freno del telefono `?dtoborde=0` (sconti dritti al GAS) e `?bordep=0` / `?bordew=0`.
+     ⚠️ Il prezzo, e perché la leva si accende solo con 🎛 BKP: finché `/pago` risponde `need:'gas'` per un caso VERO (sin_gate, apagado),
+        quel cobro si ferma invece di passare da Google — il muro del 28-ott. Si accende quando quei casi sono chiusi nel bordo. */
+  const _pagoSinGas = _pagoSinGasOn();
+  const _noGas = function (motivo, j) {
+    _pennaDice('pago:sin_gas:' + motivo);
+    return Object.assign({}, j || {}, { ok: false, borde: true, definitivo: true, sin_gas: true, error: motivo,
+      mensaje: (j && j.mensaje) || 'No se pudo registrar el pago en el sistema — reintenta en unos segundos.' });
+  };
   if (!_pagoSolo && (!bordeWriteOn() || BORDE_PAGO.QS === '0')) { _pennaDice('pago:leva-off'); return null; }
   if (!_pagoSolo && BORDE_PAGO.QS !== '1' && Date.now() < BORDE_PAGO.pausaHasta) { _pennaDice('pago:pausa'); return null; }
   /* la porta si guarda sul payload GIÀ COSTRUITO, non sullo stato del pannello:
@@ -3080,8 +3100,10 @@ async function _pagoAlBorde(body, consumo, action) {
     if (j && j.motivo === 'apagado') BORDE_PAGO.pausaHasta = Date.now() + BORDE_PAGO.APAGADO_MS;
     /* [AUT-0268] il bordo ha risposto e NON ha timbrato `borde:true`: è la via
        di sempre per decisione SUA, non nostra — e va distinta dal silenzio. */
+    if (_pagoSinGas) return _noGas(String((j && (j.error || j.motivo || j.need)) || 'senza_timbro'), j);   // [02-nov · C2] il bordo ha risposto: niente Google
     _pennaDice('pago:gas:' + ((j && (j.motivo || j.need || j.error)) || 'senza-timbro'));
   } catch (e) {
+    if (_pagoSinGas) return _noGas(e && e.name === 'AbortError' ? 'timeout' : 'sin_red', null);   // [02-nov · C2] il chiamante lo rilancia come la rete di oggi
     BORDE_PAGO.pausaHasta = Date.now() + BORDE_PAGO.RETE_MS;
     /* [AUT-0268] la `e` era legata e BUTTATA: qui muore la distinzione fra
        «il bordo ci ha messo troppo» e «la rete non c'era». Sono due guasti
@@ -10126,6 +10148,8 @@ function _saludLeggi() {
       if (YAPAG3_TEL === null) YAPAG3_ON = String(cercaK(j, 'ya_pagado_ack_on')) === '1';   // [21-ott · ②] la guardia segue la leva del bordo
       CANC_LOCAL_SRV = String(cercaK(j, 'sala_cancelado_local_on')) === '1';       // [23-ott · TERZA] il pedido cancellato da qui
       MXV2_SRV = String(cercaK(j, 'cobro_mixto_v2_on')) === '1';                    // [21-ott · le note di Alberto sul mixto] vedi `mxV2On`
+      { const _pv = String(cercaK(j, 'pago_sin_gas_on') == null ? '' : cercaK(j, 'pago_sin_gas_on')).trim().toUpperCase();   // [02-nov · C2/C3] "1" o l'elenco dei locali; assente = spenta
+        PAGO_SIN_GAS_ON = _pv === '1' || (_pv !== '' && _pv !== '0' && _pv.split(',').map(function (x) { return x.trim(); }).indexOf(String(CFG.LOCAL || 'BKS').toUpperCase()) >= 0); }
       { const _sp = cercaK(j, 'staffpost_solo_borde'); if (_sp != null) STAFFPOST_SOLO = String(_sp); }   // [27-ott] la chiave assente non svuota la lista   // [21-ott · 1.3] vedi `_soloBorde`
       { const _vm = cercaK(j, 'sala_ver_min'); if (_vm != null) { SALA_VER_MIN = String(_vm).trim(); _verMinControlla(); } }   // [28-ott] vedi `_verMinControlla`
       SALIDA_BORDE_V = (function (v) { v = String(v == null ? '' : v).trim().toUpperCase();   // [21-ott · 1.6b] la stessa regola di `levaSalidaBorde` del bordo
@@ -16687,6 +16711,23 @@ async function pagoConfirmar(btn) {
       }
       rB = x.rB;
     }
+    /* [02-nov · C2] a leva `pago_sin_gas_on` il bordo non risponde «vai al GAS»: il timeout e la rete tornano per la strada di oggi (il catch qui
+       sotto: il timeout si verifica, la rete dice «reintenta»), e il resto che si conclude da solo (v3.122) ribussa al BORDO, una volta, con le
+       stesse condizioni e lo stesso `pago_uid` del ritentativo verso il GAS più giù. */
+    if (rB && rB.sin_gas && (rB.error === 'timeout' || rB.error === 'sin_red')) throw new Error(rB.error);
+    if (rB && rB.ok === false && rB.error === 'parte_mayor_que_resto' && _pagoSinGasOn() && !pg._restoAuto
+        && _restoAttivo(STATE.sala) && pg.c4 && !pg.parte && !pg.montoOn && body.parcial === 1) {
+      const _res0 = Math.round(Number(rB.residuo));
+      if (isFinite(_res0) && _res0 > 0 && _res0 < (pg.tot || 0)) {
+        pg.c4.pagadoAntes = Math.max(0, Math.round((pg.tot || 0) - _res0));
+        const _parte0 = c4Parte(pg);
+        if (_parte0 > 0 && _parte0 <= _res0) {
+          pg._restoAuto = 1; pg._restoPedido = body.monto; body.monto = _parte0;
+          rB = await _pagoAlBorde(body, pg.tot);
+          if (rB && rB.sin_gas && (rB.error === 'timeout' || rB.error === 'sin_red')) throw new Error(rB.error);
+        }
+      }
+    }
     if (rB && rB.ok !== false) {
       _pagoEsito(pg, 'ok', 'bordo');
       _prFin = 'ok'; if (PAGO_DOBLE_ON) _pagoRecEsito(pg.mesa, pg.uid, 'ok');   // [24-ott]
@@ -16750,7 +16791,7 @@ async function pagoConfirmar(btn) {
        Sicuro perché: ① quel rifiuto vive PRIMA della penna (v3.140: il no sta
        sopra appendRow — zero righe scritte) e ② il pago_uid è lo stesso, la
        guardia di mesa 49 riconosce il gesto. Peggio di ieri non si può andare. */
-    if (r && !r.ok && r.error === 'precuenta_no_encontrada' && body.folio_pc) {
+    if (r && !r.ok && r.error === 'precuenta_no_encontrada' && body.folio_pc && !(r.borde === true && _pagoSinGasOn())) {   // [02-nov · C2] un no del bordo non si ritenta sul GAS
       delete body.folio_pc;
       r = await gasPost('registrarPago', body);
     }
@@ -16793,7 +16834,7 @@ async function pagoConfirmar(btn) {
             GRUPPO B del runbook del 20-set.
           · LA DATA · quella già scritta in quella voce, non una nuova. Una
             scadenza che si riscrive da sola a ogni cura non è una scadenza. */
-    if (r && !r.ok && r.error === 'parte_mayor_que_resto' && !pg._restoAuto
+    if (r && !r.ok && r.error === 'parte_mayor_que_resto' && !pg._restoAuto && !_pagoSinGasOn()   // [02-nov · C2] a leva accesa il ritentativo è al bordo, sopra
         && _restoAttivo(STATE.sala) && pg.c4 && !pg.parte && !pg.montoOn && body.parcial === 1) {
       const _res1 = Math.round(Number(r.residuo));
       if (isFinite(_res1) && _res1 > 0 && _res1 < (pg.tot || 0)) {
@@ -17024,6 +17065,7 @@ async function pagoConfirmar(btn) {
       _rech('✋ Valor superior al pago restante' +
         ((isFinite(_res) && _res > 0) ? ' · faltan $' + _fmtMiles(_res) : ''));
     }
+    else if (r && r.sin_gas) _rech('⚠️ ' + r.mensaje + ' (' + r.error + ')');   // [02-nov · C2] il no del bordo con la sua frase; il motivo tra parentesi per il JL
     else _rech('No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
     _pagoEsito(pg, 'sin_respuesta', (e && e.message) || '?');
