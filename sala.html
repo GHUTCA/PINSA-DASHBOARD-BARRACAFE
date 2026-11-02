@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.75 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.76 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3035,7 +3035,8 @@ async function _pagoAlBorde(body, consumo, action) {
         al GAS e si contano già in `muro_via`; il freno del telefono `?dtoborde=0` (sconti dritti al GAS) e `?bordep=0` / `?bordew=0`.
      ⚠️ Il prezzo, e perché la leva si accende solo con 🎛 BKP: finché `/pago` risponde `need:'gas'` per un caso VERO (sin_gate, apagado),
         quel cobro si ferma invece di passare da Google — il muro del 28-ott. Si accende quando quei casi sono chiusi nel bordo. */
-  const _pagoSinGas = _pagoSinGasOn();
+  /* [02-nov · 🎛 V33 ③] la colación resta fuori dalla leva: è la riga di oggi (con `fam_coln_motivo_on` si ferma da sé, r.~2950), e T8 non la tocca */
+  const _pagoSinGas = _pagoSinGasOn() && action !== 'registrarColacion';
   const _noGas = function (motivo, j) {
     _pennaDice('pago:sin_gas:' + motivo);
     return Object.assign({}, j || {}, { ok: false, borde: true, definitivo: true, sin_gas: true, error: motivo,
@@ -3104,7 +3105,12 @@ async function _pagoAlBorde(body, consumo, action) {
     if (j && j.motivo === 'apagado') BORDE_PAGO.pausaHasta = Date.now() + BORDE_PAGO.APAGADO_MS;
     /* [AUT-0268] il bordo ha risposto e NON ha timbrato `borde:true`: è la via
        di sempre per decisione SUA, non nostra — e va distinta dal silenzio. */
-    if (_pagoSinGas) return _noGas(String((j && (j.error || j.motivo || j.need)) || 'senza_timbro'), j);   // [02-nov · C2] il bordo ha risposto: niente Google
+    /* [02-nov · 🎛 V33 su `533EE0B PAGO_SIN_GAS VERDE 91/0` ①] `monto_explicito` (le parti del conto diviso, il monto scritto a mano) il bordo vivo
+       non lo giudica ancora: resta la strada di oggi, al GAS, contata da `pago:gas:monto_explicito` qui sotto. Buco dichiarato di T8, proprietario
+       🎛 BKP: si chiude quando `/pago` giudica la parte contro il resto (`parte_mayor_que_resto` + `residuo`, già letto dal vetro). */
+    /* E `apagado` (`PAGO_BORDE_ON` "0") è il freno di ritorno del bordo: chi lo gira vuole il GAS di ieri, non un locale che non cobra. */
+    const _mot = String((j && (j.motivo || j.error || j.need)) || '');
+    if (_pagoSinGas && _mot !== 'monto_explicito' && _mot !== 'apagado') return _noGas(String((j && (j.error || j.motivo || j.need)) || 'senza_timbro'), j);   // [02-nov · C2] il bordo ha risposto: niente Google
     _pennaDice('pago:gas:' + ((j && (j.motivo || j.need || j.error)) || 'senza-timbro'));
   } catch (e) {
     if (_pagoSinGas) return _noGas(e && e.name === 'AbortError' ? 'timeout' : 'sin_red', null);   // [02-nov · C2] il chiamante lo rilancia come la rete di oggi
@@ -16844,7 +16850,7 @@ async function pagoConfirmar(btn) {
             GRUPPO B del runbook del 20-set.
           · LA DATA · quella già scritta in quella voce, non una nuova. Una
             scadenza che si riscrive da sola a ogni cura non è una scadenza. */
-    if (r && !r.ok && r.error === 'parte_mayor_que_resto' && !pg._restoAuto && !_pagoSinGasOn()   // [02-nov · C2] a leva accesa il ritentativo è al bordo, sopra
+    if (r && !r.ok && r.error === 'parte_mayor_que_resto' && !pg._restoAuto && !(r.borde === true && _pagoSinGasOn())   // [02-nov · C2] un no del BORDO a leva accesa si ritenta al bordo, sopra; il no del GAS come ieri
         && _restoAttivo(STATE.sala) && pg.c4 && !pg.parte && !pg.montoOn && body.parcial === 1) {
       const _res1 = Math.round(Number(r.residuo));
       if (isFinite(_res1) && _res1 > 0 && _res1 < (pg.tot || 0)) {
