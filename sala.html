@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.68 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.80 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -5302,6 +5302,14 @@ function _pinErrorPersistente(r) {
 }
 async function guardarCorreccion__in(uuid, btn) {
   if (btn) btn.disabled = true;
+  if (K28_BEBMENU_ON) {   // [02-nov · K28 ⓐ] stessa regola di «Un producto»: tolto l'ultimo piatto del menù, esce anche la sua bebida a $0
+    try {
+      const _pk = [].concat((STATE.sala && STATE.sala.mios) || [], (STATE.sala && STATE.sala.por_limpiar) || [],
+        (STATE.sala && STATE.sala.pendientes) || [], (STATE.sala && STATE.sala.sin_dueno) || [])
+        .find(function (x) { return x && x.uuid === uuid; });
+      if (_pk) _k28Finales(itemsDe(_pk), STATE.editQty);   // dentro editQty: items e «Total nuevo» qui sotto la vedono già a 0
+    } catch (e) {}
+  }
   // v1.15 · gli id nuovi (editNuevos) viaggiano coi dati completi → il GAS li AGGIUNGE
   const items = Object.keys(STATE.editQty).map(id => {
     const nu = STATE.editNuevos[id];
@@ -9983,6 +9991,13 @@ var SALDO_SIN_PADRON_ON = false;
 /* [11-ott · AUT-0665 · 🎛 V28 `PROVA 108 DOM PASSATA E FAM MANCA NELLA APP JL`] regola di Alberto «il JL fa tutto dalla sua app»: ELIMINAR nell'app del JL offriva SOLO «Un producto»; Familia, Convenio e Colación
    esistevano solo sul telefono del mesero (ieri Alberto e dovuto passare dall'app di Jurley). /salud → jl_eliminar_todo_on. NASCE SPENTA: spenta, la porta e quella di ieri (solo «Un producto»). */
 var JL_ELIMINAR_TODO_ON = false;
+/* [02-nov · K28 · 🛎 SALA V33 · bacheca `LA MESA CON SOLO LA BEBIDA A $0 NON HA USCITA`] la mesa 997 di Alberto: tolto il piatto del Menú del Día
+   restava la sua bebida a $0, e ELIMINAR, COBRAR e PRECUENTA si fermavano tutti su `!tot` («sin consumo»). Dall'app del JL non c'era nessuna
+   uscita (lo sheet PEDIDOS in modo JL nasconde «✎ Cambiar»). Due pezzi dietro questa leva:
+   ⓐ `_k28Finales`: una correzione che toglie l'ultimo piatto del menù che paga si porta via, nello stesso gesto, la bebida del menù a $0;
+   ⓑ `_k28SoloCeros`: con righe vive tutte a $0, ELIMINAR apre «Un producto» (solo quella porta) invece di «sin consumo».
+   /salud → k28_bebida_menu_on. NASCE SPENTA: spenta, tutto come ieri. Il conto che muore lo accende 🎛 BKP (CONTO_MUORE_ANULADO_ON). */
+var K28_BEBMENU_ON = false;
 /* [19-ott · AUT-0716 · 🎛 V31 `V31 PROPINA MIXTO TAMPONE CONTEGGIO E AUT-0716`] nel mixto la propina dice IN CHE MEZZO entra (contratto di 🎛 BKP
    `BKP V31 AUT-0716 IL CONTRATTO DELLA PROPINA DEL MIXTO`: `propina` su ogni riga di `medios_json`). Leva del bordo, nasce "0": la accende BKP insieme a `cajaAtteso`. */
 var PROPINA_MIXTO_MEDIO_ON = false;
@@ -10101,6 +10116,7 @@ function _saludLeggi() {
       CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
       SALDO_SIN_PADRON_ON = String(cercaK(j, 'saldo_sin_padron_on')) === '1';             // [11-ott · AUT-0666]
       JL_ELIMINAR_TODO_ON = String(cercaK(j, 'jl_eliminar_todo_on')) === '1';   // [11-ott · AUT-0665]
+      K28_BEBMENU_ON = String(cercaK(j, 'k28_bebida_menu_on')) === '1';         // [02-nov · K28] leva assente = spenta
       PROPINA_MIXTO_MEDIO_ON = String(cercaK(j, 'propina_mixto_medio_on')) === '1';   // [19-ott · AUT-0716]
       PROPINA_VOUCHER_ON = String(cercaK(j, 'propina_voucher_on')) === '1';   // [21-ott · AUT-0716 ②]
       CORR_SIN_GAS_ON = String(cercaK(j, 'corregir_sin_gas_on')) === '1';     // [21-ott · pezzo 1.5]
@@ -10274,6 +10290,59 @@ function _dtMin() { return _dt ? Math.ceil(_dt.tot * (100 - DTO_MAX_PCT) / 100) 
    ♻️ I motivi sono `CORR_MOTIVOS`, **gli stessi della via vecchia, riusati e
    non ricopiati**: due liste per lo stesso fossile divergono al primo ritocco,
    e i quattro codici (`cambio_producto`…) sono ciò che il libro conterà. */
+/* [02-nov · K28 ⓐ] pura, testabile. `items` = le righe del pedido come le dà `itemsDe` (id, precio, es_menu, menu_beb_de);
+   `qty` = {id: quantità finale}. Ritorna i nomi delle bebidas del menù a $0 che muoiono, e le mette a 0 DENTRO `qty`.
+   Una bebida col suo piatto scritto (`menu_beb_de`, la nascita v2.17) muore quando quel piatto arriva a 0. Una senza (righe nate
+   prima, o il piatto non è in questo pedido) muore solo quando nel pedido non resta NESSUN piatto del menù che paga:
+   ⚠️ con due menù e un piatto tolto, la sua bebida senza `menu_beb_de` resta — una bebida in più, mai una tolta per sbaglio. */
+function _k28Finales(items, qty) {
+  var its = items || [], q = qty || {}, morte = [];
+  var fin = function (id) { return q[id] != null ? (parseInt(q[id], 10) || 0) : 1; };
+  var ids = its.map(function (it) { return it && it.id; });
+  var orig = function (it) { var n = parseInt(it.qty, 10); return isNaN(n) ? 1 : n; };
+  /* scatta SOLO se questo gesto toglie un piatto del menù che paga: una bebida nata in un pedido suo (il piatto in un altro)
+     non muore per una correzione che non tocca nessun piatto. */
+  var tolto = its.some(function (it) { return it && it.id && it.es_menu && (parseFloat(it.precio) || 0) > 0 && fin(it.id) < orig(it); });
+  if (!tolto) return morte;
+  var pagaMenu = its.some(function (it) { return it && it.id && it.es_menu && (parseFloat(it.precio) || 0) > 0 && fin(it.id) > 0; });
+  its.forEach(function (it) {
+    if (!it || !it.id || !it.es_menu || (parseFloat(it.precio) || 0) > 0 || fin(it.id) <= 0) return;
+    var muere = (it.menu_beb_de && ids.indexOf(it.menu_beb_de) >= 0) ? fin(it.menu_beb_de) <= 0 : !pagaMenu;
+    if (muere) { q[it.id] = 0; morte.push(it.nombre || it.id); }
+  });
+  return morte;
+}
+/* [02-nov · K28 ⓑ] la mesa ha righe vive (con id) e tutte insieme valgono $0: è la 997 — non «sin consumo», ma una riga da togliere.
+   Somma le RIGHE, non `p.total`: sulla 997 il total del pedido è rimasto 11990 dopo la correzione delle 14:03 (Postgres, 15:3x). */
+function _k28SoloCeros(mesa) {
+  var m = (STATE.mesasModel || []).filter(function (x) { return x.mesa === mesa; })[0];
+  if (!m) return false;
+  var n = 0, s = 0;
+  [].concat(m.pend || [], m.mios || [], m.limpiar || []).forEach(function (p) {
+    itemsDe(p).forEach(function (it) {
+      var q = parseInt(it.qty, 10); if (isNaN(q)) q = 1;
+      if (!it.id || q <= 0) return;
+      n++; s += (parseFloat(it.precio) || 0) * q;
+    });
+  });
+  return n > 0 && s <= 0;
+}
+/* [02-nov · K28 ⓐ] il riepilogo dice anche la bebida che esce con il piatto: il JL vede tutto quello che firma, prima di firmarlo */
+function _k28Tambien() {
+  if (!K28_BEBMENU_ON || !_dt || !_dt.pr) return '';
+  try {
+    var m = (STATE.mesasModel || []).filter(function (x) { return x.mesa === _dt.mesa; })[0];
+    var ped = m ? [].concat(m.pend || [], m.mios || [], m.limpiar || []).filter(function (p) { return p.uuid === _dt.pr.uuid; })[0] : null;
+    if (!ped) return '';
+    var q = {};
+    itemsDe(ped).forEach(function (it) { var n = parseInt(it.qty, 10) || 1; q[it.id] = it.id === _dt.pr.id ? Math.max(0, n - _dt.pr.quita) : n; });
+    var morte = _k28Finales(itemsDe(ped), q);
+    return morte.length
+      ? '<div style="display:flex;justify-content:space-between;font-size:14px;padding:2px 0"><span>Sale también</span>' +
+        '<b style="color:var(--cs-ink);font-weight:600">' + esc(morte.join(' · ')) + ' · $0</b></div>'
+      : '';
+  } catch (e) { return ''; }
+}
 function _dtProdRighe() {
   if (!_dt) return [];
   var m = (STATE.mesasModel || []).filter(function (x) { return x.mesa === _dt.mesa; })[0];
@@ -10366,6 +10435,12 @@ function _dtFalta() {
 function vDescontar3(mesa) {
   muroT0('eliminar');   // ⏱ [AUT-0159]
   var tot = _vpTot(mesa);
+  if (!tot && K28_BEBMENU_ON && _k28SoloCeros(mesa)) {   // [02-nov · K28 ⓑ] solo «Un producto»: convenio, descuento e familia su $0 non hanno senso
+    _dt = { mesa: mesa, tot: 0, promo: 0, tipo: 'prod', soloProd: true,
+            conv: '', mot: '', txt: '', fam: '', col: '', cob: 0, pin: '' };
+    _dtPinta();
+    return;
+  }
   if (!tot) { _sinConsumo(mesa); return; }
   _dt = { mesa: mesa, tot: tot, promo: _dtPromo(mesa), tipo: '',
           conv: '', mot: '', txt: '', fam: '', col: '', cob: 0, pin: '' };
@@ -10528,8 +10603,8 @@ function _dtPie() {
       : 'Aplicar · cobras ' + fmtPrice(_dtCobra());
   f.innerHTML = '<button class="c4cta" ' + (ok ? '' : 'disabled') + ' onclick="_dtGo()">' +
       eti + '</button>' +
-    '<button class="c4cta sec" onclick="' + (_dt.tipo ? '_dtTipo(\'\')' : '_dtCerrar()') + '">' +
-      (_dt.tipo ? '‹ Volver' : 'Cancelar') + '</button>';
+    '<button class="c4cta sec" onclick="' + ((_dt.tipo && !_dt.soloProd) ? '_dtTipo(\'\')' : '_dtCerrar()') + '">' +   // [K28 ⓑ] senza altre porte, «Volver» non ha dove tornare
+      ((_dt.tipo && !_dt.soloProd) ? '‹ Volver' : 'Cancelar') + '</button>';
 }
 function _dtResumen() {
   if (!_dtHay() || _dt.tipo === 'franq' && false) return '';
@@ -10768,6 +10843,7 @@ function _dtPinta() {
             '<div style="display:flex;justify-content:space-between;font-size:14px;padding:2px 0">' +
               '<span>Sale de la comanda</span><b style="color:var(--cs-ink);font-weight:600">' +
               (_dt.pr.quita > 1 ? _dt.pr.quita + '× ' : '') + esc(_dt.pr.n) + '</b></div>' +
+            _k28Tambien() +
             '<div style="display:flex;justify-content:space-between;font-size:14px;padding:2px 0">' +
               '<span>La cuenta baja</span><b style="color:var(--cs-verde);font-weight:600">−' +
               fmtPrice(_dtProdMonto()) + '</b></div></div>';
@@ -11173,6 +11249,10 @@ function _dtGo() {
       var q = parseInt(it.qty, 10) || 1;
       return { id: it.id, qty: (it.id === pr.id) ? Math.max(0, q - pr.quita) : q };
     });
+    if (K28_BEBMENU_ON) {   // [02-nov · K28 ⓐ] l'ultimo piatto del menù che esce si porta via la sua bebida a $0, nello stesso gesto
+      var _qk = {}; finales.forEach(function (f) { _qk[f.id] = f.qty; });
+      if (_k28Finales(itemsDe(ped), _qk).length) finales.forEach(function (f) { f.qty = _qk[f.id]; });
+    }
     _dt = null; _dtPinta();
     /* [AUT-0216c] in modalità JL: `nombre` = il JL (è già STATE.nombre), il PIN
        esce dalla SESSIONE e la porta si dichiara (`via:'app_jl'`, come nelle
@@ -11384,6 +11464,7 @@ function _dtGo() {
 
 function vDescontarSala(mesa) {
   if (DESCONTAR_V2_ON) return vDescontar3(mesa);
+  if (!_vpTot(mesa) && K28_BEBMENU_ON && _k28SoloCeros(mesa)) return vDescontar3(mesa);   // [02-nov · K28 ⓑ] la card con la sola porta «Un producto»
   const tot = _vpTot(mesa);
   if (!tot) { _sinConsumo(mesa); return; }
   vhoja('<h3>Descontar · Mesa ' + esc(mesa) + '</h3>' +
@@ -11968,6 +12049,8 @@ function _sinConsumo(mesa) {
   const b = Math.round(_vpBase(mesa) || 0);
   if (b > 0) toast('err', '🔴 Mesa ' + mesa + ': las líneas suman ' + fmtPrice(b) + ' y el sistema dice que ya está pagada. ' +
     'No cobres de nuevo ni por fuera: si el cliente dice que no pagó, avisa al JL.');
+  else if (K28_BEBMENU_ON && _k28SoloCeros(mesa))   // [02-nov · K28] COBRAR e PRECUENTA restano fermi a $0, ma dicono dov'è l'uscita
+    toast('warn', 'Mesa ' + mesa + ': solo queda la bebida del menú a $0. Quítala en ELIMINAR → Un producto.');
   else toast('warn', 'Mesa ' + mesa + ' sin consumo');
 }
 function _vpBase(mesa) {
