@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.44.1</span>
+<span class="ver" id="ver">app_jl v1.44.2</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -2582,7 +2582,21 @@ async function _asignarPorBordo(m, p, f, agregar) {
     gestos.push({ accion: 'asignar', persona_id: nuevo.persona_id, sustituye_persona_id: aQuitar[0].persona_id, motivo: 'cambio de plaza (JL)' });
     aQuitar.slice(1).forEach(function (pp) { gestos.push({ accion: 'quitar', persona_id: pp.persona_id }); });
   } else if (!previos.some(function (n) { const pp = porNombre(n); return pp && pp.persona_id === nuevo.persona_id; })) gestos.push({ accion: 'asignar', persona_id: nuevo.persona_id });
-  else return { usado: true, ok: true, ya: true };                                               // ya estaba: nada que hacer
+  else if (!franjaCompuestaOn()) return { usado: true, ok: true, ya: true };                                               // ya estaba: nada que hacer
+  /* [03-nov · v1.44.2 · 🖐 TERZA · 🎛 BKP `Il token del forense non è stato ruotato`] CAMBIARE L'ORA = asignar la franja nuova, POI quitar la vecchia dello stesso mesero
+     sulla stessa plaza. La chiave del bordo è `plaza|franja|persona` (turno.js r.329): senza il quitar Wilbert resta con due franjas, e l'app non ha un gesto per
+     togliere la vecchia. Prima il nuovo, poi il vecchio: nessun istante senza plaza. Solo con la franja composta accesa, solo senza «＋ agregar», solo franjas
+     HH:MM-HH:MM (le «viejas» le gestisce il GAS). */
+  if (franjaCompuestaOn() && !agregar) {
+    const RE_F = /^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]|24):[0-5][0-9]$/, kN = (m || '').toString().trim().toLowerCase(), viste = {};
+    ((STATE.turno && STATE.turno.asignaciones) || []).forEach(function (a) {
+      const fa = (a && a.franja || '').toString();
+      if (!a || a._pendiente || a.plaza !== p || fa === f || !RE_F.test(fa) || viste[fa]) return;
+      if (!(a.mesero || '').toString().split(',').some(function (n) { return n.trim().toLowerCase() === kN; })) return;
+      viste[fa] = 1; gestos.push({ accion: 'quitar', persona_id: nuevo.persona_id, franja: fa, motivo: 'cambio de hora (JL)' });
+    });
+    if (!gestos.length) return { usado: true, ok: true, ya: true };
+  }
   for (let i = 0; i < gestos.length; i++) {
     const g = Object.assign({ plaza: p, franja: f, uid_gesto: _uidGesto(), pin_jl: STATE.pin }, gestos[i]);
     const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 8000);
