@@ -305,7 +305,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.31</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.32</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -421,10 +421,29 @@ const CFG = {
    riceve un token (bautizarDevice) — da lì il código del turno nuovo se lo
    pesca da solo (salaCheckIn): mai più digitazione a ogni turno. */
 let kdsToken = (() => { try { return localStorage.getItem('kds_token') || ''; } catch (e) { return ''; } })();
+/* ═══ [03-nov · 🎛 V33 `GIRO SERALE MAR 3 · I PEZZI DI STASERA` · TERZA] IL CODICE NUOVO SI CHIEDE PRIMA AL BORDO ═══
+   Col turno solo sul bordo il `salaCheckIn` del GAS risponde `no_turno_abierto`, e il tablet battezzato tornava alla tastiera (mar 3, il 2365).
+   `POST /deviceCheckin/<local>` {device_token}: lo stesso check-in della sala (`_checkInDalBorde`, sala.html). Si crede solo a `ok:true` CON
+   `codigo` (il bordo lo dà con la sua leva `CHECKIN_CODIGO_BORDE_ON` e il turno del bordo aperto); `device_revocado` è definitivo. Ogni altra
+   risposta (`need:'gas'`, ok senza codigo, rete, 6 s) ⇒ `salaCheckIn` del GAS, come ieri. A leva del bordo "" il risultato è identico a v1.31.
+   Freno per tablet: `?kdsck=0` (o `?borde=0`, che spegne tutto il bordo). Ritorno: kds v1.31. */
+async function _renovarDalBorde() {
+  try { if (QS.get('kdsck') === '0' || !BORDE.ON) return null; } catch (e) { return null; }
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
+  try {
+    const r = await fetch(BORDE.URL + '/deviceCheckin/' + encodeURIComponent(CFG.LOCAL), { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE.T }, body: JSON.stringify({ device_token: kdsToken }), cache: 'no-store', signal: ctrl.signal });
+    const j = await r.json();
+    if (j && j.ok === true && j.codigo) return j;
+    if (j && j.ok === false && j.error === 'device_revocado') return j;
+    return null;
+  } catch (e) { return null; }
+  finally { clearTimeout(to); }
+}
 async function renovarCodigo() {
   if (!kdsToken) return false;
   try {
-    const r = await gasPost('salaCheckIn', { device_token: kdsToken });
+    const r = (await _renovarDalBorde()) || await gasPost('salaCheckIn', { device_token: kdsToken });
     if (r && r.ok && r.codigo) {
       STATE.codigo = r.codigo;
       try { localStorage.setItem(CFG.SK.COD, r.codigo); } catch (e) {}
@@ -656,7 +675,7 @@ function showTablero(){
    · bordo che risponde ma senza la coda (vuota all'apertura del turno, o la sezione non ancora pronta) ⇒ «cargando»: il tablet entra e aspetta;
    · foto del bordo oltre il tetto ⇒ si mostra DICHIARATA (il banner ambra di sempre), mai Google;
    · l'ingresso col codice si valida sul bordo (`/estado` risponde `codigo_invalid` come il GAS).
-   Restano su Google, dichiarati: il rinnovo del codice del tablet battezzato (`salaCheckIn`: il bordo dà il codice solo con 1.15) e il ripiego dei
+   Restano su Google, dichiarati: il rinnovo del codice del tablet battezzato quando il bordo non lo dà (v1.32, `_renovarDalBorde`) e il ripiego dei
    due tocchi `marcarKds*` quando il bordo non timbra (la lista «solo bordo» è di ⚙️ ARQ).
    Leva: NASCE ACCESA (la lezione del 25: una leva che vive solo sul bordo non arriva al tablet che non lo raggiunge). `?kdsgas=1` per apparecchio = il
    mondo di ieri; `?borde=0` (il freno di sempre) spegne tutto il bordo e quindi anche questa. */
