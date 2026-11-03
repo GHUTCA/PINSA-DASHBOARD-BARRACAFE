@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.81 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.82 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -2311,6 +2311,7 @@ async function staffPost(action, body, opts) {   // [01-ott] opts.ingreso: vedi 
     // (sin_gate 503, rate_limit 429, token, rete) → la via di sempre.
     if (j && j.borde === true) {
       _telTurnoVede(j);   // [31-ott · il telefono del turno] il bordo ha detto NO al telefono: la schermata giusta, e il no torna al chiamante com'è
+      if (!(opts && opts.ingreso)) _codigoNoVale(j);   // [03-nov · ARQ 95a0181 ③] codice non del turno: fuori con la frase del bordo. L'ingresso la dice da sé (entrar · _verificaDetras)
       if (j.ok && body && body.uuid) BORDE_W.ok[body.uuid] = Date.now();
       /* i contatori si svuotano SOLO qui: il POST è arrivato e timbrato. Se
          fallisce, restano e ripartono col prossimo — niente conteggi persi. */
@@ -7484,6 +7485,14 @@ async function nuevoEnviar__in(btn) {
     }
     /* [25-ott · 🎛 `BKP V32 CUCINA CERRADA NON E RETE` ①] la cucina chiusa: il bordo (leva `ESTACION_CERRADA_TIMBRO_ON`) manda la frase per il mesero
        («La cocina está cerrada: <piatto> no se puede pedir ahora.»). Si dice quella, non «No se pudo: estacion_cerrada»; la libreta resta. */
+    /* [03-nov · ARQ 95a0181 ③] codice non del turno: `staffPost` ha già mandato il mesero all'ingresso (`_codigoNoVale`, che svuota la libreta).
+       La cattura non si perde: va nella coda del telefono, che al rientro col codice del JL la spedisce col codice vivo (uuid fisso, mai doppia). */
+    if (_cnvOn() && r && r.error === 'codigo_no_vale' && r.borde === true) {
+      _colaPut({ action: 'crearPedidoMesero', body: body });
+      toast('warn', '📡 Pedido GUARDADO · Mesa ' + mesa + ' — entra solo cuando vuelvas a entrar con el código del JL', 10000);
+      STATE.nuevo = null; renderNuevo();
+      return;
+    }
     if (r && r.error === 'estacion_cerrada') { toast('err', '🚫 ' + (r.mensaje || 'Fuera de horario: ese producto no se puede pedir ahora.'), 8000); }
     else toast('err', 'No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
@@ -7836,6 +7845,11 @@ async function _menuEnviarCategoria__in(mesa, grupoId, categoria, lineas, esPrim
       if (_caida) toast('sig', _caida, 6000);
       else toast('ok', '🍽 ' + categoria + ' → cocina · mesa ' + mesa + (esPrimera ? ' · ' + fmtPrice(precioFormula) : ' · $0 (ya pagada en la fórmula)'));
       refrescar(false);
+      return true;
+    }
+    if (_cnvOn() && r && r.error === 'codigo_no_vale' && r.borde === true) {   // [03-nov · ARQ 95a0181 ③] come il pedido normale: in coda, entra al rientro
+      _colaPut({ action: 'crearPedidoMesero', body: body });
+      toast('warn', '📡 ' + categoria + ' GUARDADA — entra sola cuando vuelvas a entrar con el código del JL', 10000);
       return true;
     }
     toast('err', 'No se pudo: ' + ((r && r.error) || '?'));
@@ -17971,10 +17985,45 @@ async function _clockInDetras() {
   if (!_CLOCKIN_UID || _CLOCKIN_UID.k !== k) _CLOCKIN_UID = { k: k, u: 'ci-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7) };
   return staffPost('clockIn', { codigo: STATE.codigo, nombre: STATE.nombre, clockin_uid: _CLOCKIN_UID.u }, { ingreso: true });
 }
+/* [03-nov · 🎛 V33 «DUE MESEROS HANNO UN CODICE»] il kick-out di `_verificaDetras` (v3.31.0, AUT-0113: si rimanda INTERO se il cliente ha il
+   telefono) ora ha un nome, perché lo usa anche `_codigoNoVale`. Il testo è quello di prima, riga per riga. La coda offline non si tocca:
+   i pedidos fermi entrano da soli col codice nuovo (`_colaFlush` sostituisce il codice). Ritorna false se ha rimandato. */
+function _fueraDelTurno(msg) {
+  if (STATE.pago && STATE.pago.cliente) return false;
+  try { localStorage.removeItem(CFG.SK.COD); } catch (e) {}
+  STATE.codigo = '';
+  if (STATE.pollTimer) clearInterval(STATE.pollTimer);
+  /* v2.0.1 · il kick-out chiude anche gli overlay che vivono FUORI da
+     #vSala (reperto: pago/cierre/comandera restavano sopra la tastiera) */
+  try { STATE.pago = null; renderPago(); } catch (e2) {}
+  try { $('cierreWrap').innerHTML = ''; } catch (e2) {}
+  try { STATE.nuevo = null; renderNuevo(); } catch (e2) {}
+  try { cerrarMesa(); } catch (e2) {}
+  $('vSala').classList.add('hide');
+  showEntrada(msg);
+  return true;
+}
+/* [03-nov · 🎛 V33 · ARQ `95a0181` ③] il bordo, a leva GATE_NO_MATCH_TIMBRO_ON, risponde a un codice che non è quello del suo turno
+   {ok:false, borde:true, definitivo:true, error:'codigo_no_vale', mensaje}. Prima era un 503 senza timbro ⇒ `sin_red` ⇒ il pedido restava muto
+   nella coda «📡 por entrar» e riprovava per sempre col codice sbagliato. Adesso il mesero esce all'ingresso con la frase del bordo e rientra
+   col codice dell'app del JL; la coda resta e parte da sola. Solo con il timbro `borde:true`. Freno per telefono `?cnv=0`.
+   true = gestito (fuori, o rimandato perché il cliente ha il telefono: il prossimo gesto rifiutato ci ripassa). */
+function _cnvOn() { try { return QS.get('cnv') !== '0' && !JL; } catch (e) { return false; } }   // il JL non ha la tastiera del codice: per lui il no torna com'è
+function _codigoNoVale(j) {
+  try {
+    if (!j || j.ok !== false || j.borde !== true || j.error !== 'codigo_no_vale' || !_cnvOn()) return false;
+    if (!STATE.codigo) return true;   // già fuori: la coda che riprova col codice vecchio ogni 20 s non deve ridisegnare l'ingresso sotto le dita
+    _fueraDelTurno(j.mensaje || 'Ese código no es el del turno de hoy: sal y vuelve a entrar con el código que te da el JL.');
+    return true;
+  } catch (e) { return false; }   // mai in mezzo a un gesto
+}
 async function _verificaDetras() {
   try {
     const r = await _clockInDetras();
     if (r && r.ok) { STATE.tgLink = r.tg_link || ''; return; }
+    /* [03-nov · 🎛 V33 «DUE MESEROS HANNO UN CODICE» · ARQ `95a0181`] `codigo_no_vale` (timbrato dal bordo a leva GATE_NO_MATCH_TIMBRO_ON): il codice
+       di questo telefono non è quello del turno del bordo ⇒ fuori, con la frase del bordo. Freno per telefono `?cnv=0`. */
+    if (_codigoNoVale(r)) return;
     if (r && (r.error === 'codigo_invalid' || r.error === 'no_turno_abierto')) {
       /* ═══ v3.31.0 · [AUT-0113] · IL KICK-OUT ASPETTA CHE IL TELEFONO TORNI ═══
          Trovato da 📖 MENU facendo da seconda testa, e NON dal mio collaudo:
@@ -17992,18 +18041,7 @@ async function _verificaDetras() {
          resta a vetro aperto. Non dà nessun potere (ogni gasPost è già
          rifiutato dal server) ed è un problema di telefono perso, non di
          software. */
-      if (STATE.pago && STATE.pago.cliente) return;
-      try { localStorage.removeItem(CFG.SK.COD); } catch (e) {}
-      STATE.codigo = '';
-      if (STATE.pollTimer) clearInterval(STATE.pollTimer);
-      /* v2.0.1 · il kick-out chiude anche gli overlay che vivono FUORI da
-         #vSala (reperto: pago/cierre/comandera restavano sopra la tastiera) */
-      try { STATE.pago = null; renderPago(); } catch (e2) {}
-      try { $('cierreWrap').innerHTML = ''; } catch (e2) {}
-      try { STATE.nuevo = null; renderNuevo(); } catch (e2) {}
-      try { cerrarMesa(); } catch (e2) {}
-      $('vSala').classList.add('hide');
-      showEntrada('El turno se cerró — pide el código de HOY al JL');
+      _fueraDelTurno('El turno se cerró — pide el código de HOY al JL');
       return;
     }
     // errore applicativo non riconosciuto: la sala resta aperta, vigila il poll
