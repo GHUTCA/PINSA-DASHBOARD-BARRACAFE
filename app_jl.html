@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.44.4</span>
+<span class="ver" id="ver">app_jl v1.44.5</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -2593,7 +2593,7 @@ async function _asignarPorBordo(m, p, f, agregar) {
       const fa = (a && a.franja || '').toString();
       if (!a || a._pendiente || a.plaza !== p || fa === f || !RE_F.test(fa) || viste[fa]) return;
       if (!(a.mesero || '').toString().split(',').some(function (n) { return n.trim().toLowerCase() === kN; })) return;
-      viste[fa] = 1; gestos.push({ accion: 'quitar', persona_id: nuevo.persona_id, franja: fa, motivo: 'cambio de hora (JL)', _entro: !!a.hora_entrada_iso });
+      viste[fa] = 1; gestos.push({ accion: 'quitar', persona_id: nuevo.persona_id, franja: fa, motivo: 'cambio de hora (JL)', _entro: !!a.hora_entrada_iso, _sust: true });
     });
     /* [03-nov · v1.44.3 · 🎛 BKP `DOPO IL quitar L'ENTRATA`] l'entrata vive sulla chiave plaza|franja|persona: il quitar della vecchia la cancella, e la riga nuova
        nasce senza hora_entrada. ⇒ se la franja vecchia ha già un'entrata, NON si scrive niente (nemmeno la nuova) e si dice perché. Prudente: la riga può avere
@@ -2602,9 +2602,19 @@ async function _asignarPorBordo(m, p, f, agregar) {
     if (entro) return { usado: true, ok: false, err: m + ' ya marcó su entrada en ' + p + ' ' + entro.franja + ': cambiarle la hora le borraría la entrada. No se cambió nada' };
     gestos.forEach(function (g) { delete g._entro; });
     if (!gestos.length) return { usado: true, ok: true, ya: true };
+    /* [03-nov · v1.44.5 · ⚙️ ARQ `I DUE PEZZI SONO SUI RAMI` (2f562d8)] LE FRANJAS VECCHIE VIAGGIANO DENTRO L'ASIGNAR. Con la leva del bordo
+       `TURNO_SOSTITUISCE_FRANJA_ON` il bordo toglie la persona da quelle franjas NELLO STESSO GESTO e risponde `sustituye_franjas:'aplicado'`: i quitar
+       qui sotto non partono, e il taglio a metà (H10) non esiste più. Con `'leva_spenta'` (o un bordo che non lo dice) partono i quitar di v1.44.4,
+       come ieri. Le franjas le dice il vetro, mai il bordo da solo: un turno spezzato ha due franjas vere. Freno per telefono: `?sustf=0`. */
+    const _sf = gestos.filter(function (g) { return g._sust; }).map(function (g) { return g.franja; });
+    let _sfOff = false; try { _sfOff = QS.get('sustf') === '0'; } catch (e) {}
+    if (_sf.length && gestos[0].accion === 'asignar' && !_sfOff) gestos[0].sustituye_franjas = _sf.slice(0, 4);
   }
+  let _sfAplicado = false;
   for (let i = 0; i < gestos.length; i++) {
+    if (gestos[i]._sust && _sfAplicado) continue;   // [v1.44.5] il bordo le ha già tolte nell'asignar
     const g = Object.assign({ plaza: p, franja: f, uid_gesto: _uidGesto(), pin_jl: STATE.pin }, gestos[i]);
+    delete g._sust;
     const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 8000);
     let r, j;
     try {
@@ -2613,7 +2623,8 @@ async function _asignarPorBordo(m, p, f, agregar) {
       j = await r.json().catch(function () { return null; });
     } catch (e) { clearTimeout(to); return { usado: true, ok: false, timeout: true, hechos: i }; }   // NO se sabe si escribió: no se ripiega
     if (!r.ok || !j || (j.ok === true && j.scritto === false && j.motivo === 'gate_spento')) { if (i === 0) return { usado: false, por: 'bordo_no_responde' }; return { usado: true, ok: false, err: 'se cortó a la mitad (' + i + ' de ' + gestos.length + ')', hechos: i }; }
-    if (j.ok === false) return { usado: true, ok: false, err: _ERR_TURNO[j.error] || j.error || 'no', bloqueado: /^pin_jl_bloqueado/.test(String(j.error)) ? (j.faltan_s || 0) : 0, hechos: i };   // [10-ott · EL GIRO] anche _apparecchio (freno a due piani)
+    if (j.ok === false) return { usado: true, ok: false, err: (j.error === 'entrada_en_franja_anterior' && j.mensaje) || _ERR_TURNO[j.error] || j.error || 'no', bloqueado: /^pin_jl_bloqueado/.test(String(j.error)) ? (j.faltan_s || 0) : 0, hechos: i };   // [10-ott · EL GIRO] anche _apparecchio (freno a due piani)
+    if (g.sustituye_franjas && j.sustituye_franjas === 'aplicado') _sfAplicado = true;   // [v1.44.5] le franjas vecchie sono già tolte: i quitar non servono (solo se le abbiamo mandate noi)
   }
   return { usado: true, ok: true };
 }
