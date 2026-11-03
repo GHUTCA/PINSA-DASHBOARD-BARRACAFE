@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.44.5</span>
+<span class="ver" id="ver">app_jl v1.44.6</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -2154,6 +2154,7 @@ function vTurno() {
     if (faltan.length) h += '<div class="row2"><button class="btn" onclick="tabAsig()">Reasignar</button><button class="btn gh" disabled>Avisar RRHH · próx.</button></div>';
     h += '<p class="mini">El clock-in escribe solo — nadie rellena nada. La cadena RRHH → Inspección: cantiere aparte, en camino.</p></div>';
     h += _telHtml();   // [31-ott] il telefono del turno: vuoto a leva spenta
+    h += _dispHtml();  // [03-nov] i dispositivi del locale e la revoca: vuoto a leva spenta
     /* plazas */
     const sinD = (t.plazas || []).filter(p => !(t.asignaciones || []).some(a => a.plaza === p.plaza && a.mesero));
     h += '<div class="card"><h4>👥 Plazas <span class="pill ' + (sinD.length ? 'amb' : 'on') + '">' + ((t.plazas || []).length - sinD.length) + ' asignadas · ' + sinD.length + ' sin dueño</span></h4>' +
@@ -2712,6 +2713,84 @@ async function telGesto(i, accion) {
     else toast('err', (j && (_ERR_TEL[j.error] || _ERR_TURNO[j.error] || j.error)) || 'El sistema no respondió — reintenta');
   }
   await giroTelefonos(); pintaTab();
+}
+/* ═══ [03-nov · 🎛 V33 AUT-0820 · ⚙️ ARQ `LA ROTTA DELLA REVOCA DEL JL È 50D56BE` · strada A ⓒ] IL JL REVOCA UN DISPOSITIVO SENZA AVERLO IN MANO ═══
+   Il 02-nov hanno rubato il telefono di Ale: la revoca che esisteva (`revocarDevice`) la può fare solo il telefono stesso. Qui il JL vede i dispositivi
+   del locale e ne revoca uno PER ID, col PIN e un motivo.
+   Elenco: `POST /turno/dispositivos/<local>` {pin_jl, accion:'elenco'} → `{ok, dispositivos:[{dispositivo_id, nombre, tipo, activo, battezzato_at,
+   revocado_at, ultimo_checkin}]}` (mai l'hash). Si chiede col bottone, non a ogni giro: non è un dato che cambia durante il servizio.
+   Gesto: stessa rotta {pin_jl, accion:'revocar', uid_gesto, id, motivo} → `{ok:true, esito:'revocado'|'ya_revocado', quien}` o `{ok:false, error}`.
+   `uid_gesto` coniato UNA volta per dispositivo e riusato nei ritocchi finché il bordo non risponde: la funzione PG con lo stesso uid scrive una riga sola.
+   Timeout ⇒ non si sa se ha scritto: si rilegge l'elenco. Leva del bordo `disp_revoca_jl_on` (da /salud, elenco di locali): spenta ⇒ la card non esiste.
+   Niente Google: a bordo muto la card lo dice. Freno per telefono: `?disp=0`. */
+function dispRevocaOn() {
+  try {
+    if (QS.get('disp') === '0') return false;
+    const m = /"disp_revoca_jl_on"\s*:\s*(?:"([^"]*)"|([^,}\s]*))/.exec(JSON.stringify(STATE.salud || {}));
+    const v = (m ? (m[1] != null ? m[1] : m[2]) : '').trim().toUpperCase();
+    if (v === '' || v === '0' || v === 'FALSE') return false;
+    if (v === '1' || v === 'TRUE') return true;
+    const loc = String(LOC_PG[CFG.LOCAL] || CFG.LOCAL || '').toUpperCase();
+    return v.split(',').map(function (x) { return x.trim(); }).filter(Boolean).indexOf(loc) >= 0;
+  } catch (e) { return false; }
+}
+const _DISP_UID = {};   // dispositivo_id → uid_gesto, finché il bordo non risponde
+const _ERR_DISP = { no_existe: 'Ese dispositivo ya no existe', otro_local: 'Ese dispositivo es de otro local', motivo_vacio: 'Falta el motivo', sin_postgres: 'El sistema no responde — reintenta en un minuto', apagado: 'La revocación no está activa todavía' };
+async function _dispPost(body) {
+  const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 8000);
+  try {
+    const r = await fetch(CFG.BORDE + '/turno/dispositivos/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T },
+      body: JSON.stringify(body), signal: ctrl.signal, cache: 'no-store' });
+    const j = await r.json().catch(function () { return null; });
+    return j || { ok: false, error: 'http' + r.status };
+  } catch (e) { return { ok: false, timeout: true }; }
+  finally { clearTimeout(to); }
+}
+async function giroDispositivos() {
+  if (!dispRevocaOn() || !STATE.pin) return;
+  STATE.dispCarga = true; pintaTab();
+  const j = await _dispPost({ pin_jl: STATE.pin, accion: 'elenco' });
+  STATE.dispCarga = false;
+  if (j.ok === true && Array.isArray(j.dispositivos)) { STATE.dispositivos = j.dispositivos; STATE.dispErr = ''; }
+  else STATE.dispErr = j.timeout ? 'sin_red' : (j.error || 'no');
+  pintaTab();
+}
+function _dispFecha(s) { try { if (!s) return ''; return new Date(s).toLocaleDateString('es-CL', { day: 'numeric', month: 'short' }); } catch (e) { return ''; } }
+function _dispHtml() {
+  if (!dispRevocaOn()) return '';
+  let h = '<div class="card"><h4>📵 Dispositivos del local</h4>';
+  if (!STATE.dispositivos) {
+    h += '<p class="mini">' + (STATE.dispCarga ? 'Cargando…' : STATE.dispErr ? '✋ ' + esc(_ERR_DISP[STATE.dispErr] || _ERR_TURNO[STATE.dispErr] || (STATE.dispErr === 'sin_red' ? 'Sin respuesta — reintenta' : STATE.dispErr)) : 'Teléfonos y pantallas que entran solos al turno. Si se pierde o roban uno, revócalo aquí.') + '</p>';
+    h += '<button class="btn gh" onclick="giroDispositivos()">Ver dispositivos</button></div>';
+    return h;
+  }
+  const ls = STATE.dispositivos;
+  if (!ls.length) h += '<p class="mini">No hay dispositivos bautizados en este local.</p>';
+  ls.forEach(function (d, i) {
+    if (!d) return;
+    const info = esc(d.tipo || '') + (d.battezzato_at ? ' · desde ' + esc(_dispFecha(d.battezzato_at)) : '') + (d.ultimo_checkin ? ' · último uso ' + esc(_dispFecha(d.ultimo_checkin)) : '');
+    if (d.activo === false || d.revocado_at) h += '<div class="cob">' + esc(d.nombre || '¿?') + ' <span class="mini">' + info + '</span><span class="st2 dn">revocado</span></div>';
+    else h += '<div class="cob">' + esc(d.nombre || '¿?') + ' <span class="mini">' + info + '</span><button class="btn gh" style="width:auto;margin-left:auto" onclick="dispRevocar(' + i + ')">Revocar</button></div>';
+  });
+  h += (STATE.dispErr ? '<p class="mini">✋ ' + esc(_ERR_DISP[STATE.dispErr] || _ERR_TURNO[STATE.dispErr] || STATE.dispErr) + '</p>' : '') +
+    '<p class="mini">Revocar es para siempre: ese teléfono ya no entra solo. Si lo recupera, se vuelve a bautizar.</p><button class="btn gh" onclick="giroDispositivos()">Actualizar</button></div>';
+  return h;
+}
+async function dispRevocar(i) {
+  const d = (STATE.dispositivos || [])[i];
+  if (!d || !d.dispositivo_id || !STATE.pin) return;
+  const motivo = (prompt('¿Por qué revocas «' + (d.nombre || 'este dispositivo') + '»? (ej.: teléfono robado)') || '').trim();
+  if (!motivo) { toast('warn', 'Sin motivo no se revoca. No se cambió nada'); return; }
+  if (!_DISP_UID[d.dispositivo_id]) _DISP_UID[d.dispositivo_id] = _uidGesto();
+  const j = await _dispPost({ pin_jl: STATE.pin, accion: 'revocar', uid_gesto: _DISP_UID[d.dispositivo_id], id: d.dispositivo_id, motivo: motivo });
+  if (j.timeout) { toast('warn', 'Sin respuesta — puede que sí se revocó, reviso'); await giroDispositivos(); return; }
+  if (j.ok === true) { delete _DISP_UID[d.dispositivo_id]; toast('ok', j.esito === 'ya_revocado' ? (d.nombre || 'Ese dispositivo') + ' ya estaba revocado' : '✓ ' + (d.nombre || 'Dispositivo') + ' revocado: ya no entra solo'); }
+  else {
+    if (j.ok === false && !/^http/.test(String(j.error))) delete _DISP_UID[d.dispositivo_id];   // un NO del bordo è definitivo: il prossimo tocco è un gesto nuovo
+    if (/^pin_jl_bloqueado/.test(String(j.error))) toast('err', '✋ PIN bloqueado por intentos fallidos · prueba en ' + Math.max(1, Math.ceil((j.faltan_s || 0) / 60)) + ' min');
+    else toast('err', '✋ No se revocó: ' + (_ERR_DISP[j.error] || _ERR_TURNO[j.error] || j.error || 'el sistema no respondió'));
+  }
+  await giroDispositivos();
 }
 function _porQueNoBordo(por, franja) {
   if (por === 'franja_vieja') return 'La franja «' + franja + '» está en un formato antiguo: avisa a RRHH, hay que corregirla. No se escribió nada';
