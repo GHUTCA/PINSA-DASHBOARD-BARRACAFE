@@ -3448,6 +3448,18 @@ var _gasDownHasta=0;
    sessione il token che il login del GAS AUTH conia ({u, r, loc, exp 24h} + HMAC). Qui lo si legge come lo legge
    `PinsitaAuth.firma()` (stessa forma, questa pagina non carica il modulo): solo `exp`, nessuna verifica — quella è
    del bordo (`X-Firma`) e del GAS (`token` nel corpo). Vuoto ⇒ si scrive come ieri. Freno: `pinsita_firma_off`="1". */
+/* [ⓑ1] il bordo dice che la firma non vale (401 `firma_vencida`/`firma_requerida`): si chiede UNA volta per pagina se
+   tornare al PIN. Il lavoro già registrato è nella coda (localStorage) e riparte dopo il login; un conteggio a metà
+   resta sullo schermo se si dice «no». */
+var _firmaPinChiesto=false;
+function _firmaAlPin(){
+  if(_firmaPinChiesto) return; _firmaPinChiesto=true;
+  try{
+    if(!confirm('Tu firma venció. Para guardar, vuelve a entrar con tu PIN.\n\nLo que ya registraste queda en cola y se envía solo.\n\n¿Entrar ahora?')) return;
+    try{ localStorage.removeItem('pinsita_session'); }catch(e){}
+    location.href='atalaya.html'+((typeof SOLO_MAPA!=='undefined'&&SOLO_MAPA&&typeof CTX_CODE!=='undefined'&&CTX_CODE)?('?f='+CTX_CODE):'');
+  }catch(e){}
+}
 function _firmaSesion(){
   try{
     if(localStorage.getItem('pinsita_firma_off')==='1') return '';
@@ -3579,6 +3591,9 @@ async function _invBordo(payload, timeoutMs, urlOverride){
           return { method: 'POST', headers: _h, body: JSON.stringify(_b), signal: ctl ? ctl.signal : undefined };
         })());
     var j = null; try { j = await r.json(); } catch(e) {}
+    /* [ⓑ1 · contratto di ⚙️ ARQ 5d06052] firma assente o scaduta a leva «1» ⇒ 401: NON è un rifiuto definitivo del
+       lote (dopo il PIN lo stesso lote passa), quindi si toglie `definitivo` e il lote resta in coda; si torna al PIN. */
+    if (j && (j.error === 'firma_vencida' || j.error === 'firma_requerida')) { delete j.definitivo; _firmaAlPin(); }
     /* 404 = la rotta /inventario NON ESISTE su questo bordo (vetro partito prima
        del bordo, o bordo tornato indietro): il libro nuovo non c'e', quindi e'
        una leva spenta. Senza questa riga il 404 si leggeva come «leva accesa» e
@@ -4708,6 +4723,8 @@ async function flushCola(){
          stesso lote verra' rifiutato SEMPRE (payload malformato, inventario
          general non ancora al bordo…). Si ferma e RESTA VISIBILE nel badge col
          suo motivo, invece di essere ritentato all'infinito in silenzio. */
+      // [ⓑ1] firma scaduta o assente: il lote resta, perde la firma vecchia e prende quella del prossimo PIN
+      else if(r && (r.error==='firma_vencida' || r.error==='firma_requerida')){ c[i].estado='fail'; c[i].error='FIRMA: vuelve a entrar con tu PIN'; if(c[i].payload) delete c[i].payload.token; }
       else if(r && r.definitivo){ c[i].estado='rechazado'; c[i].error='RECHAZADO: '+(r.error||'sin motivo'); }
       else { c[i].estado='fail'; c[i].error=(r&&r.error)||'sin red'; }
       colaGuardar(c); pintarBadge();
