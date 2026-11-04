@@ -2,7 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BKS Sala</title>
-<meta name="ver" content="sala_nueva v0.6.5 · 04-nov · il conto con ID · mover e juntar col dito · cobrar in una schermata · la mesa si apre nel gesto">
+<meta name="ver" content="sala_nueva v0.6.6 · 04-nov · il conto con ID · mover e juntar col dito · cobrar in una schermata · la mesa si apre nel gesto">
 <meta name="claude:viewport-fit-sides" content="cover">
 <!-- DEVICE-CLASS: 1 · cattura in movimento — si guarda SUL TELEFONO
      🎨 DESIGN V32 · 24-ott-2026 · la SALA NUOVA (v4, 23-set) col COBRO montato dentro.
@@ -1274,7 +1274,7 @@ function riga(){
       '<div><div class="n num">Mesa '+x.m+(x.libre||!cid(x)?'':'<span class="id">'+cid(x)+'</span>')+'</div><div class="q">'+
         (x.libre?'plaza '+(x.plz||7)+' · libre'
                :'plaza '+(x.plz||7)+(x.pax?' · '+x.pax+' pers':'')+(x.min!=null?' · '+x.min+' min':''))+'</div></div>'+
-      (x.libre?'':'<div class="tot num">'+P(x.tot)+'</div>')+'</div>';
+      (x.libre||vista==='cobrar'?'':'<div class="tot num">'+P(x.tot)+'</div>')+'</div>';   // v0.6.6 · nel cobro l'importo sta già in Total e in «cobras»
   }
 }
 /* la tessera CRESCE fino alla riga — l'occhio non perde l'oggetto */
@@ -1568,7 +1568,17 @@ document.head.insertAdjacentHTML('beforeend','<style>'+
 var C1M={};
 /* v0.6.2 · la propina NON è preselezionata (decisione del 21-ott, _DECISIONI_PRESE r.2291): il 10 % si vede ma entra nel totale
    solo quando il mesero lo tocca — una propina preselezionata la decide il sistema, non il cliente. null = nessuna scelta (= $0). */
-function c1(){ var m=CB.m; if(!C1M[m]) C1M[m]={modo:'todo',sel:[],partes:2,prop:null,dtoOpen:false,qr:false}; return C1M[m]; }
+function c1(){ var m=CB.m; if(!C1M[m]) C1M[m]={modo:'todo',sel:[],partes:2,prop:null,dtoOpen:false,qr:false,wa:'',noWa:false}; return C1M[m]; }
+/* v0.6.6 · IL WHATSAPP DELLA BOLETA (Alberto 04-nov, bacheca «IL WHATSAPP DELLA BOLETA SI PRENDE SUL TELEFONO DEL CLIENTE»):
+   se il cliente l'ha dato dal suo telefono il passo SI SALTA e il vetro dice solo «✓ boleta a WhatsApp» — MAI il numero
+   (21-ott: sul vetro i dati del cliente non si vedono). Il campo della sala resta solo quando manca. Boleta PRIMA del pago (21-ott):
+   senza un numero valido o «Sin WhatsApp» i medios restano spenti. */
+function c1WaOk(){ var s=c1(); return !!X().waOk || s.noWa || waSt('cl',s.wa).ok; }
+function c1WaHtml(){ var s=c1();
+  if(X().waOk) return '<div class="c1k"><button type="button" class="on" disabled style="opacity:1">✓ boleta a WhatsApp</button></div>';
+  return '<div class="c1k">'+
+    (s.noWa?'':'<input id="c1Wa" inputmode="tel" placeholder="WhatsApp boleta · 9 1234 5678" value="'+(s.wa||'')+'" oninput="c1().wa=this.value.replace(/\\D/g,\'\').slice(0,9);$(\'pollice\').innerHTML=c1Pollice()" style="flex:2 1 auto;min-width:0;padding:9px 10px;border-radius:12px;border:1px solid var(--filo);background:transparent;color:#fff;font:inherit;font-size:14px;font-weight:650">')+
+    '<button type="button" class="'+(s.noWa?'on':'')+'" onclick="c1().noWa=!c1().noWa;pinta()">Sin WhatsApp</button></div>'; }
 function c1Parte(){ var s=c1(), r=saldoPieno();
   if(s.modo==='mio') return s.sel.reduce(function(a,i){ return a+(L()[i]?L()[i].p:0); },0);
   if(s.modo==='partes'){ var fatte=CB.pagos.filter(function(p){ return p.div; }).length; return fatte>=s.partes-1 ? r : Math.round(pieno()/s.partes); }
@@ -1603,18 +1613,19 @@ function c1Centro(){ var x=X(), s=c1(), pz=Math.min(c1Parte(),saldoPieno()), cob
       '<button type="button" class="'+(CB.dto?'on':'')+'" onclick="c1DtoOpen()">'+(CB.dto?nomeDto().split(' ')[0]:'Dcto')+'</button></div>'+
     (s.dtoOpen?'<div class="c1k">'+MOTIVOS.map(function(m){ return '<button type="button" class="'+(CB.dto===m[0]?'on':'')+'" onclick="c1Dto(\''+m[0]+'\')">'+m[1]+' −'+m[2]+'%</button>'; }).join('')+
       (CB.dto?'<button type="button" onclick="c1Dto(null)">Sin dcto</button>':'')+'</div>':'')+
+    c1WaHtml()+
     '<button type="button" class="c1l" style="margin-top:12px;color:var(--ink3)" onclick="c1().prodOpen=!c1().prodOpen;pinta()"'+(s.modo==='mio'?' disabled':'')+'><span>Productos · '+nProd+'</span><b>'+(aperti?'▴':'▾')+'</b></button>'+
     (aperti?(righe||''):'')+
     (s.qr?'<div class="c1qr" onclick="c1().qr=false;pinta()">'+qrSvg(220)+'<b style="color:var(--oro)">cuenta '+cid(x)+'</b><span style="font-size:13px;opacity:.7">✕</span></div>':'')+
     '</div>'; }
-function c1Pollice(){ var s=c1(), pz=Math.min(c1Parte(),saldoPieno()), vuota=pz<=0, solCred=fal();
+function c1Pollice(){ var s=c1(), pz=Math.min(c1Parte(),saldoPieno()), vuota=pz<=0||!c1WaOk(), solCred=fal();
   var md=[['Efectivo','💵'],['Débito','💳'],['Crédito','💳'],['Transferencia','🏦']], cobra=cons(pz)+c1Prop(pz);
   /* il numero che il mesero dice ad alta voce sta SOPRA i bottoni che pagano: sempre visibile, mai sotto lo scroll */
   return '<div style="display:flex;justify-content:space-between;align-items:baseline;margin:0 4px 8px"><span style="font-size:13px;color:var(--ink3)">'+
-      (vuota?'elige qué se paga':'cobras'+(c1Prop(pz)?' · con propina':''))+'</span><b class="num" style="font-size:30px;letter-spacing:-.03em;color:var(--oro)">'+P(vuota?0:cobra)+'</b></div>'+
+      (pz<=0?'elige qué se paga':(!c1WaOk()?'boleta: WhatsApp':'cobras'+(c1Prop(pz)?' · con propina':'')))+'</span><b class="num" style="font-size:30px;letter-spacing:-.03em;color:var(--oro)">'+P(pz<=0?0:cobra)+'</b></div>'+
     '<div class="c1g">'+md.map(function(m){ var off=vuota||(solCred&&m[0]!=='Crédito');
       return '<button type="button" class="vb '+(m[0]==='Crédito'||m[0]==='Débito'?'filo':'sec')+(off?' off':'')+'" '+(off?'disabled':'onclick="c1Paga(\''+m[0]+'\')"')+'>'+m[1]+' '+m[0]+(solCred&&m[0]!=='Crédito'?'<small>solo Falabella</small>':'')+'</button>'; }).join('')+
-    '<button type="button" class="vb pieno'+(vuota||solCred?' off':'')+'" style="grid-column:1/-1" '+(vuota||solCred?'disabled':'onclick="c1().qr=true;pinta()"')+'>📱 Con su teléfono · QR'+(solCred?'<small>Falabella: solo en máquina</small>':'')+'</button></div>'; }
+    '<button type="button" class="vb pieno'+(pz<=0||solCred?' off':'')+'" style="grid-column:1/-1" '+(pz<=0||solCred?'disabled':'onclick="c1().qr=true;pinta()"')+'>📱 Con su teléfono · QR'+(solCred?'<small>Falabella: solo en máquina</small>':'')+'</button></div>'; }
 function c1Modo(m){ var s=c1(); s.modo=m; if(m!=='mio') s.sel=[]; pinta(); }
 function c1Linea(i){ var s=c1(), k=s.sel.indexOf(i); if(k<0) s.sel.push(i); else s.sel.splice(k,1); pinta(); }
 function c1Partes(d){ var s=c1(), fatte=CB.pagos.filter(function(p){ return p.div; }).length; s.partes=Math.max(fatte+1,Math.max(2,Math.min(12,s.partes+d))); pinta(); }
@@ -1622,10 +1633,12 @@ function c1SetProp(v){ c1().prop=v; pinta(); if(v==='otro'){ var i=$('c1Otro'); 
 function c1DtoOpen(){ var s=c1(); s.dtoOpen=!s.dtoOpen; pinta(); }
 function c1Dto(k){ CB.dto=k; CB.pin=!!k; c1().dtoOpen=false; pinta(); }   // in prova il PIN del JL è un tocco
 function c1Pre(){ if(PRE_QUEDAN<=0){ flash('Sin precuentas esta noche'); return; } PRE_QUEDAN--; flash('🧾 Precuenta '+cid(X())+' · quedan '+PRE_QUEDAN+' de 10'); pinta(); }
-function c1Paga(medio){ var s=c1(), pz=Math.min(c1Parte(),saldoPieno()); if(pz<=0) return;
+function c1Paga(medio){ var s=c1(), pz=Math.min(c1Parte(),saldoPieno()); if(pz<=0||!c1WaOk()) return;
+  var wam=X().waOk?'boleta a WhatsApp':(s.noWa?'':masc('cl',s.wa));   // sul vetro mai il numero intero
+  if(!X().waOk){ s.wa=''; s.noWa=false; }                                  // il prossimo che paga dà il suo
   var foto=juntaFoto();
   CB.pagos.push({pieno:pz,cons:cons(pz),prop:c1Prop(pz),lines:s.modo==='mio'?s.sel.slice():[],div:s.modo==='partes',
-    lab:s.modo==='mio'?'lo suyo':(s.modo==='partes'?(CB.pagos.filter(function(p){return p.div;}).length+1)+' de '+s.partes:(CB.pagos.length?'el resto':'toda la cuenta')),wam:'',medio:medio});
+    lab:s.modo==='mio'?'lo suyo':(s.modo==='partes'?(CB.pagos.filter(function(p){return p.div;}).length+1)+' de '+s.partes:(CB.pagos.length?'el resto':'toda la cuenta')),wam:wam,medio:medio});
   s.sel=[];
   if(saldoPieno()>0){ flash('✓ '+medio+' '+P(cons(pz)+c1Prop(pz))+' · queda '+P(saldoCons())); pinta(); return; }
   /* resto 0 ⇒ la cuenta muore da sola; DESHACER 5 s rimette tutto com'era (anche il pago appena fatto) */
@@ -2603,6 +2616,7 @@ function vvAplica(v) {
     // v0.5.0 · l'ID della cuenta lo dà il bordo; senza, il vetro vivo non ne inventa uno (cid() lo conia solo in prova)
     if (r.conto_id) x.id = '#' + String(r.conto_id).replace(/[^0-9a-z]/gi, '').slice(-4).toUpperCase();
     // v0.6.0 · le righe del conto, se la vista le porta (oggi solo la prova): il cobro le mostra una per una
+    if (r.wa_ok) x.waOk = true;   // v0.6.6 · il WhatsApp della boleta è già stato dato dal telefono (nel vero: legato al conto ID, campo da decidere con 🎛 e ⚙️)
     if (r.items && r.items.length) { x.lin = r.items.map(function (i) { return { n: (i.q > 1 ? i.q + '× ' : '') + i.n, p: i.q * i.p, f: i.f }; });
       x.tot = x.lin.reduce(function (a, l) { return a + l.p; }, 0); }
   });
@@ -2703,7 +2717,7 @@ var VV_DEMO = {
   mesas: [
     { mesa: '21', plaza: '3', total: 64900, n: 3, mio: 64900, ajeno: 0, de: [], items: [{ n: 'Tabla para compartir', q: 1, p: 18900 }, { n: 'Pizza napoli', q: 2, p: 13800 }, { n: 'Negroni', q: 2, p: 7990 }, { n: 'Agua mineral', q: 1, p: 2900 }] },
     { mesa: '23', plaza: '3', total: 18900, n: 1, mio: 18900, ajeno: 0, de: [], items: [{ n: 'Tabla para compartir', q: 1, p: 18900 }] },
-    { mesa: '24', plaza: '3', total: 81960, n: 6, mio: 81960, ajeno: 0, de: [], items: CONTO24 },
+    { mesa: '24', plaza: '3', total: 81960, n: 6, mio: 81960, ajeno: 0, de: [], items: CONTO24, wa_ok: true },   // la 24 ha dato il WhatsApp dal telefono
     { mesa: '30', plaza: '4', total: 21500, n: 2, mio: 21500, ajeno: 0, de: [], items: [{ n: 'Pisco Sour Catedral', q: 2, p: 7990 }, { n: 'Papas bravas', q: 1, p: 5520 }] },
     { mesa: '31', plaza: '4', total: 15600, n: 1, mio: 15600, ajeno: 0, de: [], items: [{ n: 'Pizza napoli', q: 1, p: 13800 }, { n: 'Café cortado', q: 1, p: 1800 }] },
     { mesa: '33', plaza: '4', total: 84600, n: 4, mio: 84600, ajeno: 0, de: [], items: [{ n: 'Filete Alfredo', q: 2, p: 16000, f: 'alm' }, { n: 'Pisco Sour Catedral', q: 4, p: 7990, f: 'sou' }, { n: 'Tiramisú', q: 2, p: 5000 }, { n: 'Espresso', q: 4, p: 2190 }] },
