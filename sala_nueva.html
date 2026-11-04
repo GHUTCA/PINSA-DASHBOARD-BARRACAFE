@@ -2,7 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BKS Sala</title>
-<meta name="ver" content="sala_nueva v0.6.8 · 04-nov · il conto con ID · mover e juntar col dito · cobrar in una schermata · la mesa si apre nel gesto">
+<meta name="ver" content="sala_nueva v0.6.9 · 04-nov · il conto con ID · mover e juntar col dito · cobrar in una schermata · la mesa si apre nel gesto">
 <meta name="claude:viewport-fit-sides" content="cover">
 <!-- DEVICE-CLASS: 1 · cattura in movimento — si guarda SUL TELEFONO
      🎨 DESIGN V32 · 24-ott-2026 · la SALA NUOVA (v4, 23-set) col COBRO montato dentro.
@@ -1228,7 +1228,7 @@ var VENDIDO=312400, CUENTAS=7, PROPINA=31240;
 var $=function(i){return document.getElementById(i)};
 var P=function(n){return '$'+n.toLocaleString('es-CL')};
 var M=function(){ for(var i=0;i<MESAS.length;i++) if(MESAS[i].m===abierta) return MESAS[i]; };
-function pinta(){ ambiente(); riga(); centro(); pollice(); pintaCliente(); pintaPeligro(); pintaTop(); }
+function pinta(){ ambiente(); riga(); centro(); pollice(); pintaCliente(); pintaPeligro(); pintaTop(); c1Sheet(); }
 
 /* 🔑 l'ambiente governa SOLO la luce e l'ora. La serata SI VEDE solo a riposo:
    se sto lavorando un tavolo, il centro è di quel tavolo e di nient'altro. */
@@ -1395,7 +1395,7 @@ function abrir(m){ abierta=m; limpiaPads(); medio=null; q=''; apriNelGesto(m); p
 function apriNelGesto(m){ var x=M2(m);
   if(x && !x.libre && /cuenta/i.test(x.llama||'')){ cbApri(); vista='cobrar'; return; }
   vista='pedir'; pdApri(); }
-function cerrar(){ abierta=null; vista='msg'; pinta(); }
+function cerrar(){ abierta=null; vista='msg'; for(var k in C1M) C1M[k].sheet=null; pinta(); }   // v0.6.9 · uscendo, i fogli del pago si chiudono
 function ir(v){ if(v==='cobrar') cbApri(); if(v==='pedir') pdApri(); vista=v; limpiaPads(); medio=null; q=''; dto=null; abreDto=false; fam='frec';
   movAcc=null; movDest=null; pinta(); }
 function setCta(i){ cta=i; pad=PADS[i]; centro(); pollice(); }
@@ -1636,12 +1636,11 @@ function c1Centro(){ var x=X(), s=c1(), pz=Math.min(c1Parte(),saldoPieno()), cob
       '<button type="button" class="'+(s.prop===0?'on':'')+'" onclick="c1SetProp(0)">Sin</button></div>'+
     c1WaHtml()+
     '<div class="c1mini">'+
-      '<button type="button" class="'+(CB.dto?'on':'')+'" onclick="c1DtoOpen()">'+(CB.dto?'−'+pct()+'% '+nomeDto().split(' ').pop():'＋ Descuento')+'</button>'+
+      '<button type="button" class="'+(CB.dto?'on':'')+'" onclick="c1DtoOpen()">'+(CB.dto?'−'+pct()+'% '+nomeDto().split(' ').pop():'Descuento ›')+'</button>'+
       (X().waOk?'<span class="ok">✓ boleta</span>':'')+
-      '<button type="button" onclick="c1().prodOpen=!c1().prodOpen;pinta()"'+(s.modo==='mio'?' disabled':'')+'>'+nProd+' productos '+(aperti?'▴':'▾')+'</button></div>'+
-    (s.dtoOpen?'<div class="c1k">'+MOTIVOS.map(function(m){ return '<button type="button" class="'+(CB.dto===m[0]?'on':'')+'" onclick="c1Dto(\''+m[0]+'\')">'+m[1]+' −'+m[2]+'%</button>'; }).join('')+
-      (CB.dto?'<button type="button" onclick="c1Dto(null)">Sin dcto</button>':'')+'</div>':'')+
-    (aperti?'<div class="c1box" style="margin-top:10px;max-height:190px;overflow-y:auto">'+righe+'</div>':'')+
+      '<button type="button" onclick="c1().sheet=\'prod\';pinta()"'+(s.modo==='mio'?' disabled':'')+'>'+nProd+' productos ›</button></div>'+
+    /* con «Lo mío» le righe servono per scegliere: stanno qui, dentro un box ad altezza fissa */
+    (s.modo==='mio'?'<div class="c1box" style="margin-top:10px;max-height:190px;overflow-y:auto">'+righe+'</div>':'')+
     (s.qr?'<div class="c1qr" onclick="c1().qr=false;pinta()">'+qrSvg(220)+'<b style="color:var(--oro)">cuenta '+cid(x)+'</b><span style="font-size:13px;opacity:.7">✕</span></div>':'')+
     '</div>'; }
 function c1Pollice(){ var s=c1(), pz=Math.min(c1Parte(),saldoPieno()), vuota=pz<=0||!c1WaOk(), solCred=fal();
@@ -1662,8 +1661,25 @@ function c1Modo(m){ var s=c1(); s.modo=m; if(m!=='mio') s.sel=[]; pinta(); }
 function c1Linea(i){ var s=c1(), k=s.sel.indexOf(i); if(k<0) s.sel.push(i); else s.sel.splice(k,1); pinta(); }
 function c1Partes(d){ var s=c1(), fatte=CB.pagos.filter(function(p){ return p.div; }).length; s.partes=Math.max(fatte+1,Math.max(2,Math.min(12,s.partes+d))); pinta(); }
 function c1SetProp(v){ c1().prop=v; pinta(); if(v==='otro'){ var i=$('c1Otro'); if(i) i.focus(); } }
-function c1DtoOpen(){ var s=c1(); s.dtoOpen=!s.dtoOpen; pinta(); }
-function c1Dto(k){ CB.dto=k; CB.pin=!!k; c1().dtoOpen=false; pinta(); }   // in prova il PIN del JL è un tocco
+/* v0.6.9 · UN'AZIONE PORTA ALLA SUA SCHERMATA (Alberto, 04-nov: «per vedere gli sconti devo scrollare… non si capisce dove sono»).
+   Descuento e Productos aprono un FOGLIO sopra il pago, a tutta altezza: niente scroll per trovarli, ✕ o una scelta riportano al pago. */
+function c1DtoOpen(){ c1().sheet='dto'; pinta(); }
+function c1Dto(k){ CB.dto=k; CB.pin=!!k; c1().sheet=null; pinta(); }   // in prova il PIN del JL è un tocco
+function c1SheetHtml(){ var s=c1(), x=X(); if(!s.sheet) return '';
+  var base=saldoPieno(), riga='display:flex;justify-content:space-between;align-items:center;width:100%;padding:16px 14px;margin:0 0 8px;border-radius:14px;font:inherit;font-size:16px;font-weight:700;text-align:left;';
+  var corpo = s.sheet==='dto'
+    ? MOTIVOS.map(function(m){ var on=CB.dto===m[0];
+        return '<button type="button" onclick="c1Dto(\''+m[0]+'\')" style="'+riga+'border:1px solid '+(on?'var(--oro)':'rgba(243,234,216,.22)')+';background:'+(on?'rgba(224,169,74,.16)':'transparent')+';color:'+(on?'var(--oro)':'#f3ead8')+'">'+
+          '<span>'+m[1]+'<span style="display:block;font-size:12px;font-weight:600;opacity:.65;margin-top:2px">−'+m[2]+'%'+(m[0]==='conv'?' · solo tarjeta Falabella':'')+'</span></span><b class="num">−'+P(Math.round(base*m[2]/100))+'</b></button>'; }).join('')+
+      (CB.dto?'<button type="button" onclick="c1Dto(null)" style="'+riga+'justify-content:center;border:1px dashed rgba(243,234,216,.3);background:transparent;color:#cbbfa9">Sin descuento</button>':'')+
+      '<div style="font-size:12px;color:#a99e8c;text-align:center;margin-top:4px">con el PIN del JL</div>'
+    : L().map(function(l,i){ return '<div style="display:flex;justify-content:space-between;padding:12px 4px;border-top:1px solid rgba(243,234,216,.12);font-size:16px;font-weight:650;color:#fff'+(lineaPagata(i)?';opacity:.4;text-decoration:line-through':'')+'"><span>'+(l.p&&!/^\d+× /.test(l.n)?'1× ':'')+l.n+'</span><b class="num">'+P(l.p)+'</b></div>'; }).join('');
+  return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><b style="flex:1;font-size:19px;color:#f3ead8">'+(s.sheet==='dto'?'Descuento':'Productos')+' · Mesa '+x.m+'</b>'+
+      '<button type="button" onclick="c1().sheet=null;pinta()" aria-label="Cerrar" style="width:44px;height:44px;border-radius:12px;border:1.5px solid rgba(243,234,216,.45);background:transparent;color:#f3ead8;font-size:20px">✕</button></div>'+
+    '<div style="overflow-y:auto;flex:1">'+corpo+'</div>'; }
+function c1Sheet(){ var t=$('tel'), el=$('c1sheet');
+  if(!el){ el=document.createElement('div'); el.id='c1sheet'; el.style.cssText='position:absolute;inset:0;z-index:45;background:#0d0b10;padding:56px 16px 18px;display:flex;flex-direction:column'; t.appendChild(el); }
+  var on=abierta&&vista==='cobrar'&&CB&&C1M[CB.m]&&C1M[CB.m].sheet; el.hidden=!on; el.style.display=on?'flex':'none'; el.innerHTML=on?c1SheetHtml():''; }
 function c1Pre(){ if(PRE_QUEDAN<=0){ flash('Sin precuentas esta noche'); return; } PRE_QUEDAN--; flash('🧾 Precuenta '+cid(X())+' · quedan '+PRE_QUEDAN+' de 10'); pinta(); }
 function c1Paga(medio){ var s=c1(), pz=Math.min(c1Parte(),saldoPieno()); if(pz<=0||!c1WaOk()) return;
   var wam=X().waOk?'boleta a WhatsApp':(s.noWa?'':masc('cl',s.wa));   // sul vetro mai il numero intero
