@@ -1312,10 +1312,24 @@ function showToast(msg, type='') {
   setTimeout(() => t.className = 'toast', 2800);
 }
 
+/* [AUT-0865 · ⓑ1 · 04-nov · 🖐 TERZA V32, su «IL SESTO BOUND È BCENTRAL» di ⚙️ ARQ] LA FIRMA DI CHI SCRIVE: il token
+   della sessione (`PinsitaAuth.firma()`, pinsita_auth v1.13) va nel CORPO, mai nell'URL: il `cancelloGuardia` di
+   BCENTRAL legge `data.token`. Vuoto se assente o scaduto ⇒ si scrive come ieri (in `warn` passa, in `on` torna
+   `no_autorizado` e si chiede il PIN, una volta per pagina). */
+let _firmaPinChiestoBC = false;
 async function callGAS(payload) {
   try {
-    const r = await fetch(CFG.GAS_URL, { method:'POST', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) });
+    let _f = '';
+    try { _f = (window.PinsitaAuth && typeof PinsitaAuth.firma === 'function') ? (PinsitaAuth.firma() || '') : ''; } catch(e) {}
+    const _p = _f ? Object.assign({}, payload, { token: _f }) : payload;
+    const r = await fetch(CFG.GAS_URL, { method:'POST', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(_p) });
     const txt = await r.text();
+    let _j = null; try { _j = JSON.parse(txt); } catch(e) {}
+    if (_j && _j.error === 'no_autorizado' && !_firmaPinChiestoBC) {
+      _firmaPinChiestoBC = true;
+      try { if (confirm('Tu firma venció: no se guardó. Vuelve a entrar con tu PIN.\n\n¿Entrar ahora?')) PinsitaAuth.logout(); } catch(e) {}
+    }
+    if (_j) return _j;
     try { return JSON.parse(txt); } catch(e) { return { ok: true }; }
   } catch(e) { return { ok: false, error: e.toString() }; }
 }
