@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.44.0.1</span>
+<span class="ver" id="ver">app_jl v1.44.0.2</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -1410,11 +1410,28 @@ async function _prodsDalBorde() {
   let a, c;
   try { a = await get('ago86'); } catch (e) { return { stato: 'rete' }; }
   if (!a.j || a.status === 404 || a.j.error === 'ruta_apagada' || a.j.ok !== true || a.j.apagado || !a.j.seeded || !Array.isArray(a.j.ids)) return { stato: 'non_mio' };
+  const ago = {}; a.j.ids.forEach(function (id) { ago[String(id)] = true; });
+  /* [03-nov · CONTROLLER V33 «IL PANNELLO NON VEDE GLI AGOTADOS»] `/catalogoMesero` ESCLUDE gli agotados (è la carta che si vende): il
+     pannello diceva «Agotados ahora 0» con 15 in 86, e il JL non poteva dire «volvió». Si legge la carta INTERA, `GET /cartaAdmin/<local>`
+     (producto_carta in Postgres, stesso token, leva CARTA_ADMIN_PG_ON): i prodotti attivi più ogni agotado, anche spento.
+     Leva spenta o risposta strana ⇒ il catalogo del mesero come ieri, ma ogni id in 86 che lì manca entra col suo id per nome: un 86 si
+     deve poter togliere sempre. FRENO per telefono: ?carta86=0. */
+  let carta86 = true; try { carta86 = new URLSearchParams(location.search).get('carta86') !== '0'; } catch (e) {}
+  if (carta86) {
+    let k = null;
+    try { k = await get('cartaAdmin'); } catch (e) { k = null; }
+    if (k && k.j && k.j.ok === true && Array.isArray(k.j.productos) && k.j.productos.length) {
+      return { stato: 'ok', prods: k.j.productos.filter(function (p) { return p && p.id_producto && (p.activo !== false || ago[String(p.id_producto)]); })
+        .map(function (p) { const id = String(p.id_producto); return { id: id, nombre: p.nombre || id, agotado: !!ago[id] }; }) };
+    }
+  }
   try { c = await get('catalogoMesero'); } catch (e) { return { stato: 'rete' }; }
   if (!c.j || c.j.ok !== true || !Array.isArray(c.j.productos) || !c.j.productos.length) return { stato: 'non_mio' };
-  const ago = {}; a.j.ids.forEach(function (id) { ago[String(id)] = true; });
-  return { stato: 'ok', prods: c.j.productos.filter(function (p) { return p && p.id; })
-    .map(function (p) { return { id: String(p.id), nombre: p.nombre || String(p.id), agotado: !!ago[String(p.id)] }; }) };
+  const prods = c.j.productos.filter(function (p) { return p && p.id; })
+    .map(function (p) { return { id: String(p.id), nombre: p.nombre || String(p.id), agotado: !!ago[String(p.id)] }; });
+  const visti = {}; prods.forEach(function (p) { visti[p.id] = true; });
+  Object.keys(ago).forEach(function (id) { if (!visti[id]) prods.push({ id: id, nombre: id, agotado: true }); });
+  return { stato: 'ok', prods: prods };
 }
 async function giroProds() {
   /* il catalogo del pannello (adminListProducts): serve al 🚫 86 — ricerca
