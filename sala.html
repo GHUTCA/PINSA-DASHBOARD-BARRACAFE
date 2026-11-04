@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.86 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.87 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -5888,6 +5888,21 @@ function _gConflitto(r) {
 }
 function _gestoRosso(gid, tipo, de, a) { _gFail[gid] = { tipo: tipo, de: de, a: a, ts: Date.now() }; delete _gPend[gid]; _gFailSalva(); }
 
+/* ═══ [AUT-EMERG-0868 · mesa 32 · decisione di Alberto 04-nov «MOVER SOLO SU UNA MESA LIBERA»] ═══
+   Il bordo rifiuta un `moverMesa` verso una mesa con un conto vivo (`mesa_ocupada`, `borde:true`, `definitivo:true`, `mensaje` col nome).
+   staffPost lo restituisce senza ripiegare sul GAS; il vetro non applica l'eco (lo fa solo su `ok`).
+   Qui si dice il rifiuto in parole e si PROPONE JUNTAR: due tavoli occupati si mettono insieme solo con la junta (D-450).
+   La mesa che RICEVE è la destinazione `a` (quella che ha già la cuenta): `juntaCrear` prende come principal `_mapStart`. */
+function _moverOcupadaOfrece(r, de, a) {
+  const frase = (r && r.mensaje) ? r.mensaje : ('La ' + a + ' tiene cuenta abierta.');
+  if (!window.confirm('⛔ ' + frase + '\n\n¿Juntar la ' + de + ' con la ' + a + '?\nUna sola cuenta, en la ' + a + '.')) {
+    toast('err', '⛔ ' + frase);
+    return;
+  }
+  STATE.selMesas = [String(a), String(de)];
+  _mapStart = String(a);   // la principal = la mesa che riceve
+  juntaCrear();
+}
 async function moverMesaUI__in(de){
   const a = (window.prompt('¿A qué mesa se cambió el cliente de la mesa ' + de + '?') || '').replace(/[^0-9]/g, '');
   if (!a) return;
@@ -5925,8 +5940,8 @@ async function moverMesaUI__in(de){
     /* [AUT-EMERG-0868 · mesa 32, 04-nov] il bordo (`86d0a18`, leva MOVER_OCUPADA_ON) rifiuta il mover sulla mesa con la cuenta di un altro:
        `{ok:false, need:'mesa_ocupada', borde:true, definitivo:true, mensaje}`. staffPost lo restituisce senza ripiegare sul GAS (borde:true);
        qui si dice al mesero la frase del bordo, che porta il nome di chi ha la cuenta, invece di «No se pudo: mesa_ocupada». */
-    const msj = (r && r.error === 'mesa_ocupada' && r.mensaje) ? '⛔ ' + r.mensaje
-      : { nada_que_mover: 'No hay pedidos abiertos en la mesa ' + de,
+    if (r && r.error === 'mesa_ocupada') { _moverOcupadaOfrece(r, de, a); return; }
+    const msj = { nada_que_mover: 'No hay pedidos abiertos en la mesa ' + de,
                   grupo_activo: 'La mesa está en un grupo — deshace el grupo primero',
                   misma_mesa: 'Es la misma mesa' }[r && r.error] || ('No se pudo: ' + (r && r.error || '?'));
     toast('err', msj);
@@ -9789,9 +9804,9 @@ async function _mvHacer(btn) {
         (r.cerrados_quedan ? ' · ' + r.cerrados_quedan + ' cerrados quedan en la ' + deL : ''));
       refrescar(false); return;
     }
-    /* [AUT-EMERG-0868] stessa frase del bordo anche dal pannello: la mesa con la cuenta di un altro non si tocca, e si dice di chi è */
-    toast('err', (r && r.error === 'mesa_ocupada' && r.mensaje) ? '⛔ ' + r.mensaje
-      : { nada_que_mover: 'No hay pedidos abiertos en la ' + _mvDe,
+    /* [AUT-EMERG-0868] stessa strada anche dal pannello: si dice il rifiuto e si propone JUNTAR */
+    if (r && r.error === 'mesa_ocupada') { vhojaCerrar(); vpSoltar(); _moverOcupadaOfrece(r, deL, aL); return; }
+    toast('err', { nada_que_mover: 'No hay pedidos abiertos en la ' + _mvDe,
       grupo_activo: 'La mesa está en un grupo del sistema — sepáralo primero',
       misma_mesa: 'Es la misma mesa' }[r && r.error] || ('No se pudo: ' + (r && r.error || '?')));
   } catch (e) { toast('err', 'Sin señal — inténtalo de nuevo'); }
