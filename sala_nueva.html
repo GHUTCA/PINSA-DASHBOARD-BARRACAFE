@@ -2,7 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BKS Sala</title>
-<meta name="ver" content="sala_nueva v0.6.4 · 04-nov · il conto con ID · mover e juntar col dito · cobrar in una schermata · la mesa si apre nel gesto">
+<meta name="ver" content="sala_nueva v0.6.5 · 04-nov · il conto con ID · mover e juntar col dito · cobrar in una schermata · la mesa si apre nel gesto">
 <meta name="claude:viewport-fit-sides" content="cover">
 <!-- DEVICE-CLASS: 1 · cattura in movimento — si guarda SUL TELEFONO
      🎨 DESIGN V32 · 24-ott-2026 · la SALA NUOVA (v4, 23-set) col COBRO montato dentro.
@@ -1563,7 +1563,6 @@ document.head.insertAdjacentHTML('beforeend','<style>'+
  '.c1k{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 0}.c1k button{flex:1 1 auto;padding:9px 10px;border-radius:12px;border:1px solid var(--filo);background:transparent;color:var(--ink2,#cbbfa9);font:inherit;font-size:13px;font-weight:650}'+
  '.c1k button.on{border-color:var(--oro);color:var(--oro);background:rgba(224,169,74,.1)}.c1k button[disabled]{opacity:.35}'+
  '.c1g{display:grid;grid-template-columns:1fr 1fr;gap:8px}.c1g .vb{padding:13px 8px;font-size:15px}.c1g .vb small{display:block;font-size:11px;font-weight:600;opacity:.75}'+
- '.pdh .volver{align-self:flex-start}'+
  '.c1qr{position:absolute;inset:0;z-index:40;background:rgba(10,8,6,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}'+
  '</style>');
 var C1M={};
@@ -2135,7 +2134,8 @@ function manca(n,sel){ return gruppi(n).some(function(g,i){ return g.obl&&!sel[i
 function prezzo(it){ var p=it.p; gruppi(it.n).forEach(function(g,i){ var o=g.ops.filter(function(x){return x.o===it.sel[i];})[0]; if(o&&o.d) p+=o.d; }); return p; }
 function etich(it){ var t=it.sel.filter(Boolean); if(it.parti) t=[]; return t.concat(it.nota?['«'+it.nota+'»']:[]).join(' · '); }
 function chiave(it){ return (it.cta||'A')+'§'+it.n+'§'+(it.menu||it.sel).join('|')+'§'+it.nota+'§'+(it.hold?1:0)+'§'+(it.parti?it.parti.map(function(p){return p.hold?1:0;}).join(''):''); }
-function aggiungi(it){ PD.aperto=false; if(!it.cta) it.cta=PD.cta; var k=chiave(it); for(var i=0;i<PD.items.length;i++) if(chiave(PD.items[i])===k){ PD.items[i].q+=it.q; return; } PD.items.push(it); }
+/* v0.6.5 · si tocca un prodotto ⇒ «lo que lleva» si chiude, resta la riga dell'ultimo aggiunto */
+function aggiungi(it){ PD.aperto=false; PD.ver=false; if(!it.cta) it.cta=PD.cta; var k=chiave(it); for(var i=0;i<PD.items.length;i++) if(chiave(PD.items[i])===k){ PD.items[i].q+=it.q; return; } PD.items.push(it); }
 function qDi(n){ return PD.items.filter(function(it){return it.n===n;}).reduce(function(a,it){return a+it.q;},0); }
 function totPD(){ return PD.items.reduce(function(a,it){return a+prezzo(it)*it.q;},0); }
 
@@ -2178,7 +2178,8 @@ function catsHtml(){ if(PD.busca||PD.fam==='ahora'||PD.fam==='menus') return '';
 function pdCentro(){
   var l=listaProdotti(), x=X0(); l=l.filter(function(p){ return !qDi(p.n)||p.n===PD.ultimoN; }).concat(l.filter(function(p){ return qDi(p.n)&&p.n!==PD.ultimoN; }));
   return '<div class="vista">'+
-    (PD.ver?'<div class="leva"><div class="lt">lo que lleva la '+x.m+'</div>'+((x.lin||[]).length?x.lin.map(function(r){ return '<div class="lr"><span>'+r.n+'</span><b>'+P(r.p)+'</b></div>'; }).join(''):'<div class="lr"><span>todavía nada</span></div>')+'</div>':'')+
+    /* v0.6.5 · si lavora di notte (penombra, strobo): righe bianche, grandi, in grassetto; il pannello ha un'altezza fissa e scorre dentro di sé, così non mangia lo spazio dei bottoni */
+    (PD.ver?'<div class="leva" style="max-height:168px;overflow-y:auto;background:#151210;border-color:rgba(255,255,255,.18)"><div class="lt" style="color:#fff;opacity:.75">lo que lleva la '+x.m+'</div>'+((x.lin||[]).length?x.lin.map(function(r){ return '<div class="lr" style="color:#fff;font-size:15.5px;font-weight:650"><span>'+r.n+'</span><b style="color:#fff">'+P(r.p)+'</b></div>'; }).join(''):'<div class="lr" style="color:#fff"><span>todavía nada</span></div>')+'</div>':'')+
     blocHtml()+
     '<div class="carta2">'+l.map(function(p){ var i=CAT.p.indexOf(p), q=qDi(p.n), ag=agot(p.n), g=gruppi(p.n), nota=ag?'agotado':(g.some(function(x){return x.obl&&!x.def;})?'elige':(g.length?(selDefault(p.n).filter(Boolean)[0]||''):''));
       return '<div class="pt'+(q?' hay':'')+(ag?' agot':'')+'">'+
@@ -2194,12 +2195,12 @@ function pdRiga(){ var x=X0(), pax=x.pax||2, prima=Math.round((x.tot||0)/pax), d
        Tavolo vuoto: la media per persona compare dal primo prodotto — un «▼ $0» rosso su un tavolo appena aperto sembrava un allarme. */
     /* v0.6.4 · Alberto, 04-nov: la mesa al centro col numero della cuenta SOTTO; due bottoni pari, VER e COBRAR; l'importo una volta sola (su COBRAR) */
     (!x.libre&&x.tot
-      ? '<div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:0">'+
-          '<div style="text-align:center;margin-right:46px"><div class="n num" style="font-size:26px;font-weight:800;line-height:1.05">Mesa '+x.m+'</div>'+
+      /* v0.6.5 · una riga sola (Alberto: «due file sono troppe»): ‹ · VER a sinistra · la mesa al centro col numero sotto · COBRAR a destra */
+      ? '<div style="flex:1;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;min-width:0">'+
+          '<button type="button" class="vb sec" style="min-width:0;width:auto;padding:10px 12px;font-size:14px" data-a="pdVer">Ver '+(PD.ver?'▴':'▾')+'</button>'+
+          '<div style="text-align:center;min-width:0"><div class="n num" style="font-size:24px;font-weight:800;line-height:1.05;white-space:nowrap">Mesa '+x.m+'</div>'+
             (cid(x)?'<div style="font-size:11.5px;font-weight:700;letter-spacing:.08em;color:var(--oro);margin-top:3px">'+cid(x)+'</div>':'')+'</div>'+
-          '<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:8px">'+
-            '<button type="button" class="vb sec" style="min-width:0;width:auto;padding:9px 6px;font-size:14px" data-a="pdVer">'+(PD.ver?'Ocultar ▴':'Ver ▾')+'</button>'+
-            '<button type="button" class="vb filo" style="min-width:0;width:auto;padding:9px 6px;font-size:14px;white-space:nowrap" onclick="ir(\'cobrar\')">COBRAR <span class="num">'+cobrarLabel(x)+'</span></button></div>'+
+          '<button type="button" class="vb filo" style="min-width:0;width:auto;padding:7px 12px;font-size:13px;line-height:1.15" onclick="ir(\'cobrar\')">COBRAR<span class="num" style="display:block;font-size:14px">'+cobrarLabel(x)+'</span></button>'+
         '</div></div>'
       : '<button type="button" class="pdm" data-a="pdVer"><span class="n num">Mesa '+x.m+'</span><span class="q">'+pax+' pers</span></button>'+
         (totPD()?'<div class="pdmed '+(dopo>=DATI.media_por_persona?'bien':'mal')+'"><i>media por persona</i><b class="num">'+(dopo>=DATI.media_por_persona?'▲ ':'▼ ')+P(dopo)+'</b><span>'+(up?'+'+P(up)+' este pedido · ':'')+'hoy '+P(DATI.media_por_persona)+'</span>'+
