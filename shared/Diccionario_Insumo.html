@@ -1110,7 +1110,7 @@ async function provGuardar(){
   $('pm-save').disabled=true;$('pm-save').textContent='Guardando…';
   banner('okk','Guardando proveedor «'+nombre+'»…');
   try{
-    const r=await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
+    const r=await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(_conFirmaDicc(payload))});
     const j=await r.json();
     if(!(j&&j.ok))throw new Error(j&&j.error?j.error:'respuesta inesperada del GAS');
     PROV_LIST.push(nombre);PROV_LIST.sort((a,b)=>a.localeCompare(b));   // lista viva (evita doble alta en la sesión)
@@ -1332,6 +1332,12 @@ function spinner(on){    // 🆕 12-jun · clessidra durante la scrittura
      sarebbe un secondo conio dello SKU). Il ritentativo porta lo STESSO uid ⇒ non crea due volte.
    Il token e' lo stesso (pubblico) del Registro: debito M4 dichiarato, non nuovo. */
 const DICC_BORDE = { URL:'https://pinsita-borde.alberto-agostini.workers.dev', T:'7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ' };
+/* [AUT-EMERG-0864 ② · ⓑ1 · 04-nov · 🖐 TERZA V32] LA FIRMA DI CHI SCRIVE: il token della sessione (`PinsitaAuth.firma()`,
+   pinsita_auth v1.13), vuoto se assente o scaduto ⇒ si scrive come ieri. Al bordo nell'header `X-Firma`, al GAS nel corpo
+   (`token`). Mai nell'URL, mai nel corpo del bordo. */
+function _firmaDicc(){ try{ return (window.PinsitaAuth && typeof PinsitaAuth.firma === 'function') ? (PinsitaAuth.firma() || '') : ''; }catch(e){ return ''; } }
+function _hBordoDicc(extra){ const h = Object.assign({ 'X-Borde-Token':DICC_BORDE.T }, extra || {}); const f = _firmaDicc(); if (f) h['X-Firma'] = f; return h; }
+function _conFirmaDicc(p){ const f = _firmaDicc(); return f ? Object.assign({}, p, { token:f }) : p; }
 const _uidInCorso = {};   // un uid per GESTO, finche' non va a buon fine (idempotenza dal lato che ripete)
 function _uidPer(payload){
   // ✏️ banco C2a D5: la chiave e' TUTTO il gesto (row, extras, guard…) tranne l'ora — se l'operatore cambia
@@ -1346,14 +1352,14 @@ async function scriviCatalogo(payload){
   let r = null, j = null;
   try {
     r = await fetch(DICC_BORDE.URL + '/catalogo/scrivi', { method:'POST',
-      headers:{ 'X-Borde-Token':DICC_BORDE.T, 'Content-Type':'text/plain' }, body: JSON.stringify(Object.assign({}, payload, { uid })) });
+      headers:_hBordoDicc({ 'Content-Type':'text/plain' }), body: JSON.stringify(Object.assign({}, payload, { uid })) });
     try { j = await r.json(); } catch(e) { j = null; }
   } catch(e) {
     throw new Error('sin conexión con el sistema (' + (e && e.name || e) + '). Reintenta: no se crea dos veces');
   }
   const levaSpenta = (j && j.error === 'leva_spenta') || (r.status === 404 && (!j || j.error === 'ruta_desconocida'));
   if (levaSpenta) {                         // il GAS come oggi, invariato
-    const g = await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
+    const g = await fetch(CFG.GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(_conFirmaDicc(payload))});
     return await g.json();
   }
   if (!j) throw new Error('respuesta ilegible del sistema (' + r.status + '). Reintenta: no se crea dos veces');
@@ -1675,7 +1681,7 @@ async function guardarRendimiento(rv){
   const k=E.sku+'|'+rv.valor;
   if(!_rendUid[k]) _rendUid[k]='rend-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
   try{
-    const r=await fetch(DICC_BORDE.URL+'/catalogo/rendimiento',{ method:'POST', headers:{'X-Borde-Token':DICC_BORDE.T,'Content-Type':'text/plain'}, body:JSON.stringify(Object.assign({uid:_rendUid[k]},payload)) });
+    const r=await fetch(DICC_BORDE.URL+'/catalogo/rendimiento',{ method:'POST', headers:_hBordoDicc({'Content-Type':'text/plain'}), body:JSON.stringify(Object.assign({uid:_rendUid[k]},payload)) });
     const j=await r.json().catch(()=>null);
     if(!(j&&j.ok)) throw new Error((j&&j.error)||('sin respuesta ('+r.status+')'));
     if(rv.valor==null) delete RENDIM.map[E.sku]; else RENDIM.map[E.sku]=rv.valor;

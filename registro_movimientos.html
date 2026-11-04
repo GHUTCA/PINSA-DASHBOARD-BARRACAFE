@@ -566,7 +566,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v108 · la pantalla de entrada dice qué acción es · AUT-0685 · 16oct</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v109 · la firma de quien escribe · AUT-EMERG-0864 · 4nov</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:4px 8px;min-width:64px;min-height:44px;font-size:19px;cursor:pointer;line-height:1.1;touch-action:manipulation;transition:transform .1s">🧾<small style="display:block;font-size:10px;font-weight:700;margin-top:2px">Mis registros</small></button>
@@ -3444,8 +3444,23 @@ var _gasDownHasta=0;
    registro_hoy arriva con TUTTI i responsables (il GAS pubblica una volta
    sola): il filtro per operador lo fa il telefono — il cervello decide,
    il bordo sceglie. */
+/* [AUT-EMERG-0864 ② · ⓑ1 · 04-nov · 🖐 TERZA V32] LA FIRMA DI CHI SCRIVE. `pinsita_auth` v1.13 salva nella
+   sessione il token che il login del GAS AUTH conia ({u, r, loc, exp 24h} + HMAC). Qui lo si legge come lo legge
+   `PinsitaAuth.firma()` (stessa forma, questa pagina non carica il modulo): solo `exp`, nessuna verifica — quella è
+   del bordo (`X-Firma`) e del GAS (`token` nel corpo). Vuoto ⇒ si scrive come ieri. Freno: `pinsita_firma_off`="1". */
+function _firmaSesion(){
+  try{
+    if(localStorage.getItem('pinsita_firma_off')==='1') return '';
+    var s=JSON.parse(localStorage.getItem('pinsita_session')||'null');
+    if(!s || !s.expiresAt || Date.now()>=s.expiresAt) return '';
+    var t=s.token; if(typeof t!=='string' || t.indexOf('.')<=0) return '';
+    var b=t.split('.')[0].replace(/-/g,'+').replace(/_/g,'/'); while(b.length%4) b+='=';
+    var p=JSON.parse(atob(b));
+    return (p && Number(p.exp)>Date.now()) ? t : '';
+  }catch(e){ return ''; }
+}
 var BORDE_REG = {
-  URL: 'https://pinsita-borde.alberto-agostini.workers.dev',
+  URL:'https://pinsita-borde.alberto-agostini.workers.dev',
   T: '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ',
   ON: (new URLSearchParams(location.search)).get('borde') !== '0',
   MAX_EDAD_MS: 10*60*1000,   // una foto più vecchia di 10' non si serve: al GAS
@@ -3555,8 +3570,14 @@ async function _invBordo(payload, timeoutMs, urlOverride){
          : lettura ? '/' + lettura : '');
     var r = await fetch(url, lettura
       ? { headers: { 'X-Borde-Token': BORDE_REG.T }, cache: 'no-store', signal: ctl ? ctl.signal : undefined }
-      : { method: 'POST', headers: { 'X-Borde-Token': BORDE_REG.T, 'Content-Type': 'text/plain' },
-          body: JSON.stringify(payload), signal: ctl ? ctl.signal : undefined });
+      : (function(){
+          /* [ⓑ1] la firma va nell'HEADER, mai nel corpo: il corpo del bordo finisce nel libro. Quella del lote
+             (timbrata in coda) vince su quella di adesso: il fatto porta chi l'ha registrato. */
+          var _f = (payload && payload.token) || _firmaSesion(), _h = { 'X-Borde-Token': BORDE_REG.T, 'Content-Type': 'text/plain' };
+          if (_f) _h['X-Firma'] = _f;
+          var _b = Object.assign({}, payload); delete _b.token;
+          return { method: 'POST', headers: _h, body: JSON.stringify(_b), signal: ctl ? ctl.signal : undefined };
+        })());
     var j = null; try { j = await r.json(); } catch(e) {}
     /* 404 = la rotta /inventario NON ESISTE su questo bordo (vetro partito prima
        del bordo, o bordo tornato indietro): il libro nuovo non c'e', quindi e'
@@ -3644,7 +3665,10 @@ async function callGAS(payload, timeoutMs, urlOverride){
   var ctl=(typeof AbortController!=='undefined')?new AbortController():null;
   var tid=ctl?setTimeout(function(){ try{ctl.abort();}catch(e){} }, timeoutMs||12000):null;
   try{
-    var r=await fetch(urlOverride||GAS_RIESCO,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload),signal:ctl?ctl.signal:undefined});
+    // [ⓑ1] al GAS il token viaggia nel CORPO (il suo cancello legge `data.token`, anche sulle letture)
+    var _fG=(payload&&payload.token)||_firmaSesion();
+    var _pG=_fG?Object.assign({},payload,{token:_fG}):payload;
+    var r=await fetch(urlOverride||GAS_RIESCO,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(_pG),signal:ctl?ctl.signal:undefined});
     var t=await r.text();
     _gasDownHasta=0;
     // v46: respuesta no-JSON = endpoint roto (login Google, error HTML…) →
@@ -4652,6 +4676,10 @@ function nuevoLoteId(){
 }
 function colaEncolar(payload, resumen){
   var c=colaLeer();
+  /* [ⓑ1] il lote si timbra con la firma di chi lo registra ADESSO: se parte dalla coda dopo un cambio di persona
+     sul tablet condiviso, porta ancora chi l'ha fatto. ⚠️ Un lote fermo oltre le 24 h ha la firma scaduta: a leva
+     accesa il bordo lo rifiuta (`firma_requerida`) e resta visibile in coda. */
+  if(payload && !payload.token){ var _ft=_firmaSesion(); if(_ft) payload.token=_ft; }
   // multilocal: el lote recuerda SU endpoint — si el admin cambia de local con
   // lotes pendientes, cada uno viaja igual a su libro correcto.
   c.push({ loteId:payload.loteId, payload:payload, resumen:resumen, gas:GAS_RIESCO,
