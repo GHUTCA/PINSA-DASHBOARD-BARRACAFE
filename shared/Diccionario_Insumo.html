@@ -1338,6 +1338,13 @@ const DICC_BORDE = { URL:'https://pinsita-borde.alberto-agostini.workers.dev', T
 function _firmaDicc(){ try{ return (window.PinsitaAuth && typeof PinsitaAuth.firma === 'function') ? (PinsitaAuth.firma() || '') : ''; }catch(e){ return ''; } }
 function _hBordoDicc(extra){ const h = Object.assign({ 'X-Borde-Token':DICC_BORDE.T }, extra || {}); const f = _firmaDicc(); if (f) h['X-Firma'] = f; return h; }
 function _conFirmaDicc(p){ const f = _firmaDicc(); return f ? Object.assign({}, p, { token:f }) : p; }
+/* [ⓑ1 · contratto di ⚙️ ARQ 5d06052] 401 `firma_vencida`/`firma_requerida` ⇒ non si è scritto niente: si chiede di
+   tornare al PIN (Salir ricarica la pagina col PIN) e il gesto lancia l'errore, così niente dice «guardado». */
+function _firmaNoValeDicc(j){
+  if (!(j && (j.error === 'firma_vencida' || j.error === 'firma_requerida'))) return false;
+  try{ if (confirm('Tu firma venció: no se guardó. Vuelve a entrar con tu PIN.\n\n¿Entrar ahora? (se pierde lo escrito en esta ficha)') && window.PinsitaAuth) PinsitaAuth.logout(); }catch(e){}
+  return true;
+}
 const _uidInCorso = {};   // un uid per GESTO, finche' non va a buon fine (idempotenza dal lato che ripete)
 function _uidPer(payload){
   // ✏️ banco C2a D5: la chiave e' TUTTO il gesto (row, extras, guard…) tranne l'ora — se l'operatore cambia
@@ -1363,6 +1370,7 @@ async function scriviCatalogo(payload){
     return await g.json();
   }
   if (!j) throw new Error('respuesta ilegible del sistema (' + r.status + '). Reintenta: no se crea dos veces');
+  if (_firmaNoValeDicc(j)) throw new Error('tu firma venció: vuelve a entrar con tu PIN. No se guardó');
   if (j.ok === true) {
     delete _uidInCorso[k];
     // banco C2b E06 (stessa classe nel Diccionario): un gesto piu' NUOVO sullo stesso SKU e' andato a buon fine ⇒ i
@@ -1683,6 +1691,7 @@ async function guardarRendimiento(rv){
   try{
     const r=await fetch(DICC_BORDE.URL+'/catalogo/rendimiento',{ method:'POST', headers:_hBordoDicc({'Content-Type':'text/plain'}), body:JSON.stringify(Object.assign({uid:_rendUid[k]},payload)) });
     const j=await r.json().catch(()=>null);
+    if(_firmaNoValeDicc(j)) throw new Error('tu firma venció: vuelve a entrar con tu PIN');
     if(!(j&&j.ok)) throw new Error((j&&j.error)||('sin respuesta ('+r.status+')'));
     if(rv.valor==null) delete RENDIM.map[E.sku]; else RENDIM.map[E.sku]=rv.valor;
     E.rendOrig=rv.valor; delete _rendUid[k]; return true;
