@@ -2,7 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BKS Sala</title>
-<meta name="ver" content="sala_nueva v0.5.1 · 04-nov · il conto con ID · junta col dito">
+<meta name="ver" content="sala_nueva v0.5.2 · 04-nov · il conto con ID · junta col dito · deshacer e separar">
 <meta name="claude:viewport-fit-sides" content="cover">
 <!-- DEVICE-CLASS: 1 · cattura in movimento — si guarda SUL TELEFONO
      🎨 DESIGN V32 · 24-ott-2026 · la SALA NUOVA (v4, 23-set) col COBRO montato dentro.
@@ -1108,14 +1108,39 @@ function muereCuenta(x){ var j=(x.juntas||[]).slice(); j.forEach(function(m){ M2
 var SEL=[], _lpT=null, _lpSalta=false, _lpX=0, _lpY=0;
 function princ(m){ return M2(m).junta||m; }
 function selTocca(m){ m=princ(m); var i=SEL.indexOf(m); if(i===0) SEL=[]; else if(i>0) SEL.splice(i,1); else SEL.push(m); pinta(); }
-document.addEventListener('pointerdown',function(e){ var t=e.target.closest&&e.target.closest('#pollice .sm[data-m]'); if(!t||abierta||SEL.length) return;
+document.addEventListener('pointerdown',function(e){ var t=e.target.closest&&e.target.closest('#pollice .sm[data-m]'); if(!t||abierta||SEL.length||SEPJ) return;
   _lpX=e.clientX; _lpY=e.clientY; clearTimeout(_lpT); var m=t.dataset.m;
-  _lpT=setTimeout(function(){ _lpT=null; _lpSalta=true; SEL=[princ(m)]; try{ if(navigator.vibrate) navigator.vibrate([14,40,14]); }catch(_){} pinta(); },300); });
+  _lpT=setTimeout(function(){ _lpT=null; _lpSalta=true; var p=princ(m);
+    if((M2(p).juntas||[]).length) SEPJ=p; else SEL=[p];   // v0.5.2 · tenere premuto un tasto di junta = la domanda «separar»
+    try{ if(navigator.vibrate) navigator.vibrate([14,40,14]); }catch(_){} pinta(); },300); });
 document.addEventListener('pointermove',function(e){ if(_lpT && Math.abs(e.clientX-_lpX)+Math.abs(e.clientY-_lpY)>12){ clearTimeout(_lpT); _lpT=null; } });   // si muove prima dei 300 ms: è uno scroll
 ['pointerup','pointercancel'].forEach(function(ev){ document.addEventListener(ev,function(){ if(_lpT){ clearTimeout(_lpT); _lpT=null; } if(_lpSalta) setTimeout(function(){ _lpSalta=false; },80); }); });
 document.addEventListener('contextmenu',function(e){ if(e.target.closest&&e.target.closest('#pollice .sm')) e.preventDefault(); });
 document.head.insertAdjacentHTML('beforeend','<style>#pollice .sm{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}</style>');
-function juntaBar(){ if(!SEL.length) return ''; var p=SEL[0], conC=SEL.map(M2).filter(function(x){ return !x.libre; })[0], idR=conC?cid(conC):'';
+/* ═══ v0.5.2 · LE DUE USCITE DI UNA JUNTA (Alberto, 04-nov: «ok va bene») ═══
+   ① DESHACER per 5 s subito dopo JUNTAR: copre l'errore di dito (stessa idea della barra di ENVIAR).
+   ② SEPARAR tenendo premuto il tasto «33·24», ma SOLO finché la junta non ha pedidos (nessuna cuenta):
+      con un pedido dentro si divide al cobro (Lo mío), come deciso — il conto è uno e non si spacca a metà. */
+var SEPJ=null, UNDO=null;
+function juntaFoto(){ return JSON.stringify({M:MESAS,C:CBM}); }
+function juntaDeshacer(){ if(!UNDO) return; clearTimeout(UNDO.t); var s=JSON.parse(UNDO.foto); MESAS=s.M; CBM=s.C; CB=null; UNDO=null; SEL=[]; pinta(); flash('↩ Junta deshecha'); }
+function separaDo(){ var o=M2(SEPJ); if(!o.m){ SEPJ=null; pinta(); return; }
+  if(!o.libre){ SEPJ=null; pinta(); return; }
+  var j=(o.juntas||[]).slice(); muereCuenta(o); SEPJ=null; pinta(); flash('✓ '+[o.m].concat(j).join(' · ')+' separadas'); }
+function sepBar(){ var o=M2(SEPJ), nums=[o.m].concat(o.juntas||[]).join(' · ');
+  return '<div style="margin:0 0 8px;padding:10px 12px;border-radius:14px;border:1px solid rgba(224,169,74,.5);background:rgba(224,169,74,.08)">'+
+    (o.libre
+      ? '<div style="font-size:13px;font-weight:650;color:var(--oro)">'+nums+' · todavía sin pedidos</div>'+
+        '<div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="vb pieno" style="flex:1" onclick="separaDo()">SEPARAR '+nums+'</button>'+
+        '<button type="button" class="vb sec" style="flex:0 0 34%" onclick="SEPJ=null;pinta()">Cancelar</button></div>'
+      : '<div style="font-size:13px;font-weight:650;color:var(--oro)">'+nums+' ya tiene pedidos en la cuenta '+cid(o)+'</div>'+
+        '<div style="font-size:12px;opacity:.8;margin-top:3px">no se separa: lo que paga cada uno se divide en COBRAR → Lo mío. Al cerrar la cuenta, las mesas vuelven a su lugar.</div>'+
+        '<div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="vb sec" style="flex:1" onclick="SEPJ=null;pinta()">Entendido</button></div>')+'</div>'; }
+function undoBar(){ if(!UNDO) return ''; var s=Math.max(0,Math.ceil((UNDO.fin-Date.now())/1000));
+  return '<div style="margin:0 0 8px;padding:9px 12px;border-radius:14px;background:rgba(116,201,138,.12);border:1px solid rgba(116,201,138,.45);display:flex;align-items:center;gap:10px">'+
+    '<span style="flex:1;font-size:13px;font-weight:650">'+UNDO.txt+'</span>'+
+    '<button type="button" class="vb sec" style="flex:0 0 auto;padding:8px 12px" onclick="juntaDeshacer()">DESHACER '+s+'</button></div>'; }
+function juntaBar(){ if(UNDO) return undoBar(); if(SEPJ) return sepBar(); if(!SEL.length) return ''; var p=SEL[0], conC=SEL.map(M2).filter(function(x){ return !x.libre; })[0], idR=conC?cid(conC):'';
   return '<div style="margin:0 0 8px;padding:10px 12px;border-radius:14px;border:1px solid rgba(224,169,74,.5);background:rgba(224,169,74,.08)">'+
     '<div style="font-size:13px;font-weight:650;color:var(--oro)">'+(SEL.length<2 ? 'Juntar con la '+p+': toca la otra mesa'
       : SEL.join(' + ')+' → una cuenta sola'+(idR?', la '+idR:'')+' · los pedidos van a la '+p)+'</div>'+
@@ -1134,10 +1159,13 @@ function juntaUna(o,x){
     if(x.qr&&!o.qr) o.qr=x.qr; if(x.llama&&!o.llama) o.llama=x.llama; }
   o.juntas=(o.juntas||[]).concat([x.m],x.juntas||[]); (x.juntas||[]).forEach(function(j){ M2(j).junta=o.m; });
   x.tot=0; x.lin=[]; x.libre=1; x.llama=null; x.qr=null; x.id=null; x.juntas=[]; x.junta=o.m; }
-function juntaDo(){ var o=M2(SEL[0]), ent=SEL.slice(1).map(M2), chiuse=[];
+function juntaDo(){ var foto=juntaFoto(), o=M2(SEL[0]), ent=SEL.slice(1).map(M2), chiuse=[];
   ent.forEach(function(x){ if(!x.libre && !o.libre) chiuse.push(cid(x)); juntaUna(o,x); });
   var t='✓ '+[o.m].concat(ent.map(function(x){ return x.m; })).join(' · ')+' juntas'+(cid(o)?' · cuenta '+cid(o):'')+(chiuse.length?' · '+chiuse.join(', ')+(chiuse.length>1?' se cierran':' se cierra'):'');
-  SEL=[]; pinta(); flash(t); }
+  SEL=[]; if(UNDO) clearTimeout(UNDO.t);
+  UNDO={foto:foto,txt:t,fin:Date.now()+5000,t:null};
+  (function tic(){ if(!UNDO) return; if(Date.now()>=UNDO.fin){ UNDO=null; pinta(); return; } if(!abierta) pollice(); UNDO.t=setTimeout(tic,500); })();
+  pinta(); }
 /* la carta: ogni prodotto sa a che FAMIGLIA appartiene e se è di quelli che si pidono ADESSO */
 var CARTA=[
  {n:'Gin tonic',p:8400,f:'tragos',frec:1},{n:'Negroni',p:7900,f:'tragos',frec:1},
@@ -1244,6 +1272,7 @@ function riga(){
 function crece(el,m){
   if(_lpSalta){ _lpSalta=false; return; }                       // il rilascio del tenere premuto non è un tocco
   if(SEL.length){ selTocca(m); return; }                         // con una junta in costruzione il tocco aggiunge/toglie
+  if(SEPJ){ SEPJ=null; pinta(); return; }                        // con la domanda «separar» aperta, un tocco altrove la chiude
   var tel=$('tel').getBoundingClientRect(), a=el.getBoundingClientRect();
   var g=document.createElement('div'); g.className='fantasma';
   g.textContent=m; g.style.cssText+='left:'+(a.left-tel.left)+'px;top:'+(a.top-tel.top)+
