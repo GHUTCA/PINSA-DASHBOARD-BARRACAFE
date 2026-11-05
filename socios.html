@@ -7,10 +7,11 @@
      De dónde (contrato de ⚙️ ARQ, ramo arq-socios e017d6f, leva SOCIOS_ON):
        GET {BORDE}/socios/resumen?loc=BKS&dia=AAAA-MM-DD  → { ok, local, dia, righe:[{k:'hoy'|'ayer'|'sem', dia,
                    pedidos, venta, venta_am, mesas, boletas, cobrado, propina}], leido_ts }  = pinsita.soci_comparativa
-       GET {BORDE}/socios/mes?loc=BKS&mes=AAAA-MM  → { ok, local, mes, righe:[{dia, n, total, meta?, normal?}], leido_ts }
-                   = pinsita.soci_mes: boletas emitidas por día operativo 06-06. La meta y el «día normal»
-                   (dom..sáb) se leen de la respuesta o de la primera fila; si faltan, la página lo dice.
-       La página pide el mes en curso + los 3 anteriores (últimos 7 días y meses cerrados), sin segunda fórmula.
+       GET {BORDE}/socios/mes?loc=BKS&mes=AAAA-MM  → { ok, local, mes, righe:{ meta, normal:[dom..sáb],
+                   dias:[{dia, n, total}], meses:[{mes, total}] }, leido_ts }  = pinsita.soci_mes, UN jsonb
+                   (forma decidida por el 🎛 CONTROLLER V34, bacheca «DUE CONTRATTI, UNO SOLO», 05-nov 16:33).
+                   dias = boletas emitidas por día operativo 06-06; la página usa sólo los días < hoy.
+                   Una llamada por mes. meta/normal null ⇒ la página lo dice, no inventa.
        Errores: 401 firma_* · 403 cargo_no_autorizado / local_fuera_de_alcance · 404 leva_spenta · 502 pg_no_responde.
      Un día que falta se DICE que falta, nunca cero. ?demo=1 = números reales del 04-nov, fijos. -->
 <html lang="es">
@@ -52,7 +53,7 @@ footer{font-size:12px;color:var(--mute);margin:8px 0 24px}
 <div id="aviso" class="note hidden"></div>
 <div id="app"><div class="card"><div class="mute">Cargando…</div></div></div>
 <footer>Venta = pedidos del día · Cobrado = pagos con boleta · Mes = boletas emitidas · Día de 06:00 a 06:00 · Sólo lectura.
-  <br><span id="ver">socios v1.0.1 · 05-nov-2026</span> · <span id="edad"></span></footer>
+  <br><span id="ver">socios v1.0.2 · 05-nov-2026</span> · <span id="edad"></span></footer>
 </div>
 <script src="shared/pinsita_auth.js"></script>
 <script>
@@ -89,23 +90,23 @@ var DEMO_RES = { ok:true, local:'BKS', dia:'2026-11-04', righe:[
   {k:'sem', dia:'2026-10-28', pedidos:212, venta:4043260, venta_am:1810930, mesas:50, boletas:98, cobrado:3709676, propina:369267},
   {k:'ayer',dia:'2026-11-03', pedidos:221, venta:4059590, venta_am:1445010, mesas:53, boletas:94, cobrado:3723224, propina:363810},
   {k:'hoy', dia:'2026-11-04', pedidos:195, venta:3848410, venta_am:1734120, mesas:48, boletas:98, cobrado:3725112, propina:366745}]};
-// demo en la forma ya «juntada» por juntarMeses(): el mes en curso + días y totales de los meses anteriores
-var DEMO_MES = { ok:true, local:'BKS', mes:'2026-11', meta:240000000,
+var DEMO_MES = { ok:true, local:'BKS', mes:'2026-11', righe:{ meta:240000000,
   normal:[5328188,2950448,2926109,4182664,6415939,11060032,14000790],
   dias:[{dia:'2026-10-29',total:6415939},{dia:'2026-10-30',total:11330784},{dia:'2026-10-31',total:14882414},
         {dia:'2026-11-01',n:114,total:5581476},{dia:'2026-11-02',n:82,total:3500712},{dia:'2026-11-03',n:89,total:3723224},{dia:'2026-11-04',n:95,total:3725112}],
-  meses:[{mes:'2026-10',total:223865632}] };
-function mesAnterior(m,k){ var y=+m.slice(0,4), mm=+m.slice(5,7)-k; while(mm<1){mm+=12;y--;} return y+'-'+(mm<10?'0':'')+mm; }
-// une las 4 respuestas de /socios/mes (en curso + 3 anteriores) en la forma que pinta tarjetasMes
-function juntarMeses(rs, hoy){
-  var cur=rs[0]||{}, r0=(cur.righe||[])[0]||{}, dias=[], meses=[];
-  rs.forEach(function(r,i){ var rg=(r&&r.righe)||[]; rg.forEach(function(x){ if(x&&x.dia) dias.push({dia:String(x.dia).slice(0,10),n:+x.n,total:+x.total}); });
-    if(i>0 && rg.length) meses.unshift({mes:r.mes, total:rg.reduce(function(s,x){return s+(+x.total||0);},0)}); });
-  dias=dias.filter(function(d){ return d.dia<hoy; });
-  var meta = cur.meta!=null ? cur.meta : (r0.meta!=null ? r0.meta : null);
-  var normal = cur.normal || r0.normal || null;
+  meses:[{mes:'2026-10',total:223865632}] } };
+// la respuesta de /socios/mes (righe = el jsonb de soci_mes) en la forma que pinta tarjetasMes
+function leerMes(r, hoy){
+  var o=(r&&r.righe)||{};
+  if(Array.isArray(o) || typeof o!=='object') throw {code:'forma_mes'};   // otra forma: no se pinta a medias
+  var normal=o.normal;
   if(typeof normal==='string'){ try{ normal=JSON.parse(normal.replace(/^\{/,'[').replace(/\}$/,']')); }catch(e){ normal=null; } }
-  return { ok:true, local:cur.local, mes:cur.mes||hoy.slice(0,7), meta:meta, normal:normal, dias:dias, meses:meses };
+  if(!(Array.isArray(normal) && normal.length===7)) normal=null;
+  var dias=(o.dias||[]).map(function(x){ return {dia:String(x.dia).slice(0,10), n:+x.n, total:+x.total}; })
+    .filter(function(d){ return d.dia<hoy; });
+  var meses=(o.meses||[]).map(function(x){ return {mes:String(x.mes).slice(0,7), total:+x.total}; })
+    .filter(function(x){ return x.mes<hoy.slice(0,7); });
+  return { ok:true, local:r.local, mes:r.mes||hoy.slice(0,7), meta:(o.meta==null?null:+o.meta), normal:normal, dias:dias, meses:meses };
 }
 
 function pedir(ruta){
@@ -201,6 +202,7 @@ function mensajeError(e){
   if(c==='firma'||/^firma_/.test(c)||c==='http_401') return 'Tu sesión no trae la firma o ya venció: sal y vuelve a entrar con tu PIN.';
   if(c==='cargo_no_autorizado'||c==='local_fuera_de_alcance'||c==='http_403') return 'Tu acceso no incluye este local.';
   if(c==='leva_spenta'||c==='http_404') return 'Esta sección aún no está encendida.';
+  if(c==='forma_mes'||c==='pg_forma') return 'Los números llegaron con otra forma: no muestro cifras a medias. Avisa a Alberto.';
   return 'No pude leer los números ('+esc(c||'sin red')+'). Vuelve a intentar en un minuto.';
 }
 
@@ -212,13 +214,9 @@ function pintar(ses){
   if(DEMO){ var av=document.getElementById('aviso'); av.textContent='DEMO · números reales del miércoles 04-11, fijos. No es la página viva.'; av.classList.remove('hidden'); }
   var loc = ((location.search.match(/[?&]loc=([a-z*,]+)/i)||[])[1]||'BKS').toUpperCase();
   var q = '?loc='+encodeURIComponent(loc);
-  var m0 = hoy.slice(0,7);
-  var pr = DEMO ? Promise.all([DEMO_RES, DEMO_MES])
-    : Promise.all([pedir('/socios/resumen'+q+'&dia='+ayer),
-        Promise.all([0,1,2,3].map(function(k){ var mm=mesAnterior(m0,k);
-          // un mes anterior que falla no tumba la página: se pinta sin él (y sin su total)
-          return k===0 ? pedir('/socios/mes'+q+'&mes='+mm) : pedir('/socios/mes'+q+'&mes='+mm).catch(function(){ return {mes:mm, righe:[]}; }); }))
-        .then(function(rs){ return juntarMeses(rs, hoy); })]);
+  var pr = Promise.all([ DEMO ? DEMO_RES : pedir('/socios/resumen'+q+'&dia='+ayer),
+                         (DEMO ? Promise.resolve(DEMO_MES) : pedir('/socios/mes'+q+'&mes='+hoy.slice(0,7)))
+                           .then(function(r){ return leerMes(r, hoy); }) ]);
   pr.then(function(r){
     app.innerHTML = '<div class="tabs"><span>'+esc(r[0].local||'BKS')+'</span></div>' + tarjetaAyer(r[0]) + tarjetasMes(r[1], hoy);
     document.getElementById('edad').textContent = 'Leído: ' + new Date().toLocaleString('es-CL',{timeZone:'America/Santiago',dateStyle:'short',timeStyle:'short'});
