@@ -1,5 +1,13 @@
 /* ════════════════════════════════════════════════════════════════════
- *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.12
+ *  *  PINSITA · AUTH-RUOLI · modulo frontend condiviso  ·  v1.13
+ *  v1.13 (04-nov-2026) · AUT-EMERG-0864 ② ⓑ1 · LA SESSIONE TIENE IL TOKEN.
+ *           Il login del GAS AUTH conia da luglio un token firmato
+ *           ({u, r, loc, exp 24h} + HMAC con CANCELLO_SECRET) e qui si buttava.
+ *           Ora `guardarSesion` lo salva e `PinsitaAuth.firma()` lo restituisce
+ *           finché non scade (stringa vuota altrimenti). I vetri che scrivono lo
+ *           mandano: `X-Firma` al bordo, `token` nel corpo al GAS. ⚠️ Il set_pin
+ *           non restituisce token: chi ha appena scelto il PIN resta senza firma
+ *           fino al login successivo. Freno: localStorage `pinsita_firma_off`="1".
  *  v1.12 (06-ago-2026) · LA SERRATURA DICE LA VERITÀ (mappa 06-ago: il login
  *           era il punto singolo di rottura più grave — fetch senza timeout,
  *           lista che degradava a testo libero IN SILENZIO, «Sin conexión»
@@ -191,7 +199,13 @@
       inject();
       window.addEventListener('pageshow', inject);
     },
-    sesion: function () { return leerSesion(); }
+    sesion: function () { return leerSesion(); },
+    // v1.13 · AUT-EMERG-0864 ② ⓑ1 · LA FIRMA DI CHI SCRIVE. Il token della sessione
+    // valida, se non è scaduto (`exp` letto dal corpo, NON verificato: la verifica è
+    // del bordo e del GAS, qui si evita solo di spedire un token morto). Altrimenti
+    // stringa vuota ⇒ il vetro scrive come ieri, e a leva accesa il bordo dice
+    // `firma_requerida` (si torna al PIN). Freno: localStorage `pinsita_firma_off`="1".
+    firma: function () { return firmaDeSesion(leerSesion()); }
   };
 
   // ════════════════════════════════════════════════════════════════
@@ -274,7 +288,7 @@
     // v1.5 · usa res.local dal GAS (verita' autorevole) invece di CFG.local
     // CFG.local riflette il scope della card cliccata, non il local reale dell'utente.
     // Utenti corporate (local='*') venivano salvati col scope della card → gating sbagliato.
-    guardarSesion(seleccion.nombre, res.cargo, res.turno, res.local || CFG.local);
+    guardarSesion(seleccion.nombre, res.cargo, res.turno, res.local || CFG.local, res.token);
 
     var ses = leerSesion();
     var cd = cardPendiente;
@@ -322,12 +336,30 @@
     } catch (e) { return null; }
   }
 
-  function guardarSesion(user, role, turno, localOverride) {
+  // v1.13 · il corpo del token è base64url(JSON): se ne legge solo `exp`.
+  function firmaDeSesion(s) {
+    try {
+      if (localStorage.getItem('pinsita_firma_off') === '1') return '';
+      var t = s && s.token;
+      if (typeof t !== 'string' || t.indexOf('.') <= 0) return '';
+      var b = t.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+      while (b.length % 4) b += '=';
+      var p = JSON.parse(atob(b));
+      if (!p || !(Number(p.exp) > Date.now())) return '';
+      return t;
+    } catch (e) { return ''; }
+  }
+
+  function guardarSesion(user, role, turno, localOverride, token) {
     var s = {
       user: user, role: role,
       local: localOverride || CFG.local,
       turno: turno || '', expiresAt: Date.now() + SESSION_HORAS * 3600 * 1000
     };
+    // v1.13 · il token firmato che il login del GAS AUTH conia (`_cancelloFirmar_`,
+    // {u, r, loc, exp 24h} + HMAC). Prima si buttava. Si salva SOLO se ha la forma
+    // `corpo.firma`: il set_pin non lo restituisce, e allora la sessione resta senza.
+    if (typeof token === 'string' && token.indexOf('.') > 0) s.token = token;
     try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) {}
     // v1.9 · briciola permanente (sopravvive alla scadenza): questo telefono ha
     // fatto login col PIN almeno una volta → NON è il telefono di un mesero
@@ -676,7 +708,7 @@
         if (modoPortal) {
           finalizarLoginPortal(res);
         } else {
-          guardarSesion(seleccion.nombre, res.cargo, res.turno, res.local); // v1.8: lo scope viene dal foglio usuarios
+          guardarSesion(seleccion.nombre, res.cargo, res.turno, res.local, res.token); // v1.8 · v1.13 + token: lo scope viene dal foglio usuarios
           ocultarOverlay();
           aplicarGating(res.cargo);
         }
@@ -723,7 +755,7 @@
         if (modoPortal) {
           finalizarLoginPortal(res);
         } else {
-          guardarSesion(seleccion.nombre, res.cargo, res.turno, res.local); // v1.8: lo scope viene dal foglio usuarios
+          guardarSesion(seleccion.nombre, res.cargo, res.turno, res.local, res.token); // v1.8 · v1.13 + token: lo scope viene dal foglio usuarios
           ocultarOverlay();
           aplicarGating(res.cargo);
         }

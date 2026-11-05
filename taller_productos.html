@@ -184,7 +184,7 @@
     <button id="nav-precios" onclick="vista('precios')" style="display:none">Precios</button>
   </nav>
   <span class="userchip" id="userchip">—</span>
-  <span class="ver" id="ver">v2.7.1 · familias EXO · 19-oct</span>
+  <span class="ver" id="ver">v2.7.3 · la firma de quien escribe, sin Google · 4-nov</span>
 </header>
 
 <main>
@@ -3256,6 +3256,15 @@ async function llamarGAS(payload){
      un secondo conio). Il ritentativo dello STESSO gesto porta lo STESSO uid ⇒ non crea due volte.
    Il token e' lo stesso (pubblico) del Registro e del Diccionario: debito M4 dichiarato, non nuovo. */
 const TALLER_BORDE = { URL:'https://pinsita-borde.alberto-agostini.workers.dev', T:'7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ' };
+/* [AUT-EMERG-0864 ② · ⓑ1 · 04-nov · 🖐 TERZA V32] LA FIRMA DI CHI SCRIVE: il token della sessione (`PinsitaAuth.firma()`,
+   pinsita_auth v1.13) nell'header `X-Firma` al bordo; vuoto se assente o scaduto ⇒ si scrive come ieri.
+   Al GAS non va: il ripiego `llamarGAS` (GET `?data=`, il token finirebbe nell'URL) è tolto da `scriviReceta`;
+   le scritture in GET del Visor le chiude ⚙️ ARQ lato GAS (dom 8). */
+function _hBordoTaller(extra){
+  const h = Object.assign({ 'X-Borde-Token':TALLER_BORDE.T }, extra || {});
+  try{ const f = (window.PinsitaAuth && typeof PinsitaAuth.firma === 'function') ? PinsitaAuth.firma() : ''; if (f) h['X-Firma'] = f; }catch(e){}
+  return h;
+}
 const _uidReceta = {};   // un uid per GESTO (tutto il payload), finche' non va a buon fine: { k: {uid, id} }
 async function scriviReceta(payload){
   const k = JSON.stringify(payload);
@@ -3266,14 +3275,23 @@ async function scriviReceta(payload){
   let r = null, j = null;
   try {
     r = await fetch(TALLER_BORDE.URL + '/catalogo/scrivi', { method:'POST',
-      headers:{ 'X-Borde-Token':TALLER_BORDE.T, 'Content-Type':'text/plain' }, body: JSON.stringify(body) });
+      headers:_hBordoTaller({ 'Content-Type':'text/plain' }), body: JSON.stringify(body) });
     try { j = await r.json(); } catch(e) { j = null; }
   } catch(e) {
     throw new Error('sin conexión con el sistema (' + (e && e.name || e) + '). Reintenta: no se crea dos veces');
   }
   const levaSpenta = (j && j.error === 'leva_spenta') || (r.status === 404 && (!j || j.error === 'ruta_desconocida'));
-  if (levaSpenta) return await llamarGAS(payload);   // il GAS come oggi, invariato
+  /* [ⓑ1 · 04-nov · scelta di ⚙️ ARQ V34, «LE TRE CONDIZIONI: ① FATTA»] IL RIPIEGO AL GAS SI TOGLIE. Era un GET `?data=`
+     verso il Visor, senza cancello: una porta aperta col suo URL in pagina, e il token lì andrebbe nell'URL. Leva spenta
+     o rotta assente ⇒ non si scrive su Google: si dice «no se pudo» e il gesto tiene il suo uid (`_uidReceta`), così
+     il reintento non crea due volte. `llamarGAS` resta definita e non la chiama più nessuno. */
+  if (levaSpenta) throw new Error('el sistema no recibe recetas en este momento (' + ((j && j.error) || r.status) + '). No se guardó: reintenta en un rato, no se crea dos veces');
   if (!j) throw new Error('respuesta ilegible del sistema (' + r.status + '). Reintenta: no se crea dos veces');
+  /* [ⓑ1 · contratto di ⚙️ ARQ 5d06052] 401 `firma_vencida`/`firma_requerida` ⇒ non si è scritto niente: si torna al PIN */
+  if (j.error === 'firma_vencida' || j.error === 'firma_requerida') {
+    try{ if (confirm('Tu firma venció: no se guardó. Vuelve a entrar con tu PIN.\n\n¿Entrar ahora? (se pierde lo escrito en esta ficha)') && window.PinsitaAuth) PinsitaAuth.logout(); }catch(e){}
+    throw new Error('tu firma venció: vuelve a entrar con tu PIN. No se guardó');
+  }
   if (j.ok === true) {
     delete _uidReceta[k];
     // banco C2b E06: un gesto piu' NUOVO sulla stessa ricetta e' andato a buon fine ⇒ i gesti rimasti aperti su

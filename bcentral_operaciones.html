@@ -1312,11 +1312,35 @@ function showToast(msg, type='') {
   setTimeout(() => t.className = 'toast', 2800);
 }
 
+/* [AUT-0865 · ⓑ1 · 04-nov · 🖐 TERZA V32, su «IL SESTO BOUND È BCENTRAL» di ⚙️ ARQ] LA FIRMA DI CHI SCRIVE: il token
+   della sessione (`PinsitaAuth.firma()`, pinsita_auth v1.13) va nel CORPO, mai nell'URL: il `cancelloGuardia` di
+   BCENTRAL legge `data.token`. Vuoto se assente o scaduto ⇒ si scrive come ieri (in `warn` passa, in `on` torna
+   `no_autorizado` e si chiede il PIN, una volta per pagina). */
+let _firmaPinChiestoBC = false;
+const _ESCRITURAS_BC = { emitirOC:1, anularOC:1, recibirOC:1, despacharSolicitud:1, registrarAjusteBC:1,
+  registrarMovimientoBC:1, registrarMovimientosBC:1, resolverDiferenciaBC:1, guardarProveedor:1 };
 async function callGAS(payload) {
   try {
-    const r = await fetch(CFG.GAS_URL, { method:'POST', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) });
+    let _f = '';
+    try { _f = (window.PinsitaAuth && typeof PinsitaAuth.firma === 'function') ? (PinsitaAuth.firma() || '') : ''; } catch(e) {}
+    const _p = _f ? Object.assign({}, payload, { token: _f }) : payload;
+    const r = await fetch(CFG.GAS_URL, { method:'POST', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(_p) });
     const txt = await r.text();
-    try { return JSON.parse(txt); } catch(e) { return { ok: true }; }
+    let _j = null; try { _j = JSON.parse(txt); } catch(e) {}
+    if (_j && _j.error === 'no_autorizado' && !_firmaPinChiestoBC) {
+      _firmaPinChiestoBC = true;
+      try { if (confirm('Tu firma venció: no se guardó. Vuelve a entrar con tu PIN.\n\n¿Entrar ahora?')) PinsitaAuth.logout(); } catch(e) {}
+    }
+    /* [AUT-0865 · 04-nov · 🎛 CONTROLLER V34, su «Sì, ci sta nel giro di gio 5» · ✅] «GUARDADO» SOLO CON UN JSON ok:true.
+       Prima una risposta non JSON (pagina HTML di Google, login, captive portal) tornava `{ok:true}` e diceva «guardado»
+       senza che niente fosse scritto. Ora: non JSON ⇒ errore visibile; per le SCRITTURE anche un JSON senza `ok:true`
+       è un errore (i chiamanti di emitirOC, recibirOC, registrarAjusteBC e guardarProveedor leggevano `ok!==false`).
+       Tutti i return di primo livello dei nove handler di BCENTRAL portano `ok` (letto su Code.js). */
+    if (!_j) return { ok: false, error: 'respuesta no válida del sistema (' + r.status + '): no se guardó, reintenta' };
+    if (_ESCRITURAS_BC[payload && payload.action] && _j.ok !== true && _j.ok !== false) {
+      return Object.assign({}, _j, { ok: false, error: _j.error || 'el sistema no confirmó: no se guardó, reintenta' });
+    }
+    return _j;
   } catch(e) { return { ok: false, error: e.toString() }; }
 }
 
