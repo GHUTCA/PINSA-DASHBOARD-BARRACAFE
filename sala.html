@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.93 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.94 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3226,6 +3226,8 @@ async function leerSala(codigo, nombre) {
             /* [05-nov · D-431, prova del QR con Alberto: la 999 restava LIBRE] il bordo pubblica `qr_espera` al livello di `muertos`, non dentro la fetta
                del mesero: senza questa copia `_qrEsperaHtml` leggeva sempre il vuoto. Assente = leva spenta sul bordo = vetro di ieri. */
             if (Array.isArray(j.datos.datos.qr_espera)) mia.qr_espera = j.datos.datos.qr_espera;
+            /* [05-nov · AUT-0877] `qr_bloqueados` ARQ lo mette nella fetta E in cima: vince la fetta, la cima solo se la fetta non lo porta. */
+            if (!Array.isArray(mia.qr_bloqueados) && Array.isArray(j.datos.datos.qr_bloqueados)) mia.qr_bloqueados = j.datos.datos.qr_bloqueados;
             /* [AUT-0461 · 27-set] l ora VERA dei dati (quando il libro li ha letti): la junta la usa per decidere se una foto è nata prima o dopo il gesto. `_edad_dato_s` dal 26-set (AUT-0445) è l età del BORDO, fresca anche quando i dati dentro sono vecchi. */
             if (_tsD > 0) mia._ts_datos = _tsD;
             /* v3.23.0 · una sala vecchia si mostra, ma DICE quanto è vecchia.
@@ -6017,6 +6019,75 @@ async function _qrGesto(action, uuid) {
   }
   if (STATE.sala && Array.isArray(STATE.sala.qr_espera) && j && j.borde === true && (j.ok || j.need === 'qr_ya_resuelto' || j.need === 'qr_no_encontrado' || j.error === 'apagado')) {
     STATE.sala.qr_espera = STATE.sala.qr_espera.filter(function (x) { return String(x.uuid) !== String(uuid); });   // esce subito; il poll lo conferma
+  }
+  refrescarMapa();
+}
+/* ═══ [05-nov · AUT-0877 · D-459, Alberto: «dopo un rechazo il telefono può solo guardare»] LO SBLOCCO DAL VETRO ═══════════════
+   Contratto di ⚙️ ARQ `5620317` (bacheca «ARQ V34 5620317 AUT-0877»): il bordo manda `qr_bloqueados` = [{uuid, mesa, tel_hash, ts, ts_pedido, chi, ruolo,
+   total, productos}] dentro `meseros[slug]` (e in cima: lo si legge anche da lì, così la lezione del 05-nov mattina non torna in nessun verso).
+   Il gesto `desbloquearTelefono {mesa, tel_hash, uid_gesto, nombre, codigo|pin_jl}` va SOLO al bordo, come confirmarQr. Chi può: come `_qrPuede`
+   (dueño della plaza o JL); decide il bordo. LEVA: il campo stesso. Con `QR_BLOCCO_MESA_ON` "0" non nasce e questa sezione non esiste. */
+const _qrBloqUid = {};    // mesa|tel_hash -> uid_gesto del tocco in corso (stesso uid sui retry senza risposta timbrata)
+const _qrBloqVolo = {};
+function _qrBloqLista(r) { return (r && Array.isArray(r.qr_bloqueados)) ? r.qr_bloqueados : []; }   // la copia dal livello alto la fa `leerSala`
+function _qrBloqHtml(r) {
+  const l = _qrBloqLista(r).filter(function (b) { return b && b.mesa != null && b.tel_hash; });
+  if (!l.length) return '';
+  return '<div class="h">🔒 Teléfonos bloqueados hoy — ' + l.length + '</div>' + l.map(function (b) {
+    const k = String(b.mesa) + '|' + String(b.tel_hash);
+    const kj = esc(String(b.mesa)).replace(/'/g, '') + "','" + esc(String(b.tel_hash)).replace(/'/g, '');
+    const t = +new Date(b.ts) || +b.ts || 0;
+    const min = t ? Math.max(0, Math.round((Date.now() - t) / 60000)) : 0;
+    const prods = (b.productos || []).map(function (p) { return esc(String((p.qty || 1) + '× ' + (p.nombre || ''))); }).join(' · ');
+    const volo = !!_qrBloqVolo[k], puede = _qrPuede({ mesa: b.mesa });
+    return '<div style="background:#334155;color:#fff;border-radius:10px;padding:10px;margin:0 0 8px">' +
+      '<div style="font-weight:800;font-size:14px">Mesa ' + esc(String(b.mesa)) + ' · pedido rechazado' +
+        '<span style="float:right;font-weight:600;opacity:.8">' + (t ? (min > 0 ? 'hace ' + min + ' min' : 'ahora') : '') + '</span></div>' +
+      '<div style="font-size:12px;margin:6px 0">' + (prods || '—') + (b.total ? ' · <b>$' + _fmtMiles(+b.total || 0) + '</b>' : '') +
+        (b.chi ? ' · <span style="opacity:.8">rechazó ' + esc(String(b.chi)) + '</span>' : '') + '</div>' +
+      '<div style="font-size:11px;opacity:.85;margin-bottom:6px">Ese teléfono solo puede ver la carta en esta mesa.</div>' +
+      '<button ' + (volo || !puede ? 'disabled ' : '') + 'onclick="_qrDesbloquear(\'' + kj + '\')" style="width:100%;padding:10px;border:0;border-radius:8px;background:#0369a1;color:#fff;font-weight:800' + (puede ? '' : ';opacity:.4') + '">🔓 Desbloquear este teléfono</button>' +
+      (puede ? '' : '<div style="font-size:11px;opacity:.85;margin-top:6px">Solo el garzón de la plaza de la mesa ' + esc(String(b.mesa)) + ' o el JL pueden desbloquearlo.</div>') +
+      '</div>';
+  }).join('');
+}
+async function _qrDesbloquear(mesa, telHash) {
+  const k = String(mesa) + '|' + String(telHash);
+  if (!mesa || !telHash || _qrBloqVolo[k]) return;
+  if (!_qrPuede({ mesa: mesa })) { toast('warn', 'Solo el garzón de la plaza de la mesa ' + mesa + ' o el JL.'); return; }
+  if (!_qrBloqUid[k]) _qrBloqUid[k] = _gid('qr');
+  _qrBloqVolo[k] = true; refrescarMapa();
+  let j = null;
+  try {
+    if (!BORDE_SALA || !BORDE_SALA.URL) throw new Error('sin_borde');
+    const u = BORDE_SALA.URL + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL || 'BKS') + '?t=' + encodeURIComponent(BORDE_SALA.T);
+    const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
+    const res = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, cache: 'no-store', signal: ctrl.signal,
+      body: JSON.stringify(_conDev(Object.assign({ action: 'desbloquearTelefono', local: CFG.LOCAL, cli_ver: _salaVer(), app: APP_ID,
+        mesa: String(mesa), tel_hash: String(telHash), uid_gesto: _qrBloqUid[k], mesero: STATE.nombre || '' },
+        JL ? { pin_jl: JL.pin, nombre: JL.user || STATE.nombre || '' } : { codigo: STATE.codigo || '', nombre: STATE.nombre || '' }))) });
+    clearTimeout(to);
+    j = await res.json();
+  } catch (e) { j = null; }
+  delete _qrBloqVolo[k];
+  const _telVisto = !!(j && j.borde === true && _telTurnoVede(j));
+  if (j && j.borde === true) delete _qrBloqUid[k];   // risposta timbrata: il prossimo tocco è un gesto nuovo
+  let esce = false;
+  if (!(j && j.borde === true)) {
+    toast('warn', '📶 No se desbloqueó: vuelve a tocar.');   // stesso uid_gesto al prossimo tocco
+  } else if (j.ok) {
+    esce = true;
+    toast('ok', j.ya ? (j.mensaje || 'Ese teléfono ya no estaba bloqueado.') : '🔓 Mesa ' + (j.mesa || mesa) + ': el teléfono puede volver a pedir.');
+  } else if (j.error === 'apagado') {
+    esce = true;
+    toast('warn', 'El bloqueo de teléfonos está apagado.');
+  } else if (!_telVisto && j.error === 'codigo_no_verificable') {
+    toast('err', 'No se pudo verificar tu código del turno: sal y vuelve a entrar, o avísale al JL.');
+  } else if (!_telVisto) {
+    toast('err', j.mensaje || ('No se pudo: ' + (j.error || j.need || 'error') + '.'));   // no_es_tu_plaza · sin_dueno · mismo_telefono: la frase è del bordo
+  }
+  if (esce && STATE.sala && Array.isArray(STATE.sala.qr_bloqueados)) {
+    STATE.sala.qr_bloqueados = STATE.sala.qr_bloqueados.filter(function (x) { return !(x && String(x.mesa) === String(mesa) && String(x.tel_hash) === String(telHash)); });
   }
   refrescarMapa();
 }
@@ -13185,6 +13256,7 @@ function renderMesas(r) {
   const todas = _plazaLista();
   list.forEach(function (m) { if (todas.indexOf(m.mesa) < 0) todas.push(m.mesa); });
   h += _qrEsperaHtml(r);   // [01-nov · D-431] sopra la plaza e fuori dal suo if: conferma qualsiasi garzón del turno, anche senza plaza
+  h += _qrBloqHtml(r);     // [05-nov · AUT-0877] i telefoni che oggi possono solo guardare: campo assente = niente
   if (todas.length) {
     h += '<div class="h">Mi plaza — ' + list.length + ' con gente</div>' +
       /* v3.17.0 · [AUT-0034] · se il DISEGNO tronca, lo dice. Il diritto di
