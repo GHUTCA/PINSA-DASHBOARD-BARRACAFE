@@ -43,6 +43,12 @@ header a{color:var(--mute);text-decoration:none;font-size:13px}
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:5px 2px;text-align:right;font-variant-numeric:tabular-nums}td:first-child,th:first-child{text-align:left}th{color:var(--mute);font-weight:500;border-bottom:1px solid var(--line)}
 .bars{display:flex;align-items:flex-end;gap:6px;height:90px;margin-top:6px}.bars div{flex:1;background:var(--bar);border-radius:4px 4px 0 0;min-height:2px}.bars div.hi{background:var(--barhi)}.bars div.nd{background:none;border:1px dashed var(--line)}
 .lbl{display:flex;gap:6px}.lbl span{flex:1;text-align:center;font-size:11px;color:var(--mute)}
+.d7{display:flex;gap:4px;align-items:flex-end}.dcol{flex:1;min-width:0;text-align:center}
+.dval{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;margin-bottom:2px}
+.dbars{display:flex;gap:2px;align-items:flex-end;height:110px}.dbars i{flex:1;display:block;background:var(--bar);border-radius:3px 3px 0 0}
+.dbars i.hi{background:var(--barhi)}.dbars i.sh{background:none;border:1.5px solid var(--mute);border-bottom:0;opacity:.6}.dbars i.nd{background:none;border:1px dashed var(--line)}
+.dlbl{font-size:11px;color:var(--mute);margin-top:4px;white-space:nowrap}.dpct{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
+.sw{display:inline-block;width:10px;height:10px;background:var(--barhi);border-radius:2px;vertical-align:-1px}.sw.sh{background:none;border:1.5px solid var(--mute);opacity:.6}
 footer{font-size:12px;color:var(--mute);margin:8px 0 24px}
 .note{background:var(--warnbg);color:var(--warn);border-radius:10px;padding:8px 12px;font-size:13px;margin-bottom:12px}
 .hidden{display:none}
@@ -53,7 +59,7 @@ footer{font-size:12px;color:var(--mute);margin:8px 0 24px}
 <div id="aviso" class="note hidden"></div>
 <div id="app"><div class="card"><div class="mute">Cargando…</div></div></div>
 <footer>Venta = pedidos del día · Cobrado = pagos con boleta · Mes = boletas emitidas · Día de 06:00 a 06:00 · Sólo lectura.
-  <br><span id="ver">socios v1.0.3 · 05-nov-2026</span> · <span id="edad"></span></footer>
+  <br><span id="ver">socios v1.1.0 · 05-nov-2026</span> · <span id="edad"></span></footer>
 </div>
 <script src="shared/pinsita_auth.js"></script>
 <script>
@@ -95,6 +101,9 @@ var DEMO_MES = { ok:true, local:'BKS', mes:'2026-11', righe:{ meta:240000000,
   dias:[{dia:'2026-10-29',total:6415939},{dia:'2026-10-30',total:11330784},{dia:'2026-10-31',total:14882414},
         {dia:'2026-11-01',n:114,total:5581476},{dia:'2026-11-02',n:82,total:3500712},{dia:'2026-11-03',n:89,total:3723224},{dia:'2026-11-04',n:95,total:3725112}],
   meses:[{mes:'2026-08',total:33047184},{mes:'2026-09',total:232192344},{mes:'2026-10',total:221743862}] } };
+// demo: 1→7 de octubre (4 semanas antes de 29-oct→4-nov), boletas por día operativo puro (soci_mes de octubre)
+var DEMO_SOMBRA = {'2026-10-01':6541508,'2026-10-02':10883104,'2026-10-03':14077302,'2026-10-04':4833540,
+  '2026-10-05':2114326,'2026-10-06':1899530,'2026-10-07':4426868};
 // Las boletas en PG empiezan el 29-ago-2026: un mes anterior a éste es PARCIAL y no se compara (🚚 MIGRA, 05-nov).
 var PRIMER_MES_COMPLETO = { BKS:'2026-09' };
 // la respuesta de /socios/mes (righe = el jsonb de soci_mes) en la forma que pinta tarjetasMes
@@ -179,12 +188,33 @@ function tarjetasMes(m, hoy){
       t+='<tr><td>'+(+s.desde.slice(8))+(s.desde===s.hasta?'':'–'+(+s.hasta.slice(8)))+'</td><td>'+(s.nv?mill(s.v)+(s.nv<n?' <span class="mute">('+s.nv+' d)</span>':''):'—')+'</td><td>'+mill(s.meta)+'</td></tr>'; });
     out+=t+'</table></div>';
   }
-  // ④ últimos 7 días operativos
+  // ④ últimos 7 días operativos, cada uno contra el MISMO día de la semana 4 semanas antes (Alberto, 05-nov:
+  //    «non si capisce quanto si vende»). Mié contra mié: un sábado contra un martes miente.
+  //    Los días de 4 semanas antes vienen de soci_mes de su mes (m.sombra, pedido aparte en pintar).
   var u=[]; for(var k=7;k>=1;k--) u.push(addDias(hoy,-k));
-  var mx=Math.max.apply(null,u.map(function(d){return act[d]||0;}).concat([1]));
-  out+='<div class="card"><h2>Últimos 7 días</h2><div class="bars">'+u.map(function(d){ var v=act[d];
-      return v==null?'<div class="nd" style="height:100%" title="sin dato"></div>':'<div class="'+((dow(d)===5||dow(d)===6)?'hi':'')+'" style="height:'+(100*v/mx).toFixed(0)+'%" title="'+peso(v)+'"></div>'; }).join('')
-    +'</div><div class="lbl">'+u.map(function(d){return '<span>'+DOW[dow(d)]+'<br>'+(+d.slice(8))+'</span>';}).join('')+'</div></div>';
+  var sb=m.sombra||{};
+  var vals=[]; u.forEach(function(d){ if(act[d]!=null) vals.push(act[d]); var s=sb[addDias(d,-28)]; if(s!=null) vals.push(s); });
+  var mx=Math.max.apply(null,vals.concat([1]));
+  var col=function(d){
+    var v=act[d], d4=addDias(d,-28), s=sb[d4], p=(v!=null&&s>0)?pct(v,s):null;
+    var h=function(x){ return (x==null?0:Math.max(2,100*x/mx)).toFixed(0)+'%'; };
+    return '<div class="dcol">'
+      +'<div class="dval">'+(v==null?'—':mill(v).slice(1))+'</div>'
+      +'<div class="dbars">'
+        +(v==null?'<i class="nd" style="height:100%" title="sin dato"></i>':'<i class="'+((dow(d)===5||dow(d)===6)?'hi':'')+'" style="height:'+h(v)+'" title="'+esc(fechaLarga(d))+' · '+peso(v)+'"></i>')
+        +(s==null?'<i class="nd" style="height:100%" title="sin dato hace 4 semanas"></i>':'<i class="sh" style="height:'+h(s)+'" title="'+esc(fechaLarga(d4))+' · '+peso(s)+'"></i>')
+      +'</div>'
+      +'<div class="dlbl">'+DOW[dow(d)]+' '+(+d.slice(8))+'</div>'
+      +'<div class="dpct '+(p>0?'up':(p<0?'down':''))+'">'+(p===null?'—':(p>0?'+':'')+(p===0?'=':p+'%'))+'</div>'
+      +'</div>'; };
+  var tv=u.reduce(function(a,d){return a+(act[d]||0);},0), ts=u.reduce(function(a,d){return a+(sb[addDias(d,-28)]||0);},0);
+  var completa=u.every(function(d){ return act[d]!=null && sb[addDias(d,-28)]!=null; });
+  out+='<div class="card"><h2>Últimos 7 días · contra 4 semanas antes</h2>'
+    +'<div class="d7">'+u.map(col).join('')+'</div>'
+    +'<div class="mute" style="margin-top:8px"><span class="sw"></span> el día · <span class="sw sh"></span> el mismo día de la semana, 4 semanas antes · cifras en millones</div>'
+    +(completa?'<div class="row" style="margin-top:6px"><span>La semana: '+mill(tv)+' contra '+mill(ts)+'</span><b class="'+(tv>ts?'up':(tv<ts?'down':''))+'">'+(pct(tv,ts)>0?'+':'')+pct(tv,ts)+'%</b></div>'
+      :'<div class="mute" style="margin-top:6px">Faltan días para comparar la semana entera.</div>')
+    +'</div>';
   // ⑤ meses cerrados contra 2025
   var ms=(m.meses||[]).slice(-3);
   if(ms.length){
@@ -216,9 +246,18 @@ function pintar(ses){
   if(DEMO){ var av=document.getElementById('aviso'); av.textContent='DEMO · números reales del miércoles 04-11, fijos. No es la página viva.'; av.classList.remove('hidden'); }
   var loc = ((location.search.match(/[?&]loc=([a-z*,]+)/i)||[])[1]||'BKS').toUpperCase();
   var q = '?loc='+encodeURIComponent(loc);
+  // los días de 4 semanas antes de los últimos 7 caen en 1 o 2 meses anteriores: se piden aparte a la
+  // misma ruta (soci_mes de ese mes). Si fallan, las barras salen sin su sombra — nunca tumban la página.
+  var mesesSombra=[]; for(var k=7;k>=1;k--){ var mm=addDias(addDias(hoy,-k),-28).slice(0,7); if(mm!==hoy.slice(0,7) && mesesSombra.indexOf(mm)<0) mesesSombra.push(mm); }
+  var sombra = DEMO ? Promise.resolve(DEMO_SOMBRA)
+    : Promise.all(mesesSombra.map(function(mm){ return pedir('/socios/mes'+q+'&mes='+mm).then(function(r){ return leerMes(r, hoy).dias; }).catch(function(){ return []; }); }))
+        .then(function(ls){ var o={}; ls.forEach(function(l){ l.forEach(function(d){ o[d.dia]=d.total; }); }); return o; });
   var pr = Promise.all([ DEMO ? DEMO_RES : pedir('/socios/resumen'+q+'&dia='+ayer),
                          (DEMO ? Promise.resolve(DEMO_MES) : pedir('/socios/mes'+q+'&mes='+hoy.slice(0,7)))
-                           .then(function(r){ return leerMes(r, hoy); }) ]);
+                           .then(function(r){ return leerMes(r, hoy); }),
+                         sombra ])
+    .then(function(r){ var m=r[1], o={}; (m.dias||[]).forEach(function(d){ o[d.dia]=d.total; });
+      Object.keys(r[2]).forEach(function(k){ if(!(k in o)) o[k]=r[2][k]; }); m.sombra=o; return [r[0], m]; });
   pr.then(function(r){
     app.innerHTML = '<div class="tabs"><span>'+esc(r[0].local||'BKS')+'</span></div>' + tarjetaAyer(r[0]) + tarjetasMes(r[1], hoy);
     document.getElementById('edad').textContent = 'Leído: ' + new Date().toLocaleString('es-CL',{timeZone:'America/Santiago',dateStyle:'short',timeStyle:'short'});
