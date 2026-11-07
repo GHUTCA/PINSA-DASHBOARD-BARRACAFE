@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.97 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.98 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -6198,12 +6198,30 @@ function otraRondaMesa(mesa){
   its.forEach(function(i){
     if (!i.id) return;
     const pc = catg.find(function(p){ return p.id === i.id; });
-    STATE.nuevo.lineas.push({ k: ++STATE.nuevo.seq, id: i.id,
+    /* 🔴 [07-nov · 🛎 SALA V33 · 🎛 «È DENARO: SI MISURA OGGI»] la riga ripetuta perdeva l'extra: `precio` = base del catalogo, `op` =
+       «Michelada» come testo, NIENTE `mods` ⇒ una Schop Michelada (5.500 + 1.500) ripartiva a $5.500 con scritto «Michelada» (classe AUT-0127).
+       Ora la riga porta i `mods` della riga originale e `precio_base`, e `precio` = base vigente + delta. Il delta è quello VIGENTE
+       (`mods2Delta` sul vocabolario di adesso, come una riga nuova); se il gruppo o l'opzione non si trovano più, quello scritto nella riga
+       originale. Senza mods la riga è identica a ieri. Anche il `termino` torna (prima si perdeva). */
+    /* [🟡 di 💵 EL GIRO] senza catalogo e senza `precio_base`, la base è `precio` MENO i delta scritti nella riga: `precio` li contiene già */
+    const dRiga = Array.isArray(i.mods) ? i.mods.reduce(function(s2, m){ return s2 + ((m && parseFloat(m.d)) || 0); }, 0) : 0;
+    const base = (pc && pc.precio != null) ? pc.precio : (i.precio_base != null ? (parseFloat(i.precio_base) || 0) : ((parseFloat(i.precio) || 0) - dRiga));
+    const mods = Array.isArray(i.mods) ? i.mods.filter(function(m){ return m && (m.o || m.oid); }).map(function(m){
+      let d = (typeof m.d === 'number') ? m.d : (parseFloat(m.d) || 0);
+      const gr = (MODS2_VOC && MODS2_VOC.grupos || []).find(function(g){ return g.g === m.g; });
+      const op = gr && (gr.ops || []).find(function(o){ return (m.oid && o.oid === m.oid) || o.o === m.o; });
+      if (op) { const dv = mods2Delta(op, gr.g); if (dv !== null) d = dv; }
+      return { g: m.g || '', gn: m.gn || '', oid: m.oid || '', o: m.o || '', d: d, cl: m.cl || '' };
+    }) : [];
+    const dTot = mods.reduce(function(s2, m){ return s2 + (m.d || 0); }, 0);
+    const lr = { k: ++STATE.nuevo.seq, id: i.id,
       nombre: i.nombre || (pc && pc.nombre) || i.id,
-      precio: (pc && pc.precio != null) ? pc.precio : (parseFloat(i.precio) || 0),
+      precio: base + dTot,
       qty: parseInt(i.qty,10) || 1,
-      cat: i.cat || (pc && pc.cat) || '', op: (i.op || '').toString(),
-      es_menu: false, promo: (pc && _cmEs2(pc)) ? '2x1' : '', persona: 1, pri: 0 });
+      cat: i.cat || (pc && pc.cat) || '', op: (i.op || '').toString(), termino: (i.termino || '').toString(),
+      es_menu: false, promo: (pc && _cmEs2(pc)) ? '2x1' : '', persona: 1, pri: 0 };
+    if (mods.length) { lr.mods = mods; lr.precio_base = base; }
+    STATE.nuevo.lineas.push(lr);
   });
   renderNuevo();
   if (!catg.length) {
