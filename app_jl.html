@@ -628,6 +628,16 @@ function _jlSenzaGas() {
   if (v === null) { try { v = localStorage.getItem('jl_senza_gas_v') === '1'; } catch (e) { v = false; } }
   return v === true;
 }
+/* [07-nov · v1.44.6 · 🎛 V34 «LE DUE COSE DICHIARATE» ②] il login di un telefono che non ha mai letto /salud non decide al buio: legge /salud UNA volta
+   prima di decidere. «Si sa» = /salud letto (porta `version`) oppure il ricordo nel telefono. Non si sa neanche dopo ⇒ il login non va al GAS. */
+function _jlLevaNota() {
+  try { if (/"version"\s*:/.test(JSON.stringify(STATE.salud || {}))) return true; } catch (e) {}
+  try { return localStorage.getItem('jl_senza_gas_v') !== null; } catch (e) { return false; }
+}
+async function _jlSaludPrima() {
+  if (JL_GAS_FRENO || _jlLevaNota()) return;
+  try { const s = await bordeGet('/salud'); if (s && typeof s === 'object') { STATE.salud = s; STATE.ts.salud = Date.now(); _jlSenzaGas(); } } catch (e) { /* resta «non si sa» */ }
+}
 /* /salud ha detto le leve della caja? (la chiave c'è, qualunque sia il valore). No ⇒ non si sa se la caja è del bordo: con la leva sopra, non si chiede a Google. */
 function _saludCajaNota() { try { return /"caja_servicio_on"\s*:/.test(JSON.stringify(STATE.salud || {})); } catch (e) { return false; } }
 async function cajaPost1(payload) {
@@ -3143,6 +3153,8 @@ async function entrar() {
      PIN rifiutato ⇒ «PIN no válido». PIN bloccato dal freno del bordo ⇒ «PIN bloqueado» col tempo, niente ripiego sul GAS (nota ③ di 💵). Leva spenta (`gate_spento`), 404/403, rete morta o risposta
      illeggibile ⇒ il cammino di oggi, intero: il login non resta mai chiuso per colpa del bordo. Muore con la leva TURNO_ABRE_BORDE_ON (ven 23). */
   STATE.pin = pin;
+  await _jlSaludPrima();   // [07-nov · v1.44.6 · 🎛 V34 ②] prima di decidere, la leva si sa
+  const _jlIgnoto = !JL_GAS_FRENO && !_jlLevaNota();
   let bd = { usado: false };
   try { bd = await _turnoAdminPorBordo(); } catch (e) { bd = { usado: false }; }
   if (bd.usado && bd.pinMal) { STATE.pin = null; $('gErr').textContent = 'PIN no válido'; return; }
@@ -3151,6 +3163,8 @@ async function entrar() {
      risposta illeggibile): lo dice e il JL riprova. ⚠️ Dichiarato: a leva accesa, bordo morto = login chiuso (ieri entrava dal GAS). Il ponte (turno
      aperto sul GAS, altri locali) e `gate_spento` restano il cammino di ieri. */
   if (bd.usado && !bd.ok && _jlSenzaGas()) { STATE.pin = null; $('gErr').textContent = '✋ ' + (bd.err || 'El sistema no responde · prueba de nuevo'); return; }
+  // [🎛 V34 ②] /salud mai arrivato e nessun ricordo: non si sa se la leva è accesa ⇒ niente getTurnoAdmin/adminPing al GAS (si dice, il JL riprova)
+  if (_jlIgnoto && !(bd.usado && bd.ok && !bd.ponte)) { STATE.pin = null; $('gErr').textContent = '✋ Sin datos del sistema · prueba de nuevo'; return; }
   if (bd.usado && bd.ok && !bd.ponte) {   // [23-ott] col ponte, al login non c'è un codice di oggi in mano: il cammino di oggi (una getTurnoAdmin)
     const rB = bd.r; STATE.turno = rB; STATE.ts.turno = Date.now(); STATE.user = rB.user ? String(rB.user) : '';
     if (!STATE.user) { try { const who = await gasGet('adminPing', { pin: pin }); if (who && who.ok && who.user) STATE.user = who.user; } catch (e) {} }
