@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.104 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.105 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -3226,6 +3226,7 @@ async function leerSala(codigo, nombre) {
             /* [05-nov · D-431, prova del QR con Alberto: la 999 restava LIBRE] il bordo pubblica `qr_espera` al livello di `muertos`, non dentro la fetta
                del mesero: senza questa copia `_qrEsperaHtml` leggeva sempre il vuoto. Assente = leva spenta sul bordo = vetro di ieri. */
             if (Array.isArray(j.datos.datos.qr_espera)) mia.qr_espera = j.datos.datos.qr_espera;
+            if (!Array.isArray(mia.sin_papel) && Array.isArray(j.datos.datos.sin_papel)) mia.sin_papel = j.datos.datos.sin_papel;   // [08-nov] la carta che non nasce: assente = «non so», [] = niente
             /* [05-nov · AUT-0877] `qr_bloqueados` ARQ lo mette nella fetta E in cima: vince la fetta, la cima solo se la fetta non lo porta. */
             if (!Array.isArray(mia.qr_bloqueados) && Array.isArray(j.datos.datos.qr_bloqueados)) mia.qr_bloqueados = j.datos.datos.qr_bloqueados;
             /* [AUT-0461 · 27-set] l ora VERA dei dati (quando il libro li ha letti): la junta la usa per decidere se una foto è nata prima o dopo il gesto. `_edad_dato_s` dal 26-set (AUT-0445) è l età del BORDO, fresca anche quando i dati dentro sono vecchi. */
@@ -3414,6 +3415,34 @@ async function gasPost(action, body) {
 const $ = id => document.getElementById(id);
 const esc = s => (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtPrice = n => '$' + (parseInt(n, 10) || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+/* ═══ [08-nov · 🛎 SALA V33 · proposta «LA CARTA CHE NON NASCE», contratto con ⚙️ ARQ «LA ROTTA È sala_vista»] ═══
+   Il bordo dice quali pedidos non hanno avuto la carta 30 s dopo l'accettazione (`sin_papel`, in cima e in ogni `meseros[slug]` di
+   `sala_vista`, dal giro del latido: fino a ~60 s di età, `sin_papel_ts`). Il vetro lo MOSTRA e basta: ⚠️ sulla tessera e una
+   fascia in testa al pannello della mesa, visibili a chiunque guardi quella mesa. Nessun gesto chiesto: il piatto è già sul KDS.
+   Campo ASSENTE = il bordo non lo sa (leva spenta, giro vecchio) ⇒ niente. `[]` = niente da dire. Mai inventato dal vetro. */
+function _sinPapelLista() {
+  const s = STATE.sala;
+  return (s && Array.isArray(s.sin_papel)) ? s.sin_papel : [];
+}
+function _sinPapelDe(mesa) {
+  const m = String(mesa == null ? '' : mesa).trim();
+  if (!m) return null;
+  return _sinPapelLista().find(function (x) { return x && String(x.mesa == null ? '' : x.mesa).trim() === m; }) || null;
+}
+function _sinPapelHtml(mesas) {
+  const its = [];
+  (mesas || []).forEach(function (m) { _sinPapelLista().forEach(function (x) { if (x && String(x.mesa).trim() === String(m).trim()) its.push(x); }); });
+  if (!its.length) return '';
+  return its.map(function (x) {
+    const est = (Array.isArray(x.estaciones) ? x.estaciones : []).map(function (e) { e = String(e).toLowerCase(); return /coc/.test(e) ? 'la cocina' : /bar/.test(e) ? 'la barra' : 'la ' + e; });
+    const quien = est.length ? est.join(' y ') : 'la cocina';
+    const ts = typeof x.ts === 'number' ? x.ts : Date.parse(x.ts || '');
+    const hace = (ts > 0) ? ' · hace ' + fmtHace(Math.round((Date.now() - ts) / 1000)) : '';
+    const que = x.primero ? ' (' + esc(String(x.primero)) + (Number(x.mas) > 0 ? ' y ' + Number(x.mas) + ' más' : '') + ')' : '';
+    return '<div class="msh-llam" style="margin:9px 0 2px;border-color:#e5484d;background:rgba(229,72,77,.14)">⚠️ <b>Mesa ' + esc(String(x.mesa)) +
+      ': ' + quien + (est.length > 1 ? ' no recibieron' : ' no recibió') + ' el papel</b>' + que + hace + ' — míralo en el KDS</div>';
+  }).join('');
+}
 const fmtHace = s => { s = Math.max(0, s); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
 /* [AUT-0372 🅑] la versione di QUESTA scheda, letta dal marcatore già esistente
    nell'header (`id="ver"`, testo intatto: `_LA_LEGGE_DELLE_INTERFACCE`/AUT-0274
@@ -12575,13 +12604,14 @@ function renderPanel() {
   if (llamV && _llamYaHecha(llamV.id_llamada)) llamV = null;
   const esCtaV = llamV && llamV.motivo === 'cuenta';
   const icV = llamV ? (esCtaV ? '💳' : llamV.motivo === 'duda' ? '❓' : '🔔') : '';
-  let fasciaV = llamV
+  const _spV = _sinPapelHtml(j ? j.mesas : [mesa]);   // [08-nov] la carta che non è nata: in testa, prima della chiamata del cliente
+  let fasciaV = _spV + (llamV
     ? '<div class="msh-llam" style="margin:9px 0 2px">' + icV + ' <b>' +
       (esCtaV ? 'Quiere la cuenta' : llamV.motivo === 'duda' ? 'El cliente tiene una duda' : 'El cliente te llama') +
       '</b> · ⏱ ' + fmtHace(llamV.hace_s || 0) +
       '<button onclick="_llamResolver(\'' + esc(llamV.id_llamada) + '\',\'' + esc(mesa) + '\',\'' + icV + '\',' + esCtaV + ',this)">' +
       (esCtaV ? '💳 COBRAR' : '✓ Voy') + '</button></div>'
-    : '';
+    : '');
   /* v3.4.3 · SECONDA FAMIGLIA CHE PULSA (trovata da Alberto: «e la 27?»): la
      tessera «pide ya» non è una llamada — è un PEDIDO NUEVO senza dueño.
      [AUT-0425 · 24-set] Il bottone ✓ MÍO è MORTO col verbo (⚙️: «il verbo non
@@ -13464,7 +13494,7 @@ function renderMesas(r) {
          il resto: al cambio turno \u00e8 l'unica cosa che conta sapere prima di
          toccare il tavolo. */
       const yaPag = _pagadaDeMesa(m.mesa);
-      const extra = pagFin ? '\ud83d\udc9a' : yaPag ? '\ud83e\uddfe'
+      const extra = _sinPapelDe(m.mesa) ? '\u26a0\ufe0f' : pagFin ? '\ud83d\udc9a' : yaPag ? '\ud83e\uddfe'   // [08-nov] \u26a0\ufe0f prima di tutto: la cucina non ha la carta di questa mesa
         : (m.grupo && m.grupo !== m.mesa) ? '\ud83d\udd17' : m.regalo ? '\ud83c\udf81'
         : (m.st === 'digitar' && m.hayListo) ? '\ud83c\udf78' : '';
       h += '<button class="mtile mt-' + m.st + selC + '" data-mesa="' + esc(m.mesa) + '"' + jSt + '>' +
