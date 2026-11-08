@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.44.8</span>
+<span class="ver" id="ver">app_jl v1.44.9</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -344,26 +344,45 @@ async function gasGet(action, params) {
       PER LOCALE: un PIN che il bordo rifiuta, ripetuto da un poll, bloccherebbe il PIN di tutti i JL del locale. Quindi al primo 403
       `credencial_requerida` con il PIN in mano il vetro SMETTE di mandarlo in lettura (per questa sessione) e non lo ripete.
    Il bordo vecchio (leva "") ignora l'uno e l'altro: un parametro e un header in più, già fra gli allow-headers del CORS. */
-let _LF_PIN_KO = false;
-function _lfCodigo() { return (STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo) || ''; }
-function _lfQuery(sep) { const c = _lfCodigo(); return c ? (sep + 'codigo=' + encodeURIComponent(c)) : ''; }
-function _lfHeaders(base) {
-  const h = Object.assign({}, base || {});
-  if (!_lfCodigo() && STATE.pin && STATE.pin !== 'DEMO' && !_LF_PIN_KO) h['X-Caja-Pin'] = STATE.pin;
-  return h;
+/* [08-nov · v1.44.9 · i due 🟡 di 💵 EL GIRO, «0F4FF26 CONTRO 09A426E»] il «no» si ricorda PER CREDENZIALE, non per sessione:
+   G2 — si ricorda QUALE PIN è stato rifiutato: se il JL rientra con un altro PIN, quello nuovo si prova (prima restava cieco fino al reload).
+   G3 — si ricorda QUALE codice di turno è stato rifiutato (turno chiuso o cambiato in memoria): si passa subito al PIN, nella stessa lettura,
+        un tentativo solo; un codice NUOVO si prova di nuovo. */
+let _LF_PIN_KO = '', _LF_COD_KO = '';
+function _lfCred() {
+  const t = (STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo) || '';
+  const cod = (t && t !== _LF_COD_KO) ? t : '';
+  const pin = (!cod && STATE.pin && STATE.pin !== 'DEMO' && STATE.pin !== _LF_PIN_KO) ? STATE.pin : '';
+  return { cod: cod, pin: pin };
 }
-function _lfEsito(status, j) {
-  if (status === 403 && j && j.error === 'credencial_requerida' && !_lfCodigo() && STATE.pin) _LF_PIN_KO = true;
+async function _lfFetch(url, sep, base, signal) {
+  const giro = async function (c) {
+    const h = Object.assign({}, base || {});
+    if (c.pin) h['X-Caja-Pin'] = c.pin;
+    const r = await fetch(url + (c.cod ? sep + 'codigo=' + encodeURIComponent(c.cod) : ''), { headers: h, cache: 'no-store', signal: signal });
+    const j = await r.json().catch(function () { return null; });
+    return { status: r.status, j: j };
+  };
+  const no = function (o, c) {   // il «no» del bordo si ricorda sulla credenziale che l'ha preso, anche al secondo tentativo
+    const k = o.status === 403 && o.j && o.j.error === 'credencial_requerida' && (c.cod || c.pin);
+    if (k) { if (c.cod) _LF_COD_KO = c.cod; else _LF_PIN_KO = c.pin; }
+    return k;
+  };
+  const c = _lfCred();
+  let out = await giro(c);
+  if (no(out, c)) {
+    const c2 = _lfCred();
+    if (c2.cod || c2.pin) { out = await giro(c2); no(out, c2); }   // un tentativo solo con la credenziale successiva
+  }
+  return out;
 }
 async function bordeGetLf(path) {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 6000);
-  const sep = path.indexOf('?') >= 0 ? '&' : '?';
-  const r = await fetch(CFG.BORDE + path + sep + 't=' + encodeURIComponent(CFG.T) + _lfQuery('&'), { headers: _lfHeaders(), signal: ctrl.signal, cache: 'no-store' });
-  clearTimeout(to);
-  const j = await r.json();
-  _lfEsito(r.status, j);
-  return j;
+  try {
+    const sep = path.indexOf('?') >= 0 ? '&' : '?';
+    return (await _lfFetch(CFG.BORDE + path + sep + 't=' + encodeURIComponent(CFG.T), '&', null, ctrl.signal)).j;
+  } finally { clearTimeout(to); }
 }
 async function bordeGet(path) {
   const ctrl = new AbortController();
@@ -550,11 +569,10 @@ function cjSaldoOn() { return cjFlag('saldo_sin_padron_on'); }
 async function cjSaldosLeer() {
   const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 5000);
   try {
-    const r = await fetch(CFG.BORDE + '/saldi/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL) + _lfQuery('?'), { headers: _lfHeaders({ 'x-borde-token': CFG.T }), cache: 'no-store', signal: ctrl.signal });   // [v1.44.8] la credenziale della lettura
+    const r = await _lfFetch(CFG.BORDE + '/saldi/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), '?', { 'x-borde-token': CFG.T }, ctrl.signal);   // [v1.44.8/9] la credenziale della lettura
     clearTimeout(to);
-    const j = await r.json().catch(function () { return null; });
-    _lfEsito(r.status, j);
-    if (!r.ok || !j || j.ok !== true || !Array.isArray(j.mesas)) return { ok: false };
+    const j = r.j;
+    if (r.status !== 200 || !j || j.ok !== true || !Array.isArray(j.mesas)) return { ok: false };
     return { ok: true, mesas: j.mesas, ignote: Array.isArray(j.ignote) ? j.ignote : [] };
   } catch (e) { clearTimeout(to); return { ok: false }; }
 }
@@ -2531,8 +2549,8 @@ function _staffJLCarga() {
     }).catch(function (e) { _STAFF_JL_TS = 0; _STAFF_JL_ERR = (e && e.message === 'timeout') ? 'timeout' : 'sin_red'; });
   };
   const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
-  fetch(CFG.BORDE + '/turno/estado/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL) + _lfQuery('?'), { headers: _lfHeaders({ 'x-borde-token': CFG.T }), cache: 'no-store', signal: ctrl.signal })   // [v1.44.8] la credenziale della lettura
-    .then(function (r) { return r.json().then(function (j) { _lfEsito(r.status, j); return j; }); })
+  _lfFetch(CFG.BORDE + '/turno/estado/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), '?', { 'x-borde-token': CFG.T }, ctrl.signal)   // [v1.44.8/9] la credenziale della lettura
+    .then(function (r) { return r.j; })
     .then(function (r) {
       clearTimeout(to);
       if (r && r.ok && Array.isArray(r.staff) && r.staff.length) {
