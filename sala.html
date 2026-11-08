@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.106 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.107 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -12458,18 +12458,19 @@ async function _restoMesaLeer(mesa) {
     const j = await r.json();
     const d = j && j.datos && j.datos.datos;
     if (!r.ok || !d || d.ok !== true || String(d.mesa == null ? m : d.mesa) !== m) return null;   // reintenta, leva spenta, un'altra mesa: non so
+    /* [08-nov 19:5x · v3.228.107 · il 🟡 di 💵 EL GIRO «RESTO_MESA 68237bb»] SOLO `cerrada`, MAI IL NUMERO. `cerrada` nasce da Postgres
+       (nessun pedido vivo della mesa oggi). `resta` invece passa ancora da `_restoMesa`, che prende T0 e `pagado_seduta` dalla FOTO del
+       GAS quando la foto ha un vivo della mesa: con una foto ferma EL GIRO ha misurato resta 5.000 invece di 35.000. Un resta 0 sbagliato
+       qui direbbe «ya está pagada, no cobres» su una mesa che deve ancora pagare: è un buco nel pago. Il numero torna quando la foto
+       esce da `_restoMesa` (domanda di EL GIRO ad ARQ e BKP). */
     if (d.cerrada === true) return { cerrada: true };
-    if (d.resta_ignota === true || d.resta == null || !isFinite(Number(d.resta))) return null;
-    return { cerrada: false, resta: Math.round(Number(d.resta)), consumo: Math.round(Number(d.consumo) || 0), pagado: Math.round(Number(d.pagado) || 0) };
+    return null;
   } catch (e) { return null; }
 }
 function _restoMesaTexto(mesa, rm) {
   const eta = _fotoCobroEtaMin();
   const viejo = '📵 La sala no se actualiza' + (eta ? ' (hace ' + eta + ' min)' : '') + '. ';
-  if (rm.cerrada) return viejo + 'Según el sistema, la mesa ' + mesa + ' no tiene nada por pagar ahora: no cobres de nuevo.';
-  if (rm.resta <= 0) return viejo + 'Según el sistema, la mesa ' + mesa + ' ya está pagada: no cobres de nuevo.';
-  return viejo + 'Según el sistema, a la mesa ' + mesa + ' le quedan $' + _fmtMiles(rm.resta) + '. No puedo abrir el cobro sobre una sala vieja' +
-    (JL ? ': cóbrala desde otro teléfono.' : ': avisa al JL.');
+  return viejo + 'Según el sistema, la mesa ' + mesa + ' no tiene nada por pagar ahora: no cobres de nuevo.';   // solo cerrada (v3.228.107)
 }
 /* true = il gesto si ferma qui (la sala è una foto). `rifai` è il gesto stesso, da rilanciare se la sala torna fresca. */
 function _dineroSobreFoto(mesa, rifai) {
@@ -12486,8 +12487,8 @@ function _dineroSobreFoto(mesa, rifai) {
     if (chiuso) return;
     if (!(STATE.sala && STATE.sala._foto_local)) { chiuso = true; STATE.fotoCobroEspera = false; try { rifai(); } catch (e) {} return; }
     // la mesa senza niente da pagare si dice SUBITO: non c'è un cobro da aspettare
-    if (rm && (rm.cerrada || rm.resta <= 0)) { chiuso = true; STATE.fotoCobroEspera = false; toast('err', _restoMesaTexto(mesa, rm), 9000); return; }
-    if (Date.now() - t0 >= FOTO_COBRO_ESPERA_MS) { chiuso = true; STATE.fotoCobroEspera = false; toast('err', rm ? _restoMesaTexto(mesa, rm) : _fotoCobroTexto(mesa), 9000); return; }
+    if (rm && rm.cerrada) { chiuso = true; STATE.fotoCobroEspera = false; toast('err', _restoMesaTexto(mesa, rm), 9000); return; }
+    if (Date.now() - t0 >= FOTO_COBRO_ESPERA_MS) { chiuso = true; STATE.fotoCobroEspera = false; toast('err', _fotoCobroTexto(mesa), 9000); return; }
     setTimeout(giro, 400);
   })();
   return true;
