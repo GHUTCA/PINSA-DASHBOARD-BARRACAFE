@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.44.9</span>
+<span class="ver" id="ver">app_jl v1.44.10</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -348,8 +348,16 @@ async function gasGet(action, params) {
    G2 — si ricorda QUALE PIN è stato rifiutato: se il JL rientra con un altro PIN, quello nuovo si prova (prima restava cieco fino al reload).
    G3 — si ricorda QUALE codice di turno è stato rifiutato (turno chiuso o cambiato in memoria): si passa subito al PIN, nella stessa lettura,
         un tentativo solo; un codice NUOVO si prova di nuovo. */
-let _LF_PIN_KO = '', _LF_COD_KO = '';
+/* [08-nov · v1.44.10 · il 🟡 G5 di 💵 EL GIRO] a freno delle letture bloccato il bordo dice «no» anche alla credenziale GIUSTA: un «no»
+   ricordato per sempre accecava il vetro per tutta la sessione. Ora il «no» SCADE dopo LF_KO_MS (11 min, più dei 10 del blocco del bordo):
+   un PIN davvero sbagliato si riprova al più una volta ogni 11 minuti (sotto i 5 in 10 del freno). E se il bordo dirà
+   `lettura_bloqueada` (proposta ad ARQ), quello non è un «no» alla credenziale: si ricorda solo `credencial_requerida`, quindi la lettura dopo riprova. */
+const LF_KO_MS = 11 * 60000;
+let _LF_PIN_KO = '', _LF_COD_KO = '', _LF_PIN_KO_TS = 0, _LF_COD_KO_TS = 0;
 function _lfCred() {
+  const now = Date.now();
+  if (_LF_PIN_KO && now - _LF_PIN_KO_TS > LF_KO_MS) _LF_PIN_KO = '';
+  if (_LF_COD_KO && now - _LF_COD_KO_TS > LF_KO_MS) _LF_COD_KO = '';
   const t = (STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo) || '';
   const cod = (t && t !== _LF_COD_KO) ? t : '';
   const pin = (!cod && STATE.pin && STATE.pin !== 'DEMO' && STATE.pin !== _LF_PIN_KO) ? STATE.pin : '';
@@ -365,7 +373,7 @@ async function _lfFetch(url, sep, base, signal) {
   };
   const no = function (o, c) {   // il «no» del bordo si ricorda sulla credenziale che l'ha preso, anche al secondo tentativo
     const k = o.status === 403 && o.j && o.j.error === 'credencial_requerida' && (c.cod || c.pin);
-    if (k) { if (c.cod) _LF_COD_KO = c.cod; else _LF_PIN_KO = c.pin; }
+    if (k) { if (c.cod) { _LF_COD_KO = c.cod; _LF_COD_KO_TS = Date.now(); } else { _LF_PIN_KO = c.pin; _LF_PIN_KO_TS = Date.now(); } }
     return k;
   };
   const c = _lfCred();
