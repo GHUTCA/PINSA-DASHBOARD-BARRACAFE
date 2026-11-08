@@ -92,7 +92,7 @@ footer{font-size:12px;color:var(--mute);margin:8px 0 24px}
 <div id="aviso" class="note hidden"></div>
 <div id="app"><div class="card"><div class="mute">Cargando…</div></div></div>
 <footer>Cobrado = pagos con boleta, sin propina · Por cobrar = consumo de las mesas abiertas, menos cortesías y pagos parciales · Consumo = pedidos del día · Mes = boletas emitidas · Día de 06:00 a 06:00 · Sólo lectura.
-  <br><span id="ver">socios v1.2.1 · 08-nov-2026</span> · <span id="edad"></span></footer>
+  <br><span id="ver">socios v1.2.2 · 08-nov-2026</span> · <span id="edad"></span></footer>
 </div>
 <script src="shared/pinsita_auth.js"></script>
 <script>
@@ -350,9 +350,9 @@ function enganchaGrafico(G){
 }
 // N1 (v1.2.1, 08-nov): el panel NO espera la red. Se dibuja al instante con la última lectura guardada en este teléfono
 // (del mismo día operativo, con SU hora y «actualizando…»), y se reemplaza cuando llega la nueva. El ↻ no vacía el panel.
-var HOY_KEY='socios_hoy_v1_';
-function hoyGuardado(loc){ try{ var o=JSON.parse(localStorage.getItem(HOY_KEY+loc)||'null');
-  return o && o.ok && String(o.dia||'').slice(0,10)===diaOperativoHoy() ? o : null; }catch(e){ return null; } }
+var HOY_KEY='socios_hoy_v1_', HOY_N=0;   // HOY_N: número de la petición; sólo la última dibuja (🟡 H1 de EL GIRO)
+function deHoy(o){ return !!(o && o.ok && String(o.dia||'').slice(0,10)===diaOperativoHoy()); }   // una lectura de ayer nunca se muestra (🟡 G1)
+function hoyGuardado(loc){ try{ var o=JSON.parse(localStorage.getItem(HOY_KEY+loc)||'null'); return deHoy(o) ? o : null; }catch(e){ return null; } }
 function hoyGuarda(loc,res){ try{ localStorage.setItem(HOY_KEY+loc, JSON.stringify(res)); }catch(e){} }
 function pintaHoy(box,res,viejo,q){
   var p=panelHoy(res,viejo); box.innerHTML = typeof p==='string'? p : p.html;
@@ -362,13 +362,16 @@ function pintaHoy(box,res,viejo,q){
 function cargarHoy(q, actual){
   var box=document.getElementById('hoyBox'); if(!box) return;
   var loc=(q.match(/loc=([^&]+)/)||[])[1]||'BKS';
-  var previo = DEMO ? null : (actual || hoyGuardado(loc));
+  var n = ++HOY_N;
+  var previo = DEMO ? null : (deHoy(actual) ? actual : hoyGuardado(loc));
   if(previo) pintaHoy(box, previo, 'actualizando…', q);
-  else if(!box.innerHTML) box.innerHTML='<div class="hoy"><div class="hero"><div class="htop"><span>Hoy</span><span class="live"><span class="dot off"></span>cargando…</span></div><div class="hnum" style="opacity:.35">$ —</div></div></div>';
+  else if(!box.innerHTML || actual) box.innerHTML='<div class="hoy"><div class="hero"><div class="htop"><span>Hoy</span><span class="live"><span class="dot off"></span>cargando…</span></div><div class="hnum" style="opacity:.35">$ —</div></div></div>';
   (DEMO ? Promise.resolve(DEMO_HOYP) : pedir('/socios/hoy'+q)).then(function(res){
+    if(n!==HOY_N) return;               // llegó tarde: ya hay una petición más nueva
     if(!DEMO) hoyGuarda(loc,res);
     pintaHoy(box, res, null, q);
   }).catch(function(e){
+    if(n!==HOY_N) return;
     var c=e&&e.code||'';
     if(c==='leva_spenta'||c==='http_404'){ box.innerHTML=''; return; }
     if(previo){ pintaHoy(box, previo, 'no pude actualizar', q); return; }
