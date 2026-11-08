@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.44.7</span>
+<span class="ver" id="ver">app_jl v1.44.8</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -336,6 +336,34 @@ async function gasGet(action, params) {
     if (!r.ok) throw new Error('http_' + r.status);
     return await r.json();
   } catch (e) { clearTimeout(t); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+/* [08-nov · v1.44.8 · ⚙️ ARQ V34 «VOGLIONO UNA PERSONA», #27 ① ②] /saldi · /pedidos · /turno/estado: col solo token di lettura, a leva
+   LETTURE_FIRMATE_ON accesa, il bordo risponde 403 `credencial_requerida`. Questo vetro manda la credenziale che HA GIÀ:
+   ① il CODICE DEL TURNO aperto (`?codigo=`, via `turno`), che non tocca il freno del PIN;
+   ② solo se non c'è un turno, il PIN del JL in `X-Caja-Pin` (mai nell'URL). Il bordo lo verifica col freno delle scritture, che è
+      PER LOCALE: un PIN che il bordo rifiuta, ripetuto da un poll, bloccherebbe il PIN di tutti i JL del locale. Quindi al primo 403
+      `credencial_requerida` con il PIN in mano il vetro SMETTE di mandarlo in lettura (per questa sessione) e non lo ripete.
+   Il bordo vecchio (leva "") ignora l'uno e l'altro: un parametro e un header in più, già fra gli allow-headers del CORS. */
+let _LF_PIN_KO = false;
+function _lfCodigo() { return (STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo) || ''; }
+function _lfQuery(sep) { const c = _lfCodigo(); return c ? (sep + 'codigo=' + encodeURIComponent(c)) : ''; }
+function _lfHeaders(base) {
+  const h = Object.assign({}, base || {});
+  if (!_lfCodigo() && STATE.pin && STATE.pin !== 'DEMO' && !_LF_PIN_KO) h['X-Caja-Pin'] = STATE.pin;
+  return h;
+}
+function _lfEsito(status, j) {
+  if (status === 403 && j && j.error === 'credencial_requerida' && !_lfCodigo() && STATE.pin) _LF_PIN_KO = true;
+}
+async function bordeGetLf(path) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 6000);
+  const sep = path.indexOf('?') >= 0 ? '&' : '?';
+  const r = await fetch(CFG.BORDE + path + sep + 't=' + encodeURIComponent(CFG.T) + _lfQuery('&'), { headers: _lfHeaders(), signal: ctrl.signal, cache: 'no-store' });
+  clearTimeout(to);
+  const j = await r.json();
+  _lfEsito(r.status, j);
+  return j;
 }
 async function bordeGet(path) {
   const ctrl = new AbortController();
@@ -522,9 +550,10 @@ function cjSaldoOn() { return cjFlag('saldo_sin_padron_on'); }
 async function cjSaldosLeer() {
   const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 5000);
   try {
-    const r = await fetch(CFG.BORDE + '/saldi/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, cache: 'no-store', signal: ctrl.signal });
+    const r = await fetch(CFG.BORDE + '/saldi/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL) + _lfQuery('?'), { headers: _lfHeaders({ 'x-borde-token': CFG.T }), cache: 'no-store', signal: ctrl.signal });   // [v1.44.8] la credenziale della lettura
     clearTimeout(to);
     const j = await r.json().catch(function () { return null; });
+    _lfEsito(r.status, j);
     if (!r.ok || !j || j.ok !== true || !Array.isArray(j.mesas)) return { ok: false };
     return { ok: true, mesas: j.mesas, ignote: Array.isArray(j.ignote) ? j.ignote : [] };
   } catch (e) { clearTimeout(to); return { ok: false }; }
@@ -1186,7 +1215,7 @@ async function giroVeloce() {
   if (_tick % 3 === 1) {   // un tick su tre: le letture di contorno
     try { const s = await bordeGet('/salud'); STATE.salud = s; STATE.ts.salud = Date.now(); _jlSenzaGas(); } catch (e) { STATE.salud = null; }   // [07-nov · v1.44.6 · 10.2] il telefono ricorda la leva a ogni /salud letto
     try {
-      const p = await bordeGet('/pedidos/' + encodeURIComponent(CFG.LOCAL));
+      const p = await bordeGetLf('/pedidos/' + encodeURIComponent(CFG.LOCAL));   // [v1.44.8] la credenziale della lettura
       if (p && p.stato) { STATE.rechazos = p.stato.pago_rechazo || null; STATE.ts.rechazos = Date.now(); }
     } catch (e) {}
     try {
@@ -2502,8 +2531,8 @@ function _staffJLCarga() {
     }).catch(function (e) { _STAFF_JL_TS = 0; _STAFF_JL_ERR = (e && e.message === 'timeout') ? 'timeout' : 'sin_red'; });
   };
   const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
-  fetch(CFG.BORDE + '/turno/estado/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, cache: 'no-store', signal: ctrl.signal })
-    .then(function (r) { return r.json(); })
+  fetch(CFG.BORDE + '/turno/estado/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL) + _lfQuery('?'), { headers: _lfHeaders({ 'x-borde-token': CFG.T }), cache: 'no-store', signal: ctrl.signal })   // [v1.44.8] la credenziale della lettura
+    .then(function (r) { return r.json().then(function (j) { _lfEsito(r.status, j); return j; }); })
     .then(function (r) {
       clearTimeout(to);
       if (r && r.ok && Array.isArray(r.staff) && r.staff.length) {
