@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.105 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.106 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -12434,6 +12434,43 @@ function _fotoCobroTexto(mesa) {
   return '📵 Sin conexión' + (eta ? ' hace ' + eta + ' min' : '') + ': no puedo saber si la mesa ' + mesa + ' ya pagó. ' +
     'No cobres en efectivo fuera del sistema' + (JL ? ' — mira la cuenta en otro teléfono.' : ' — avisa al JL.');
 }
+/* [08-nov · 🛎 SALA V33 · AUT-0943 di ⚙️ ARQ, bordo arq-resto-mesa 68237bb] LA MESA SOLA, DAL BORDO, MENTRE LA SALA È UNA FOTO.
+   `/estado/<LOCAL>?seccion=resto_mesa&mesa=N&codigo=…` dà il resto della SOLA mesa da Postgres (la stessa catena di /cuenta e di
+   _pagoSistema, senza il giudizio contro la foto ferma). Contratto in j.datos.datos:
+     {ok:true, cerrada:true, resta:0}                        nessun pedido vivo della mesa oggi (pagata, o mai aperta: il bordo non distingue)
+     {ok:true, cerrada:false, consumo, pagado, resta, resta_ignota}
+     {ok:false, reintenta:true, motivo}                      mai un numero · leva bordo spenta: datos null.
+   🔒 SOLO PER DIRE, MAI PER COBRAR: con la sala ancora foto il pannello resta chiuso anche se il resto è noto. Il pago esce dalla
+      sala (righe, uuids, junta), e quella è vecchia. La guardia in scrittura è il ③ di AUT-0936 nel bordo. Qui si dice la verità. */
+const RESTO_MESA_TIMEOUT_MS = 4000;
+async function _restoMesaLeer(mesa) {
+  try {
+    if (!BORDE_SALA.ON || !STATE.codigo) return null;
+    const m = String(mesa == null ? '' : mesa).trim();
+    if (!/^[0-9A-Za-z_-]{1,12}$/.test(m)) return null;
+    const u = BORDE_SALA.URL + '/estado/' + encodeURIComponent(CFG.LOCAL || 'BKS')
+      + '?t=' + encodeURIComponent(BORDE_SALA.T)
+      + '&seccion=resto_mesa&mesa=' + encodeURIComponent(m) + '&codigo=' + encodeURIComponent(STATE.codigo);
+    const ctrl = new AbortController();
+    const to = setTimeout(function () { ctrl.abort(); }, RESTO_MESA_TIMEOUT_MS);
+    const r = await fetch(u, { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    const j = await r.json();
+    const d = j && j.datos && j.datos.datos;
+    if (!r.ok || !d || d.ok !== true || String(d.mesa == null ? m : d.mesa) !== m) return null;   // reintenta, leva spenta, un'altra mesa: non so
+    if (d.cerrada === true) return { cerrada: true };
+    if (d.resta_ignota === true || d.resta == null || !isFinite(Number(d.resta))) return null;
+    return { cerrada: false, resta: Math.round(Number(d.resta)), consumo: Math.round(Number(d.consumo) || 0), pagado: Math.round(Number(d.pagado) || 0) };
+  } catch (e) { return null; }
+}
+function _restoMesaTexto(mesa, rm) {
+  const eta = _fotoCobroEtaMin();
+  const viejo = '📵 La sala no se actualiza' + (eta ? ' (hace ' + eta + ' min)' : '') + '. ';
+  if (rm.cerrada) return viejo + 'Según el sistema, la mesa ' + mesa + ' no tiene nada por pagar ahora: no cobres de nuevo.';
+  if (rm.resta <= 0) return viejo + 'Según el sistema, la mesa ' + mesa + ' ya está pagada: no cobres de nuevo.';
+  return viejo + 'Según el sistema, a la mesa ' + mesa + ' le quedan $' + _fmtMiles(rm.resta) + '. No puedo abrir el cobro sobre una sala vieja' +
+    (JL ? ': cóbrala desde otro teléfono.' : ': avisa al JL.');
+}
 /* true = il gesto si ferma qui (la sala è una foto). `rifai` è il gesto stesso, da rilanciare se la sala torna fresca. */
 function _dineroSobreFoto(mesa, rifai) {
   if (!(STATE.sala && STATE.sala._foto_local)) return false;
@@ -12443,9 +12480,14 @@ function _dineroSobreFoto(mesa, rifai) {
   toast('warn', '📷 Comprobando la sala antes de cobrar…', FOTO_COBRO_ESPERA_MS + 1000);
   const t0 = Date.now();
   try { refrescar(false); } catch (e) {}
+  let rm = null, rmFin = false, chiuso = false;
+  try { _restoMesaLeer(mesa).then(function (x) { rm = x; rmFin = true; }, function () { rmFin = true; }); } catch (e) { rmFin = true; }
   (function giro() {
-    if (!(STATE.sala && STATE.sala._foto_local)) { STATE.fotoCobroEspera = false; try { rifai(); } catch (e) {} return; }
-    if (Date.now() - t0 >= FOTO_COBRO_ESPERA_MS) { STATE.fotoCobroEspera = false; toast('err', _fotoCobroTexto(mesa), 9000); return; }
+    if (chiuso) return;
+    if (!(STATE.sala && STATE.sala._foto_local)) { chiuso = true; STATE.fotoCobroEspera = false; try { rifai(); } catch (e) {} return; }
+    // la mesa senza niente da pagare si dice SUBITO: non c'è un cobro da aspettare
+    if (rm && (rm.cerrada || rm.resta <= 0)) { chiuso = true; STATE.fotoCobroEspera = false; toast('err', _restoMesaTexto(mesa, rm), 9000); return; }
+    if (Date.now() - t0 >= FOTO_COBRO_ESPERA_MS) { chiuso = true; STATE.fotoCobroEspera = false; toast('err', rm ? _restoMesaTexto(mesa, rm) : _fotoCobroTexto(mesa), 9000); return; }
     setTimeout(giro, 400);
   })();
   return true;
