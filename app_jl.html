@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.44.11</span>
+<span class="ver" id="ver">app_jl v1.44.12</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -377,7 +377,13 @@ function _jlDispositivoId() {
     return id;
   } catch (e) { return ''; }
 }
+/* [08-nov · v1.44.12 · ⚙️ ARQ V34 «IL BLOCCO SI DICE», 88ae107] a blocco attivo il bordo risponde `403 lectura_bloqueada` con `faltan_s`:
+   non è un «no» alla credenziale (quello resta `credencial_requerida`), quindi non si ricorda e non si passa alla credenziale successiva.
+   Il vetro aspetta `faltan_s` (al più un'ora) e poi riprova con la stessa: durante la pausa nessuna chiamata, la risposta è la stessa del bordo. */
+let _LF_PAUSA_FINO = 0;
 async function _lfFetch(url, sep, base, signal) {
+  const ora = Date.now();
+  if (ora < _LF_PAUSA_FINO) return { status: 403, j: { ok: false, error: 'lectura_bloqueada', faltan_s: Math.ceil((_LF_PAUSA_FINO - ora) / 1000) } };
   const dev = _jlDispositivoId();
   if (dev) { url = url + sep + 'dispositivo_id=' + encodeURIComponent(dev); sep = '&'; }
   const giro = async function (c) {
@@ -392,11 +398,18 @@ async function _lfFetch(url, sep, base, signal) {
     if (k) { if (c.cod) { _LF_COD_KO = c.cod; _LF_COD_KO_TS = Date.now(); } else { _LF_PIN_KO = c.pin; _LF_PIN_KO_TS = Date.now(); } }
     return k;
   };
+  const pausa = function (o) {
+    if (o.status === 403 && o.j && o.j.error === 'lectura_bloqueada') {
+      const fs_ = Math.min(3600, Math.max(1, Number(o.j.faltan_s) || 60));
+      _LF_PAUSA_FINO = Date.now() + fs_ * 1000;
+    }
+    return o;
+  };
   const c = _lfCred();
-  let out = await giro(c);
+  let out = pausa(await giro(c));
   if (no(out, c)) {
     const c2 = _lfCred();
-    if (c2.cod || c2.pin) { out = await giro(c2); no(out, c2); }   // un tentativo solo con la credenziale successiva
+    if (c2.cod || c2.pin) { out = pausa(await giro(c2)); no(out, c2); }   // un tentativo solo con la credenziale successiva
   }
   return out;
 }
