@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.100 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.101 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9698,7 +9698,15 @@ async function vPrecuentaImprimir(mesa, btn, parte, pinJl) {
 function vCobrarSala(mesa) {
   const j = _juntaDe(mesa);
   if (!j) return _cobrarMesaSola(mesa);   // v3.2 · la porta a 4 vie anche da sola (Alberto)
-  let tot = 0; j.mesas.forEach(function (m) { tot += _vpTot(m); });
+  /* ═══ [08-nov · Alberto, sulla 41 del 07-nov] «SE IO JUNTO DUE MESAS IL CONTO DOVREBBE DIVENTARE UNO SOLO» ═══
+     La scelta «Todo / Por mesa» mostrava due tavoli e due conti: Arianna ha creduto di non poter più cobrar «lo mío» (una parte),
+     ha separato e rigiuntato tre volte, e alla fine il resto mesa per mesa ha fatto pagare 12.490 in più. Una junta confermata dal
+     server (`gidSrv`) è UN conto anche nel bordo (`contoJuntaUnisci`): si apre il pannello del pago come per una mesa sola, con tutte
+     le righe della junta (`_vpItemsDet` è già junta-aware) e lo stesso bivio di sempre — todo · iguales · por producto.
+     Senza `gidSrv` il server non conosce la junta: resta la scelta di prima (Por mesa), perché lì i conti sono davvero due.
+     Leva per apparecchio `?juntauna=0` (torna la scelta). */
+  if (PAGO_V3_ON && JUNTA_UNA_ON && j.gidSrv) return abrirPago(String(j.principal || j.mesas[0]));
+  let tot = _vpTotMesas(j.mesas);   // [08-nov] il resto della JUNTA, non la somma dei resti per mesa
   vhoja('<h3>Cobrar · Junta ' + j.n + '</h3>' +
     '<div class="cs-psub"><b>$' + _fmtMiles(tot) + '</b> en la mesa · ' + j.mesas.length + ' mesas</div>' +
     /* v3.4.1 · «TODO LO QUE QUEDA» SI ACCENDE (ordine di Alberto, 13-ago a
@@ -9789,7 +9797,7 @@ function _dedoVista(mesa, volverJs) {
   det.items.forEach(function (x) { const q2 = _quienPaga(x); (porQuien[q2] = porQuien[q2] || []).push(x); });
   const nombres = Object.keys(porQuien);
   if (!nombres.length) { toast('warn', 'Sin consumo'); return; }
-  const todo = det.mesas.reduce(function (s, m2) { return s + _vpTot(m2); }, 0);
+  const todo = _vpTotMesas(det.mesas);   // [08-nov] il resto della junta
   vhoja('<h3>A dedo · quién debe qué</h3>' +
     '<div class="cs-psub">Los nombres nacen en la libreta (toca la persona al pedir). Sin nombre = su mesa.</div>' +
     nombres.map(function (q2) {
@@ -9824,7 +9832,7 @@ function _cobrarPorMesa(nJ) {
 }
 function _cobrarIguales(nJ) {
   const j = _juntasLoad().find(function (x) { return x.n === nJ; }); if (!j) return;
-  let tot = 0; j.mesas.forEach(function (m) { tot += _vpTot(m); });
+  let tot = _vpTotMesas(j.mesas);   // [08-nov]
   vhoja('<h3>Por partes iguales</h3>' +
     '<div class="cs-psub">$' + _fmtMiles(tot) + ' · ¿entre cuántas personas?</div>' +
     '<div class="cs-chips">' + [2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map(function (n2) {
@@ -12384,6 +12392,44 @@ function _vpBase(mesa) {
   const visto = m ? m.pend.concat(m.mios, m.limpiar).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0) : 0;
   return res ? Math.max(res.total || 0, visto) : visto;
 }
+/* il già pagato della seduta di UNA mesa, nel ramo `uuids` di `_vpTot`: il MASSIMO fra server e memoria locale, mai la somma
+   (stesso denaro visto da due lati · AUT-0696). Estratto il 08-nov per `_vpTotMesas`: la formula è quella di prima, riga per riga. */
+function _vpPagadoU(mesa, parcU) {
+  if (parcU === undefined) parcU = (MARCA_TS_ON && STATE.pagadoParcial[mesa]) ? STATE.pagadoParcial[mesa] : 0;
+  const sedU = RESTO_SERVER_ON ? _pagadoSedutaDeMesa(mesa) : null;
+  return Math.max((sedU != null && isFinite(Number(sedU))) ? Number(sedU) : 0, parcU || 0);
+}
+/* ═══ [08-nov · 🛎 SALA V33 · la 41 del 07-nov, +$12.490 al cliente] IL RESTO DI UNA JUNTA SI CALCOLA SULLA JUNTA ═══
+   Prima: Σ `_vpTot(m)`, cioè `max(0, base − pagato)` MESA PER MESA, e poi la somma. I pagos di una junta si registrano sulla mesa
+   dove si incassano (la principal): la 41 aveva base 37.370 e pagato 49.860 ⇒ max(0, −12.490) = 0, e i 12.490 pagati per la 198
+   sparivano nel taglio. La 198 restava a 34.480 intera ⇒ il vetro ha cobrado 34.480 invece di 21.990.
+   Ora: Σ base − Σ pagato, e il taglio a zero UNA volta, dopo la somma. I pagos del bordo portano UNA mesa ciascuno
+   (`salaPgMesasPagadas`, chiave `p.mesa`): sommare il pagato delle mesas non conta due volte lo stesso pago.
+   Solo nel ramo `uuids` (acceso di flotta); fuori da lì, e per una mesa sola, è `_vpTot` di sempre.
+   Leva per apparecchio `?juntaresto=0` (torna la somma mesa per mesa). */
+const JUNTA_RESTO_ON = (function () {
+  const q = QS.get('juntaresto');
+  try {
+    if (q === '1') { localStorage.setItem('sala_juntaresto', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_juntaresto', '0'); return false; }
+    return localStorage.getItem('sala_juntaresto') !== '0';
+  } catch (e) { return q !== '0'; }
+})();
+const JUNTA_UNA_ON = (function () {   // [08-nov] la junta confermata apre UN conto (vCobrarSala)
+  const q = QS.get('juntauna');
+  try {
+    if (q === '1') { localStorage.setItem('sala_juntauna', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_juntauna', '0'); return false; }
+    return localStorage.getItem('sala_juntauna') !== '0';
+  } catch (e) { return q !== '0'; }
+})();
+function _vpTotMesas(mesas) {
+  const ms = (mesas || []).map(function (m) { return String(m); });
+  if (ms.length <= 1 || !JUNTA_RESTO_ON || !PAGO_UUIDS_VETRO_ON) return ms.reduce(function (s, m) { return s + _vpTot(m); }, 0);
+  let base = 0, pag = 0;
+  ms.forEach(function (m) { base += _vpBase(m); pag += _vpPagadoU(m); });
+  return Math.max(0, base - pag);
+}
 function _vpTot(mesa) {
   const res = _resDe(mesa);
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
@@ -12397,9 +12443,7 @@ function _vpTot(mesa) {
        Adesso il già pagato è il MASSIMO fra server e memoria locale — mai la somma (sono lo stesso denaro visto da due
        lati). Il massimo, non «il server vince secco»: subito dopo una parte il server può non averla ancora
        (`pagado_seduta` stantio) e la memoria sì; un secondo telefono che ha cobrado altro lo sa solo il server. */
-    const sedU = RESTO_SERVER_ON ? _pagadoSedutaDeMesa(mesa) : null;
-    const pagU = Math.max((sedU != null && isFinite(Number(sedU))) ? Number(sedU) : 0, parcU || 0);
-    return Math.max(0, baseU - pagU);
+    return Math.max(0, baseU - _vpPagadoU(mesa, parcU));
   }
   /* [AUT-0428] il server vince SEMPRE quando `pagado_seduta` è noto — prima
      di ogni altro segnale, anche del locale di 0422ⓑ (che resta il fallback
@@ -12505,7 +12549,7 @@ function renderPanel() {
   const j = _juntaDe(mesa);
   const viva = (STATE.mesasModel || []).some(function (x) { return x.mesa === mesa; });
   const ya = _pagadaDeMesa(mesa);
-  let totJ = 0; if (j) j.mesas.forEach(function (mm) { totJ += _vpTot(mm); });
+  let totJ = j ? _vpTotMesas(j.mesas) : 0;   // [08-nov] il resto della junta, come il pannello del pago
   /* [26-set · reperto di Alberto, collaudo junta 998+999 dal vivo] IL
      PANNELLO MOSTRAVA SOLO LE RIGHE DELLA MESA TOCCATA: `its = _vpItems(mesa)`
      guardava una mesa sola, mentre `totJ` (già sopra) sommava tutta la
@@ -14257,7 +14301,7 @@ function abrirPago(mesa, parte) {
      l'ajeno dentro) e il visto locale. Flag spento o campo assente → visto
      locale, cioè il comportamento di ieri. Il denaro lo dice il server. */
   let tot = 0;
-  mesasPago.forEach(function (mm) { tot += _vpTot(mm); });
+  tot = _vpTotMesas(mesasPago);   // [08-nov · la 41] il resto della JUNTA: Σ consumo − Σ pagato, il taglio a zero dopo la somma
   /* v2.0 · IL MEDIO NON SI PRESELEZIONA (ordine di Alberto, 12-ago): un
      default è una selezione che nessuno ha fatto — e finisce nel fossile.
      Il bottone verde nasce spento e si accende quando la mano SCEGLIE. */
@@ -18089,7 +18133,7 @@ if (DEMO) {
       window._demoPagado = window._demoPagado || {};
       const consumo = (function () {
         const j = _juntaDe(mk), ms = j ? j.mesas : [mk];
-        return ms.reduce(function (s, m2) { return s + _vpTot(m2); }, 0);
+        return _vpTotMesas(ms);
       })();
       const antes = window._demoPagado[mk] || 0;
       if (mt > consumo - antes) {
