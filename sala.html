@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.110 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.111 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9889,8 +9889,9 @@ function _cobrarADedo(nJ) {
    Niente schermata di opzioni sul cammino caldo. L'anteprima (vPrecuentaSala)
    resta per il caso raro: una ristampa entro 5 min si conferma guardando. */
 function vPrecuentaDirecta(mesa) {
-  if (K28_BEBMENU_ON && _k28SoloCeros(mesa)) { _sinConsumo(mesa); return; }   // [02-nov · K28] come in _cobrarMesaSola: le righe, non `p.total`
-  const tot = _vpTot(mesa);
+  mesa = _mesaDelConto(mesa);   // [v3.228.111] la junta: la carta è della principal, col conto intero
+  if (K28_BEBMENU_ON && !_juntaSrvDe(mesa) && _k28SoloCeros(mesa)) { _sinConsumo(mesa); return; }   // [02-nov · K28] come in _cobrarMesaSola: le righe, non `p.total`
+  const tot = _vpTotConto(mesa);
   if (!tot) { _sinConsumo(mesa); return; }
   const ult = (STATE.pcUlt || {})[mesa] || 0;
   if (ult && Date.now() - ult < 300000) { vPrecuentaSala(mesa); return; }   // anti doble papel
@@ -10803,8 +10804,9 @@ function _dtFalta() {
 /* ── LO STATO ────────────────────────────────────────────────────────────── */
 function vDescontar3(mesa) {
   muroT0('eliminar');   // ⏱ [AUT-0159]
-  var tot = _vpTot(mesa);
-  if (K28_BEBMENU_ON && _k28SoloCeros(mesa)) {   // [02-nov · K28 ⓑ] solo «Un producto»: convenio, descuento e familia su $0 non hanno senso. Le righe, non `tot`: `p.total` può essere stantio (foto del GAS)
+  mesa = _mesaDelConto(mesa);   // [v3.228.111] la junta: lo sconto è sul conto della principal, il totale è della junta
+  var tot = _vpTotConto(mesa);
+  if (K28_BEBMENU_ON && !_juntaSrvDe(mesa) && _k28SoloCeros(mesa)) {   // [02-nov · K28 ⓑ] solo «Un producto»: convenio, descuento e familia su $0 non hanno senso. Le righe, non `tot`: `p.total` può essere stantio (foto del GAS)
     _dt = { mesa: mesa, tot: 0, promo: 0, tipo: 'prod', soloProd: true,
             conv: '', mot: '', txt: '', fam: '', col: '', cob: 0, pin: '' };
     _dtPinta();
@@ -10821,7 +10823,7 @@ function _dtCerrar() { _dt = null; _dtPinta(); }
    totale si incassa più basso **senza che si veda**. */
 function _dtTipo(t) {
   if (!_dt) return;
-  var fresco = _vpTot(_dt.mesa);
+  var fresco = _vpTotConto(_dt.mesa);   // [v3.228.111] col totale della junta
   if (fresco !== _dt.tot) {
     toast('warn', '🔄 La mesa cambió: ' + fmtPrice(_dt.tot) + ' → ' + fmtPrice(fresco));
     _dt.tot = fresco; _dt.promo = _dtPromo(_dt.mesa);
@@ -11833,8 +11835,9 @@ function _dtGo() {
 
 function vDescontarSala(mesa) {
   if (DESCONTAR_V2_ON) return vDescontar3(mesa);
-  if (K28_BEBMENU_ON && _k28SoloCeros(mesa)) return vDescontar3(mesa);   // [02-nov · K28 ⓑ] la card con la sola porta «Un producto»
-  const tot = _vpTot(mesa);
+  mesa = _mesaDelConto(mesa);   // [v3.228.111] la junta
+  if (K28_BEBMENU_ON && !_juntaSrvDe(mesa) && _k28SoloCeros(mesa)) return vDescontar3(mesa);   // [02-nov · K28 ⓑ] la card con la sola porta «Un producto»
+  const tot = _vpTotConto(mesa);
   if (!tot) { _sinConsumo(mesa); return; }
   vhoja('<h3>Descontar · Mesa ' + esc(mesa) + '</h3>' +
     '<div class="cs-psub">Consumo <b>' + fmtPrice(tot) + '</b>. Todo queda en el libro: ' +
@@ -11958,23 +11961,29 @@ async function colnConfirmar(btn) {
    indietro e si atterra direttamente nella correzione di QUEL pedido —
    quantità, motivo dalla lista, PIN del JL se è già in produzione. */
 function _dtoProducto(mesa) {
-  const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
-  if (!m) { toast('warn', 'Mesa ' + mesa + ' sin pedidos'); return; }
+  /* [v3.228.111 · Alberto: «eliminare i prodotti della 999 senza separare»] con una junta del server le righe sono di TUTTE le sue mesas,
+     ognuna col suo numero; la correzione va per uuid sulla mesa del pedido (`abrirMesa` della SUA mesa), come prima. */
+  const jE = _juntaSrvDe(mesa);
+  const mesasE = jE ? jE.mesas.map(String) : [String(mesa)];
   const righe = [];
-  m.pend.concat(m.mios, m.limpiar).forEach(function (p) {
-    try {
-      JSON.parse(p.items_json || '[]').forEach(function (it) {
-        righe.push({ uuid: p.uuid, id: p.id_pedido || '', n: it.nombre || it.id || '?',
-          q: parseInt(it.qty, 10) || 1, pu: parseFloat(it.precio) || 0 });
-      });
-    } catch (e) {}
+  mesasE.forEach(function (mm) {
+    const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mm; });
+    if (!m) return;
+    m.pend.concat(m.mios, m.limpiar).forEach(function (p) {
+      try {
+        JSON.parse(p.items_json || '[]').forEach(function (it) {
+          righe.push({ mesa: mm, uuid: p.uuid, id: p.id_pedido || '', n: it.nombre || it.id || '?',
+            q: parseInt(it.qty, 10) || 1, pu: parseFloat(it.precio) || 0 });
+        });
+      } catch (e) {}
+    });
   });
-  if (!righe.length) { toast('warn', 'Mesa ' + mesa + ' sin productos'); return; }
-  vhoja('<h3>Un producto · Mesa ' + esc(mesa) + '</h3>' +
+  if (!righe.length) { toast('warn', (jE ? 'La junta ' + mesasE.join('·') : 'Mesa ' + mesa) + ' sin productos'); return; }
+  vhoja('<h3>Un producto · ' + (jE ? 'Junta ' + esc(mesasE.join('·')) : 'Mesa ' + esc(mesa)) + '</h3>' +
     '<div class="cs-psub">Toca el que vuelve — se quita <b>esa línea sola</b>, con motivo.</div>' +
     righe.map(function (x) {
-      return '<button class="opt2" onclick="vhojaCerrar();abrirMesa(\'' + esc(mesa) + '\');abrirCorreccion(\'' + esc(x.uuid) + '\')">' +
-        '<b>' + x.q + '× ' + esc(x.n) + '</b><small>$' + _fmtMiles(x.q * x.pu) + (x.id ? ' · ' + esc(x.id) : '') + '</small></button>';
+      return '<button class="opt2" onclick="vhojaCerrar();abrirMesa(\'' + esc(x.mesa) + '\');abrirCorreccion(\'' + esc(x.uuid) + '\')">' +
+        '<b>' + x.q + '× ' + esc(x.n) + '</b><small>' + (jE ? 'Mesa ' + esc(x.mesa) + ' · ' : '') + '$' + _fmtMiles(x.q * x.pu) + (x.id ? ' · ' + esc(x.id) : '') + '</small></button>';
     }).join(''));
 }
 function _dtoPct(mesa, pct) {
@@ -12545,6 +12554,15 @@ const JUNTA_UNA_ON = (function () {   // [08-nov] la junta confermata apre UN co
     return localStorage.getItem('sala_juntauna') !== '0';
   } catch (e) { return q !== '0'; }
 })();
+/* ═══ [09-nov · v3.228.111 · 👤 Alberto, la junta 998+999: «sin consumo» con la 999 a $2.190, ed «eliminare dentro la junta senza separare»] ═══
+   Una junta CONFERMATA dal server (`gidSrv`) è UN conto sulla principal (`contoJuntaUnisci`, come COBRAR da `vCobrarSala`). PRECUENTA,
+   DESCUENTO/ELIMINAR e il foglio guardavano solo la mesa toccata: con la principal svuotata dicevano «sin consumo» mentre la junta aveva da
+   cobrar — la scusa per cobrar fuori (r.~12375, 17-ott). Qui la mesa del gesto diventa la principal e il totale è quello della junta.
+   Una junta che il server non conosce resta com'era: lì i conti sono davvero due. Precuenta: il bordo legge la carta della junta per conto
+   (`PC_PER_CONTO_ON` "1" sul vivo). */
+function _juntaSrvDe(mesa) { const j = _juntaDe(String(mesa)); return (j && j.gidSrv) ? j : null; }
+function _mesaDelConto(mesa) { const j = _juntaSrvDe(mesa); return j ? String(j.principal || j.mesas[0]) : String(mesa); }
+function _vpTotConto(mesa) { const j = _juntaSrvDe(mesa); return j ? _vpTotMesas(j.mesas) : _vpTot(mesa); }
 function _vpTotMesas(mesas) {
   const ms = (mesas || []).map(function (m) { return String(m); });
   if (ms.length <= 1 || !JUNTA_RESTO_ON || !PAGO_UUIDS_VETRO_ON) return ms.reduce(function (s, m) { return s + _vpTot(m); }, 0);
@@ -12671,7 +12689,7 @@ function renderPanel() {
     return;
   }
   const j = _juntaDe(mesa);
-  const viva = (STATE.mesasModel || []).some(function (x) { return x.mesa === mesa; });
+  const viva = (j ? j.mesas : [mesa]).some(function (mm) { return (STATE.mesasModel || []).some(function (x) { return x.mesa === mm; }); });   // [v3.228.111] una mesa viva della junta basta
   const ya = _pagadaDeMesa(mesa);
   let totJ = j ? _vpTotMesas(j.mesas) : 0;   // [08-nov] il resto della junta, come il pannello del pago
   /* [26-set · reperto di Alberto, collaudo junta 998+999 dal vivo] IL
