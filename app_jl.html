@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.44.8</span>
+<span class="ver" id="ver">app_jl v1.44.9</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -336,6 +336,93 @@ async function gasGet(action, params) {
     if (!r.ok) throw new Error('http_' + r.status);
     return await r.json();
   } catch (e) { clearTimeout(t); throw (e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+/* [08-nov · v1.44.8 · ⚙️ ARQ V34 «VOGLIONO UNA PERSONA», #27 ① ②] /saldi · /pedidos · /turno/estado: col solo token di lettura, a leva
+   LETTURE_FIRMATE_ON accesa, il bordo risponde 403 `credencial_requerida`. Questo vetro manda la credenziale che HA GIÀ:
+   ① il CODICE DEL TURNO aperto (`?codigo=`, via `turno`), che non tocca il freno del PIN;
+   ② solo se non c'è un turno, il PIN del JL in `X-Caja-Pin` (mai nell'URL). Il bordo lo verifica col freno delle scritture, che è
+      PER LOCALE: un PIN che il bordo rifiuta, ripetuto da un poll, bloccherebbe il PIN di tutti i JL del locale. Quindi al primo 403
+      `credencial_requerida` con il PIN in mano il vetro SMETTE di mandarlo in lettura (per questa sessione) e non lo ripete.
+   Il bordo vecchio (leva "") ignora l'uno e l'altro: un parametro e un header in più, già fra gli allow-headers del CORS. */
+/* [08-nov · v1.44.9 · i due 🟡 di 💵 EL GIRO, «0F4FF26 CONTRO 09A426E»] il «no» si ricorda PER CREDENZIALE, non per sessione:
+   G2 — si ricorda QUALE PIN è stato rifiutato: se il JL rientra con un altro PIN, quello nuovo si prova (prima restava cieco fino al reload).
+   G3 — si ricorda QUALE codice di turno è stato rifiutato (turno chiuso o cambiato in memoria): si passa subito al PIN, nella stessa lettura,
+        un tentativo solo; un codice NUOVO si prova di nuovo. */
+/* [08-nov · v1.44.10 · il 🟡 G5 di 💵 EL GIRO] a freno delle letture bloccato il bordo dice «no» anche alla credenziale GIUSTA: un «no»
+   ricordato per sempre accecava il vetro per tutta la sessione. Ora il «no» SCADE dopo LF_KO_MS (11 min, più dei 10 del blocco del bordo):
+   un PIN davvero sbagliato si riprova al più una volta ogni 11 minuti (sotto i 5 in 10 del freno). E se il bordo dirà
+   `lettura_bloqueada` (proposta ad ARQ), quello non è un «no» alla credenziale: si ricorda solo `credencial_requerida`, quindi la lettura dopo riprova. */
+const LF_KO_MS = 11 * 60000;
+let _LF_PIN_KO = '', _LF_COD_KO = '', _LF_PIN_KO_TS = 0, _LF_COD_KO_TS = 0;
+function _lfCred() {
+  const now = Date.now();
+  if (_LF_PIN_KO && now - _LF_PIN_KO_TS > LF_KO_MS) _LF_PIN_KO = '';
+  if (_LF_COD_KO && now - _LF_COD_KO_TS > LF_KO_MS) _LF_COD_KO = '';
+  const t = (STATE.turno && STATE.turno.turno && STATE.turno.turno.codigo) || '';
+  const cod = (t && t !== _LF_COD_KO) ? t : '';
+  const pin = (!cod && STATE.pin && STATE.pin !== 'DEMO' && STATE.pin !== _LF_PIN_KO) ? STATE.pin : '';
+  return { cod: cod, pin: pin };
+}
+/* [08-nov · v1.44.11 · ⚙️ ARQ V34 «L5 CURATO COME DECISO», c45c6da] il freno delle letture è per chi prova: per apparecchio
+   (`?dispositivo_id=`, 5 in 10 min) e per IP (20 in 10 min). Tutti i telefoni del locale escono dallo stesso IP del wifi: con un id
+   stabile, il telefono che sbaglia si ferma da solo prima di far scattare il secchio dell'IP per tutti. Lo stesso modo di `sala.html`
+   (`_dispositivoId`), chiave sua. Storage negato ⇒ niente id, e resta il secchio dell'IP, come senza.
+   [v1.44.13 · il 🟡 S3 di 💵 EL GIRO] l'id viaggia in query dal client: se si indovina, chiunque da fuori blocca QUEL telefono per 10 minuti.
+   Quindi 128 bit da `crypto.getRandomValues` (non `Math.random`, non l'ora), chiave `jl_lettura_id`, usato SOLO per le letture. */
+function _jlDispositivoId() {
+  try {
+    let id = localStorage.getItem('jl_lettura_id');
+    if (!id || !/^jl[0-9a-f]{32}$/.test(id)) {
+      const b = new Uint8Array(16); crypto.getRandomValues(b);
+      id = 'jl' + Array.from(b, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+      localStorage.setItem('jl_lettura_id', id);
+    }
+    return id;
+  } catch (e) { return ''; }   // niente storage o niente crypto: nessun id, resta il secchio dell'IP
+}
+/* [08-nov · v1.44.12 · ⚙️ ARQ V34 «IL BLOCCO SI DICE», 88ae107] a blocco attivo il bordo risponde `403 lectura_bloqueada` con `faltan_s`:
+   non è un «no» alla credenziale (quello resta `credencial_requerida`), quindi non si ricorda e non si passa alla credenziale successiva.
+   Il vetro aspetta `faltan_s` (al più un'ora) e poi riprova con la stessa: durante la pausa nessuna chiamata, la risposta è la stessa del bordo. */
+let _LF_PAUSA_FINO = 0;
+async function _lfFetch(url, sep, base, signal) {
+  const ora = Date.now();
+  if (ora < _LF_PAUSA_FINO) return { status: 403, j: { ok: false, error: 'lectura_bloqueada', faltan_s: Math.ceil((_LF_PAUSA_FINO - ora) / 1000) } };
+  const dev = _jlDispositivoId();
+  if (dev) { url = url + sep + 'dispositivo_id=' + encodeURIComponent(dev); sep = '&'; }
+  const giro = async function (c) {
+    const h = Object.assign({}, base || {});
+    if (c.pin) h['X-Caja-Pin'] = c.pin;
+    const r = await fetch(url + (c.cod ? sep + 'codigo=' + encodeURIComponent(c.cod) : ''), { headers: h, cache: 'no-store', signal: signal });
+    const j = await r.json().catch(function () { return null; });
+    return { status: r.status, j: j };
+  };
+  const no = function (o, c) {   // il «no» del bordo si ricorda sulla credenziale che l'ha preso, anche al secondo tentativo
+    const k = o.status === 403 && o.j && o.j.error === 'credencial_requerida' && (c.cod || c.pin);
+    if (k) { if (c.cod) { _LF_COD_KO = c.cod; _LF_COD_KO_TS = Date.now(); } else { _LF_PIN_KO = c.pin; _LF_PIN_KO_TS = Date.now(); } }
+    return k;
+  };
+  const pausa = function (o) {
+    if (o.status === 403 && o.j && o.j.error === 'lectura_bloqueada') {
+      const fs_ = Math.min(3600, Math.max(1, Number(o.j.faltan_s) || 60));
+      _LF_PAUSA_FINO = Date.now() + fs_ * 1000;
+    }
+    return o;
+  };
+  const c = _lfCred();
+  let out = pausa(await giro(c));
+  if (no(out, c)) {
+    const c2 = _lfCred();
+    if (c2.cod || c2.pin) { out = pausa(await giro(c2)); no(out, c2); }   // un tentativo solo con la credenziale successiva
+  }
+  return out;
+}
+async function bordeGetLf(path) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const sep = path.indexOf('?') >= 0 ? '&' : '?';
+    return (await _lfFetch(CFG.BORDE + path + sep + 't=' + encodeURIComponent(CFG.T), '&', null, ctrl.signal)).j;
+  } finally { clearTimeout(to); }
 }
 async function bordeGet(path) {
   const ctrl = new AbortController();
@@ -522,10 +609,10 @@ function cjSaldoOn() { return cjFlag('saldo_sin_padron_on'); }
 async function cjSaldosLeer() {
   const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 5000);
   try {
-    const r = await fetch(CFG.BORDE + '/saldi/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, cache: 'no-store', signal: ctrl.signal });
+    const r = await _lfFetch(CFG.BORDE + '/saldi/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), '?', { 'x-borde-token': CFG.T }, ctrl.signal);   // [v1.44.8/9] la credenziale della lettura
     clearTimeout(to);
-    const j = await r.json().catch(function () { return null; });
-    if (!r.ok || !j || j.ok !== true || !Array.isArray(j.mesas)) return { ok: false };
+    const j = r.j;
+    if (r.status !== 200 || !j || j.ok !== true || !Array.isArray(j.mesas)) return { ok: false };
     return { ok: true, mesas: j.mesas, ignote: Array.isArray(j.ignote) ? j.ignote : [] };
   } catch (e) { clearTimeout(to); return { ok: false }; }
 }
@@ -1186,7 +1273,7 @@ async function giroVeloce() {
   if (_tick % 3 === 1) {   // un tick su tre: le letture di contorno
     try { const s = await bordeGet('/salud'); STATE.salud = s; STATE.ts.salud = Date.now(); _jlSenzaGas(); } catch (e) { STATE.salud = null; }   // [07-nov · v1.44.6 · 10.2] il telefono ricorda la leva a ogni /salud letto
     try {
-      const p = await bordeGet('/pedidos/' + encodeURIComponent(CFG.LOCAL));
+      const p = await bordeGetLf('/pedidos/' + encodeURIComponent(CFG.LOCAL));   // [v1.44.8] la credenziale della lettura
       if (p && p.stato) { STATE.rechazos = p.stato.pago_rechazo || null; STATE.ts.rechazos = Date.now(); }
     } catch (e) {}
     try {
@@ -2505,8 +2592,8 @@ function _staffJLCarga() {
     }).catch(function (e) { _STAFF_JL_TS = 0; _STAFF_JL_ERR = (e && e.message === 'timeout') ? 'timeout' : 'sin_red'; });
   };
   const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
-  fetch(CFG.BORDE + '/turno/estado/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, cache: 'no-store', signal: ctrl.signal })
-    .then(function (r) { return r.json(); })
+  _lfFetch(CFG.BORDE + '/turno/estado/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), '?', { 'x-borde-token': CFG.T }, ctrl.signal)   // [v1.44.8/9] la credenziale della lettura
+    .then(function (r) { return r.j; })
     .then(function (r) {
       clearTimeout(to);
       if (r && r.ok && Array.isArray(r.staff) && r.staff.length) {

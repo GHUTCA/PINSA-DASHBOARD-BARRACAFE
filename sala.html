@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.110 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.111 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -11888,10 +11888,28 @@ function _dtoOtroMonto(mesa) {
    locale, non solo chi è in plaza: la colación è anche per cocina e barra. Leva del bordo `colacion_staff_borde_on`, nasce "0", e serve
    anche `TURNO_PG_ON` "1" (spento ⇒ 503). A leva accesa NON si torna a Google: se il bordo non risponde la lista dice di riprovare. */
 const LOC_PG_SALA = { BKS: 'BKS', RIESCO: 'RSC', CANDELARIA: 'CDL' };
+/* [08-nov · v3.228.112 · il 🟡 S3 di 💵 EL GIRO] l'id delle letture viaggia in query: se si indovina, chiunque da fuori blocca QUESTO tablet
+   per 10 minuti. Non è `_dispositivoId` (quello del freno delle scritture, fatto con l'ora e `Math.random`): 128 bit da
+   `crypto.getRandomValues`, chiave `sala_lettura_id`, usato solo per le letture. */
+function _letturaId() {
+  try {
+    let id = localStorage.getItem('sala_lettura_id');
+    if (!id || !/^sl[0-9a-f]{32}$/.test(id)) {
+      const b = new Uint8Array(16); crypto.getRandomValues(b);
+      id = 'sl' + Array.from(b, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+      localStorage.setItem('sala_lettura_id', id);
+    }
+    return id;
+  } catch (e) { return ''; }   // niente storage o niente crypto: nessun id, resta il secchio dell'IP
+}
 async function _staffDalBorde() {
   const ctrl = new AbortController(); const to = setTimeout(function () { ctrl.abort(); }, 6000);
   try {
-    const r = await fetch(BORDE_SALA.URL + '/turno/estado/' + encodeURIComponent(LOC_PG_SALA[CFG.LOCAL] || CFG.LOCAL || 'BKS'),
+    /* [08-nov · v3.228.110 · ⚙️ ARQ V34 «VOGLIONO UNA PERSONA», #27 ②] a leva LETTURE_FIRMATE_ON accesa il solo token di lettura dà 403:
+       la sala manda il codice del turno che ha già (`?codigo=`, via `turno`, nessun freno del PIN). Senza turno la colación non si apre comunque. */
+    const r = await fetch(BORDE_SALA.URL + '/turno/estado/' + encodeURIComponent(LOC_PG_SALA[CFG.LOCAL] || CFG.LOCAL || 'BKS')
+      + '?dispositivo_id=' + encodeURIComponent(_letturaId())   // [v3.228.111 · ARQ c45c6da] il freno delle letture per apparecchio: chi sbaglia si ferma da solo · [v3.228.112] id suo, non quello delle scritture
+      + (STATE.codigo ? '&codigo=' + encodeURIComponent(STATE.codigo) : ''),
       { headers: { 'x-borde-token': BORDE_SALA.T }, cache: 'no-store', signal: ctrl.signal });
     const j = await r.json();
     if (j && j.ok && Array.isArray(j.staff)) {
