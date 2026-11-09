@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.98 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.107 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -9698,7 +9698,15 @@ async function vPrecuentaImprimir(mesa, btn, parte, pinJl) {
 function vCobrarSala(mesa) {
   const j = _juntaDe(mesa);
   if (!j) return _cobrarMesaSola(mesa);   // v3.2 · la porta a 4 vie anche da sola (Alberto)
-  let tot = 0; j.mesas.forEach(function (m) { tot += _vpTot(m); });
+  /* ═══ [08-nov · Alberto, sulla 41 del 07-nov] «SE IO JUNTO DUE MESAS IL CONTO DOVREBBE DIVENTARE UNO SOLO» ═══
+     La scelta «Todo / Por mesa» mostrava due tavoli e due conti: Arianna ha creduto di non poter più cobrar «lo mío» (una parte),
+     ha separato e rigiuntato tre volte, e alla fine il resto mesa per mesa ha fatto pagare 12.490 in più. Una junta confermata dal
+     server (`gidSrv`) è UN conto anche nel bordo (`contoJuntaUnisci`): si apre il pannello del pago come per una mesa sola, con tutte
+     le righe della junta (`_vpItemsDet` è già junta-aware) e lo stesso bivio di sempre — todo · iguales · por producto.
+     Senza `gidSrv` il server non conosce la junta: resta la scelta di prima (Por mesa), perché lì i conti sono davvero due.
+     Leva per apparecchio `?juntauna=0` (torna la scelta). */
+  if (PAGO_V3_ON && JUNTA_UNA_ON && j.gidSrv) return abrirPago(String(j.principal || j.mesas[0]));
+  let tot = _vpTotMesas(j.mesas);   // [08-nov] il resto della JUNTA, non la somma dei resti per mesa
   vhoja('<h3>Cobrar · Junta ' + j.n + '</h3>' +
     '<div class="cs-psub"><b>$' + _fmtMiles(tot) + '</b> en la mesa · ' + j.mesas.length + ' mesas</div>' +
     /* v3.4.1 · «TODO LO QUE QUEDA» SI ACCENDE (ordine di Alberto, 13-ago a
@@ -9789,7 +9797,7 @@ function _dedoVista(mesa, volverJs) {
   det.items.forEach(function (x) { const q2 = _quienPaga(x); (porQuien[q2] = porQuien[q2] || []).push(x); });
   const nombres = Object.keys(porQuien);
   if (!nombres.length) { toast('warn', 'Sin consumo'); return; }
-  const todo = det.mesas.reduce(function (s, m2) { return s + _vpTot(m2); }, 0);
+  const todo = _vpTotMesas(det.mesas);   // [08-nov] il resto della junta
   vhoja('<h3>A dedo · quién debe qué</h3>' +
     '<div class="cs-psub">Los nombres nacen en la libreta (toca la persona al pedir). Sin nombre = su mesa.</div>' +
     nombres.map(function (q2) {
@@ -9824,7 +9832,7 @@ function _cobrarPorMesa(nJ) {
 }
 function _cobrarIguales(nJ) {
   const j = _juntasLoad().find(function (x) { return x.n === nJ; }); if (!j) return;
-  let tot = 0; j.mesas.forEach(function (m) { tot += _vpTot(m); });
+  let tot = _vpTotMesas(j.mesas);   // [08-nov]
   vhoja('<h3>Por partes iguales</h3>' +
     '<div class="cs-psub">$' + _fmtMiles(tot) + ' · ¿entre cuántas personas?</div>' +
     '<div class="cs-chips">' + [2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map(function (n2) {
@@ -12384,6 +12392,130 @@ function _vpBase(mesa) {
   const visto = m ? m.pend.concat(m.mios, m.limpiar).reduce(function (s, p) { return s + (parseFloat(p.total) || 0); }, 0) : 0;
   return res ? Math.max(res.total || 0, visto) : visto;
 }
+/* il già pagato della seduta di UNA mesa, nel ramo `uuids` di `_vpTot`: il MASSIMO fra server e memoria locale, mai la somma
+   (stesso denaro visto da due lati · AUT-0696). Estratto il 08-nov per `_vpTotMesas`: la formula è quella di prima, riga per riga. */
+function _vpPagadoU(mesa, parcU) {
+  if (parcU === undefined) parcU = (MARCA_TS_ON && STATE.pagadoParcial[mesa]) ? STATE.pagadoParcial[mesa] : 0;
+  const sedU = RESTO_SERVER_ON ? _pagadoSedutaDeMesa(mesa) : null;
+  return Math.max((sedU != null && isFinite(Number(sedU))) ? Number(sedU) : 0, parcU || 0);
+}
+/* ═══ [08-nov · 🛎 SALA V33 · la 41 del 07-nov, +$12.490 al cliente] IL RESTO DI UNA JUNTA SI CALCOLA SULLA JUNTA ═══
+   Prima: Σ `_vpTot(m)`, cioè `max(0, base − pagato)` MESA PER MESA, e poi la somma. I pagos di una junta si registrano sulla mesa
+   dove si incassano (la principal): la 41 aveva base 37.370 e pagato 49.860 ⇒ max(0, −12.490) = 0, e i 12.490 pagati per la 198
+   sparivano nel taglio. La 198 restava a 34.480 intera ⇒ il vetro ha cobrado 34.480 invece di 21.990.
+   Ora: Σ base − Σ pagato, e il taglio a zero UNA volta, dopo la somma. I pagos del bordo portano UNA mesa ciascuno
+   (`salaPgMesasPagadas`, chiave `p.mesa`): sommare il pagato delle mesas non conta due volte lo stesso pago.
+   Solo nel ramo `uuids` (acceso di flotta); fuori da lì, e per una mesa sola, è `_vpTot` di sempre.
+   Leva per apparecchio `?juntaresto=0` (torna la somma mesa per mesa). */
+/* [08-nov · 🛎 SALA V33 · ordine di Alberto via 🎛 V34 «IL COBRAR SULLA FOTO SI CURA STASERA»] IL DENARO SU UNA FOTO NON DICE PIÙ «2 SEGUNDOS».
+   🩸 sab 07-nov 03:02: il JL ha ricaricato, la lettura falliva, la sala era la FOTO del telefono (`_foto_local`) e cobrar rispondeva
+      «Actualizando la sala… 2 segundos y vuelve a tocar» per tutta la durata del guasto. E la foto era VECCHIA: mostrava da cobrar la 97,
+      pagata alle 02:41 in efectivo dal mesero. Il blocco è giusto (cobrar su una foto è la seconda boleta); sbagliato era il silenzio.
+   ⇒ al tocco: ① UNA lettura fresca subito (il gesto passa il cancello del poll, `refrescar`), e si aspetta fino a FOTO_COBRO_ESPERA_MS;
+      se la sala torna fresca il gesto riparte da solo, sulla sala vera · ② se no, il toast dice l'età e la regola, e niente «2 segundos».
+   Una sola attesa alla volta (due tocchi non fanno due giri). Leva `?fotocobro=0` ⇒ il comportamento di ieri. */
+const FOTO_COBRO_ON = (function () {
+  const q = QS.get('fotocobro');
+  try {
+    if (q === '1') { localStorage.setItem('sala_fotocobro', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_fotocobro', '0'); return false; }
+    return localStorage.getItem('sala_fotocobro') !== '0';
+  } catch (e) { return q !== '0'; }
+})();
+const FOTO_COBRO_ESPERA_MS = 8000;
+function _fotoCobroEtaMin() {
+  const ts = Number(STATE.salaFotoTs) || 0;
+  if (ts > 0) return Math.max(1, Math.round((Date.now() - ts) / 60000));
+  const s = STATE.sala && Number(STATE.sala._foto_local);
+  return s > 0 ? Math.max(1, Math.round(s / 60)) : null;
+}
+function _fotoCobroTexto(mesa) {
+  const eta = _fotoCobroEtaMin();
+  return '📵 Sin conexión' + (eta ? ' hace ' + eta + ' min' : '') + ': no puedo saber si la mesa ' + mesa + ' ya pagó. ' +
+    'No cobres en efectivo fuera del sistema' + (JL ? ' — mira la cuenta en otro teléfono.' : ' — avisa al JL.');
+}
+/* [08-nov · 🛎 SALA V33 · AUT-0943 di ⚙️ ARQ, bordo arq-resto-mesa 68237bb] LA MESA SOLA, DAL BORDO, MENTRE LA SALA È UNA FOTO.
+   `/estado/<LOCAL>?seccion=resto_mesa&mesa=N&codigo=…` dà il resto della SOLA mesa da Postgres (la stessa catena di /cuenta e di
+   _pagoSistema, senza il giudizio contro la foto ferma). Contratto in j.datos.datos:
+     {ok:true, cerrada:true, resta:0}                        nessun pedido vivo della mesa oggi (pagata, o mai aperta: il bordo non distingue)
+     {ok:true, cerrada:false, consumo, pagado, resta, resta_ignota}
+     {ok:false, reintenta:true, motivo}                      mai un numero · leva bordo spenta: datos null.
+   🔒 SOLO PER DIRE, MAI PER COBRAR: con la sala ancora foto il pannello resta chiuso anche se il resto è noto. Il pago esce dalla
+      sala (righe, uuids, junta), e quella è vecchia. La guardia in scrittura è il ③ di AUT-0936 nel bordo. Qui si dice la verità. */
+const RESTO_MESA_TIMEOUT_MS = 4000;
+async function _restoMesaLeer(mesa) {
+  try {
+    if (!BORDE_SALA.ON || !STATE.codigo) return null;
+    const m = String(mesa == null ? '' : mesa).trim();
+    if (!/^[0-9A-Za-z_-]{1,12}$/.test(m)) return null;
+    const u = BORDE_SALA.URL + '/estado/' + encodeURIComponent(CFG.LOCAL || 'BKS')
+      + '?t=' + encodeURIComponent(BORDE_SALA.T)
+      + '&seccion=resto_mesa&mesa=' + encodeURIComponent(m) + '&codigo=' + encodeURIComponent(STATE.codigo);
+    const ctrl = new AbortController();
+    const to = setTimeout(function () { ctrl.abort(); }, RESTO_MESA_TIMEOUT_MS);
+    const r = await fetch(u, { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    const j = await r.json();
+    const d = j && j.datos && j.datos.datos;
+    if (!r.ok || !d || d.ok !== true || String(d.mesa == null ? m : d.mesa) !== m) return null;   // reintenta, leva spenta, un'altra mesa: non so
+    /* [08-nov 19:5x · v3.228.107 · il 🟡 di 💵 EL GIRO «RESTO_MESA 68237bb»] SOLO `cerrada`, MAI IL NUMERO. `cerrada` nasce da Postgres
+       (nessun pedido vivo della mesa oggi). `resta` invece passa ancora da `_restoMesa`, che prende T0 e `pagado_seduta` dalla FOTO del
+       GAS quando la foto ha un vivo della mesa: con una foto ferma EL GIRO ha misurato resta 5.000 invece di 35.000. Un resta 0 sbagliato
+       qui direbbe «ya está pagada, no cobres» su una mesa che deve ancora pagare: è un buco nel pago. Il numero torna quando la foto
+       esce da `_restoMesa` (domanda di EL GIRO ad ARQ e BKP). */
+    if (d.cerrada === true) return { cerrada: true };
+    return null;
+  } catch (e) { return null; }
+}
+function _restoMesaTexto(mesa, rm) {
+  const eta = _fotoCobroEtaMin();
+  const viejo = '📵 La sala no se actualiza' + (eta ? ' (hace ' + eta + ' min)' : '') + '. ';
+  return viejo + 'Según el sistema, la mesa ' + mesa + ' no tiene nada por pagar ahora: no cobres de nuevo.';   // solo cerrada (v3.228.107)
+}
+/* true = il gesto si ferma qui (la sala è una foto). `rifai` è il gesto stesso, da rilanciare se la sala torna fresca. */
+function _dineroSobreFoto(mesa, rifai) {
+  if (!(STATE.sala && STATE.sala._foto_local)) return false;
+  if (!FOTO_COBRO_ON) { toast('warn', '📷 Actualizando la sala… 2 segundos y vuelve a tocar 💳'); refrescar(false); return true; }
+  if (STATE.fotoCobroEspera) { toast('warn', '📷 Comprobando la sala… un momento'); return true; }
+  STATE.fotoCobroEspera = true;
+  toast('warn', '📷 Comprobando la sala antes de cobrar…', FOTO_COBRO_ESPERA_MS + 1000);
+  const t0 = Date.now();
+  try { refrescar(false); } catch (e) {}
+  let rm = null, rmFin = false, chiuso = false;
+  try { _restoMesaLeer(mesa).then(function (x) { rm = x; rmFin = true; }, function () { rmFin = true; }); } catch (e) { rmFin = true; }
+  (function giro() {
+    if (chiuso) return;
+    if (!(STATE.sala && STATE.sala._foto_local)) { chiuso = true; STATE.fotoCobroEspera = false; try { rifai(); } catch (e) {} return; }
+    // la mesa senza niente da pagare si dice SUBITO: non c'è un cobro da aspettare
+    if (rm && rm.cerrada) { chiuso = true; STATE.fotoCobroEspera = false; toast('err', _restoMesaTexto(mesa, rm), 9000); return; }
+    if (Date.now() - t0 >= FOTO_COBRO_ESPERA_MS) { chiuso = true; STATE.fotoCobroEspera = false; toast('err', _fotoCobroTexto(mesa), 9000); return; }
+    setTimeout(giro, 400);
+  })();
+  return true;
+}
+const JUNTA_RESTO_ON = (function () {
+  const q = QS.get('juntaresto');
+  try {
+    if (q === '1') { localStorage.setItem('sala_juntaresto', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_juntaresto', '0'); return false; }
+    return localStorage.getItem('sala_juntaresto') !== '0';
+  } catch (e) { return q !== '0'; }
+})();
+const JUNTA_UNA_ON = (function () {   // [08-nov] la junta confermata apre UN conto (vCobrarSala)
+  const q = QS.get('juntauna');
+  try {
+    if (q === '1') { localStorage.setItem('sala_juntauna', '1'); return true; }
+    if (q === '0') { localStorage.setItem('sala_juntauna', '0'); return false; }
+    return localStorage.getItem('sala_juntauna') !== '0';
+  } catch (e) { return q !== '0'; }
+})();
+function _vpTotMesas(mesas) {
+  const ms = (mesas || []).map(function (m) { return String(m); });
+  if (ms.length <= 1 || !JUNTA_RESTO_ON || !PAGO_UUIDS_VETRO_ON) return ms.reduce(function (s, m) { return s + _vpTot(m); }, 0);
+  let base = 0, pag = 0;
+  ms.forEach(function (m) { base += _vpBase(m); pag += _vpPagadoU(m); });
+  return Math.max(0, base - pag);
+}
 function _vpTot(mesa) {
   const res = _resDe(mesa);
   const m = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
@@ -12397,9 +12529,7 @@ function _vpTot(mesa) {
        Adesso il già pagato è il MASSIMO fra server e memoria locale — mai la somma (sono lo stesso denaro visto da due
        lati). Il massimo, non «il server vince secco»: subito dopo una parte il server può non averla ancora
        (`pagado_seduta` stantio) e la memoria sì; un secondo telefono che ha cobrado altro lo sa solo il server. */
-    const sedU = RESTO_SERVER_ON ? _pagadoSedutaDeMesa(mesa) : null;
-    const pagU = Math.max((sedU != null && isFinite(Number(sedU))) ? Number(sedU) : 0, parcU || 0);
-    return Math.max(0, baseU - pagU);
+    return Math.max(0, baseU - _vpPagadoU(mesa, parcU));
   }
   /* [AUT-0428] il server vince SEMPRE quando `pagado_seduta` è noto — prima
      di ogni altro segnale, anche del locale di 0422ⓑ (che resta il fallback
@@ -12482,10 +12612,12 @@ function renderPanel() {
   }
   /* più mese toccate: la barra della junta vive QUI, non sotto il mapa */
   if (sel.length >= 2) {
-    let tot = 0; sel.forEach(function (m) { tot += _vpTot(m); });
     const jS = _juntasLoad().find(function (j) {
       return j.mesas.length === sel.length && j.mesas.every(function (m) { return sel.indexOf(m) >= 0; });
     });
+    /* [08-nov · 🟡 di 💵 EL GIRO su b4fd67e] se la selezione È una junta, la cifra è il resto della junta (la stessa del pannello del pago:
+       sulla 41+198 $21.990, non $34.480). Mesas sole selezionate insieme sono conti diversi: lì resta la somma mesa per mesa. */
+    const tot = jS ? _vpTotMesas(jS.mesas) : sel.reduce(function (s, m) { return s + _vpTot(m); }, 0);
     el.innerHTML = '<div class="vp-h"><span class="tt">👆 ' + sel.length + ' mesas</span>' +
       '<span class="mn">$' + _fmtMiles(tot) + '</span>' +
       '<button class="cx" onclick="vpSoltar()">✕</button></div>' +
@@ -12505,7 +12637,7 @@ function renderPanel() {
   const j = _juntaDe(mesa);
   const viva = (STATE.mesasModel || []).some(function (x) { return x.mesa === mesa; });
   const ya = _pagadaDeMesa(mesa);
-  let totJ = 0; if (j) j.mesas.forEach(function (mm) { totJ += _vpTot(mm); });
+  let totJ = j ? _vpTotMesas(j.mesas) : 0;   // [08-nov] il resto della junta, come il pannello del pago
   /* [26-set · reperto di Alberto, collaudo junta 998+999 dal vivo] IL
      PANNELLO MOSTRAVA SOLO LE RIGHE DELLA MESA TOCCATA: `its = _vpItems(mesa)`
      guardava una mesa sola, mentre `totJ` (già sopra) sommava tutta la
@@ -12906,6 +13038,31 @@ function juntaCrear() {
      voglio PEDIR apro il verbo»). Unire è unire: si resta sulla mappa, dove il
      tile unico appena nato si vede — e ordinare resta un gesto SUO, sul tile. */
 }
+/* [08-nov · 🛎 SALA V33 · la 73/76 del 06-nov, contratto di ⚙️ ARQ «IL CAMPO È uuids_por_mesa»] il separar dice al bordo QUALI pedidos tornano
+   a ogni mesa che esce, come li vede il mesero (lo stesso `mesa` della vista con cui incassa): il conto deve seguire ciò che il mesero vede, perché
+   il pago esce da lì. Il bordo prima sceglieva per mesa di NASCITA (`mesa_ped`) e la 73 ha pagato un pedido che il bordo aveva già ridato alla 76.
+   Forma: { "<mesa che esce>": ["pm-…", …] } — la principal non c'è (ciò che non è nominato resta lì); una mesa che esce senza pedidos ha [].
+   Si legge solo su una vista FRESCA: su una foto (`_foto_local`, `_muerta`, `_vieja_s`) il campo non parte e il bordo usa `mesa_ped`, come oggi.
+   Il bordo lo usa solo con la sua leva `SEP_UUIDS_VETRO_ON`: a leva spenta è un campo in più che nessuno legge. */
+function _sepUuidsCampo(j) {
+  try {
+    const s = STATE.sala;
+    if (!s || s._foto_local || s._muerta || s._vieja_s || !j) return {};
+    const princ = String(j.principal || '').trim();
+    const escono = (j.mesas || []).map(function (m) { return String(m).trim(); }).filter(function (m) { return m && m !== princ; });
+    if (!escono.length) return {};
+    const todas = [].concat(s.mios || [], s.por_limpiar || [], s.pendientes || [], s.sin_dueno || []);
+    const out = {};
+    escono.forEach(function (m) { out[m] = []; });
+    todas.forEach(function (p) {
+      if (!p || !p.uuid) return;
+      if (/cerrad|anulad|cancelad|expirad/i.test(String(p.estado || ''))) return;
+      const m = String(p.mesa == null ? '' : p.mesa).trim();
+      if (out[m] && out[m].indexOf(String(p.uuid)) < 0) out[m].push(String(p.uuid));
+    });
+    return { uuids_por_mesa: out };
+  } catch (e) { return {}; }   // un inciampo qui non ferma il separar: il bordo ricade su `mesa_ped`
+}
 function juntaSeparar(nJ) {
   const list = _juntasLoad(); const j = list.find(function (x) { return x.n === nJ; }); if (!j) return;
   _juntasSave(list.filter(function (x) { return x.n !== nJ; }));
@@ -12950,7 +13107,7 @@ function juntaSeparar(nJ) {
       /* [10-ott · EL GIRO `EL GIRO 1.4B DF3944F DUE ROSSI` ⓪ + QUARTA] `mesas` = le mesas della junta che si scioglie. Il guardiano del conflitto del bordo cerca i pedidos del gruppo come
          `q.mesa_grupo === principal` OPPURE `mesa ∈ mesas`; la sombra del DO non porta `mesa_grupo`, e senza `mesas` il separar trovava ZERO ⇒ `conflicto` ⇒ ripiegava sul GAS, ogni volta. */
       staffPost('separarMesas', Object.assign({ codigo: STATE.codigo, nombre: STATE.nombre,
-        principal: j.principal, mesas: (j.mesas || []).join(','), gid: _gid('sp') }, _chiavePg ? { gid_rotti: [_chiavePg] } : {})).catch(function () {});
+        principal: j.principal, mesas: (j.mesas || []).join(','), gid: _gid('sp') }, _chiavePg ? { gid_rotti: [_chiavePg] } : {}, _sepUuidsCampo(j))).catch(function () {});
     } catch (e) {}
   }
   cerrarMesa(); refrescarMapa();
@@ -13753,11 +13910,7 @@ async function fintocRegistrar__in(mesa) {
   if (STATE.fintocEnviando) return;
   // v2.0.1 · stessa regola di abrirPago: un pago Fintoc letto da una foto
   // locale può essere GIÀ registrato — si aspetta la foto fresca
-  if (STATE.sala && STATE.sala._foto_local) {
-    toast('warn', '📷 Actualizando la sala… 2 segundos y vuelve a tocar');
-    refrescar(false);
-    return;
-  }
+  if (_dineroSobreFoto(mesa, function () { fintocRegistrar__in(mesa); })) return;   // [08-nov] vedi FOTO_COBRO_ON
   const pagFin = _fintocDeMesa(mesa); if (!pagFin) return;
   const md = (STATE.mesasModel || []).find(function (x) { return x.mesa === mesa; });
   const tot = md ? md.pend.concat(md.mios).concat(md.limpiar)
@@ -14196,11 +14349,7 @@ function abrirPago(mesa, parte) {
      non contenere un pago appena entrato → fascia rossa assente → seconda
      boleta. Il pago aspetta la prima foto FRESCA (di norma <10 s). PEDIR e
      la precuenta restano liberi: la carta non è denaro. */
-  if (STATE.sala && STATE.sala._foto_local) {
-    toast('warn', '📷 Actualizando la sala… 2 segundos y vuelve a tocar 💳');
-    refrescar(false);
-    return;
-  }
+  if (_dineroSobreFoto(mesa, function () { abrirPago(mesa, parte); })) return;   // [08-nov] vedi FOTO_COBRO_ON
   /* v3.4.1 · IL TOTALE È DELLA SESSIONE, NON DELLA MESA: se la mesa è la
      principal di un grupo confermato dal server (gid), il pago copre TUTTE le
      sue mesas (specchio esatto di _sesionDeMesa col flag ON, GAS r.11993).
@@ -14232,7 +14381,7 @@ function abrirPago(mesa, parte) {
      l'ajeno dentro) e il visto locale. Flag spento o campo assente → visto
      locale, cioè il comportamento di ieri. Il denaro lo dice il server. */
   let tot = 0;
-  mesasPago.forEach(function (mm) { tot += _vpTot(mm); });
+  tot = _vpTotMesas(mesasPago);   // [08-nov · la 41] il resto della JUNTA: Σ consumo − Σ pagato, il taglio a zero dopo la somma
   /* v2.0 · IL MEDIO NON SI PRESELEZIONA (ordine di Alberto, 12-ago): un
      default è una selezione che nessuno ha fatto — e finisce nel fossile.
      Il bottone verde nasce spento e si accende quando la mano SCEGLIE. */
@@ -17456,6 +17605,16 @@ async function pagoConfirmar(btn) {
       _rech('✋ Valor superior al pago restante' +
         ((isFinite(_res) && _res > 0) ? ' · faltan $' + _fmtMiles(_res) : ''));
     }
+    /* [08-nov · 🛎 SALA V33 · AUT-0936 ③ e ① di ⚙️ ARQ, branch arq-pago-total-motivo a875cbe] IL NO DEL BORDO SUL RESTO SI LEGGE COL SUO NUMERO.
+       Il bordo rifiuta (borde+definitivo) un pago oltre il resto del conto (`supera_resta`, resta + cobrado) o un totale sotto il conto
+       (`consumo_bajo`, consumo + cobrado), e manda la frase in `mensaje`. Prima finivano in «No se pudo: supera_resta» e la frase
+       si perdeva. Con resta 0 la mesa è GIÀ PAGATA (la 97 di sab 03:02): lo si dice così, e la sala si rilegge. */
+    else if (r && r.error === 'supera_resta') {
+      const _rs = Math.round(Number(r.resta));
+      if (isFinite(_rs) && _rs <= 0) { _rech('✋ La mesa ' + pg.mesa + ' ya está pagada — no cobres de nuevo.'); refrescar(false); }
+      else _rech('✋ ' + (r.mensaje || ('Valor superior al pago restante' + (isFinite(_rs) && _rs > 0 ? ' · faltan $' + _fmtMiles(_rs) : ''))));
+    }
+    else if (r && r.error === 'consumo_bajo') _rech('✋ ' + (r.mensaje || 'El monto es menor que la cuenta. Si cobras otro monto, usa «Cobré otro monto» con el PIN del JL.'));
     else if (r && r.sin_gas) _rech('⚠️ ' + r.mensaje + ' (' + r.error + ')');   // [02-nov · C2] il no del bordo con la sua frase; il motivo tra parentesi per il JL
     else _rech('No se pudo: ' + (r && r.error || '?'));
   } catch (e) {
@@ -18064,7 +18223,7 @@ if (DEMO) {
       window._demoPagado = window._demoPagado || {};
       const consumo = (function () {
         const j = _juntaDe(mk), ms = j ? j.mesas : [mk];
-        return ms.reduce(function (s, m2) { return s + _vpTot(m2); }, 0);
+        return _vpTotMesas(ms);
       })();
       const antes = window._demoPagado[mk] || 0;
       if (mt > consumo - antes) {
