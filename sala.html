@@ -1112,7 +1112,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.115 · vetro</span>
+      <span class="ver" id="ver">sala v3.228.116 · vetro</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1434,6 +1434,48 @@ const ENVMESA_QS = (function () {
   } catch (e) { return (q === '1' || q === '0') ? q : ''; }
 })();
 function envMesaOn() { return ENVMESA_QS === '0' ? false : (ENVMESA_QS === '1' || ENVMESA_SRV); }
+/* ═══ [09-nov · v3.228.112 · 👤 Alberto, bacheca «IL MESERO ORDINA SOLO SULLA SUA PLAZA» + «SI CHIUDE ENTRO GIOVEDÌ 12»] LA REGOLA DELLA PLAZA ═══
+   ① plaza con mesas ⇒ solo quelle · ② una plaza SENZA mesas (RUNNER) o il JL ⇒ qualunque mesa vera · ③ nessuna plaza ⇒ niente pedido,
+   «pídela al JL» — ma prima il vetro rilegge la sala UNA volta: il vuoto può essere solo un poll in ritardo.
+   La plaza si legge da `plazas_detalle` della vista (la stessa di `STATE.plazaMesas`), niente letture nuove. Il bordo ha la sua guardia (🎛 BKP).
+   Leva: `pedido_solo_plaza_on` dal /salud ("" spenta · "1" o l'elenco dei locali) · per telefono `?soloplaza=1|0` (0 vince). Spenta = la riga di ieri. */
+let SOLO_PLAZA_SRV = false;
+const SOLO_PLAZA_QS = (function () {
+  const q = QS.get('soloplaza');
+  try {
+    if (q === '1' || q === '0') localStorage.setItem('sala_soloplaza', q);
+    return localStorage.getItem('sala_soloplaza') || '';
+  } catch (e) { return (q === '1' || q === '0') ? q : ''; }
+})();
+function soloPlazaOn() { return SOLO_PLAZA_QS === '0' ? false : (SOLO_PLAZA_QS === '1' || SOLO_PLAZA_SRV); }
+function _soloPlazaLeva(v) {
+  v = String(v == null ? '' : v).trim().toUpperCase();
+  if (!v || v === '0') return false;
+  if (v === '1') return true;
+  const cl = (typeof CFG !== 'undefined' && CFG.LOCAL) || 'BKS';
+  const loc = String((typeof LOC_PG_SALA !== 'undefined' && LOC_PG_SALA[cl]) || cl).toUpperCase();   // le leve del bordo nominano BKS · RSC · CDL
+  return v.split(/[,\s]+/).indexOf(loc) >= 0;
+}
+/* 'ok' · 'sin_plaza' · 'fuera' — pura sullo stato del vetro */
+/* [v3.228.113 · 🟡 ② di 💵 EL GIRO] `refrescar` esce subito se un poll è già in volo: allora si aspetta QUEL poll (al più 4 s), non se ne lancia un altro */
+async function _plazaRilegge() {
+  if (STATE.pollEnVuelo) { for (let i = 0; i < 20 && STATE.pollEnVuelo; i++) await new Promise(function (r) { setTimeout(r, 200); }); return; }
+  try { await refrescar(false); } catch (e) {}
+}
+function _plazaRegola(mesa) {
+  if (typeof JL !== 'undefined' && JL) return 'ok';
+  /* [v3.228.113 · 🟡 ① di 💵 EL GIRO] la sala morta (o la foto del telefono senza plazas) non è «senza plaza»: è «senza dati». Il pedido non parte
+     lo stesso (verso sicuro), ma il mesero non va dal JL per niente. */
+  if (STATE.sala && (STATE.sala._muerta || STATE.sala._foto_local) && !(Array.isArray(STATE.sala.plazas_detalle) && STATE.sala.plazas_detalle.length)) return 'sin_datos';
+  /* [v3.228.114 · 👤 Alberto, bacheca «ORDINA ANCHE SULLE MESAS TRASFERITE»] regola ① = plaza ∪ le mesas VIVE a suo nome (traspaso compreso). La fonte è
+     quella del bordo: i suoi pedidos vivi nella sala_vista (`mios` e `por_limpiar`, che il bordo manda SOLO per lui). Vale anche senza plaza. */
+  const mm = String(mesa);
+  if (STATE.sala && [].concat(STATE.sala.mios || [], STATE.sala.por_limpiar || []).some(function (p) { return p && String(p.mesa) === mm; })) return 'ok';
+  const det = (STATE.sala && Array.isArray(STATE.sala.plazas_detalle)) ? STATE.sala.plazas_detalle : [];
+  if (!det.length) return 'sin_plaza';
+  if (det.some(function (p) { return !String((p && p.mesas) || '').trim(); })) return 'ok';   // RUNNER: una plaza senza mesas
+  return _mesaFuera(mesa) ? 'fuera' : 'ok';
+}
 /* [AUT-0676 · 14-ott · 🖐 TERZA V30] il corte completa dal BORDO (`estado_mesero`) invece che da `getCierreMesero` (Google).
    Leva: `sala_corte_estado_on` dal /salud (nasce assente = spenta) · `?cortest=1` per telefono (prova) / `?cortest=0` freno che vince. */
 let CORTEST_SRV = false;
@@ -7692,8 +7734,18 @@ async function nuevoEnviar__in(btn) {
      del cajón (`csMesaChip`) cambia `n.mesa` senza ridisegnarlo. Leva spenta: la riga di sempre. */
   const mesa = (envMesaOn() ? (n.mesa || '') : ($('nuevoMesa') ? $('nuevoMesa').value : n.mesa || '')).toString().replace(/[^0-9]/g, '');
   if (!mesa) { toast('warn', '¿Qué mesa es? Pon el número'); return; }
+  /* [09-nov · v3.228.111 · 🎛 V34 «COME FA UN GARZÓN A METTERE LA MESA 0», i 3 pedidos di Ignacio del 07-nov, $52.780] «0» è una stringa NON vuota:
+     passava `if (!mesa)`. Una mesa vera è un numero da 1 in su, senza zeri davanti. Il bordo avrà la sua guardia (🎛 BKP): questa è la prima. */
+  if (!/^[1-9][0-9]{0,3}$/.test(mesa)) { toast('err', '⛔ La mesa ' + mesa + ' no existe — elige tu mesa de la lista'); return; }
   /* v3.2.1 · la cintura vera: una funzione che spedisce non si fida del solo
      vetro. Mesa fuori plaza → NON parte, e la libreta resta intatta. */
+  if (soloPlazaOn()) {   // [v3.228.112] la regola della plaza: ③ prima si rilegge, poi si dice
+    let _pr = _plazaRegola(mesa);
+    if (_pr === 'sin_plaza' || _pr === 'sin_datos') { await _plazaRilegge(); _pr = _plazaRegola(mesa); }
+    if (_pr === 'sin_datos') { toast('err', '📵 No tengo los datos de la sala ahora: espera un momento y vuelve a enviar. Tu pedido sigue en la libreta'); return; }
+    if (_pr === 'sin_plaza') { toast('err', '⛔ No tienes plaza asignada: pídela al JL. Tu pedido sigue en la libreta'); return; }
+    if (_pr === 'fuera') { toast('err', '⛔ La ' + mesa + ' no es de tu plaza — no se puede comandar aquí. Cúbrela con el JL.'); return; }
+  } else
   if (_mesaFuera(mesa)) { toast('err', '⛔ La ' + mesa + ' no es de tu plaza — no se puede comandar aquí. Cúbrela con el JL.'); return; }
   if (!n.lineas.length) { toast('warn', 'La libreta está en blanco'); return; }
   if (n.eligiendo) { toast('warn', 'Responde la pregunta de arriba primero'); return; }
@@ -10495,6 +10547,7 @@ function _saludLeggi() {
       YAPAGV_SRV = String(cercaK(j, 'sala_yapag_vuoto_on')) === '1';        // [14-ott · AUT-0674]
       CORTEST_SRV = String(cercaK(j, 'sala_corte_estado_on')) === '1';      // [14-ott · AUT-0676]
       ENVMESA_SRV = String(cercaK(j, 'sala_envmesa_on')) === '1';           // [14-ott · AUT-0672]
+      SOLO_PLAZA_SRV = _soloPlazaLeva(cercaK(j, 'pedido_solo_plaza_on'));    // [09-nov · v3.228.112] la regola della plaza
       if (!(j && j.ok === false)) UNIR_VIA_BORDE_ON = String(cercaK(j, 'unir_via_borde_on')) === '1';   // [10-ott · 1.4] · [AUT-0687] un JSON d'errore non è «spenta»: resta null
       CONTO_APERTURA_ON = String(cercaK(j, 'conto_apertura_on')) === '1';   // [10-ott · AUT-0646]
       SALDO_SIN_PADRON_ON = String(cercaK(j, 'saldo_sin_padron_on')) === '1';             // [11-ott · AUT-0666]
