@@ -95,7 +95,7 @@ footer{font-size:12px;color:var(--mute);margin:8px 0 24px}
 <div id="aviso" class="note hidden"></div>
 <div id="app"><div class="card"><div class="mute">Cargando…</div></div></div>
 <footer>Cobrado = pagos con boleta, sin propina · Por cobrar = consumo de las mesas abiertas, menos cortesías y pagos parciales · Consumo = pedidos del día · Mes = boletas emitidas · Día de 06:00 a 06:00 · Sólo lectura.
-  <br><span id="ver">socios v1.3.0 · 14-nov-2026</span> · <span id="edad"></span></footer>
+  <br><span id="ver">socios v1.3.1 · 14-nov-2026</span> · <span id="edad"></span></footer>
 </div>
 <script src="shared/pinsita_auth.js"></script>
 <script>
@@ -308,57 +308,56 @@ function graficoHoy(cv, venta, el, lblSp){
   return { svg:'<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Cobrado acumulado de hoy contra '+esc(lblSp)+'">'+g+'</svg>',
     W:W, L:L, R:R, n:n, x:x, HOY:HOY, SP:SP, k:k };
 }
-// ── v1.3.0 (14-nov, Alberto): las mesas hora por hora, abiertas y cerradas juntas. Llega SOLO si soci_hoy es v5 (columna curva_mesas):
-// sin ella este bloque no aparece y el panel queda idéntico a la v1.2.2. Abiertas = cuentas vivas al cierre de la hora (como la tarjeta
-// Ocupación); cerradas = las que terminaron DENTRO de esa hora (la diferencia del acumulado). Hoy: las horas no empezadas llegan null.
+// ── v1.3.1 (14-nov, Alberto: «non mi interessano abiertas o cerradas, mi interessa l'affluenza»): la AFLUENCIA hora por hora, dos líneas.
+// Mesas en la hora = cuentas que estuvieron vivas en algún momento de esa hora = abiertas al cierre de la hora + cerradas DENTRO de la hora
+// (la diferencia del acumulado). Se dibujan sólo las horas TERMINADAS (la hora en curso caería a cada comienzo de hora). Llega SOLO si soci_hoy es v5 (columna curva_mesas): sin ella el bloque no aparece y el panel queda el de
+// la v1.2.2. Cada punto está en el CENTRO de su hora (la hora de 14 a 15 cae a las 14:30); las marcas del eje son las horas enteras.
 function curvaMesasOk(c){ return !!c && ['hoy_abiertas','hoy_cerradas','sp_abiertas','sp_cerradas'].every(function(k){ return Array.isArray(c[k]) && c[k].length===24; }); }
 function enLaHora(acu){ return acu.map(function(v,i){ if(v==null) return null; var p=i? acu[i-1] : 0; return Math.max(0, v-(p==null?0:p)); }); }
+function afluencia(ab, ce){ var C=enLaHora(ce); return ab.map(function(v,i){ return v==null? null : v+(C[i]||0); }); }
 function graficoMesas(cm, lblSp, el, hora){   // el = horas desde las 06:00 del dato; hora = 'HH:MM' del dato
-  var HA=cm.hoy_abiertas.map(function(v){return v==null?null:+v;}), HC=enLaHora(cm.hoy_cerradas.map(function(v){return v==null?null:+v;}));
-  var SA=cm.sp_abiertas.map(Number), SC=enLaHora(cm.sp_cerradas.map(Number));
-  var conSp = SA.some(function(v){return v>0;}) || SC.some(function(v){return v>0;});
-  var W=520,H=170,L=8,R=14,T=12,B=22,n=24, slot=(W-L-R)/n, bw=slot*0.62;
-  var top=1; for(var i=0;i<24;i++){ top=Math.max(top,(HA[i]||0)+(HC[i]||0)); if(conSp) top=Math.max(top,SA[i]+SC[i]); } top*=1.12;
-  function x(i){return L+slot*(i+1);} function y(v){return T+(H-T-B)*(1-v/top);}
+  var num0=function(v){return v==null?null:+v;};
+  var HM=afluencia(cm.hoy_abiertas.map(num0), cm.hoy_cerradas.map(num0));
+  var SM=afluencia(cm.sp_abiertas.map(Number), cm.sp_cerradas.map(Number));
+  var conSp = SM.some(function(v){return v>0;});
+  var W=520,H=170,L=8,R=14,T=12,B=22,n=24, slot=(W-L-R)/n;
+  var top=1; for(var i=0;i<24;i++){ top=Math.max(top,HM[i]||0); if(conSp) top=Math.max(top,SM[i]); } top*=1.12;
+  function x(i){return L+slot*(i+0.5);} function xe(i){return L+slot*(i+1);} function y(v){return T+(H-T-B)*(1-v/top);}
   var paso=top>120?40:(top>60?20:(top>24?10:5)), g='';
   for(var v=paso; v<top; v+=paso) g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="var(--grid)"/><text x="'+L+'" y="'+(y(v)-3)+'" font-size="10" fill="var(--mute)">'+v+'</text>';
-  [3,7,11,15,19,23].forEach(function(i){ g+='<text x="'+x(i)+'" y="'+(H-6)+'" text-anchor="middle" font-size="10" fill="var(--mute)">'+String((7+i)%24).padStart(2,'0')+'h</text>'; });
-  var k=0; for(i=0;i<24;i++){ if(HA[i]!=null) k=i+1; }
-  for(i=0;i<k;i++){ var a=HA[i]||0, c=HC[i]||0, x0=x(i)-bw/2;
-    if(a>0) g+='<rect x="'+x0+'" y="'+y(a)+'" width="'+bw+'" height="'+(y(0)-y(a))+'" rx="2" fill="var(--hot)"/>';
-    if(c>0) g+='<rect x="'+x0+'" y="'+y(a+c)+'" width="'+bw+'" height="'+(y(a)-y(a+c))+'" rx="2" fill="var(--bar)"/>'; }
-  if(conSp){
-    g+='<polyline points="'+SA.map(function(v,i){return x(i)+','+y(v);}).join(' ')+'" fill="none" stroke="var(--ghost)" stroke-width="2" stroke-dasharray="5 4"/>';
-    g+='<polyline points="'+SA.map(function(v,i){return x(i)+','+y(v+SC[i]);}).join(' ')+'" fill="none" stroke="var(--ghost)" stroke-width="1.2" stroke-dasharray="1.5 3"/>'; }
+  [3,7,11,15,19,23].forEach(function(i){ g+='<text x="'+xe(i)+'" y="'+(H-6)+'" text-anchor="middle" font-size="10" fill="var(--mute)">'+String((7+i)%24).padStart(2,'0')+'h</text>'; });
+  var k=0; for(i=0;i<24;i++){ if(HM[i]!=null) k=i+1; }
+  // l'ora EN CURSO conta solo i minuti passati e farebbe crollare la linea a ogni ora che comincia: si disegnano solo le ore FINITE.
+  // horasDesde6 legge HH:MM; alle hh:00:00 esatte la v5 manda null per l'ora che comincia (k-1 = floor(el)-1): nessuna ora in corso.
+  if(k>0 && el!=null && (k-1)===Math.floor(el)) k--;
+  if(conSp) g+='<polyline points="'+SM.map(function(v,i){return x(i)+','+y(v);}).join(' ')+'" fill="none" stroke="var(--ghost)" stroke-width="2" stroke-dasharray="5 4"/>';
+  if(k){
+    var pts=[]; for(i=0;i<k;i++) pts.push(x(i)+','+y(HM[i]||0));
+    g+='<defs><linearGradient id="gaM" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--hot)" stop-opacity=".30"/><stop offset="1" stop-color="var(--hot)" stop-opacity="0"/></linearGradient></defs>';
+    g+='<path d="M'+x(0)+','+y(0)+' L'+pts.join(' L')+' L'+x(k-1)+','+y(0)+' Z" fill="url(#gaM)"/>';
+    g+='<polyline points="'+pts.join(' ')+'" fill="none" stroke="var(--hot)" stroke-width="2.5" stroke-linejoin="round"/>';
+    g+='<circle cx="'+x(k-1)+'" cy="'+y(HM[k-1]||0)+'" r="5" fill="var(--hot)" stroke="var(--card)" stroke-width="2"/>';
+  }
   g+='<line class="cx" x1="0" x2="0" y1="'+T+'" y2="'+(H-B)+'" stroke="var(--mute)" opacity="0"/>';
-  function pico(A,hasta){ var m=-1,im=-1; for(var j=0;j<hasta;j++){ if(A[j]!=null && A[j]>m){ m=A[j]; im=j; } } return m>0? {n:m, h:String((7+im)%24).padStart(2,'0')+'h'} : null; }
-  // 🟡 de EL GIRO (14-nov): la última barra es la hora EN CURSO, contada hasta el dato (no hasta su fin). Se rotula con la hora del dato,
-  // y el sábado de comparación se toma en la hora entera más cercana, dicha explícitamente: nunca «a las 15:00» con un dato de las 14:34.
-  // (🟡 de EL GIRO sobre e53c704) sin condición sobre la fracción: horasDesde6 lee sólo HH:MM, y a las hh:00:30 la barra de la hora ya existe.
-  // A las hh:00:00 exactas la v5 manda null para la hora que empieza, así que k-1 = floor(el)-1 y enCurso queda falso solo.
-  var enCurso = k>0 && el!=null && (k-1)===Math.floor(el);
-  var ph=pico(HA,k), ps=conSp? pico(SA,24) : null, ahora=k? HA[k-1] : null;
-  if(ph && enCurso && ph.h===String((7+k-1)%24).padStart(2,'0')+'h') ph.h=(hora||'ahora');   // el pico en la barra en curso es «ahora», no el fin de la hora
-  var iSp = enCurso ? Math.max(0, Math.min(23, (el%1)<0.5 ? k-2 : k-1)) : k-1;
-  var antes=(conSp&&k&&iSp>=0)? SA[iSp] : null, hSp=String((7+iSp)%24).padStart(2,'0')+':00';
-  var hk = enCurso ? (hora||'ahora') : (k? String((7+k-1)%24).padStart(2,'0')+':00' : '');
+  function pico(A,hasta){ var m=-1,im=-1; for(var j=0;j<hasta;j++){ if(A[j]!=null && A[j]>m){ m=A[j]; im=j; } } return m>0? {n:m, i:im} : null; }
+  function franja(j){ return String((6+j)%24).padStart(2,'0')+':00 a '+String((7+j)%24).padStart(2,'0')+':00'; }
+  var ph=pico(HM,k), ps=conSp? pico(SM,24) : null, ahora=k? HM[k-1] : null, antes=(conSp&&k)? SM[k-1] : null;
   var res='';
-  if(k && ahora!=null) res+=(enCurso?'Ahora ('+esc(hk)+')':'A las '+hk)+': <b>'+ahora+'</b> mesas abiertas'
-    +(antes!=null?' · '+esc(lblSp)+(enCurso?' a las '+hSp:'')+' <b>'+antes+'</b>'+(ahora!==antes?' <span class="'+(ahora>antes?'up':'down')+'">('+(ahora>antes?'+':'')+(ahora-antes)+')</span>':' (=)'):'')+'<br>';
-  if(ph) res+='Pico de hoy: <b>'+ph.n+'</b> a las '+ph.h; if(ps) res+=(ph?' · ':'')+'pico '+esc(lblSp)+': <b>'+ps.n+'</b> a las '+ps.h;
+  if(k && ahora!=null) res+='De '+franja(k-1)+': <b>'+ahora+'</b> mesas'
+    +(antes!=null?' · '+esc(lblSp)+' <b>'+antes+'</b>'+(ahora!==antes?' <span class="'+(ahora>antes?'up':'down')+'">('+(ahora>antes?'+':'')+(ahora-antes)+')</span>':' (=)'):'')+'<br>';
+  if(ph) res+='Pico de hoy: <b>'+ph.n+'</b> de '+franja(ph.i); if(ps) res+=(ph?' · ':'')+'pico '+esc(lblSp)+': <b>'+ps.n+'</b> de '+franja(ps.i);
   if(!conSp) res+=(res?'<br>':'')+'<span class="mute">'+esc(lblSp)+': sin cuentas registradas (las cuentas nacen el 2-nov).</span>';
-  return { svg:'<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Mesas abiertas y cerradas por hora, hoy contra '+esc(lblSp)+'">'+g+'</svg>',
-    res:res, conSp:conSp, W:W, L:L, R:R, n:n, x:x, HA:HA, HC:HC, SA:SA, SC:SC, k:k, enCurso:enCurso, hora:hora };
+  return { svg:'<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Mesas ocupadas por hora, hoy contra '+esc(lblSp)+'">'+g+'</svg>',
+    res:res, conSp:conSp, W:W, L:L, R:R, n:n, x:x, HM:HM, SM:SM, k:k };
 }
 function enganchaMesas(M){
   var cw=document.getElementById('mesCw'); if(!M||!cw) return;
   var svg=cw.querySelector('svg'), tip=document.getElementById('mesTip'), cx=svg.querySelector('.cx');
   function mv(ev){ var b=svg.getBoundingClientRect(), px=((ev.touches?ev.touches[0].clientX:ev.clientX)-b.left)/b.width*M.W;
-    var i=Math.max(0,Math.min(23,Math.round((px-M.L)/(M.W-M.L-M.R)*M.n)-1)), X=M.x(i);
+    var i=Math.max(0,Math.min(23,Math.floor((px-M.L)/(M.W-M.L-M.R)*M.n))), X=M.x(i);
     cx.setAttribute('x1',X); cx.setAttribute('x2',X); cx.setAttribute('opacity','.5');
-    var ult = M.enCurso && i===M.k-1;   // la barra en curso: hoy hasta el dato, no hasta el fin de la hora
-    tip.innerHTML=String((7+i)%24).padStart(2,'0')+':00'+(ult?'<br><span style="opacity:.75">hoy hasta las '+esc(M.hora||'')+'</span>':'')+'<br>Hoy <b>'+(i<M.k&&M.HA[i]!=null? M.HA[i]+' abiertas · '+(M.HC[i]||0)+' cerradas' : '—')+'</b>'
-      +(M.conSp?'<br>Antes <b>'+M.SA[i]+' abiertas · '+M.SC[i]+' cerradas</b>':'');
+    tip.innerHTML=String((6+i)%24).padStart(2,'0')+':00 a '+String((7+i)%24).padStart(2,'0')+':00'
+      +'<br>Hoy <b>'+(i<M.k&&M.HM[i]!=null? M.HM[i]+' mesas' : '— (hora en curso o por venir)')+'</b>'+(M.conSp?'<br>Antes <b>'+M.SM[i]+' mesas</b>':'');
     tip.style.left=(X/M.W*100)+'%'; tip.style.top='30px'; tip.style.opacity=1; }
   svg.addEventListener('mousemove',mv); svg.addEventListener('touchmove',mv,{passive:true});
   svg.addEventListener('mouseleave',function(){ tip.style.opacity=0; cx.setAttribute('opacity','0'); });
@@ -398,8 +397,8 @@ function panelHoy(res, viejo){
      +'<div class="cw" id="hoyCw">'+G.svg+'<div class="tip" id="hoyTip"></div></div></div>'; }
   var GM=null;
   if(curvaMesasOk(r.curva_mesas)){ GM=graficoMesas(r.curva_mesas, DOW[dow(dia)]+' '+addDias(dia,-7).slice(8,10), el, hora);
-    h+='<div class="chart"><h3>Mesas por hora · abiertas y cerradas</h3><div class="leg"><span><i class="b"></i>Abiertas hoy</span><span><i class="c"></i>Cerradas en la hora</span></div>'
-     +(GM.conSp?'<div class="leg"><span>'+esc(spc)+':</span><span><i class="g"></i>abiertas</span><span><i class="g p"></i>+ cerradas</span></div>':'')
+    h+='<div class="chart"><h3>Mesas por hora · afluencia</h3><div class="leg"><span><i></i>Hoy</span>'+(GM.conSp?'<span><i class="g"></i>'+esc(sp)+'</span>':'')+'</div>'
+     
      +(GM.res?'<div class="mres">'+GM.res+'</div>':'')
      +'<div class="cw" id="mesCw">'+GM.svg+'<div class="tip" id="mesTip"></div></div></div>'; }
   h+='<div class="foot">Dato de las '+hora+' · se actualiza al abrir y con ↻</div>';
