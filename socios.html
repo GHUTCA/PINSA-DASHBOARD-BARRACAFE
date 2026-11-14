@@ -84,6 +84,9 @@ footer{font-size:12px;color:var(--mute);margin:8px 0 24px}
 .leg i{display:inline-block;width:14px;height:0;border-top:2px solid var(--hot);vertical-align:3px;margin-right:5px}.leg i.g{border-top:2px dashed var(--ghost)}
 .cw{position:relative}
 .tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);font-size:12px;padding:6px 9px;border-radius:8px;white-space:nowrap;transform:translate(-50%,-110%);opacity:0;transition:opacity .1s}
+.leg i.b{width:10px;height:10px;border:0;background:var(--hot);border-radius:2px;vertical-align:-1px}.leg i.c{width:10px;height:10px;border:0;background:var(--bar);border-radius:2px;vertical-align:-1px}
+.leg i.g.p{border-top:2px dotted var(--ghost)}
+.mres{font-size:13px;margin:2px 0 6px}.mres b{font-variant-numeric:tabular-nums}
 .foot{padding:8px 16px 12px;font-size:12px;color:var(--mute);border-top:1px solid var(--line)}
 </style>
 </head>
@@ -92,7 +95,7 @@ footer{font-size:12px;color:var(--mute);margin:8px 0 24px}
 <div id="aviso" class="note hidden"></div>
 <div id="app"><div class="card"><div class="mute">Cargando…</div></div></div>
 <footer>Cobrado = pagos con boleta, sin propina · Por cobrar = consumo de las mesas abiertas, menos cortesías y pagos parciales · Consumo = pedidos del día · Mes = boletas emitidas · Día de 06:00 a 06:00 · Sólo lectura.
-  <br><span id="ver">socios v1.2.2 · 08-nov-2026</span> · <span id="edad"></span></footer>
+  <br><span id="ver">socios v1.3.0 · 14-nov-2026</span> · <span id="edad"></span></footer>
 </div>
 <script src="shared/pinsita_auth.js"></script>
 <script>
@@ -270,7 +273,11 @@ var DEMO_HOYP = { ok:true, local:'BKS', dia:'2026-11-07', leido_ts:'2026-11-08T0
   venta:'4723716', cuentas_hoy:136, vivas:22, vivas_viejas:6, cerradas:113, pagado_cerradas:'4723716', max4s:83, max4s_estimado:true,
   por_cobrar:'821540', venta_sp:'3609932', boletas:129, boletas_sp:83, cierre_sp:'15393784',
   curva:{hoy:[0,0,0,0,0,0,0,300630,619168,1372938,1917078,2472324,3196306,3660976,4364476,4723716,5238546,6671066,7964686,9697856,11847806,11847806,11847806,11847806],
-         sp:[0,0,0,0,0,0,0,66740,471494,1441664,1811712,2206698,2627642,2889282,3229112,3609932,4783864,7223214,8574874,9953144,13760704,14438704,15393784,15393784]} }]};
+         sp:[0,0,0,0,0,0,0,66740,471494,1441664,1811712,2206698,2627642,2889282,3229112,3609932,4783864,7223214,8574874,9953144,13760704,14438704,15393784,15393784]},
+  // v1.3.0: soci_hoy v5 a sáb 7-nov 22:00 (PG, 14-nov). El 31-oct no tiene cuentas (nacen el 2-nov): sp en cero => la página no dibuja la línea
+  curva_mesas:{hoy_abiertas:[0,0,0,0,0,0,10,18,33,23,19,21,23,18,14,22,null,null,null,null,null,null,null,null],
+               hoy_cerradas:[0,0,0,0,0,0,1,5,16,37,54,65,78,91,107,114,null,null,null,null,null,null,null,null],
+               sp_abiertas:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], sp_cerradas:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]} }]};
 function num(v){ return v==null||v===''? null : +v; }
 function hhmm(iso){ return new Date(iso).toLocaleTimeString('es-CL',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',hour12:false}); }
 function horasDesde6(iso){ var p=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(iso)).split(':');
@@ -300,6 +307,50 @@ function graficoHoy(cv, venta, el, lblSp){
   g+='<line class="cx" x1="0" x2="0" y1="'+T+'" y2="'+(H-B)+'" stroke="var(--mute)" opacity="0"/>';
   return { svg:'<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Cobrado acumulado de hoy contra '+esc(lblSp)+'">'+g+'</svg>',
     W:W, L:L, R:R, n:n, x:x, HOY:HOY, SP:SP, k:k };
+}
+// ── v1.3.0 (14-nov, Alberto): las mesas hora por hora, abiertas y cerradas juntas. Llega SOLO si soci_hoy es v5 (columna curva_mesas):
+// sin ella este bloque no aparece y el panel queda idéntico a la v1.2.2. Abiertas = cuentas vivas al cierre de la hora (como la tarjeta
+// Ocupación); cerradas = las que terminaron DENTRO de esa hora (la diferencia del acumulado). Hoy: las horas no empezadas llegan null.
+function curvaMesasOk(c){ return !!c && ['hoy_abiertas','hoy_cerradas','sp_abiertas','sp_cerradas'].every(function(k){ return Array.isArray(c[k]) && c[k].length===24; }); }
+function enLaHora(acu){ return acu.map(function(v,i){ if(v==null) return null; var p=i? acu[i-1] : 0; return Math.max(0, v-(p==null?0:p)); }); }
+function graficoMesas(cm, lblSp){
+  var HA=cm.hoy_abiertas.map(function(v){return v==null?null:+v;}), HC=enLaHora(cm.hoy_cerradas.map(function(v){return v==null?null:+v;}));
+  var SA=cm.sp_abiertas.map(Number), SC=enLaHora(cm.sp_cerradas.map(Number));
+  var conSp = SA.some(function(v){return v>0;}) || SC.some(function(v){return v>0;});
+  var W=520,H=170,L=8,R=14,T=12,B=22,n=24, slot=(W-L-R)/n, bw=slot*0.62;
+  var top=1; for(var i=0;i<24;i++){ top=Math.max(top,(HA[i]||0)+(HC[i]||0)); if(conSp) top=Math.max(top,SA[i]+SC[i]); } top*=1.12;
+  function x(i){return L+slot*(i+1);} function y(v){return T+(H-T-B)*(1-v/top);}
+  var paso=top>120?40:(top>60?20:(top>24?10:5)), g='';
+  for(var v=paso; v<top; v+=paso) g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="var(--grid)"/><text x="'+L+'" y="'+(y(v)-3)+'" font-size="10" fill="var(--mute)">'+v+'</text>';
+  [3,7,11,15,19,23].forEach(function(i){ g+='<text x="'+x(i)+'" y="'+(H-6)+'" text-anchor="middle" font-size="10" fill="var(--mute)">'+String((7+i)%24).padStart(2,'0')+'h</text>'; });
+  var k=0; for(i=0;i<24;i++){ if(HA[i]!=null) k=i+1; }
+  for(i=0;i<k;i++){ var a=HA[i]||0, c=HC[i]||0, x0=x(i)-bw/2;
+    if(a>0) g+='<rect x="'+x0+'" y="'+y(a)+'" width="'+bw+'" height="'+(y(0)-y(a))+'" rx="2" fill="var(--hot)"/>';
+    if(c>0) g+='<rect x="'+x0+'" y="'+y(a+c)+'" width="'+bw+'" height="'+(y(a)-y(a+c))+'" rx="2" fill="var(--bar)"/>'; }
+  if(conSp){
+    g+='<polyline points="'+SA.map(function(v,i){return x(i)+','+y(v);}).join(' ')+'" fill="none" stroke="var(--ghost)" stroke-width="2" stroke-dasharray="5 4"/>';
+    g+='<polyline points="'+SA.map(function(v,i){return x(i)+','+y(v+SC[i]);}).join(' ')+'" fill="none" stroke="var(--ghost)" stroke-width="1.2" stroke-dasharray="1.5 3"/>'; }
+  g+='<line class="cx" x1="0" x2="0" y1="'+T+'" y2="'+(H-B)+'" stroke="var(--mute)" opacity="0"/>';
+  function pico(A,hasta){ var m=-1,im=-1; for(var j=0;j<hasta;j++){ if(A[j]!=null && A[j]>m){ m=A[j]; im=j; } } return m>0? {n:m, h:String((7+im)%24).padStart(2,'0')+'h'} : null; }
+  var ph=pico(HA,k), ps=conSp? pico(SA,24) : null, ahora=k? HA[k-1] : null, antes=(conSp&&k)? SA[k-1] : null, hk=k? String((7+k-1)%24).padStart(2,'0')+':00' : '';
+  var res='';
+  if(k && ahora!=null) res+='A las '+hk+': <b>'+ahora+'</b> mesas abiertas'+(antes!=null?' · '+esc(lblSp)+' <b>'+antes+'</b>'+(ahora!==antes?' <span class="'+(ahora>antes?'up':'down')+'">('+(ahora>antes?'+':'')+(ahora-antes)+')</span>':' (=)'):'')+'<br>';
+  if(ph) res+='Pico de hoy: <b>'+ph.n+'</b> a las '+ph.h; if(ps) res+=(ph?' · ':'')+'pico '+esc(lblSp)+': <b>'+ps.n+'</b> a las '+ps.h;
+  if(!conSp) res+=(res?'<br>':'')+'<span class="mute">'+esc(lblSp)+': sin cuentas registradas (las cuentas nacen el 2-nov).</span>';
+  return { svg:'<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Mesas abiertas y cerradas por hora, hoy contra '+esc(lblSp)+'">'+g+'</svg>',
+    res:res, conSp:conSp, W:W, L:L, R:R, n:n, x:x, HA:HA, HC:HC, SA:SA, SC:SC, k:k };
+}
+function enganchaMesas(M){
+  var cw=document.getElementById('mesCw'); if(!M||!cw) return;
+  var svg=cw.querySelector('svg'), tip=document.getElementById('mesTip'), cx=svg.querySelector('.cx');
+  function mv(ev){ var b=svg.getBoundingClientRect(), px=((ev.touches?ev.touches[0].clientX:ev.clientX)-b.left)/b.width*M.W;
+    var i=Math.max(0,Math.min(23,Math.round((px-M.L)/(M.W-M.L-M.R)*M.n)-1)), X=M.x(i);
+    cx.setAttribute('x1',X); cx.setAttribute('x2',X); cx.setAttribute('opacity','.5');
+    tip.innerHTML=String((7+i)%24).padStart(2,'0')+':00<br>Hoy <b>'+(i<M.k&&M.HA[i]!=null? M.HA[i]+' abiertas · '+(M.HC[i]||0)+' cerradas' : '—')+'</b>'
+      +(M.conSp?'<br>Antes <b>'+M.SA[i]+' abiertas · '+M.SC[i]+' cerradas</b>':'');
+    tip.style.left=(X/M.W*100)+'%'; tip.style.top='30px'; tip.style.opacity=1; }
+  svg.addEventListener('mousemove',mv); svg.addEventListener('touchmove',mv,{passive:true});
+  svg.addEventListener('mouseleave',function(){ tip.style.opacity=0; cx.setAttribute('opacity','0'); });
 }
 function panelHoy(res, viejo){
   var r=(res.righe||[])[0]||{}, venta=num(r.venta);
@@ -334,8 +385,14 @@ function panelHoy(res, viejo){
   if(curvaOk(r.curva)){ G=graficoHoy(r.curva, venta, el, DOW[dow(dia)]+' '+addDias(dia,-7).slice(8,10));
     h+='<div class="chart"><h3>Cómo va el día · cobrado acumulado</h3><div class="leg"><span><i></i>Hoy</span><span><i class="g"></i>'+esc(sp)+'</span></div>'
      +'<div class="cw" id="hoyCw">'+G.svg+'<div class="tip" id="hoyTip"></div></div></div>'; }
+  var GM=null;
+  if(curvaMesasOk(r.curva_mesas)){ GM=graficoMesas(r.curva_mesas, DOW[dow(dia)]+' '+addDias(dia,-7).slice(8,10));
+    h+='<div class="chart"><h3>Mesas por hora · abiertas y cerradas</h3><div class="leg"><span><i class="b"></i>Abiertas hoy</span><span><i class="c"></i>Cerradas en la hora</span></div>'
+     +(GM.conSp?'<div class="leg"><span>'+esc(spc)+':</span><span><i class="g"></i>abiertas</span><span><i class="g p"></i>+ cerradas</span></div>':'')
+     +(GM.res?'<div class="mres">'+GM.res+'</div>':'')
+     +'<div class="cw" id="mesCw">'+GM.svg+'<div class="tip" id="mesTip"></div></div></div>'; }
   h+='<div class="foot">Dato de las '+hora+' · se actualiza al abrir y con ↻</div>';
-  return { html:'<div class="hoy">'+h+'</div>', G:G };
+  return { html:'<div class="hoy">'+h+'</div>', G:G, GM:GM };
 }
 function enganchaGrafico(G){
   var cw=document.getElementById('hoyCw'); if(!G||!cw) return;
@@ -357,6 +414,7 @@ function hoyGuarda(loc,res){ try{ localStorage.setItem(HOY_KEY+loc, JSON.stringi
 function pintaHoy(box,res,viejo,q){
   var p=panelHoy(res,viejo); box.innerHTML = typeof p==='string'? p : p.html;
   if(p.G) enganchaGrafico(p.G);
+  if(p.GM) enganchaMesas(p.GM);
   var b=document.getElementById('hoyRef'); if(b) b.onclick=function(){ cargarHoy(q, res); };
 }
 function cargarHoy(q, actual){
