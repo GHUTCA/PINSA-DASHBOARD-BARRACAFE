@@ -98,7 +98,7 @@
 <div class="app">
   <div class="top">
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
-    <span class="ver" id="ver">jl v0.1.1</span>
+    <span class="ver" id="ver">jl v0.1.2</span>
   </div>
   <div class="edad" id="edad">leyendo la sala…</div>
   <div class="tabs" role="tablist">
@@ -112,7 +112,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.1.1';
+var JL_VER = 'jl v0.1.2';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -239,12 +239,15 @@ function jlModelo(dd, ora) {
       if (aut[k] != null) con('aut', aut[k]);
       else if (llam[k] && llam[k].k === 'llamando') con('llamando', llam[k].min);
       else if (llam[k]) con('cuenta', llam[k].min);
-      else if (x._vivo && x.tot > 0 && x.pagado >= x.tot) con('pagado', null);
       else if (ped.mios[k] != null) con('pidio', ped.mios[k]);
       else if (ped.limp[k] != null) con(ped.limp[k] >= JL_REFILL_MIN ? 'refill' : 'entregado', ped.limp[k]);
       else if (x._vivo) con('entregado', null);
+      /* [v0.1.2 · 🔴 K4 di 💵 EL GIRO «JLMODELO 8F09D05»] «Pagado» SOLO su una mesa senza pedidos vivi e con un pago nella seduta. Prima: `pagado >= tot`,
+         ma `tot` sono i pedidos ANCORA APERTI e `pagado_seduta` TUTTI i pagos della seduta, anche quelli che hanno già chiuso i loro: sottratto due
+         volte (lo stesso difetto dell'AUT-0460 in sala.html), una mesa che deve ancora pagare si leggeva pagata e usciva dal «$ en juego». */
+      else if (x.pagado > 0) con('pagado', null);
       else con('libre', null);
-      dueno[k] = slug;
+      (dueno[k] || (dueno[k] = [])).push(slug);
     });
     var mesas = orden.map(function (k) { return mapa[k]; }).sort(function (a, b) {
       var na = parseInt(a.m, 10), nb = parseInt(b.m, 10);
@@ -259,15 +262,23 @@ function jlModelo(dd, ora) {
   var sinDueno = [];
   ((dd && dd.qr_espera) || []).forEach(function (q) {
     if (!q || q.mesa == null) return;
-    var m = String(q.mesa), s = dueno[m], mn = jlMinDe(q, ora);
-    if (!s) { sinDueno.push({ m: m, min: mn, tot: Math.round(Number(q.total) || 0) }); return; }
-    var g = gente.filter(function (x) { return x.slug === s; })[0];
-    var x = g && g.mesas.filter(function (y) { return y.m === m; })[0];
-    if (x && x.st !== 'aut') { x.st = 'aut'; x.min = mn; x.qrTot = Math.round(Number(q.total) || 0); }
+    var m = String(q.mesa), ss = dueno[m] || [], mn = jlMinDe(q, ora);
+    var visti = gente.filter(function (g) { return ss.indexOf(g.slug) >= 0; }).map(function (g) { return g.mesas.filter(function (y) { return y.m === m; })[0]; }).filter(Boolean);
+    if (!visti.length) { sinDueno.push({ m: m, min: mn, tot: Math.round(Number(q.total) || 0) }); return; }
+    visti.forEach(function (x) { if (x.st !== 'aut') { x.st = 'aut'; x.min = mn; x.qrTot = Math.round(Number(q.total) || 0); } });
   });
-  /* «$ en juego»: il conto della mesa, più ciò che il QR chiede e nessuno ha ancora accettato */
+  /* «$ en juego»: il conto della mesa, più ciò che il QR chiede e nessuno ha ancora accettato.
+     [v0.1.2 · 🔴 K8 di 💵] il bordo mette la stessa mesa nella fetta di chi ha la plaza E di chi l'ha servita: la scheda si vede in tutte e due,
+     il totale in cima si conta PER MESA, una volta sola (la scheda più urgente). Il «$ en juego» è il conto dei pedidos aperti, non il resto
+     dopo un pago parziale (K3b, dichiarato: si decide con 🎨). */
+  var perMesa = {};
+  gente.forEach(function (g) { g.mesas.forEach(function (x) {
+    if (!jlUrgente(x)) return;
+    var p = perMesa[x.m], v = x.tot + (x.st === 'aut' ? (x.qrTot || 0) : 0);
+    if (!p || jlPrioridad(x) < p.pr || (jlPrioridad(x) === p.pr && v > p.v)) perMesa[x.m] = { pr: jlPrioridad(x), v: v };
+  }); });
   var nT = 0, tot = 0;
-  gente.forEach(function (g) { g.mesas.forEach(function (x) { if (jlUrgente(x)) { nT++; tot += x.tot + (x.st === 'aut' ? (x.qrTot || 0) : 0); } }); });
+  Object.keys(perMesa).forEach(function (m) { nT++; tot += perMesa[m].v; });
   sinDueno.forEach(function (q) { nT++; tot += q.tot; });
   return { gente: gente, sinDueno: sinDueno, nUrg: nT, enJuego: tot };
 }
