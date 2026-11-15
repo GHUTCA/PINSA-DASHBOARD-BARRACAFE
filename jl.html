@@ -1,0 +1,436 @@
+<!doctype html>
+<!-- DEVICE-CLASS: 1 · cattura in movimento — il telefono del JL
+     🛎 SALA V33 · AUT-1063 · L'APP JL NUOVA, FASE 1 (mockup v16 di 🎨 DESIGN, approvato da Alberto il 15-nov, L-14)
+     Accanto ad app_jl.html, che resta com'è. Legge SOLO il bordo: GET /estado/<local>?seccion=sala_vista (la stessa porta della sala nueva).
+     Nessuna chiamata a Google.
+     ENTRATA (fase 1): il PIN e il nome del JL dalla sessione del telefono (`jl_pin`, `jl_user`, li scrive app_jl al login, stesso dominio);
+     il codigo del turno da `jl_codigo` (sessione) o dal turno che app_jl ha già letto (`jl_cache_<LOCAL>`). Senza codigo: si torna all'app di
+     sempre, che lo legge. L'ingresso senza GAS è la rotta H1 di ⚙️ ARQ (`/jlEntra`), quando c'è.
+     ?demo=1 → una sala finta NELLA FORMA DEL BORDO, senza rete: passa dallo stesso adattatore (`jlModelo`) della sala vera.
+     ⏱ POLL dichiarato come debito (N2): un GET ogni 20 s mentre la pagina è visibile, come app_jl; muore quando la vista arriva dal /ws.
+     Pezzi: P1 i garzones · P2 le schede dei tavoli con gli stati (lun 16) · P3-P5 dettaglio, venta, 86 (mar 17). Solicitudes, reservas, ★/S,
+     «Pagando»: non si mostrano finché il bordo non ha il dato (bacheca «IL PIANO DEL VETRO: `jl.html`»). -->
+<html lang="es-CL"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0a0a0e">
+<title>JL · Servicio</title>
+<style>
+  :root{
+    --ink:#f7f0e2; --ink2:#c9c0b0; --ink3:#8f8779;
+    --oro:#e0a94a; --oro-hi:#f2c274; --oro-lo:#b8842f;
+    --ok:#5fd39b; --urge:#f0796e;
+    --vetro:rgba(255,255,255,.045); --vetro2:rgba(255,255,255,.075);
+    --filo:rgba(255,255,255,.085);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:#0a0a0e;color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif}
+  button{font:inherit;color:inherit;cursor:pointer;background:none;border:0}
+  a{color:inherit}
+  .num{font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column;position:relative;isolation:isolate}
+  .app::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:radial-gradient(120% 62% at 50% -12%,rgba(224,169,74,.17) 0%,rgba(224,169,74,.05) 42%,transparent 72%),linear-gradient(180deg,#15111b 0%,#0e0d13 45%,#0a0a0e 100%)}
+  .top{display:flex;align-items:center;gap:8px;padding:12px 14px 4px;font-size:12px;color:var(--ink3);flex:0 0 auto}
+  .top .yo{display:flex;align-items:center;gap:8px;min-width:0}
+  .top .yo b{color:var(--ink);font-weight:650;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .top .yo em{font-style:normal;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--oro);padding:3px 8px;border-radius:8px;background:rgba(224,169,74,.14);border:1px solid rgba(224,169,74,.3)}
+  .top .ver{margin-left:auto;font-size:10px;color:var(--ink3)}
+  .edad{margin:0 14px 4px;font-size:10.5px;color:var(--ink3);flex:0 0 auto}
+  .edad.mal{color:var(--urge);font-weight:700}
+  .tabs{display:flex;gap:4px;margin:4px 12px 10px;flex:0 0 auto}
+  .tabs button{flex:1 1 0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:8px 2px;border-radius:12px;background:var(--vetro);border:1px solid var(--filo);color:var(--ink3);font-size:10.5px;font-weight:650}
+  .tabs button[aria-selected="true"]{background:linear-gradient(160deg,rgba(224,169,74,.22),rgba(224,169,74,.07));border-color:rgba(224,169,74,.35);color:var(--ink)}
+  .body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 14px 24px;scrollbar-width:none}
+  .body::-webkit-scrollbar{display:none}
+  .vetro{background:var(--vetro);border:1px solid var(--filo);border-radius:19px;padding:12px 13px;margin-bottom:10px}
+  .vetro.lume{background:linear-gradient(140deg,rgba(224,169,74,.14),rgba(224,169,74,.035));border-color:rgba(224,169,74,.3)}
+  .vetro.alerta{border-color:rgba(240,121,110,.4);background:linear-gradient(140deg,rgba(240,121,110,.12),rgba(240,121,110,.03))}
+  .vetro h4{font-size:12.5px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .vetro p{font-size:12px;color:var(--ink2);line-height:1.5}
+  .pill{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:8px;padding:3px 8px;background:rgba(224,169,74,.14);border:1px solid rgba(224,169,74,.3);color:var(--oro)}
+  .pill.no{background:var(--vetro2);border-color:var(--filo);color:var(--ink3)}
+  .tira{width:100%;text-align:left;background:linear-gradient(140deg,rgba(240,121,110,.14),rgba(240,121,110,.04));border:1px solid rgba(240,121,110,.4);border-radius:17px;padding:9px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .tira b{font-size:12.5px}
+  .tira span{color:var(--ink2);font-size:12px}
+  .tira.ok{background:var(--vetro);border-color:var(--filo);cursor:default}
+  .gz{padding:10px 12px}
+  .gz-h{display:flex;align-items:center;gap:8px;cursor:pointer;min-height:30px}
+  .gz-h b{font-size:13.5px}
+  .gz-h .chev{margin-left:auto;color:var(--ink3);font-size:13px}
+  .gz-s{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;font-size:11px;color:var(--ink3)}
+  .gz-s .num{margin-left:auto;color:var(--ink2)}
+  .chip{font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;background:var(--vetro2);border:1px solid var(--filo);color:var(--ink2)}
+  .tc{font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;background:var(--vetro2);border:1px solid var(--filo);color:var(--ink2)}
+  .tc.ok{color:var(--ok);border-color:rgba(95,211,155,.3)}
+  .tc.bad{color:var(--urge);border-color:rgba(240,121,110,.4)}
+  .mesas{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-top:10px}
+  .m{position:relative;background:var(--vetro);border:1px solid var(--filo);border-radius:14px;padding:6px 3px;text-align:center;cursor:pointer;min-height:64px}
+  .m b{display:block;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+  .m small{display:block;font-size:9.5px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .m em.mon{display:block;font-style:normal;font-size:9.5px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  .m .px{display:block;font-size:9px;color:var(--ink3);margin-top:1px}
+  .m.aut{background:linear-gradient(160deg,rgba(224,169,74,.25),rgba(224,169,74,.08));border-color:rgba(224,169,74,.55)} .m.aut small{color:var(--oro)}
+  .m.llamando{border-color:rgba(240,121,110,.6)} .m.llamando small{color:var(--urge)}
+  .m.cuenta{border-color:rgba(224,169,74,.45)} .m.cuenta small{color:var(--oro)}
+  .m.refill small,.m.pidio small{color:var(--ink2)}
+  .m.entregado small{color:var(--ok)}
+  .m.pagado{border-color:rgba(95,211,155,.45)} .m.pagado small{color:var(--ok)}
+  .m.libre{opacity:.42}
+  .m small.px{color:var(--ink3)}
+  .dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:var(--oro)}
+  .riga{display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:12.5px}
+  .riga:last-child{border-bottom:0}
+  .riga .st{margin-left:auto;font-size:11px;font-weight:700;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink3)}
+  .riga small{display:block;color:var(--ink3);font-size:11px}
+  .azione{display:block;width:100%;padding:11px;border-radius:15px;background:var(--vetro2);border:1px solid var(--filo);font-size:12.5px;font-weight:650;color:var(--ink);margin-top:8px;text-align:center;text-decoration:none}
+  .azione.oro{background:linear-gradient(180deg,var(--oro-hi),var(--oro));border-color:transparent;color:#1a1208}
+  .fila2{display:flex;gap:6px} .fila2 .azione{font-size:11.5px;padding:10px 4px}
+  .volver{font-size:12px;color:var(--ink3);margin-bottom:8px;cursor:pointer;display:inline-block}
+  .conto{background:var(--vetro);border:1px solid var(--filo);border-radius:17px;padding:10px 12px;margin-bottom:8px}
+  .conto .l{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:4px 0;border-bottom:1px dashed rgba(255,255,255,.07)}
+  .conto .l:last-child{border-bottom:0}
+  .conto .tot{display:flex;justify-content:space-between;font-weight:700;padding-top:7px;font-variant-numeric:tabular-nums}
+  .sub{font-size:11.5px;color:var(--ink2);margin-top:8px}
+  .vacio{color:var(--ink3);font-size:12px;font-style:italic}
+</style></head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="yo"><b id="yo">—</b><em>JL</em></div>
+    <span class="ver" id="ver">jl v0.1.0</span>
+  </div>
+  <div class="edad" id="edad">leyendo la sala…</div>
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" onclick="ir(0)">Servicio</button>
+    <button role="tab" aria-selected="false" onclick="ir(1)">Local</button>
+    <button role="tab" aria-selected="false" onclick="ir(2)">Caja</button>
+    <button role="tab" aria-selected="false" onclick="ir(3)">Promos</button>
+    <button role="tab" aria-selected="false" onclick="ir(4)">Objetivo</button>
+  </div>
+  <div class="body" id="body"></div>
+</div>
+<script>
+'use strict';
+var JL_VER = 'jl v0.1.0';
+var QS = new URLSearchParams(location.search);
+var CFG = {
+  BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
+  T: '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ',
+  LOCAL: ({ bks: 'BKS', rsc: 'RIESCO', cdl: 'CANDELARIA' })[String(QS.get('loc') || 'bks').toLowerCase()] || 'BKS'
+};
+var DEMO = QS.get('demo') === '1' || location.hash === '#demo';
+/* le costanti PROVVISORIE del v16 (bacheca «SÌ AL PIANO» ⑦): si cambiano qui, con una riga, quando Alberto dà i numeri */
+var JL_REFILL_MIN = 15;     // Entregado da 15′ senza un pedido nuovo ⇒ «Refill»
+var JL_PIDIO_URGE_MIN = 10; // un pedido che aspetta da 10′ ⇒ «esperan tu acción»
+var JL_POLL_MS = 20000;
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function pesos(n) { n = Math.round(Number(n) || 0); return (n < 0 ? '−' : '') + '$' + Math.abs(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+function jlSlug(s) { var t = String(s || '').trim().toLowerCase(); try { t = t.normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (e) {} return t.replace(/[^a-z0-9]/g, ''); }
+/* le mesas di una plaza: lista, oppure testo «20-24, 30» (stessa regola di vvMesasDePlaza della sala nueva) */
+function jlMesasDePlaza(spec) {
+  if (Array.isArray(spec)) return spec.map(String);
+  var out = [];
+  String(spec || '').split(/[,\s]+/).forEach(function (t) {
+    if (!t) return;
+    var r = t.match(/^(\d+)-(\d+)$/);
+    if (r) { for (var i = +r[1]; i <= +r[2]; i++) out.push(String(i)); } else out.push(t);
+  });
+  return out;
+}
+function jlMinDe(it, ora) {
+  if (it && typeof it.hace_s === 'number') return Math.max(0, Math.floor(it.hace_s / 60));
+  var t = Number(it && (it.ts || it.t) || 0);
+  if (t > 1e12) return Math.max(0, Math.floor((ora - t) / 60000));
+  return null;
+}
+function jlItemsDe(it) {
+  var a = []; try { a = JSON.parse((it && it.items_json) || '[]') || []; } catch (e) { a = []; }
+  return a.map(function (i) {
+    var q = Number(i.qty || i.q || i.cantidad || 1) || 1, p = Number(i.precio != null ? i.precio : i.p) || 0;
+    var n = String(i.nombre || i.n || '').trim();
+    return n ? { n: n + (i.op ? ' · ' + i.op : ''), q: q, p: p } : null;
+  }).filter(Boolean);
+}
+
+/* ═══ IL VOCABOLARIO DEGLI STATI (validato il 15-nov, stesso nome in tutte le stanze) ═══
+   «Pagando» non c'è: oggi nessun campo del bordo dice «il cobro è cominciato e non è finito» (bacheca, punto ③ di «SÌ AL PIANO»). */
+var ESTADO = { aut: 'AUT QR', llamando: 'Llamando', cuenta: 'Cuenta pedida', refill: 'Refill', pidio: 'Pidió', entregado: 'Entregado', pagado: 'Pagado', libre: 'Libre' };
+/* l'ordine d'urgenza del v16: chi blocca la vendita sta in cima. null = non aspetta un gesto adesso */
+function jlPrioridad(x) {
+  if (x.st === 'aut') return 0;
+  if (x.st === 'llamando') return 1;
+  if (x.st === 'cuenta') return 2;
+  if (x.st === 'refill') return 4;
+  if (x.st === 'pidio' && x.min != null && x.min >= JL_PIDIO_URGE_MIN) return 5;
+  return null;
+}
+function jlUrgente(x) { return jlPrioridad(x) !== null; }
+
+/* ═══ L'ADATTATORE: la sala del bordo (`datos` di sala_vista) → il modello del vetro. FUNZIONE PURA: niente rete, niente DOM. ═══
+   Per ogni mesero (`meseros[slug]`): le mesas delle sue plazas (`plazas_detalle`), i conti (`mesas` con `items`/`total`), i pedidos vivi
+   (`mios` = nel conto e non ancora entregados, `por_limpiar` = entregados), i QR che aspettano (`pendientes` della fetta + `qr_espera` in cima),
+   le chiamate (`llamadas`), il già pagato (`mesas_pagadas[m].pagado_seduta`), la venta (`venta_turno.venta`). Pax e minuti seduti dall'anfitriona
+   (`datos.anfitriona`, solo se il bordo la manda: leva ANFITRIONA_BORDE_ON). */
+function jlModelo(dd, ora) {
+  ora = ora || Date.now();
+  var gente = [], dueno = {};
+  var mese = (dd && dd.meseros && typeof dd.meseros === 'object') ? dd.meseros : {};
+  var anf = {};
+  ((dd && dd.anfitriona && dd.anfitriona.plazas) || []).forEach(function (p) {
+    (p.mesas || []).forEach(function (m) { if (m && m.mesa != null) anf[String(m.mesa)] = m; });
+  });
+  Object.keys(mese).sort().forEach(function (slug) {
+    var v = mese[slug]; if (!v || v.ok === false) return;
+    var mapa = {}, orden = [];
+    function mesa(m, plz) {
+      m = String(m);
+      if (!mapa[m]) { mapa[m] = { m: m, plz: plz || '', st: 'libre', min: null, tot: 0, pagado: 0, items: [], _vivo: false, pax: null, sentada: null }; orden.push(m); }
+      if (plz && !mapa[m].plz) mapa[m].plz = plz;
+      return mapa[m];
+    }
+    var plazas = (v.plazas_detalle || []).map(function (p) {
+      var ms = jlMesasDePlaza(p.mesas); ms.forEach(function (m) { mesa(m, String(p.plaza)); });
+      return { nombre: String(p.plaza), mesas: ms };
+    });
+    if (!plazas.length) (v.plazas || []).forEach(function (p) { plazas.push({ nombre: String(p), mesas: [] }); });
+    (v.mesas || []).forEach(function (r) {
+      var x = mesa(r.mesa, r.plaza ? String(r.plaza) : ''); x._vivo = true;
+      x.tot = Math.round(Number(r.total) || 0);
+      if (r.items && r.items.length) { x.items = r.items.map(function (i) { return { n: String(i.n || ''), q: Number(i.q) || 1, p: Number(i.p) || 0 }; }); x._daConto = true; }
+    });
+    /* le righe dai pedidos vivi quando la vista non porta il conto (stessa regola della sala nueva v0.8.5) */
+    var ped = { mios: {}, limp: {} };
+    (v.mios || []).forEach(function (it) {
+      var x = mesa(it.mesa, String(it.plaza || '')); x._vivo = true; var mn = jlMinDe(it, ora);
+      if (!x._daConto) { jlItemsDe(it).forEach(function (i) { x.items.push(i); }); }
+      if (mn != null && (ped.mios[x.m] == null || mn > ped.mios[x.m])) ped.mios[x.m] = mn;   // il pedido che aspetta da più tempo
+      if (ped.mios[x.m] == null) ped.mios[x.m] = -1;
+    });
+    (v.por_limpiar || []).forEach(function (it) {
+      var x = mesa(it.mesa, String(it.plaza || '')); x._vivo = true; var mn = jlMinDe(it, ora);
+      if (!x._daConto) { jlItemsDe(it).forEach(function (i) { x.items.push(i); }); }
+      if (mn != null && (ped.limp[x.m] == null || mn < ped.limp[x.m])) ped.limp[x.m] = mn;   // l'ultimo entregado
+      if (ped.limp[x.m] == null) ped.limp[x.m] = -1;
+    });
+    orden.forEach(function (k) {
+      var x = mapa[k];
+      if (!x._daConto && x.items.length) x.tot = x.items.reduce(function (a, i) { return a + i.q * i.p; }, 0);
+    });
+    var aut = {};
+    (v.pendientes || []).forEach(function (it) {
+      var x = mesa(it.mesa, String(it.plaza || '')); var mn = jlMinDe(it, ora);
+      if (aut[x.m] == null || (mn != null && mn > aut[x.m])) aut[x.m] = mn == null ? -1 : mn;
+      x.qrTot = (x.qrTot || 0) + Math.round(Number(it.total) || 0);
+    });
+    var llam = {};
+    (v.llamadas || []).forEach(function (l) {
+      var x = mesa(l.mesa, String(l.plaza || '')); var mn = jlMinDe(l, ora);
+      var k = l.motivo === 'cuenta' ? 'cuenta' : 'llamando';
+      if (!llam[x.m] || (k === 'llamando' && llam[x.m].k === 'cuenta')) llam[x.m] = { k: k, min: mn };
+    });
+    var mp = (v.mesas_pagadas && typeof v.mesas_pagadas === 'object' && !Array.isArray(v.mesas_pagadas)) ? v.mesas_pagadas : {};
+    orden.forEach(function (k) {
+      var x = mapa[k];
+      x.pagado = Math.round(parseFloat((mp[k] || {}).pagado_seduta) || 0);
+      var a = anf[k]; if (a && x._vivo) { if (a.pax != null && a.pax !== '') x.pax = Number(a.pax) || null; if (a.desde_iso) { var t = Date.parse(a.desde_iso); if (t > 0) x.sentada = Math.max(0, Math.floor((ora - t) / 60000)); } }
+      function con(st, mn) { x.st = st; x.min = (mn == null || mn < 0) ? null : mn; }
+      if (aut[k] != null) con('aut', aut[k]);
+      else if (llam[k] && llam[k].k === 'llamando') con('llamando', llam[k].min);
+      else if (llam[k]) con('cuenta', llam[k].min);
+      else if (x._vivo && x.tot > 0 && x.pagado >= x.tot) con('pagado', null);
+      else if (ped.mios[k] != null) con('pidio', ped.mios[k]);
+      else if (ped.limp[k] != null) con(ped.limp[k] >= JL_REFILL_MIN ? 'refill' : 'entregado', ped.limp[k]);
+      else if (x._vivo) con('entregado', null);
+      else con('libre', null);
+      dueno[k] = slug;
+    });
+    var mesas = orden.map(function (k) { return mapa[k]; }).sort(function (a, b) {
+      var na = parseInt(a.m, 10), nb = parseInt(b.m, 10);
+      return (isNaN(na) || isNaN(nb)) ? (a.m < b.m ? -1 : 1) : na - nb;
+    });
+    if (!plazas.length && !mesas.some(function (x) { return x.st !== 'libre'; })) return;   // nessuna plaza e niente di vivo: non è in sala
+    var vt = v.venta_turno || {};
+    gente.push({ slug: slug, n: String(v.nombre || slug), plazas: plazas, mesas: mesas,
+      venta: (typeof vt.venta === 'number') ? vt.venta : null });
+  });
+  /* i QR in cima alla lettura (`qr_espera`): se la mesa è di un garzón e la sua fetta non lo porta già, la sua scheda diventa AUT QR */
+  var sinDueno = [];
+  ((dd && dd.qr_espera) || []).forEach(function (q) {
+    if (!q || q.mesa == null) return;
+    var m = String(q.mesa), s = dueno[m], mn = jlMinDe(q, ora);
+    if (!s) { sinDueno.push({ m: m, min: mn, tot: Math.round(Number(q.total) || 0) }); return; }
+    var g = gente.filter(function (x) { return x.slug === s; })[0];
+    var x = g && g.mesas.filter(function (y) { return y.m === m; })[0];
+    if (x && x.st !== 'aut') { x.st = 'aut'; x.min = mn; x.qrTot = Math.round(Number(q.total) || 0); }
+  });
+  /* «$ en juego»: il conto della mesa, più ciò che il QR chiede e nessuno ha ancora accettato */
+  var nT = 0, tot = 0;
+  gente.forEach(function (g) { g.mesas.forEach(function (x) { if (jlUrgente(x)) { nT++; tot += x.tot + (x.st === 'aut' ? (x.qrTot || 0) : 0); } }); });
+  sinDueno.forEach(function (q) { nT++; tot += q.tot; });
+  return { gente: gente, sinDueno: sinDueno, nUrg: nT, enJuego: tot };
+}
+
+/* ═══ LA SESSIONE DEL JL (fase 1: quella che app_jl ha già) ═══ */
+var SES = (function () {
+  var pin = '', user = '', codigo = '';
+  try { pin = sessionStorage.getItem('jl_pin') || ''; user = sessionStorage.getItem('jl_user') || ''; codigo = sessionStorage.getItem('jl_codigo') || ''; } catch (e) {}
+  if (!codigo) {
+    try {
+      var c = JSON.parse(localStorage.getItem('jl_cache_' + CFG.LOCAL) || 'null');
+      /* un codigo di ieri non si filtra qui: il bordo risponde `codigo_invalid` e il vetro manda il JL alla sua app, che legge il turno nuovo */
+      var cod = c && ((c.turno && c.turno.turno && c.turno.turno.codigo) || c.turnoCod);
+      if (cod) codigo = String(cod);
+      if (!user && c && c.user) user = String(c.user);
+    } catch (e) {}
+  }
+  return { pin: pin, user: user, codigo: codigo };
+})();
+function jlAppUrl() { return 'app_jl.html?loc=' + ({ BKS: 'bks', RIESCO: 'rsc', CANDELARIA: 'cdl' })[CFG.LOCAL] + (DEMO ? '&demo=1' : ''); }
+
+var VISTA = { mod: null, ts: 0, edadBordeS: null, err: '', filtro: false, exp: {}, tab: 0, aperta: null };
+
+/* ═══ LA LETTURA ═══ */
+async function jlLeggi() {
+  if (DEMO) { VISTA.mod = jlModelo(JL_DEMO, Date.now()); VISTA.ts = Date.now(); VISTA.err = ''; jlPinta(); return; }
+  if (!SES.codigo) { VISTA.err = 'sin_codigo'; jlPinta(); return; }
+  var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000), http = 0;
+  try {
+    var u = CFG.BORDE + '/estado/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T) + '&seccion=sala_vista&codigo=' + encodeURIComponent(SES.codigo);
+    var r = await fetch(u, { signal: ctrl.signal, cache: 'no-store' });
+    http = r.status;
+    var j = await r.json();
+    clearTimeout(to);
+    if (j && j.error === 'codigo_invalid') { VISTA.err = 'codigo_invalid'; jlPinta(); return; }
+    var dd = j && j.ok && j.datos && j.datos.datos;
+    if (!dd || !dd.meseros) { VISTA.err = 'El bordo no trae la sala (HTTP ' + http + ')'; jlPinta(); return; }
+    VISTA.mod = jlModelo(dd, Date.now()); VISTA.ts = Date.now(); VISTA.err = '';
+    VISTA.edadBordeS = (typeof dd.edad_foto_s === 'number') ? dd.edad_foto_s : null;
+  } catch (e) {
+    clearTimeout(to);
+    VISTA.err = (e && e.name === 'AbortError') ? 'Sin conexión con el bordo · tardó más de 6 s' : (http ? 'El bordo respondió algo que no se lee (HTTP ' + http + ')' : 'Sin conexión con el bordo');
+  }
+  jlPinta();
+}
+
+/* ═══ IL DISEGNO ═══ */
+function jlEdad() {
+  var el = document.getElementById('edad');
+  if (DEMO) { el.className = 'edad'; el.textContent = 'Prueba · datos de ejemplo, no son del sistema'; return; }
+  if (VISTA.err && VISTA.ts) { el.className = 'edad mal'; el.textContent = '⚠️ ' + VISTA.err + ' · lo que ves es de hace ' + Math.round((Date.now() - VISTA.ts) / 1000) + ' s'; return; }
+  if (VISTA.err) { el.className = 'edad mal'; el.textContent = '⚠️ ' + VISTA.err; return; }
+  if (!VISTA.ts) { el.className = 'edad'; el.textContent = 'leyendo la sala…'; return; }
+  var s = Math.round((Date.now() - VISTA.ts) / 1000) + (VISTA.edadBordeS || 0);
+  el.className = 'edad'; el.textContent = 'Sala de hace ' + s + ' s';
+}
+function tarjeta(x, gi) {
+  var lbl = ESTADO[x.st] + (x.min != null && jlUrgente(x) ? ' · ' + x.min + '′' : '');
+  var px = x.pax ? '<small class="px">' + esc(x.pax) + ' pax</small>' : '';
+  var mon = x.tot || (x.st === 'aut' ? (x.qrTot || 0) : 0);
+  var inner = x.st === 'libre' ? '<small>libre</small>' : '<em class="mon">' + (mon ? pesos(mon) : '—') + '</em><small>' + esc(lbl) + '</small>';
+  return '<div class="m ' + x.st + '" data-a="mesa" data-g="' + gi + '" data-m="' + esc(x.m) + '"><b>' + esc(x.m) + '</b>' + px + inner + '</div>';
+}
+function garzon(g, gi) {
+  var abierto = VISTA.filtro ? true : !!VISTA.exp[g.slug];
+  var urg = g.mesas.filter(jlUrgente).length;
+  var chip = g.plazas.length > 1
+    ? '<span class="chip">' + g.plazas.length + ' plazas</span>'
+    : (g.plazas[0] ? '<span class="pill no">' + esc(g.plazas[0].nombre) + '</span>' : '<span class="pill no">sin plaza</span>');
+  var h = '<div class="vetro gz"><div class="gz-h" data-a="gz" data-s="' + esc(g.slug) + '"><span class="dot"></span><b>' + esc(g.n) + '</b>' + chip + '<span class="chev">' + (abierto ? '▾' : '▸') + '</span></div>' +
+    '<div class="gz-s"><span class="tc ok">en turno</span>' + (urg ? '<span class="tc bad">' + urg + ' esperan</span>' : '') +
+    '<span class="num">venta ' + (g.venta == null ? 'sin dato' : pesos(g.venta)) + ' · obj. sin dato</span></div>';
+  if (abierto) {
+    var ms = g.mesas.filter(function (x) { return !VISTA.filtro || jlUrgente(x); });
+    if (g.plazas.length > 1 && !VISTA.filtro) h += '<div class="sub">' + g.plazas.map(function (p) { return '<b>' + esc(p.nombre) + '</b> ' + esc(p.mesas.join(' · ')); }).join(' &nbsp;|&nbsp; ') + '</div>';
+    h += '<div class="mesas">' + ms.map(function (x) { return tarjeta(x, gi); }).join('') + '</div>';
+  }
+  return h + '</div>';
+}
+function servicio() {
+  var M = VISTA.mod;
+  if (!M) {
+    if (VISTA.err === 'sin_codigo') return '<div class="vetro alerta"><h4>Falta el código del turno</h4><p>Abre primero tu app de siempre: ella lee el turno. Después vuelve aquí.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
+    if (VISTA.err === 'codigo_invalid') return '<div class="vetro alerta"><h4>El código del turno ya no vale</h4><p>Abre tu app de siempre para leer el turno nuevo.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
+    return '<p class="vacio">' + (VISTA.err ? esc(VISTA.err) : 'Leyendo la sala…') + '</p>';
+  }
+  var h = M.nUrg
+    ? '<button class="tira" data-a="filtro"><b>' + M.nUrg + ' esperan tu acción</b><span class="num">' + pesos(M.enJuego) + ' en juego · ' + (VISTA.filtro ? 'ver todas' : 'solo estas') + '</span></button>'
+    : '<div class="tira ok"><b>Nadie espera tu acción</b></div>';
+  if (M.sinDueno.length) h += '<div class="vetro alerta"><h4>QR sin garzón</h4>' + M.sinDueno.map(function (q) { return '<div class="riga"><span><b>Mesa ' + esc(q.m) + '</b><small>AUT QR' + (q.min != null ? ' · ' + q.min + '′' : '') + '</small></span><span class="st">' + (q.tot ? pesos(q.tot) : '—') + '</span></div>'; }).join('') + '</div>';
+  M.gente.forEach(function (g, gi) {
+    if (VISTA.filtro && !g.mesas.some(jlUrgente)) return;
+    h += garzon(g, gi);
+  });
+  if (!M.gente.length) h += '<p class="vacio">No hay garzones en la sala de hoy.</p>';
+  return h;
+}
+function detalle(gi, m) {
+  var g = VISTA.mod && VISTA.mod.gente[gi]; var x = g && g.mesas.filter(function (y) { return y.m === m; })[0];
+  if (!x) { VISTA.aperta = null; return servicio(); }
+  var lin = x.items.map(function (i) { return '<div class="l"><span>' + i.q + ' × ' + esc(i.n) + '</span><b class="num">' + pesos(i.q * i.p) + '</b></div>'; }).join('');
+  var sent = [];
+  if (x.sentada != null) sent.push('Sentada hace ' + x.sentada + ' min');
+  if (x.pax) sent.push(x.pax + ' pax');
+  return '<span class="volver" data-a="volver">‹ Servicio</span>' +
+    '<div class="conto"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><b>Mesa ' + esc(x.m) + ' · ' + esc(g.n) + '</b><span class="pill">' + esc(ESTADO[x.st]) + (x.min != null ? ' · ' + x.min + ' min' : '') + '</span></div>' +
+    (lin || '<p class="vacio">Sin consumo todavía.</p>') +
+    (x.tot ? '<div class="tot"><span>Total</span><span class="num">' + pesos(x.tot) + '</span></div>' : '') +
+    (x.pagado > 0 ? '<div class="sub">Pagado ' + pesos(x.pagado) + '</div>' : '') +
+    (sent.length ? '<div class="sub">' + esc(sent.join(' · ')) + '</div>' : '') + '</div>';
+}
+function local() { return '<div class="vetro"><h4>86 · reservas · turnos</h4><p>Todavía en tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>'; }
+function enApp() { return '<div class="vetro"><p>Esta parte sigue en tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>'; }
+var VIS = [servicio, local, enApp, enApp, enApp];
+function jlPinta() {
+  jlEdad();
+  var b = document.getElementById('body'), y = b.scrollTop;
+  b.innerHTML = (VISTA.tab === 0 && VISTA.aperta) ? detalle(VISTA.aperta.g, VISTA.aperta.m) : VIS[VISTA.tab]();
+  b.scrollTop = y;
+}
+function ir(i) {
+  VISTA.tab = i; VISTA.aperta = null;
+  document.querySelectorAll('.tabs button').forEach(function (b, j) { b.setAttribute('aria-selected', j === i ? 'true' : 'false'); });
+  jlPinta(); document.getElementById('body').scrollTop = 0;
+}
+document.getElementById('body').addEventListener('click', function (ev) {
+  var el = ev.target.closest('[data-a]'); if (!el) return;
+  var a = el.getAttribute('data-a');
+  if (a === 'filtro') { VISTA.filtro = !VISTA.filtro; jlPinta(); }
+  else if (a === 'gz') { var s = el.getAttribute('data-s'); VISTA.exp[s] = !VISTA.exp[s]; jlPinta(); }
+  else if (a === 'mesa') { VISTA.aperta = { g: +el.getAttribute('data-g'), m: el.getAttribute('data-m') }; jlPinta(); document.getElementById('body').scrollTop = 0; }
+  else if (a === 'volver') { VISTA.aperta = null; jlPinta(); }
+});
+
+/* la sala finta, NELLA FORMA DEL BORDO (sala_vista). Numeri d'esempio: non sono del sistema. */
+var _o = Date.now();
+var JL_DEMO = {
+  ok: true,
+  qr_espera: [{ uuid: 'q1', mesa: '84', ts: _o - 3 * 60000, total: 9800, productos: [], motivo: 'mesa_libre' }],
+  anfitriona: { plazas: [{ plaza: 'Aurora A', mesas: [{ mesa: '79', pax: 2, desde_iso: new Date(_o - 58 * 60000).toISOString() }, { mesa: '81', pax: 4, desde_iso: new Date(_o - 40 * 60000).toISOString() }] }] },
+  meseros: {
+    gabriel: { ok: true, nombre: 'Gabriel', plazas: ['Aurora A', 'Aurora B'],
+      plazas_detalle: [{ plaza: 'Aurora A', mesas: '79, 81, 84' }, { plaza: 'Aurora B', mesas: '107, 300' }],
+      mesas: [{ mesa: '79', plaza: 'Aurora A', total: 42400, items: [{ n: 'Schop LOA', q: 3, p: 4500 }, { n: 'Tabla Ganadera', q: 1, p: 18900 }, { n: 'Pisco sour', q: 2, p: 5200 }] },
+              { mesa: '81', plaza: 'Aurora A', total: 14400, items: [{ n: 'Coca Zero', q: 2, p: 2400 }, { n: 'Lomo Saltado', q: 1, p: 9600 }] }],
+      mios: [{ uuid: 'p1', mesa: '79', plaza: 'Aurora A', estado: 'digitado', total: 18900, hace_s: 12 * 60, items_json: '[{"n":"Tabla Ganadera","q":1}]' }],
+      por_limpiar: [{ uuid: 'p2', mesa: '81', plaza: 'Aurora A', estado: 'entregado', total: 14400, hace_s: 7 * 60, items_json: '[{"n":"Lomo Saltado","q":1}]' }],
+      pendientes: [], llamadas: [], venta_turno: { venta: 56800 } },
+    diego: { ok: true, nombre: 'Diego', plazas: ['T-Baja 2'],
+      plazas_detalle: [{ plaza: 'T-Baja 2', mesas: '14, 15, 61' }],
+      mesas: [{ mesa: '61', plaza: 'T-Baja 2', total: 31100, items: [{ n: 'Tabla Ganadera', q: 1, p: 18900 }, { n: 'Tropical Gin', q: 2, p: 6100 }] },
+              { mesa: '15', plaza: 'T-Baja 2', total: 9000, items: [{ n: 'Schop', q: 2, p: 4500 }] }],
+      mios: [], por_limpiar: [{ uuid: 'p3', mesa: '15', plaza: 'T-Baja 2', estado: 'entregado', total: 9000, hace_s: 22 * 60, items_json: '[{"n":"Schop","q":2}]' }],
+      pendientes: [], llamadas: [{ mesa: '61', plaza: 'T-Baja 2', motivo: 'cuenta', hace_s: 4 * 60 }], venta_turno: { venta: 40100 } }
+  }
+};
+
+document.getElementById('yo').textContent = DEMO ? 'Prueba' : (SES.user || 'JL');
+document.getElementById('ver').textContent = JL_VER;
+jlLeggi();
+/* il poll (N2, debito dichiarato in testa): solo a pagina visibile */
+setInterval(function () { if (!document.hidden) jlLeggi(); }, JL_POLL_MS);
+document.addEventListener('visibilitychange', function () { if (!document.hidden) jlLeggi(); });
+setInterval(jlEdad, 1000);
+</script>
+</body></html>
