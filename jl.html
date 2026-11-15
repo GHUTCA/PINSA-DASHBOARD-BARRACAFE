@@ -98,7 +98,7 @@
 <div class="app">
   <div class="top">
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
-    <span class="ver" id="ver">jl v0.1.0</span>
+    <span class="ver" id="ver">jl v0.1.1</span>
   </div>
   <div class="edad" id="edad">leyendo la sala…</div>
   <div class="tabs" role="tablist">
@@ -112,7 +112,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.1.0';
+var JL_VER = 'jl v0.1.1';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -291,10 +291,30 @@ function jlAppUrl() { return 'app_jl.html?loc=' + ({ BKS: 'bks', RIESCO: 'rsc', 
 
 var VISTA = { mod: null, ts: 0, edadBordeS: null, err: '', filtro: false, exp: {}, tab: 0, aperta: null };
 
+/* ═══ IL CODIGO DEL TURNO DAL BORDO (⚙️ ARQ, bacheca «A BKS IL TURNO SI APRE GIÀ SUL BORDO») ═══
+   `POST /turno/admin/<local>` {pin_jl}: a BKS il turno si apre sul bordo (TURNO_ABRE_BORDE_ON) e la risposta `fuente:'borde'` porta
+   `turno.codigo`. Prima dell'apertura: `gate_spento` ⇒ «Turno sin abrir» (senza turno non c'è sala). Un PIN rifiutato ⇒ si torna all'app.
+   `fuente:'ponte'` (turno sul GAS, oggi spento a BKS) non ha il codigo: si resta col codigo della sessione di app_jl, se c'è. */
+async function jlCodigoDalBordo() {
+  var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000);
+  try {
+    var r = await fetch(CFG.BORDE + '/turno/admin/' + encodeURIComponent(CFG.LOCAL === 'RIESCO' ? 'RSC' : CFG.LOCAL === 'CANDELARIA' ? 'CDL' : CFG.LOCAL),
+      { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T }, body: JSON.stringify({ pin_jl: SES.pin }), signal: ctrl.signal, cache: 'no-store' });
+    var j = await r.json().catch(function () { return null; });
+    clearTimeout(to);
+    if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') { VISTA.err = 'turno_sin_abrir'; return; }
+    if (j && j.ok === false && /^pin(_jl)?_bloqueado/.test(String(j.error || ''))) { VISTA.err = 'El PIN quedó bloqueado' + (+j.faltan_s ? ' · faltan ' + Math.ceil(+j.faltan_s / 60) + ' min' : ''); return; }
+    if (j && j.ok === false && /^pin(_jl)?_/.test(String(j.error || ''))) { VISTA.err = 'pin_mal'; return; }
+    var cod = j && j.ok === true && j.fuente === 'borde' && j.turno && j.turno.codigo;
+    if (cod) { SES.codigo = String(cod); if (j.user && !SES.user) SES.user = String(j.user); try { sessionStorage.setItem('jl_codigo', SES.codigo); } catch (e) {} VISTA.err = ''; }
+  } catch (e) { clearTimeout(to); }
+}
+
 /* ═══ LA LETTURA ═══ */
 async function jlLeggi() {
   if (DEMO) { VISTA.mod = jlModelo(JL_DEMO, Date.now()); VISTA.ts = Date.now(); VISTA.err = ''; jlPinta(); return; }
-  if (!SES.codigo) { VISTA.err = 'sin_codigo'; jlPinta(); return; }
+  if (!SES.codigo && SES.pin) await jlCodigoDalBordo();
+  if (!SES.codigo) { if (!VISTA.err || VISTA.err === 'codigo_invalid') VISTA.err = 'sin_codigo'; jlPinta(); return; }
   var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000), http = 0;
   try {
     var u = CFG.BORDE + '/estado/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T) + '&seccion=sala_vista&codigo=' + encodeURIComponent(SES.codigo);
@@ -302,7 +322,10 @@ async function jlLeggi() {
     http = r.status;
     var j = await r.json();
     clearTimeout(to);
-    if (j && j.error === 'codigo_invalid') { VISTA.err = 'codigo_invalid'; jlPinta(); return; }
+    if (j && j.error === 'codigo_invalid') {   // il turno è cambiato: il codigo nuovo si chiede al bordo, al giro dopo
+      VISTA.err = 'codigo_invalid'; SES.codigo = ''; try { sessionStorage.removeItem('jl_codigo'); } catch (e2) {}
+      jlPinta(); return;
+    }
     var dd = j && j.ok && j.datos && j.datos.datos;
     if (!dd || !dd.meseros) { VISTA.err = 'El bordo no trae la sala (HTTP ' + http + ')'; jlPinta(); return; }
     VISTA.mod = jlModelo(dd, Date.now()); VISTA.ts = Date.now(); VISTA.err = '';
@@ -318,8 +341,10 @@ async function jlLeggi() {
 function jlEdad() {
   var el = document.getElementById('edad');
   if (DEMO) { el.className = 'edad'; el.textContent = 'Prueba · datos de ejemplo, no son del sistema'; return; }
-  if (VISTA.err && VISTA.ts) { el.className = 'edad mal'; el.textContent = '⚠️ ' + VISTA.err + ' · lo que ves es de hace ' + Math.round((Date.now() - VISTA.ts) / 1000) + ' s'; return; }
-  if (VISTA.err) { el.className = 'edad mal'; el.textContent = '⚠️ ' + VISTA.err; return; }
+  var ERR = { sin_codigo: 'Falta el código del turno', codigo_invalid: 'El código del turno cambió', turno_sin_abrir: 'Turno sin abrir', pin_mal: 'El PIN no vale' };
+  var et = ERR[VISTA.err] || VISTA.err;
+  if (VISTA.err && VISTA.ts) { el.className = 'edad mal'; el.textContent = '⚠️ ' + et + ' · lo que ves es de hace ' + Math.round((Date.now() - VISTA.ts) / 1000) + ' s'; return; }
+  if (VISTA.err) { el.className = 'edad mal'; el.textContent = '⚠️ ' + et; return; }
   if (!VISTA.ts) { el.className = 'edad'; el.textContent = 'leyendo la sala…'; return; }
   var s = Math.round((Date.now() - VISTA.ts) / 1000) + (VISTA.edadBordeS || 0);
   el.className = 'edad'; el.textContent = 'Sala de hace ' + s + ' s';
@@ -351,6 +376,8 @@ function servicio() {
   var M = VISTA.mod;
   if (!M) {
     if (VISTA.err === 'sin_codigo') return '<div class="vetro alerta"><h4>Falta el código del turno</h4><p>Abre primero tu app de siempre: ella lee el turno. Después vuelve aquí.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
+    if (VISTA.err === 'turno_sin_abrir') return '<div class="vetro lume"><h4>Turno sin abrir</h4><p>Cuando se abra el turno, aquí aparece la sala.</p></div>';
+    if (VISTA.err === 'pin_mal') return '<div class="vetro alerta"><h4>El PIN no vale</h4><p>Entra de nuevo desde tu app.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
     if (VISTA.err === 'codigo_invalid') return '<div class="vetro alerta"><h4>El código del turno ya no vale</h4><p>Abre tu app de siempre para leer el turno nuevo.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
     return '<p class="vacio">' + (VISTA.err ? esc(VISTA.err) : 'Leyendo la sala…') + '</p>';
   }
