@@ -4283,8 +4283,11 @@ function snVouCampi(med, partes) {
     var raws = (s.mxR || []).filter(function (r) { return r && snVouPide(r.k) && (parseInt(r.v, 10) || 0) > 0; })
       .map(function (r) { return String(r.vou || '').trim(); }).filter(Boolean);
     for (var i = 0; i < raws.length; i++) if (!snVouMisura(snVouDig(raws[i]))) return { ok: false, err: 'El N° de operación de cada tarjeta son 6 cifras (o déjalo vacío)' };
-    var d0 = raws.map(snVouDig).filter(Boolean)[0] || '';
-    if (d0) out.voucher = d0;
+    /* [🎛 V34 «RISPONDO ① E ②»] in cima `voucher` = la riga carta PIÙ GRANDE con le cifre (forma della vecchia); ogni riga porta il suo in medios_json */
+    var best = null;
+    (s.mxR || []).forEach(function (r) { var v = parseInt(r && r.v, 10) || 0, d = r && snVouPide(r.k) ? snVouDig(r.vou) : '';
+      if (d && v > 0 && (!best || v > best.v)) best = { v: v, d: d }; });
+    if (best) out.voucher = best.d;
     if (raws.length) out.voucher_raw = raws.join(' ');
     return { ok: true, campi: out };
   }
@@ -4354,7 +4357,11 @@ function snPagoBody(x, medio, partes, propina, uid, uuids, parte) {
   if (_parz || _chiudeDopo) { b.parcial = 1; b.monto = _monto; }   // [v0.13.0] ① ②
   b.es_total = !_parz;                                            // [v0.13.0] ② l'ultima parte chiude il conto
   if (partes) {
-    var rr = partes.map(function (p) { return { medio: p.medio, monto: Math.round(Number(p.monto) || 0), propina: Math.max(0, Math.round(Number(p.propina) || 0)) }; }).filter(function (p) { return p.monto > 0; });   // [v0.15.7] la propina per riga, scelta dal mesero
+    var rr = partes.map(function (p) { var o = { medio: p.medio, monto: Math.round(Number(p.monto) || 0), propina: Math.max(0, Math.round(Number(p.propina) || 0)) };
+      /* [v0.15.17 · AUT-1075 · ⚙️ ARQ «ARRIVA A PG INTATTA, CON TRE CONDIZIONI»] il voucher della riga carta dentro `medios_json`: solo cifre, solo su
+         débito/crédito, MAI `voucher_pin_jl` (lì il bordo non filtra: arriverebbe in PG). `medios_json` resta una STRINGA (JSON.stringify qui sotto). */
+      var vd = String(p.voucher || '').replace(/[^0-9]/g, ''); if (vd && (o.medio === 'debito' || o.medio === 'credito')) o.voucher = vd;
+      return o; }).filter(function (p) { return p.monto > 0; });   // [v0.15.7] la propina per riga, scelta dal mesero
     if (rr.some(function (p) { return p.medio === 'transferencia' || !p.medio; })) return { ok: false, err: 'En el Mixto solo efectivo, débito o crédito: la transferencia la paga el cliente con su teléfono (Fintoc)' };   // [v0.11.4 · 🟡 T1b]
     var suma = rr.reduce(function (a, p) { return a + p.monto; }, 0);
     if (rr.length < 2) return { ok: false, err: 'Mixto = al menos 2 pagos con monto' };
@@ -4499,7 +4506,7 @@ function snMixtoSet(i, v) { var s = c1(); if (!s.mxR[i]) return; s.mxR[i].v = St
 function snMixtoMedio(i, k) { var s = c1(); if (!s.mxR[i] || SN_MX_MEDIOS.indexOf(k) < 0) return; s.mxR[i].k = k; pinta(); }
 function snMixtoMas() { var s = c1(); if (s.mxR.length >= 8) return; s.mxR.push({ k: 'Débito', v: '' }); pinta(); }
 function snMixtoQuita(i) { var s = c1(); if (s.mxR.length <= 2) return; s.mxR.splice(i, 1); pinta(); }
-function snMixtoParti() { var s = c1(); return (s.mxR || []).map(function (r) { return { medio: SN_MEDIO[r.k], monto: parseInt(r.v, 10) || 0 }; }); }
+function snMixtoParti() { var s = c1(); return (s.mxR || []).map(function (r) { var o = { medio: SN_MEDIO[r.k], monto: parseInt(r.v, 10) || 0 }; var d = snVouPide(r.k) ? snVouDig(r.vou) : ''; if (d) o.voucher = d; return o; }); }   /* [v0.15.17 · AUT-1075] il voucher della riga carta (solo cifre, mai il PIN) */
 /* ═══ [14-nov · v0.15.7 · 🛎 SALA V33 · ⚙️ ARQ «MESA 90: IL MIXTO HA SCRITTO LA PROPINA SULL'EFECTIVO» ④] LA PROPINA DEL MIXTO SI CHIEDE ═══
    🩸 Ven 13, mesa 90: efectivo 20.000 + débito 4.190, propina 2.419 pagata con la carta (voucher 6.609). Il libro la diceva in efectivo, e la caja
       aspettava da Ruth 22.419 contro i 20.000 in mano. In questo vetro la propina andava SEMPRE sulla prima riga: lo stesso errore, per costruzione.
@@ -4522,7 +4529,7 @@ function snMixtoPropCuadra() { var s = c1(), prop = snMixtoPropMonto(), su = 0;
   return r === 0 ? '<b style="color:#74c98a">✓ suma ' + P(su) + '</b>' : '<b style="color:var(--oro)">' + (r > 0 ? 'faltan ' + P(r) : 'sobran ' + P(-r)) + ' de propina</b>'; }
 /* → le righe con `propina` per riga, o null se il medio non è scelto / la divisione non torna / una propina non ci sta nel suo medio */
 function snMixtoPropReparto(reg, prop) {
-  var out = (reg || []).map(function (p) { return { medio: p.medio, monto: p.monto, propina: 0 }; });
+  var out = (reg || []).map(function (p) { var o = { medio: p.medio, monto: p.monto, propina: 0 }; if (p.voucher) o.voucher = p.voucher; return o; });   /* [v0.15.17 · AUT-1075] il voucher della riga viaggia */
   if (!(prop > 0)) return out;
   var s = c1(), pres = snMixtoPropMedi(), quota = {};
   if (s.mxProp === '_div') {
