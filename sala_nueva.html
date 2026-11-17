@@ -361,6 +361,9 @@
          pointer-events:none;z-index:30;box-shadow:0 10px 34px rgba(95,211,155,.3);
          transition:opacity .2s,transform .34s var(--ease)}
   .flash.on{opacity:1;transform:translateY(0) scale(1)}
+  /* [v0.15.25 · AUT-1088 · 🎛 V34 «VOUCHER RIPETUTO RIFIUTATO» ①] un rifiuto di denaro è ROSSO e resta finché il garzón non lo tocca */
+  .flash.mal{background:linear-gradient(180deg,#ef7a6e,#c2382c);color:#fff;pointer-events:auto;cursor:pointer;box-shadow:0 10px 34px rgba(194,56,44,.38)}
+  .flash.mal small{display:block;margin-top:6px;font-size:12px;font-weight:700;opacity:.85}
 
   .leg{max-width:300px;font-size:13.5px;color:var(--ink2);line-height:1.62}
   .leg h3{color:var(--ink);font-size:15px;margin:0 0 12px}
@@ -1501,10 +1504,15 @@ function confirmar(){
     vista='mesa'; limpiaPads(); medio=null; pinta();
   },800);
 }
-function flash(t){ var f=$('flash'); f.textContent=t; f.classList.add('on'); clearTimeout(f._t);
+function flash(t){ var f=$('flash'); if(f._fermo) return; f.textContent=t; f.classList.add('on'); clearTimeout(f._t);   // [v0.15.25] un rifiuto fermo non si copre
   f._t=setTimeout(function(){ f.classList.remove('on'); },1150); }
+/* [v0.15.25 · AUT-1088 · 🎛 V34 ①, prova di Alberto 07:33 sul voucher ripetuto: «verde e sparisce da solo»] ogni rifiuto di DENARO nel cobro:
+   rosso, fermo, si chiude solo col tocco del garzón. Un flash di routine non lo copre; un altro rifiuto lo sostituisce; un pago che entra lo toglie. */
+function snFlashFermo(t){ var f=$('flash'); clearTimeout(f._t); f._fermo=true; f.textContent=t; var sm=document.createElement('small'); sm.textContent='Toca para cerrar'; f.appendChild(sm);
+  f.classList.add('on','mal'); f.onclick=snFlashFermoVia; }
+function snFlashFermoVia(){ var f=$('flash'); if(!f._fermo) return; f._fermo=false; f.onclick=null; f.classList.remove('on','mal'); }
 /* [v0.15.20 · AUT-1081] un avviso che si deve LEGGERE (il cobro fermo): resta ms millisecondi; un flash breve dopo non lo taglia prima del tempo */
-function snFlashLargo(t,ms){ var f=$('flash'); f.textContent=t; f.classList.add('on'); clearTimeout(f._t);
+function snFlashLargo(t,ms){ var f=$('flash'); if(f._fermo) return; f.textContent=t; f.classList.add('on'); clearTimeout(f._t);
   f._t=setTimeout(function(){ f.classList.remove('on'); },ms||5000); }
 
 /* ═══════════ LA CONFERMA DEL TAVOLO SBAGLIATO ═══════════
@@ -4510,7 +4518,7 @@ function snLapideContraddice(it, x) {
   return contra;
 }
 async function snCobrarVivo(med, partes) {
-  if (abierta && typeof M2 === 'function' && M2(abierta)._lapide) { snFlashLargo('⏳ La mesa ' + abierta + ' cambió hace un momento: espera 15 s y vuelve a abrir. No se cobró nada.', 5000); pinta(); return; }   // [v0.15.20 · AUT-1081]
+  if (abierta && typeof M2 === 'function' && M2(abierta)._lapide) { snFlashFermo('⏳ La mesa ' + abierta + ' cambió hace un momento: espera 15 s y vuelve a abrir. No se cobró nada.'); pinta(); return; }   // [v0.15.20 · AUT-1081]
   if (SNP.vuelo) return;
   /* [v0.10.8 · 🟡 di 💵 EL GIRO] e viceversa: con un pedido in attesa (ENVIAR), il cobro aspetta */
   if (typeof PEND !== 'undefined' && PEND) { flash('Espera un momento: sale el pedido de la ' + PEND.m + ' (o toca DESHACER)'); return; }
@@ -4524,13 +4532,13 @@ async function snCobrarVivo(med, partes) {
     try { _fresca = await snCobroSalaFresca(); } finally { SNP.rilegge = false; }
     if (!_fresca) {   // [v0.12.8] B4: mai un cobro su una sala vecchia
       var _eta = VV.ts ? Math.max(1, Math.round((Date.now() - VV.ts) / 60000)) : null;
-      flash('📵 La sala no se actualiza' + (_eta ? ' (hace ' + _eta + ' min)' : '') + ': no cobres ahora. Revisa la señal y vuelve a tocar el medio'); pinta(); return;
+      snFlashFermo('📵 La sala no se actualiza' + (_eta ? ' (hace ' + _eta + ' min)' : '') + ': no cobres ahora. Revisa la señal y vuelve a tocar el medio'); pinta(); return;
     }
     if (SNP.vuelo) return;   // durante l'attesa può essere partito un altro gesto di cobro
     if (typeof PEND !== 'undefined' && PEND) { flash('Espera un momento: sale el pedido de la ' + PEND.m + ' (o toca DESHACER)'); return; }   // [v0.12.11] 🔴 D7: e anche un ENVIAR (v0.10.8, un gesto alla volta)
   }
   var x = X(), s = c1(), m = String(x.m);
-  if (x._lapide) { snFlashLargo('⏳ La mesa ' + m + ' cambió hace un momento: espera 15 s y vuelve a abrir. No se cobró nada.', 5000); pinta(); return; }   // [v0.15.20 · AUT-1081 · D3 di 💵] anche DOPO la rilettura fresca: è lei che può tornare vecchia
+  if (x._lapide) { snFlashFermo('⏳ La mesa ' + m + ' cambió hace un momento: espera 15 s y vuelve a abrir. No se cobró nada.'); pinta(); return; }   // [v0.15.20 · AUT-1081 · D3 di 💵] anche DOPO la rilettura fresca: è lei che può tornare vecchia
   if (!c1WaOk()) { flash('Falta la boleta: escribe el WhatsApp del cliente o toca «sin WhatsApp»'); pinta(); return; }   // [v0.11.1] mai un no muto
   /* [v0.10.2 · il 🔴 K2 di 💵 EL GIRO] il totale visto all'APERTURA è quello che si incassa, come la sala viva (`STATE.pago` congela tot e uuids
      insieme). Se a cobro aperto la mesa è cambiata (un pedido nuovo dal poll), non si paga: si mostra il totale nuovo, si ricongela, e il
@@ -4544,19 +4552,19 @@ async function snCobrarVivo(med, partes) {
        con un pago in sospeso tiene lo stesso uid: se il primo è entrato, il bordo risponde con lui e non incassa due volte. */
     if (SNP.uid[m] && CB.tot0 < prima && !vivoAncora) {
       delete SNP.uid[m];
-      flash('✓ El primer pago de ' + P(prima) + ' probablemente entró: NO lo cobres de nuevo. Queda ' + P(CB.tot0) + ' en la ' + m + ': si el cliente lo debe, vuelve a tocar el medio');
-    } else flash('⚠️ La ' + m + ' cambió mientras cobrabas: era ' + P(prima) + ', ahora es ' + P(CB.tot0) + '. Revisa con el cliente y vuelve a tocar el medio');
+      snFlashFermo('✓ El primer pago de ' + P(prima) + ' probablemente entró: NO lo cobres de nuevo. Queda ' + P(CB.tot0) + ' en la ' + m + ': si el cliente lo debe, vuelve a tocar el medio');
+    } else snFlashFermo('⚠️ La ' + m + ' cambió mientras cobrabas: era ' + P(prima) + ', ahora es ' + P(CB.tot0) + '. Revisa con el cliente y vuelve a tocar el medio');
     pinta(); return;
   }
   var _pz = Math.min(c1Parte(), saldoPieno());   // [v0.13.0] B1: quello che si cobra adesso (Todo = il resto; Lo mío / Partes = la parte)
   var b = snPagoBody(x, med, partes, c1Prop(_pz), snUidPago(m), CB && CB.uu, _pz);
-  if (!b.ok) { flash('⛔ ' + b.err); return; }
+  if (!b.ok) { snFlashFermo('⛔ ' + b.err); return; }
   var _vc = snVouCampi(med, partes);   // [v0.15.17 · AUT-1075] il sello del voucher, gli stessi campi della sala vecchia
-  if (!_vc.ok) { flash('🧾 ' + _vc.err); pinta(); return; }
+  if (!_vc.ok) { snFlashFermo('🧾 ' + _vc.err); pinta(); return; }
   Object.keys(_vc.campi).forEach(function (k) { b.body[k] = _vc.campi[k]; });
   if ((typeof SNJL !== 'undefined' && SNJL)) {   // [v0.14.0 · C1 · AUT-0646 della sala viva] il denaro va al mesero della plaza; chi incassa (registrado_por) resta il JL
     var _int = snJlIntestatario(b.body.mesas || [m]);
-    if (!_int.ok) { flash('⛔ ' + snJlIntMsg(_int)); pinta(); return; }
+    if (!_int.ok) { snFlashFermo('⛔ ' + snJlIntMsg(_int)); pinta(); return; }
     b.body.intestatario = _int.nombre; b.body.intestatario_plaza = _int.plaza; b.body.intestatario_fonte = _int.fonte_plaza;
   }
   SNP.vuelo = true; pinta();   // [v0.10.6] da qui nessun secondo tocco, anche dentro la finestra del DESHACER
@@ -4575,6 +4583,7 @@ async function snCobroEnvia(m, b) {
   } catch (e) { r = null; }
   SNP.vuelo = false;
   var es = snPagoEsito(r);
+  if (es.k === 'ok') snFlashFermoVia();   // [v0.15.25] il rifiuto di prima non copre il pago che entra
   /* [v0.13.2 · 📝 O1d di 💵 EL GIRO] anche un dedup su un pago parcial che chiudeva (es_total vero) resta qui: il pago di PRIMA era una parte, e il resto c'è ancora */
   if (es.k === 'ok' && b.body.parcial && (b.body.es_total === false || (r && (r.dedup || r.duplicado || r.ya)))) {   // [v0.13.0] B1: una parte, la mesa resta aperta
     delete SNP.uid[m];   // il prossimo pago è un pago nuovo
@@ -4600,9 +4609,9 @@ async function snCobroEnvia(m, b) {
               : ('✓ Mesa ' + m + ' cobrada · ' + P((b.body.monto != null ? b.body.monto : b.body.consumo) + b.body.propina))); pinta(); vvLeggi(); return;
   }
   if (es.k === 'codigo') { vvEsci('El código del turno cambió: pide el nuevo al JL. La ' + m + ' NO se cobró.'); return; }
-  if (es.k === 'rete') { flash('📡 No sé si entró el pago de la ' + m + ': NO cobres de nuevo al cliente. Vuelve a tocar el medio: es el mismo pago, nunca doble'); pinta(); return; }
+  if (es.k === 'rete') { snFlashFermo('📡 No sé si entró el pago de la ' + m + ': NO cobres de nuevo al cliente. Vuelve a tocar el medio: es el mismo pago, nunca doble'); pinta(); return; }
   if (es.fin) delete SNP.uid[m];   // un no definitivo: il prossimo tentativo è un pago nuovo
-  flash('🚫 ' + es.msg); pinta();
+  snFlashFermo('🚫 ' + es.msg); pinta();
 }
 /* Varios medios — [10-nov · v0.10.7 · 👤 Alberto nel collaudo: «varios medios deve permettere più pagos dello stesso medio (2-3-4 débito)»]
    Non più quattro caselle fisse, una per medio: una LISTA di pagos, ognuno col suo medio e il suo importo, «＋ Otro pago» per aggiungerne.
