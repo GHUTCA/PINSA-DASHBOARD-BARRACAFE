@@ -6474,6 +6474,7 @@ function mods2Cancello(rCat){
   if (rCat && rCat.mods2_on === true) MODS2_ON = true;
 }
 var MODS2_VOC = null;          // {grupos:[{g,gn,aplica,tipo,min,max,est,ops:[...]}]}
+var MODS2_FOTO_MAX_MS = 12 * 3600 * 1000;   // [v3.228.121] la foto del vocabolario del bordo nel telefono vale al più 12 h (un turno)
 var MODS2_RECARGO = null;      // {f,d,g:{gid:{f,d}}} · dal cancello prezzi (GAS v3.66.0)
 // i tetti anti-tilt · default della casa finché non vivono in PARAMETROS
 var MODS2_MAX = { ajuste: 1, side: 5 };
@@ -6493,11 +6494,14 @@ async function mods2Cargar(rCat){
       await _saludAttendi(5000);
       let r2 = null; try { r2 = MODS2_BORDE_ON ? await _letturaBordeOGas(true, 'getModificadores', { codigo: STATE.codigo, nombre: STATE.nombre }, {}) : null; } catch (e2) {}
       if (r2 && r2.ok && r2.borde === true) r = r2;
-      else { let c = null; try { c = JSON.parse(localStorage.getItem('mesero_mods2_voc') || 'null'); } catch (e3) {} if (c && c.ok && c.borde === true) r = c; }
+      /* [v3.228.121 · 🟡 ① ② di 💵 EL GIRO «OCCHIO SU 582DF92»] la foto vale solo col freno aperto (MODS2_BORDE_ON) e solo se è di meno di
+         MODS2_FOTO_MAX_MS (12 h, un turno): il vocabolario porta i prezzi degli extra, e una foto di giorni fa venderebbe coi prezzi di allora. */
+      else if (MODS2_BORDE_ON) { let c = null; try { c = JSON.parse(localStorage.getItem('mesero_mods2_voc') || 'null'); } catch (e3) {}
+        if (c && c.ok && c.borde === true && +c._foto_ts > 0 && (Date.now() - c._foto_ts) < MODS2_FOTO_MAX_MS) r = c; }
     }
     if (r && r.ok) {
       MODS2_VOC = r;
-      if (r.borde === true) { try { localStorage.setItem('mesero_mods2_voc', JSON.stringify(r)); } catch(e){} }   // [v3.228.120] la foto nel telefono è solo del bordo
+      if (r.borde === true && !r._foto_ts) { try { localStorage.setItem('mesero_mods2_voc', JSON.stringify(Object.assign({}, r, { _foto_ts: Date.now() }))); } catch(e){} }   // [v3.228.120] la foto nel telefono è solo del bordo · [v3.228.121] con l'ora; una foto riusata non si rinfresca
     }
   } catch(e){
     // MODO PUENTE: senza rete si lavora con l'ultima foto del vocabolario
