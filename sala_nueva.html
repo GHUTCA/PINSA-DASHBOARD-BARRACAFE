@@ -4619,9 +4619,15 @@ function snMixtoUsa(i) { var s = c1(); if (!s.mxR[i] || s.mxR[i].v) return; var 
 function snMixtoSet(i, v) { var s = c1(); if (!s.mxR[i]) return; s.mxR[i].v = String(v || '').replace(/\D/g, ''); var t = document.getElementById('snMxTot'); if (t) t.innerHTML = snMixtoTot();
   var pb = document.getElementById('snMxProp'); if (pb) pb.innerHTML = snMixtoPropHtml();   /* [v0.15.7] i medi con monto sono cambiati */
   var g = document.getElementById('snMxGo'); if (g) { var _ok = snMixtoOk(); g.disabled = !_ok; g.classList.toggle('off', !_ok); }   /* [v0.14.9] il bottone segue la somma, tasto per tasto */
-  var f = snMixtoSug(); (s.mxR || []).forEach(function (r, j) { if (j === i || r.v) return; var e = document.getElementById('snMxIn' + j); if (e) e.placeholder = f > 0 ? P(f) : '$0'; var u = document.getElementById('snMxUsa' + j); if (u) { u.hidden = !(f > 0); u.innerHTML = 'Usar ' + P(f); } }); }
+  var f = snMixtoSug(); (s.mxR || []).forEach(function (r, j) { if (j === i || r.v) return; var e = document.getElementById('snMxIn' + j); if (e) e.placeholder = f > 0 ? P(f) : '$0'; var u = document.getElementById('snMxUsa' + j); if (u) { u.hidden = !(f > 0); u.innerHTML = 'Usar ' + P(f); } });
+  /* [v0.15.25 · AUT-1088] tasto per tasto, senza ridisegnare sotto le dita: con «cuadra» le righe vuote (non quella che si scrive) e «＋ Otro pago» spariscono */
+  var cu = snMixtoCuadra(); (s.mxR || []).forEach(function (r, j) { if (j === i) return; var rw = document.getElementById('snMxRow' + j); if (rw) rw.style.display = (cu && !snMixtoRigaViva(r)) ? 'none' : ''; });
+  var mb = document.getElementById('snMxMas'); if (mb) mb.style.display = cu ? 'none' : ''; }
+/* [v0.15.25 · AUT-1088] «cuadra» = la somma arriva al dovuto (o lo supera: il vuelto in efectivo) · una riga è viva se porta un monto */
+function snMixtoCuadra() { return snMixtoFalta().f <= 0; }
+function snMixtoRigaViva(r) { return !!r && (parseInt(r.v, 10) || 0) > 0; }
 function snMixtoMedio(i, k) { var s = c1(); if (!s.mxR[i] || SN_MX_MEDIOS.indexOf(k) < 0) return; s.mxR[i].k = k; pinta(); }
-function snMixtoMas() { var s = c1(); if (s.mxR.length >= 8) return; s.mxR.push({ k: 'Débito', v: '' }); pinta(); }
+function snMixtoMas() { var s = c1(); if (s.mxR.length >= 8 || snMixtoCuadra()) return; s.mxR.push({ k: 'Débito', v: '' }); pinta(); }   // [v0.15.25] con «cuadra» non nasce un pago a $0
 function snMixtoQuita(i) { var s = c1(); if (s.mxR.length <= 2) return; s.mxR.splice(i, 1); pinta(); }
 function snMixtoParti() { var s = c1(); return (s.mxR || []).map(function (r) { var o = { medio: SN_MEDIO[r.k], monto: parseInt(r.v, 10) || 0 }; var d = snVouPide(r.k) ? snVouDig(r.vou) : ''; if (d) o.voucher = d; return o; }); }   /* [v0.15.17 · AUT-1075] il voucher della riga carta (solo cifre, mai il PIN) */
 /* ═══ [14-nov · v0.15.7 · 🛎 SALA V33 · ⚙️ ARQ «MESA 90: IL MIXTO HA SCRITTO LA PROPINA SULL'EFECTIVO» ④] LA PROPINA DEL MIXTO SI CHIEDE ═══
@@ -4708,13 +4714,20 @@ function snMixtoPaga() { var _vm = snVouMxMala(); if (_vm >= 0) { snVouAvviso('s
       snCobrarVivo(_k, null); return; }   /* una riga sola dopo il vuelto: è un pago semplice in quel medio, del giusto */
     snCobrarVivo(null, snMixtoConProp(_mc.reg)); return; }   /* [v0.14.10] il POST porta il giusto, il vuelto si dice */
   var _f = snMixtoFalta().f; if (_f !== 0) { flash(_f < 0 ? '⛔ No se puede cobrar más de lo que se cobra: sobran ' + P(-_f) : 'Faltan ' + P(_f) + ' para cuadrar'); return; }   /* [v0.14.9] guardia: niente POST se non quadra (anche da un bottone rimasto acceso) */
-  var s = c1(); s.sheet = null; pinta(); snCobrarVivo(null, snMixtoConProp(snMixtoCalc().reg)); }
+  var s = c1();
+  /* [v0.15.25 · AUT-1088 · Alberto 07:2x] cuadra con UNA riga sola con monto (le altre a $0): non è un mixto, è un pago semplice in quel medio,
+     col voucher di quella riga, come il caso del vuelto qui sopra. Le righe a $0 non entrano mai nel payload (snPagoBody le filtra). */
+  var _vive1 = (s.mxR || []).filter(snMixtoRigaViva);
+  if (_vive1.length === 1) { var _k1 = _vive1[0].k; s.sheet = null; pinta();
+    if (snVouPide(_k1)) { s.vou = _vive1[0].vou || ''; s.vouNo = false; s.vouPin = ''; }
+    snCobrarVivo(_k1, null); return; }
+  s.sheet = null; pinta(); snCobrarVivo(null, snMixtoConProp(snMixtoCalc().reg)); }
 function snMixtoHtml() { var s = c1(), x = X();
-  var _sug = snMixtoSug();
+  var _sug = snMixtoSug(), _cu = snMixtoCuadra();   /* [v0.15.25 · AUT-1088 · Alberto 07:2x] con «cuadra» niente righe vuote e niente «＋ Otro pago» */
   var riga = function (r, i) {
     var seg = SN_MX_MEDIOS.map(function (k) { var on = r.k === k;
       return '<button type="button" onclick="snMixtoMedio(' + i + ',\'' + k + '\')" style="flex:1 1 0;min-width:0;padding:7px 2px;border:0;border-left:1px solid rgba(243,234,216,.18);background:' + (on ? 'var(--oro)' : 'transparent') + ';color:' + (on ? '#241503' : '#e9dfcb') + ';font:inherit;font-size:12px;font-weight:700">' + k + '</button>'; }).join('');
-    return '<div style="padding:10px 12px;margin:0 0 8px;border:1px solid rgba(243,234,216,.22);border-radius:14px">' +
+    return '<div id="snMxRow' + i + '" style="padding:10px 12px;margin:0 0 8px;border:1px solid rgba(243,234,216,.22);border-radius:14px' + (_cu && !snMixtoRigaViva(r) ? ';display:none' : '') + '">' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="color:#cbbfa9;font-size:12px;letter-spacing:.1em">PAGO ' + (i + 1) + '</b>' +
         '<input id="snMxIn' + i + '" inputmode="numeric" value="' + (r.v || '') + '" placeholder="' + (!r.v && _sug > 0 ? P(_sug) : '$0') + '" oninput="snMixtoSet(' + i + ',this.value)" style="flex:1;min-width:0;text-align:right;background:transparent;border:0;color:var(--oro);font:inherit;font-size:20px;font-weight:700;outline:0">' +   /* [v0.14.5] il segnaposto è grigio: il mancante si VEDE, non CONTA */
         (s.mxR.length > 2 ? '<button type="button" onclick="snMixtoQuita(' + i + ')" aria-label="Quitar este pago" style="width:34px;height:34px;border-radius:10px;border:1px solid rgba(243,234,216,.3);background:transparent;color:#f3ead8;font-size:15px">✕</button>' : '') + '</div>' +
@@ -4725,7 +4738,7 @@ function snMixtoHtml() { var s = c1(), x = X();
       '<button type="button" onclick="c1().sheet=null;pinta()" aria-label="Cerrar" style="width:44px;height:44px;border-radius:12px;border:1.5px solid rgba(243,234,216,.45);background:transparent;color:#f3ead8;font-size:20px">✕</button></div>' +
     '<div id="snMxTot" style="font-size:17px;color:#e9dfcb;margin:-6px 4px 14px">' + snMixtoTot() + '</div>' +   /* [v0.14.5 · Alberto] «Suman» subito sotto il titolo, più grande */
     '<style>#snMxScroll::-webkit-scrollbar{display:none}</style><div id="snMxScroll" style="overflow-y:auto;flex:1;scrollbar-width:none;-ms-overflow-style:none">' + (s.mxR || []).map(riga).join('') +   /* [v0.15.20 · Alberto 14:37] via la barra di scorrimento, lo scorrimento resta */
-    (s.mxR.length < 8 ? '<button type="button" onclick="snMixtoMas()" style="width:100%;padding:11px;margin:0 0 10px;border-radius:12px;border:1px dashed rgba(243,234,216,.35);background:transparent;color:#e9dfcb;font:inherit;font-size:14px;font-weight:700">＋ Otro pago</button>' : '') +
+    (s.mxR.length < 8 ? '<button type="button" id="snMxMas" onclick="snMixtoMas()" style="' + (_cu ? 'display:none;' : '') + 'width:100%;padding:11px;margin:0 0 10px;border-radius:12px;border:1px dashed rgba(243,234,216,.35);background:transparent;color:#e9dfcb;font:inherit;font-size:14px;font-weight:700">＋ Otro pago</button>' : '') +
     '<div id="snMxProp">' + snMixtoPropHtml() + '</div>' +
     '<button type="button" id="snMxGo" class="vb filo' + (snMixtoOk() ? '' : ' off') + '" style="width:100%"' + (snMixtoOk() ? '' : ' disabled') + ' onclick="snMixtoPaga()">Cobrar mixto</button></div>'; }
 
