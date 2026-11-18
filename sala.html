@@ -1116,7 +1116,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.122 · vieja</span>
+      <span class="ver" id="ver">sala v3.228.123 · vieja</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -1746,6 +1746,21 @@ function _intestatarioPuro(mesas, plazaDe, todos, apertura) {
   }
   return { ok: true, nombre: nombre, plaza: plaza };
 }
+/* [v3.228.123 · AUT-EMERG] PURA: (mesas, todos) -> { mesa: { mesero } | { mesero:'', motivo } }, la stessa forma della rotta /conto.
+   Il garzón della mesa = chi ha `mio` > 0 su quella mesa nella SUA fetta (il bordo: `mio` = consumo dei pedidos col suo nome). */
+function _aperturaDalPedido(mesas, todos) {
+  const out = {};
+  (mesas || []).forEach(function (m) {
+    const nomi = [];
+    for (const sl in (todos || {})) {
+      const v = todos[sl]; if (!v || !v.ok) continue;
+      const x = (v.mesas || []).find(function (y) { return y && String(y.mesa) === String(m); });
+      if (x && (parseFloat(x.mio) || 0) > 0) { const n = v.nombre || sl; if (nomi.indexOf(n) < 0) nomi.push(n); }
+    }
+    out[String(m)] = nomi.length === 1 ? { mesero: nomi[0] } : { mesero: '', motivo: nomi.length ? 'primo_con_varios_meseros' : 'primo_sin_mesero' };
+  });
+  return out;
+}
 async function _jlIntestatario(mesas) {
   let todos = null;
   try {
@@ -1778,7 +1793,11 @@ async function _jlIntestatario(mesas) {
   let r = _intestatarioPuro(mesas, dam, todos);
   if (!r.ok && r.motivo === 'plaza_condivisa') {
     /* chi ha aperto il conto lo sa il BORDO (il primo pedido aperto della mesa); se la rotta e' spenta o non risponde, il cobro si ferma e lo dice: mai il JL, mai il primo che capita */
-    if (!CONTO_APERTURA_ON) { r.motivo = 'plaza_con_varios_meseros'; }
+    /* [v3.228.123 · AUT-EMERG 🎛 V34 18-nov 20:48 · Alberto «resta una sola strada, quel fix ora» · 🛎 SALA V33] con la rotta spenta il cobro del JL
+       su una plaza con due garzones si fermava SEMPRE (la mesa 20 di stasera). Ora il dueño si prende dal PEDIDO della mesa: nella sala letta
+       adesso, il garzón della plaza che ha consumo `mio` > 0 su quella mesa. Uno solo ⇒ è lui (e deve essere uno dei dueños della plaza, come con
+       la rotta). Zero o due ⇒ il cobro si ferma come prima («Cobra uno de los meseros de la plaza»). Muore quando CONTO_APERTURA_ON è accesa. */
+    if (!CONTO_APERTURA_ON) { r = _intestatarioPuro(mesas, dam, todos, _aperturaDalPedido(mesas, todos)); }
     else {
       let ap = null;
       try {
