@@ -93,12 +93,18 @@
   .conto .tot{display:flex;justify-content:space-between;font-weight:700;padding-top:7px;font-variant-numeric:tabular-nums}
   .sub{font-size:11.5px;color:var(--ink2);margin-top:8px}
   .vacio{color:var(--ink3);font-size:12px;font-style:italic}
+  /* [v0.2.0 · fase 1] la testata v50 e il PIN */
+  .testa{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .testa span{font-size:11.5px;font-weight:700;border-radius:10px;padding:5px 9px;background:var(--vetro2);border:1px solid var(--filo);color:var(--ink2);font-variant-numeric:tabular-nums}
+  .testa span.bad{border-color:rgba(240,121,110,.45);color:#f6b0a8}
+  .pin input{width:100%;font-size:22px;letter-spacing:.3em;text-align:center;padding:10px;border-radius:14px;border:1px solid var(--filo);background:var(--vetro2);color:var(--ink);margin-top:8px}
+  .pin .err{color:#f6b0a8;font-size:12px;margin-top:6px;min-height:1em}
 </style></head>
 <body>
 <div class="app">
   <div class="top">
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
-    <span class="ver" id="ver">jl v0.1.3</span>
+    <span class="ver" id="ver">jl v0.2.0</span>
   </div>
   <div class="edad" id="edad">leyendo la sala…</div>
   <div class="tabs" role="tablist">
@@ -112,7 +118,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.1.3';
+var JL_VER = 'jl v0.2.0';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -304,6 +310,9 @@ var SES = (function () {
 function jlAppUrl() { return 'app_jl.html?loc=' + ({ BKS: 'bks', RIESCO: 'rsc', CANDELARIA: 'cdl' })[CFG.LOCAL] + (DEMO ? '&demo=1' : ''); }
 
 var VISTA = { mod: null, ts: 0, edadBordeS: null, err: '', filtro: false, exp: {}, tab: 0, aperta: null };
+/* [v0.2.0 · P5] l'86 del bordo (GET /ago86/<local>, token in header) e i nomi dalla carta (/catalogoMesero): una lettura al minuto, non a ogni giro */
+var L86 = { ids: null, apagado: false, err: '', ts: 0 }, CARTA = { nom: {}, ts: 0 };
+var JL_86_MS = 60000;
 
 /* ═══ IL CODIGO DEL TURNO DAL BORDO (⚙️ ARQ, bacheca «A BKS IL TURNO SI APRE GIÀ SUL BORDO») ═══
    `POST /turno/admin/<local>` {pin_jl}: a BKS il turno si apre sul bordo (TURNO_ABRE_BORDE_ON) e la risposta `fuente:'borde'` porta
@@ -324,9 +333,71 @@ async function jlCodigoDalBordo() {
   } catch (e) { clearTimeout(to); }
 }
 
+/* ═══ [v0.2.0 · fase 1] L'INGRESSO COL PIN, SENZA GOOGLE (⚙️ ARQ H1, `POST /jl/entra/<local>`) ═══
+   Solo se la sessione di app_jl non c'è. A leva spenta (`JL_ENTRA_ON` "": risposta `gate_spento`) si torna all'app di sempre, come la v0.1.
+   Il PIN va al bordo e, se vale, in `sessionStorage` (`jl_pin`, `jl_user`): la stessa casa che usa app_jl e che la sala nueva in modo JL legge. */
+function jlDisp() {
+  var d = ''; try { d = localStorage.getItem('jl_disp') || ''; } catch (e) {}
+  if (!d) { d = 'jl-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); try { localStorage.setItem('jl_disp', d); } catch (e) {} }
+  return d;
+}
+var ENTRA = { vuelo: false, err: '' };
+async function jlEntra(pin) {
+  if (ENTRA.vuelo) return; pin = String(pin || '').replace(/\D/g, '');
+  if (pin.length < 4) { ENTRA.err = 'El PIN tiene al menos 4 números'; jlPinta(); return; }
+  ENTRA.vuelo = true; ENTRA.err = ''; jlPinta();
+  var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000), j = null;
+  try {
+    var r = await fetch(CFG.BORDE + '/jl/entra/' + encodeURIComponent(CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T },
+      body: JSON.stringify({ pin_jl: pin, dispositivo_id: jlDisp() }), signal: ctrl.signal, cache: 'no-store' });
+    j = await r.json().catch(function () { return null; });
+  } catch (e) { j = null; }
+  clearTimeout(to); ENTRA.vuelo = false;
+  if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') { ENTRA.err = ''; VISTA.err = 'sin_codigo'; jlPinta(); return; }   // leva spenta: l'app di sempre
+  if (j && j.ok === true && j.quien) {
+    SES.pin = pin; SES.user = String(j.quien);
+    try { sessionStorage.setItem('jl_pin', SES.pin); sessionStorage.setItem('jl_user', SES.user); } catch (e) {}
+    document.getElementById('yo').textContent = SES.user; VISTA.err = ''; jlLeggi(); return;
+  }
+  if (j && j.ok === false && /bloqueado/.test(String(j.error || ''))) ENTRA.err = 'PIN bloqueado' + (+j.faltan_s ? ' · espera ' + Math.ceil(+j.faltan_s / 60) + ' min' : '');
+  else if (j && j.ok === false) ENTRA.err = 'Ese PIN no vale';
+  else ENTRA.err = 'Sin conexión con el bordo: prueba de nuevo';
+  jlPinta();
+}
+function pinHtml() {
+  return '<div class="vetro lume pin"><h4>Entra con tu PIN de JL</h4><p>El mismo PIN de tu app.</p>' +
+    '<input id="jlPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="••••">' +
+    '<div class="err">' + esc(ENTRA.err) + '</div>' +
+    '<button class="azione oro" data-a="entra"' + (ENTRA.vuelo ? ' disabled' : '') + '>' + (ENTRA.vuelo ? 'Revisando…' : 'Entrar') + '</button>' +
+    '<a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app de siempre</a></div>';
+}
+/* [v0.2.0 · P5] l'86 e i nomi della carta: una lettura al minuto, a parte dal giro della sala */
+async function jl86Leggi() {
+  if (DEMO) { L86 = { ids: ['BKS-POS-003', 'BKS-COC-011'], apagado: false, err: '', ts: Date.now() }; CARTA.nom = { 'BKS-POS-003': 'Tiramisú', 'BKS-COC-011': 'Mojito Monster Mango' }; return; }
+  if (Date.now() - L86.ts < JL_86_MS) return;
+  L86.ts = Date.now();
+  try {
+    var c1 = new AbortController(), t1 = setTimeout(function () { c1.abort(); }, 6000);
+    var r = await fetch(CFG.BORDE + '/ago86/' + encodeURIComponent(CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, signal: c1.signal, cache: 'no-store' });
+    var j = await r.json().catch(function () { return null; }); clearTimeout(t1);
+    if (j && j.ok) { L86.ids = Array.isArray(j.ids) ? j.ids.map(String) : []; L86.apagado = !!j.apagado; L86.err = ''; }
+    else L86.err = (j && j.error) || ('HTTP ' + r.status);
+  } catch (e) { L86.err = 'sin conexión'; }
+  if (L86.ids && L86.ids.length && Date.now() - CARTA.ts > 10 * JL_86_MS) {
+    try {
+      var c2 = new AbortController(), t2 = setTimeout(function () { c2.abort(); }, 6000);
+      var r2 = await fetch(CFG.BORDE + '/catalogoMesero/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T), { signal: c2.signal, cache: 'no-store' });
+      var j2 = await r2.json().catch(function () { return null; }); clearTimeout(t2);
+      if (j2 && j2.ok && Array.isArray(j2.productos)) { var nm = {}; j2.productos.forEach(function (p) { if (p && p.id) nm[String(p.id)] = String(p.nombre || p.id); }); CARTA.nom = nm; CARTA.ts = Date.now(); }
+    } catch (e) {}
+  }
+}
+
 /* ═══ LA LETTURA ═══ */
 async function jlLeggi() {
+  jl86Leggi().then(function () { if (VISTA.tab === 1 || VISTA.tab === 0) jlPinta(); });
   if (DEMO) { VISTA.mod = jlModelo(JL_DEMO, Date.now()); VISTA.ts = Date.now(); VISTA.err = ''; jlPinta(); return; }
+  if (!SES.pin && !SES.codigo) { VISTA.err = 'sin_pin'; jlPinta(); return; }   // [v0.2.0] senza la sessione di app_jl: il PIN qui
   if (!SES.codigo && SES.pin) await jlCodigoDalBordo();
   if (!SES.codigo) { if (!VISTA.err || VISTA.err === 'codigo_invalid') VISTA.err = 'sin_codigo'; jlPinta(); return; }
   var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000), http = 0;
@@ -355,7 +426,7 @@ async function jlLeggi() {
 function jlEdad() {
   var el = document.getElementById('edad');
   if (DEMO) { el.className = 'edad'; el.textContent = 'Prueba · datos de ejemplo, no son del sistema'; return; }
-  var ERR = { sin_codigo: 'Falta el código del turno', codigo_invalid: 'El código del turno cambió', turno_sin_abrir: 'Turno sin abrir', pin_mal: 'El PIN no vale' };
+  var ERR = { sin_pin: 'Entra con tu PIN', sin_codigo: 'Falta el código del turno', codigo_invalid: 'El código del turno cambió', turno_sin_abrir: 'Turno sin abrir', pin_mal: 'El PIN no vale' };
   var et = ERR[VISTA.err] || VISTA.err;
   if (VISTA.err && VISTA.ts) { el.className = 'edad mal'; el.textContent = '⚠️ ' + et + ' · lo que ves es de hace ' + Math.round((Date.now() - VISTA.ts) / 1000) + ' s'; return; }
   if (VISTA.err) { el.className = 'edad mal'; el.textContent = '⚠️ ' + et; return; }
@@ -386,18 +457,43 @@ function garzon(g, gi) {
   }
   return h + '</div>';
 }
+/* [v0.2.0 · la testata v50 + P4] campanella (mesas che chiamano o chiedono il conto, una volta per mesa) · 86 · la venta del turno
+   (somma delle `venta_turno.venta` dei garzones; un garzón senza il dato si dice, non si conta come 0) */
+function jlConti(M) {
+  var call = {}, venta = 0, senza = 0;
+  M.gente.forEach(function (g) {
+    g.mesas.forEach(function (x) { if (x.st === 'llamando' || x.st === 'cuenta') call[x.m] = 1; });
+    if (g.venta == null) senza++; else venta += g.venta;
+  });
+  return { llam: Object.keys(call).length, venta: venta, senza: senza };
+}
+function testata(M) {
+  var c = jlConti(M), n86 = L86.ids ? L86.ids.length : null;
+  return '<div class="testa">' +
+    '<span class="' + (c.llam ? 'bad' : '') + '">🔔 ' + c.llam + (c.llam === 1 ? ' llama' : ' llaman') + '</span>' +
+    '<span' + (n86 ? ' class="bad"' : '') + ' data-a="tab86">86 · ' + (L86.apagado ? 'apagado' : n86 == null ? 'sin dato' : n86) + '</span>' +
+    '<span>Venta ' + pesos(c.venta) + (c.senza ? ' · ' + c.senza + ' sin dato' : '') + '</span></div>';
+}
+/* [v0.2.0 · bottoni dalla mesa] la mesa si apre nella sala nueva in modo JL (`?jl=1`, vista = il garzón padrone, firma = il JL): lì ci sono
+   ＋ Pedir · Cobrar · Mover · Eliminar, con le loro regole (AUT-0646). Il link esiste solo con la sessione completa (PIN + nome + codigo):
+   senza, la nueva si aprirebbe come sala normale, e non deve. */
+function jlSalaUrl(g, m) {
+  return 'sala_nueva.html?jl=1&l=' + encodeURIComponent(CFG.LOCAL) + '&vista=' + encodeURIComponent(g.n) + '&mesa=' + encodeURIComponent(m) + (DEMO ? '&demo=1' : '');
+}
+function jlSessioneCompleta() { return DEMO || !!(SES.pin && SES.user && SES.codigo); }
 function servicio() {
   var M = VISTA.mod;
   if (!M) {
+    if (VISTA.err === 'sin_pin') return pinHtml();
     if (VISTA.err === 'sin_codigo') return '<div class="vetro alerta"><h4>Falta el código del turno</h4><p>Abre primero tu app de siempre: ella lee el turno. Después vuelve aquí.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
     if (VISTA.err === 'turno_sin_abrir') return '<div class="vetro lume"><h4>Turno sin abrir</h4><p>Cuando se abra el turno, aquí aparece la sala.</p></div>';
     if (VISTA.err === 'pin_mal') return '<div class="vetro alerta"><h4>El PIN no vale</h4><p>Entra de nuevo desde tu app.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
     if (VISTA.err === 'codigo_invalid') return '<div class="vetro alerta"><h4>El código del turno ya no vale</h4><p>Abre tu app de siempre para leer el turno nuevo.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
     return '<p class="vacio">' + (VISTA.err ? esc(VISTA.err) : 'Leyendo la sala…') + '</p>';
   }
-  var h = M.nUrg
+  var h = testata(M) + (M.nUrg
     ? '<button class="tira" data-a="filtro"><b>' + M.nUrg + ' esperan tu acción</b><span class="num">' + pesos(M.enJuego) + ' en juego · ' + (VISTA.filtro ? 'ver todas' : 'solo estas') + '</span></button>'
-    : '<div class="tira ok"><b>Nadie espera tu acción</b></div>';
+    : '<div class="tira ok"><b>Nadie espera tu acción</b></div>');
   if (M.sinDueno.length) h += '<div class="vetro alerta"><h4>QR sin garzón</h4>' + M.sinDueno.map(function (q) { return '<div class="riga"><span><b>Mesa ' + esc(q.m) + '</b><small>AUT QR' + (q.min != null ? ' · ' + q.min + '′' : '') + '</small></span><span class="st">' + (q.tot ? pesos(q.tot) : '—') + '</span></div>'; }).join('') + '</div>';
   M.gente.forEach(function (g, gi) {
     if (VISTA.filtro && !g.mesas.some(jlUrgente)) return;
@@ -418,9 +514,29 @@ function detalle(gi, m) {
     (lin || '<p class="vacio">Sin consumo todavía.</p>') +
     (x.tot ? '<div class="tot"><span>Total</span><span class="num">' + pesos(x.tot) + '</span></div>' : '') +
     (x.pagado > 0 ? '<div class="sub">Pagado ' + pesos(x.pagado) + '</div>' : '') +
-    (sent.length ? '<div class="sub">' + esc(sent.join(' · ')) + '</div>' : '') + '</div>';
+    (sent.length ? '<div class="sub">' + esc(sent.join(' · ')) + '</div>' : '') + '</div>' +
+    (jlSessioneCompleta()
+      ? '<a class="azione oro" data-a="sala" href="' + esc(jlSalaUrl(g, x.m)) + '">Abrir la mesa ' + esc(x.m) + ' · ＋ Pedir · Cobrar · Mover</a>'
+      : '<div class="sub">Para pedir, cobrar o mover: entra desde tu app de siempre.</div>');
 }
-function local() { return '<div class="vetro"><h4>86 · reservas · turnos</h4><p>Todavía en tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>'; }
+/* [v0.2.0 · P5] LOCAL: chi è in sala stasera e dove, e l'86. Solo lettura: reservas e turnos restano nell'app di sempre (fase 3). */
+function local() {
+  var M = VISTA.mod, h = '';
+  if (L86.apagado) h += '<div class="vetro"><h4>86</h4><p>El 86 del bordo está apagado: míralo en tu app de siempre.</p></div>';
+  else if (!L86.ids) h += '<div class="vetro"><h4>86</h4><p>' + (L86.err ? 'No pude leer el 86 (' + esc(L86.err) + ').' : 'Leyendo el 86…') + '</p></div>';
+  else h += '<div class="vetro' + (L86.ids.length ? ' alerta' : '') + '"><h4>86 · ' + L86.ids.length + (L86.ids.length === 1 ? ' producto agotado' : ' productos agotados') + '</h4>' +
+    (L86.ids.length ? L86.ids.map(function (id) { return '<div class="riga"><span>' + esc(CARTA.nom[id] || id) + '</span><span class="st">' + esc(id) + '</span></div>'; }).join('') : '<p>Nada agotado.</p>') + '</div>';
+  if (M) {
+    h += '<div class="vetro"><h4>En sala · ' + M.gente.length + (M.gente.length === 1 ? ' garzón' : ' garzones') + '</h4>' +
+      (M.gente.length ? M.gente.map(function (g) {
+        var abiertas = g.mesas.filter(function (x) { return x.st !== 'libre'; }).length;
+        return '<div class="riga"><span><b>' + esc(g.n) + '</b><small>' + (g.plazas.length ? g.plazas.map(function (p) { return esc(p.nombre) + (p.mesas.length ? ' (' + esc(p.mesas.join(' · ')) + ')' : ''); }).join(' · ') : 'sin plaza') + '</small></span>' +
+          '<span class="st">' + abiertas + (abiertas === 1 ? ' mesa' : ' mesas') + '<br>' + (g.venta == null ? 'venta sin dato' : pesos(g.venta)) + '</span></div>';
+      }).join('') : '<p>No hay garzones en la sala de hoy.</p>') + '</div>';
+  } else if (VISTA.err === 'sin_pin') h += pinHtml();
+  h += '<div class="vetro"><h4>Reservas · turnos</h4><p>Todavía en tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
+  return h;
+}
 function enApp() { return '<div class="vetro"><p>Esta parte sigue en tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>'; }
 var VIS = [servicio, local, enApp, enApp, enApp];
 function jlPinta() {
@@ -441,6 +557,12 @@ document.getElementById('body').addEventListener('click', function (ev) {
   else if (a === 'gz') { var s = el.getAttribute('data-s'); VISTA.exp[s] = !VISTA.exp[s]; jlPinta(); }
   else if (a === 'mesa') { VISTA.aperta = { g: +el.getAttribute('data-g'), m: el.getAttribute('data-m') }; jlPinta(); document.getElementById('body').scrollTop = 0; }
   else if (a === 'volver') { VISTA.aperta = null; jlPinta(); }
+  else if (a === 'entra') { var pi = document.getElementById('jlPin'); jlEntra(pi ? pi.value : ''); }
+  else if (a === 'tab86') { ir(1); }
+  else if (a === 'sala') { try { if (SES.codigo) sessionStorage.setItem('jl_codigo', SES.codigo); if (SES.pin) sessionStorage.setItem('jl_pin', SES.pin); if (SES.user) sessionStorage.setItem('jl_user', SES.user); } catch (e) {} }   // la nueva legge la sessione: si scrive prima di uscire
+});
+document.getElementById('body').addEventListener('keydown', function (ev) {
+  if (ev.key === 'Enter' && ev.target && ev.target.id === 'jlPin') jlEntra(ev.target.value);
 });
 
 /* la sala finta, NELLA FORMA DEL BORDO (sala_vista). Numeri d'esempio: non sono del sistema. */
