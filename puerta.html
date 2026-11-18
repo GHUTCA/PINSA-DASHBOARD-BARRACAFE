@@ -9,7 +9,11 @@
 <!-- puerta.html non porta manifest né icona: l'icona installata dell'anfitriona resta quella di anfitriona.html (v1.11) -->
 <!-- ════════════════════════════════════════════════════════════════════
      puerta.html · v0.2 · 29-ott-2026 · 🎟 LA LISTA V30
-     ➕ v0.5 · 18-nov-2026 · 🎟 LA LISTA V30 · AUT-1129 (revisione di Alberto sul vivo, 17:17):
+     ➕ v0.6 · 18-nov-2026 · 🎟 LA LISTA V30 · AUT-0754 + AUT-1132 (Alberto: «l'entrada attiva, poterla cambiare, e in PG da dove entra la gente»):
+     ① la Entrada è viva: il chip legge `entradaPuerta` e apre il foglio delle entradas del locale (BKS: Plaza Principal · Entrada 2, dal bordo,
+     PUERTA_ENTRADAS); il tocco manda `cambiarEntrada {puerta_uid, a}` → una riga in pinsita.anfitriona_puerta. Leva spenta ⇒ resta «pronto».
+     SENTAR manda `entrada` (il codice) nel payload. Bordo: pinsita-borde `lista-entrada-aut0754`.
+  ➕ v0.5 · 18-nov-2026 · 🎟 LA LISTA V30 · AUT-1129 (revisione di Alberto sul vivo, 17:17):
      ② la mappa per zona: una riga per plaza (libres · ocup. · 🧹), sotto solo le occupate e da pulire, il tocco apre la zona intera ·
      ③④ SENTAR in UNA schermata: camera accesa da sola, numero con tastiera numerica, poi ¿cuántos? → SENTADOS nello stesso foglio;
      tolta la lista «Libres ahora». ① la Entrada resta «pronto»: la rotta anfitriona_puerta al bordo non esiste (ramo gio 19, ⚙️ seconda testa).
@@ -86,6 +90,7 @@
   .top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:calc(14px + env(safe-area-inset-top,0px)) 0 4px;font-size:12px;color:var(--ink3)}
   .salu b{display:block;font-size:14px;color:var(--ink)} .salu i{font-style:normal;font-size:11px}
   .ent{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);padding:5px 9px;border-radius:9px;background:var(--vetro);border:1px dashed var(--filo);white-space:nowrap}
+  .ent.on{color:var(--oro);border-style:solid;border-color:rgba(224,169,74,.55)}
   .offline{background:rgba(240,121,110,.12);border:1px solid rgba(240,121,110,.5);color:var(--urge);border-radius:12px;padding:8px 12px;font-size:12px;margin:8px 0;display:none}
   .offline.show{display:block}
   .tit{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin:14px 2px 8px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
@@ -189,8 +194,8 @@
 <section id="vMapa" class="wrap hide">
   <div class="top">
     <div class="salu"><b id="saluNombre">Hola</b><i id="saluSub">—</i></div>
-    <!-- 🚪 la entrada: spenta finché non c'è la rotta di anfitriona_puerta (AUT-0754 + ⚙️ ARQ) -->
-    <button type="button" class="ent" id="entChip" onclick="pronto('Elegir la entrada')">🚪 Entrada · pronto</button>
+    <!-- 🚪 la entrada (v0.6): dal bordo, entradaPuerta / cambiarEntrada. Con la leva spenta resta «pronto» e non salva niente. -->
+    <button type="button" class="ent" id="entChip" onclick="entAbrir()">🚪 Entrada · pronto</button>
   </div>
   <div class="offline" id="offline">Sin conexión — mostrando lo último recibido. Reintento solo.</div>
 
@@ -206,7 +211,7 @@
   <div class="leyenda"><span class="l1">libre</span><span class="l2">¿libre?</span><span class="l3">por limpiar</span><span>ocupada</span></div>
 
   <div class="foot">
-    <span class="ver"><span id="ver">puerta v0.5 · 18nov · sin Google</span> <span id="fuente"></span></span>
+    <span class="ver"><span id="ver">puerta v0.6 · 18nov · sin Google</span> <span id="fuente"></span></span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
@@ -253,6 +258,15 @@
   <button type="button" class="vb sec" onclick="scanOtraMesa()">Otra mesa</button>
   </div>
   <button type="button" class="vb sec" onclick="cerrarSheet()">Cancelar</button>
+</div></div>
+
+<!-- ═════ FOGLIO · LA ENTRADA (v0.6) ═════ -->
+<div class="sheet" id="bsEnt" onclick="if(event.target===this)entCerrar()"><div class="shb">
+  <h3>¿En qué entrada estás?</h3>
+  <div class="s2" id="entSub">Lo que elijas queda registrado: así sabemos por dónde entra la gente.</div>
+  <div class="dos" id="entOps" style="margin-bottom:10px"></div>
+  <div class="hint" id="entErrS"></div>
+  <button type="button" class="vb sec" onclick="entCerrar()">Cerrar</button>
 </div></div>
 
 <!-- ═════ FOGLIO · LA PORTA: COBRAR · PULSERA (v0.4) ═════ -->
@@ -427,6 +441,7 @@ function entrarMapa() {
   $('vEntrada').classList.add('hide'); $('vMapa').classList.remove('hide'); $('bar').classList.remove('hide');
   pintaSalu();
   refrescar(true);
+  entLeer();   // v0.6 · l'entrada di stasera, dal bordo
   if (STATE.pollTimer) clearInterval(STATE.pollTimer);
   STATE.pollTimer = setInterval(() => refrescar(false), CFG.POLL_MS);
 }
@@ -634,6 +649,7 @@ async function confirmarSentar() {
   try {
     const body = { codigo: STATE.codigo, nombre: STATE.nombre, mesa: STATE.bsMesa, pax: STATE.bsPax,
       seat_uid: STATE.bsSeatUid };   // [AUT-0424] la chiave d'idempotenza, mai dal server
+    if (ENT.actual) body.entrada = ENT.actual;   // v0.6 · il codice dell'entrada di adesso: il bordo lo valida contro PUERTA_ENTRADAS (🎛 V34 «ritiro la mia ③»)
     const r = await _sentarAlBorde(body);   // [v0.3] solo il bordo: mai sentarMesa del GAS
     /* [1.9 sin gas] il bordo ha detto di no o non ha risposto: il foglio RESTA aperto (stessa seat_uid ⇒ il ritentativo non siede due volte), e si dice perche' */
     if (r && r._sinGas) {
@@ -726,6 +742,60 @@ async function scanIniciar() {
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') scanParar(); });
 $('scNum').addEventListener('keydown', e => { if (e.key === 'Enter') scanNumero(); });
+
+/* ═════ v0.6 · LA ENTRADA (🎟 LA LISTA V30 · AUT-0754 + AUT-1132 · Alberto 18-nov: «l'entrada attiva, poterla cambiare, e in PG da dove entra la gente») ═════
+   Dal bordo, stessa porta di COBRAR (`_portaAlBorde`): `entradaPuerta` dà l'elenco del locale (codice + nome della gente) e l'entrada attuale di chi è entrata;
+   `cambiarEntrada {puerta_uid, a}` la cambia, e il bordo scrive UNA riga in pinsita.anfitriona_puerta. Il `puerta_uid` si conia UNA volta per tocco e lo
+   riusa il ritento: un doppio tocco non scrive due cambi. Leva spenta ⇒ il chip resta «Entrada · pronto» e un tocco lo dice. Niente nel localStorage:
+   l'entrada vive nel bordo, e al rientro si rilegge. SENTAR manda `entrada` (il codice) nel payload, se è scelta. */
+const ENT = { actual: null, nombre: null, entradas: [], viva: false, volo: false, uid: '', uidPer: '' };
+function entPinta() {
+  const c = $('entChip'); if (!c) return;
+  if (!ENT.viva) { c.textContent = '🚪 Entrada · pronto'; c.classList.remove('on'); return; }
+  c.textContent = '🚪 ' + (ENT.nombre || 'Elegir entrada');
+  c.classList.toggle('on', !!ENT.actual);
+}
+async function entLeer() {
+  if (!STATE.codigo || !STATE.nombre) return;
+  const r = await _portaAlBorde('entradaPuerta', {});
+  if (r && r.ok === true && Array.isArray(r.entradas)) {
+    ENT.viva = r.entradas.length > 0; ENT.entradas = r.entradas; ENT.actual = r.actual || null; ENT.nombre = r.actual_nombre || null;
+  } else if (r && r.error === 'leva_spenta') { ENT.viva = false; }
+  entPinta();
+  return r;
+}
+function entOpsPinta() {
+  $('entOps').innerHTML = ENT.entradas.map(e => '<button type="button" class="vb ' + (e.codigo === ENT.actual ? 'pieno' : 'door') + '"' + (ENT.volo ? ' disabled' : '') +
+    ' onclick="entElegir(\'' + esc(e.codigo) + '\')">' + esc(e.nombre) + '<small>' + (e.codigo === ENT.actual ? 'aquí estás' : 'cambiar aquí') + '</small></button>').join('');
+}
+async function entAbrir() {
+  if (!STATE.codigo || !STATE.nombre) { toast('err', 'Entra con el código del turno primero'); return; }
+  const r = await entLeer();
+  if (!ENT.viva) { pronto('Elegir la entrada'); return; }
+  $('entErrS').textContent = (r && r.ok === false && r.error !== 'leva_spenta') ? ptMsg(r) : '';
+  entOpsPinta();
+  $('bsEnt').classList.add('show');
+}
+function entCerrar() { $('bsEnt').classList.remove('show'); $('entErrS').textContent = ''; }
+async function entElegir(cod) {
+  if (ENT.volo) return;
+  if (cod === ENT.actual) { entCerrar(); return; }
+  if (!ENT.uid || ENT.uidPer !== cod) { ENT.uid = ptUid('pe'); ENT.uidPer = cod; }   // un'entrada nuova = un gesto nuovo; la stessa = il ritento
+  ENT.volo = true; $('entErrS').textContent = ''; entOpsPinta();
+  const r = await _portaAlBorde('cambiarEntrada', { puerta_uid: ENT.uid, a: cod });
+  ENT.volo = false;
+  if (r && r.ok === true) {
+    ENT.actual = r.actual || cod; ENT.nombre = r.actual_nombre || null; ENT.uid = ''; ENT.uidPer = '';
+    entPinta(); entCerrar(); toast('ok', '✓ Estás en ' + (ENT.nombre || cod));
+    return;
+  }
+  const e = r && r.error;
+  $('entErrS').textContent = e === 'leva_spenta' ? 'Elegir la entrada todavía no está activo'
+    : e === 'entrada_desconocida' ? 'Esa entrada no existe en este local — avisa al JL'
+    : e === 'timeout' ? 'El sistema no respondió — reintenta (no se registra dos veces)'
+    : e === 'red' ? 'Sin conexión — reintenta (no se registra dos veces)' : ptMsg(r);
+  entOpsPinta();
+}
 
 /* ═════ v0.4 · LA PORTA DEL MODO DISCOTECA: COBRAR · PULSERA (D-498 · 📖 MENU BKS V32) ═════
    Contro il bordo arq-discoteca (src/barra.js · _barraStaff, stessa rotta /pedido-staff di SENTAR, cancello = codice del turno + nome,
