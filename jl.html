@@ -104,7 +104,7 @@
 <div class="app">
   <div class="top">
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
-    <span class="ver" id="ver">jl v0.2.0</span>
+    <span class="ver" id="ver">jl v0.2.1</span>
   </div>
   <div class="edad" id="edad">leyendo la sala…</div>
   <div class="tabs" role="tablist">
@@ -118,7 +118,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.2.0';
+var JL_VER = 'jl v0.2.1';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -359,7 +359,8 @@ async function jlEntra(pin) {
     try { sessionStorage.setItem('jl_pin', SES.pin); sessionStorage.setItem('jl_user', SES.user); } catch (e) {}
     document.getElementById('yo').textContent = SES.user; VISTA.err = ''; jlLeggi(); return;
   }
-  if (j && j.ok === false && /bloqueado/.test(String(j.error || ''))) ENTRA.err = 'PIN bloqueado' + (+j.faltan_s ? ' · espera ' + Math.ceil(+j.faltan_s / 60) + ' min' : '');
+  if (j && j.ok === false && j.error === 'token_invalid') ENTRA.err = 'Esta app no está autorizada en el sistema (no es tu PIN): avisa a Alberto';   // [v0.2.1 · 🟡 ⓑ di 💵]
+  else if (j && j.ok === false && /bloqueado/.test(String(j.error || ''))) ENTRA.err = 'PIN bloqueado' + (+j.faltan_s ? ' · espera ' + Math.ceil(+j.faltan_s / 60) + ' min' : '');
   else if (j && j.ok === false) ENTRA.err = 'Ese PIN no vale';
   else ENTRA.err = 'Sin conexión con el bordo: prueba de nuevo';
   jlPinta();
@@ -460,19 +461,22 @@ function garzon(g, gi) {
 /* [v0.2.0 · la testata v50 + P4] campanella (mesas che chiamano o chiedono il conto, una volta per mesa) · 86 · la venta del turno
    (somma delle `venta_turno.venta` dei garzones; un garzón senza il dato si dice, non si conta come 0) */
 function jlConti(M) {
-  var call = {}, venta = 0, senza = 0;
+  var call = {}, venta = 0, senza = 0, plz = {}, condivisa = false;
   M.gente.forEach(function (g) {
     g.mesas.forEach(function (x) { if (x.st === 'llamando' || x.st === 'cuenta') call[x.m] = 1; });
     if (g.venta == null) senza++; else venta += g.venta;
+    /* [v0.2.1 · 🟡 ⓐ di 💵 «JL FASE 1 BANCATA»] `venta_turno` del bordo è la venta delle PLAZAS del garzón (index.js r.4950-4971):
+       due garzones con la stessa plaza la contano tutti e due. Con una plaza condivisa la somma è falsa ⇒ non si mostra. */
+    g.plazas.forEach(function (p) { var k = String(p.nombre).toUpperCase(); if (plz[k]) condivisa = true; plz[k] = 1; });
   });
-  return { llam: Object.keys(call).length, venta: venta, senza: senza };
+  return { llam: Object.keys(call).length, venta: condivisa ? null : venta, senza: senza, condivisa: condivisa };
 }
 function testata(M) {
   var c = jlConti(M), n86 = L86.ids ? L86.ids.length : null;
   return '<div class="testa">' +
     '<span class="' + (c.llam ? 'bad' : '') + '">🔔 ' + c.llam + (c.llam === 1 ? ' llama' : ' llaman') + '</span>' +
     '<span' + (n86 ? ' class="bad"' : '') + ' data-a="tab86">86 · ' + (L86.apagado ? 'apagado' : n86 == null ? 'sin dato' : n86) + '</span>' +
-    '<span>Venta ' + pesos(c.venta) + (c.senza ? ' · ' + c.senza + ' sin dato' : '') + '</span></div>';
+    '<span>' + (c.condivisa ? 'Venta · plazas compartidas: mira cada garzón' : 'Venta de las plazas ' + pesos(c.venta) + (c.senza ? ' · ' + c.senza + ' sin dato' : '')) + '</span></div>';
 }
 /* [v0.2.0 · bottoni dalla mesa] la mesa si apre nella sala nueva in modo JL (`?jl=1`, vista = il garzón padrone, firma = il JL): lì ci sono
    ＋ Pedir · Cobrar · Mover · Eliminar, con le loro regole (AUT-0646). Il link esiste solo con la sessione completa (PIN + nome + codigo):
