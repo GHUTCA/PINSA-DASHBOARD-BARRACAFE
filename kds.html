@@ -305,7 +305,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.31</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.32</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -723,7 +723,27 @@ function bordeWriteOn() {
    dall'assenza del marcatore (`via=?` diceva solo «vecchio», non QUANTO).
    Il GAS la scrive nella riga di audit accanto alla via (2 righe, stessa
    sanificazione). Client vecchio = campo assente = il GAS scrive `?`. */
-const KDS_VER = '1.29';   // v1.29 · allineata alla targhetta: l'audit (`v=`) dice quale vetro ha toccato
+const KDS_VER = '1.32';   // v1.32 · [AUT-1096] ri-allineata alla targhetta: era '1.29' con la targhetta a v1.31,
+                          //   quindi l'audit (`v=`) attribuiva i tap a un vetro di due versioni fa
+/* ═════ v1.32 · [AUT-1096] LA SECONDA DEL 2x1 NON RIPIEGA MAI SUL GAS ═══════
+   La card del rilascio del 2x1 ha un id SUO, `<uuid>~s2x1`, che esiste solo
+   nel bordo e in Postgres: il GAS non lo conosce e non può conoscerlo (dargli
+   quel nome sarebbe una capacità nuova su Google, e quella porta è chiusa).
+   ⇒ se il tap su quella card ripiegasse sul GAS, il cuciniere leggerebbe un
+   errore generico e TOCCHEREBBE DI NUOVO — un gesto che non può riuscire e
+   non lo dice. Qui il ripiego è vietato per quella sola famiglia di id, e il
+   vetro dice una cosa vera: la card resta sullo schermo.
+   📌 ⚙️ ARQ assorbe `borde:true` su `marcarKdsListo` E `marcarKdsRetirado`,
+      quindi quattro vie su cinque non arrivano mai qui. Questa riga serve
+      alla quinta, `gas_red`: un bordo che non risponde non può timbrare.
+   🟢 INERTE PER COSTRUZIONE: finché le leve di AUT-1052 sono "" nessun id
+      porta questo suffisso, quindi non può cambiare un solo gesto di oggi.
+      Non ha una leva sua: eredita quella di AUT-1052.
+   🔴 IL SUFFISSO È UN CONTRATTO con ⚙️ (bacheca 17-nov 08:06): se cambia,
+      cambia con un blocco in bacheca e non con un commit — perché una
+      guardia che non riconosce più il marchio non si rompe: SMETTE DI
+      GUARDARE, in silenzio. Il banco lo asserisce come caso. */
+const S2X1_RE = /~s2x1$/;
 async function staffPost(action, body) {
   let via = 'gas_borde_off';
   if (BORDE.ON && bordeWriteOn()) {
@@ -748,6 +768,12 @@ async function staffPost(action, body) {
       if (j && j.error) via = 'gas_' + String(j.error).replace(/[^a-z_]/gi, '').slice(0, 12);
     } catch (e) { via = 'gas_red'; }
   } else if (BORDE.ON) { via = 'gas_bw_off'; }
+  /* v1.32 · [AUT-1096] il cancello: oltre questa riga c'è il GAS, e il GAS non
+     conosce `~s2x1`. `via` viaggia nella risposta perché il motivo del no non
+     si perda (è la stessa ragione per cui esiste `via`, v1.25). */
+  if (S2X1_RE.test(String((body && body.uuid) || ''))) {
+    return { ok: false, error: 's2x1_solo_borde', via: via };
+  }
   return await gasPost(action, Object.assign({}, body || {}, { via: via, vkds: KDS_VER }));
 }
 
@@ -1194,7 +1220,14 @@ async function marcarRetirado(uuid){
       toast('', r.ya_retirado ? 'Ya estaba retirado ✓' : '🏃 Retirado — en camino a la mesa');
       if (STATE.kds) STATE.kds.listos = (STATE.kds.listos || []).filter(p => p.uuid !== uuid);
     } else {
-      toast('bad', 'No se pudo marcar: ' + (r.error || '?'));
+      /* v1.32 · [AUT-1096] il no della 2ª del 2x1 non è un errore da ripetere
+         subito: è «ora non si può». Il messaggio dice la verità e NON promette
+         un ritorno automatico, perché nessun gesto dello staff si ri-spedisce
+         da sé (debito dichiarato nella richiesta di AUT-1096). La card resta
+         sullo schermo: `r.ok` è falso, quindi non si toglie niente. */
+      toast('bad', r.error === 's2x1_solo_borde'
+        ? 'Sin red — la 2ª del 2x1 se marca solo con conexión. Vuelve a tocar.'
+        : 'No se pudo marcar: ' + (r.error || '?'));
     }
   } catch (e) {
     toast('bad', 'Sin conexión — reintenta');
@@ -1223,7 +1256,14 @@ async function marcarListo(uuid){
         }
       }
     } else {
-      toast('bad', 'No se pudo marcar: ' + (r.error || '?'));
+      /* v1.32 · [AUT-1096] il no della 2ª del 2x1 non è un errore da ripetere
+         subito: è «ora non si può». Il messaggio dice la verità e NON promette
+         un ritorno automatico, perché nessun gesto dello staff si ri-spedisce
+         da sé (debito dichiarato nella richiesta di AUT-1096). La card resta
+         sullo schermo: `r.ok` è falso, quindi non si toglie niente. */
+      toast('bad', r.error === 's2x1_solo_borde'
+        ? 'Sin red — la 2ª del 2x1 se marca solo con conexión. Vuelve a tocar.'
+        : 'No se pudo marcar: ' + (r.error || '?'));
     }
   } catch (e) {
     toast('bad', 'Sin conexión — reintenta el LISTO');
