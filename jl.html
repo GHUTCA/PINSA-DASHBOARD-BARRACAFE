@@ -104,7 +104,7 @@
 <div class="app">
   <div class="top">
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
-    <span class="ver" id="ver">jl v0.2.1</span>
+    <span class="ver" id="ver">jl v0.3.0</span>
   </div>
   <div class="edad" id="edad">leyendo la sala…</div>
   <div class="tabs" role="tablist">
@@ -118,7 +118,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.2.1';
+var JL_VER = 'jl v0.3.0';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -541,11 +541,157 @@ function local() {
   h += '<div class="vetro"><h4>Reservas · turnos</h4><p>Todavía en tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
   return h;
 }
+/* ═══ [v0.3.0 · FASE 2 · LA CAJA MINIMA — solo vetro, ordine di Alberto mer 18 «fai programmare app JL appena possibile»] ═══
+   Gli STESSI verbi e gli STESSI payload che `app_jl.html` v1.44.x manda oggi (`cajaPost1`, r.663-954), nessuna rotta nuova:
+   `POST /caja/<local>?t=` text/plain · `estado` · `ritiro` CONTATO (`monto`, `esperado_ora`, `uid_gesto`, e `confirmo_sobre_esperado:1` dopo il «Sí»)
+   · `sobre` a conteggio cieco (`contado`, `uid_gesto`). Il «Recibí $X» a un tocco resta spento come nell'app vecchia (AUT-1034, `CJ_RECIBI_UN_TOCCO` false).
+   «¿Quién entrega?» (`entregado_por`, leva caja_entregado_por_on) NON è qui: senza, il payload è quello dell'app vecchia con la scelta «el garzón».
+   La chiave d'idempotenza la conia il telefono; dopo un esito incerto resta per quel garzón (il reintento è lo stesso ritiro). */
+var CJ = { st: null, ts: 0, err: '', ret: null, enviando: false, dubbio: {}, sob: null, sobUid: null, inVolo: false, tryTs: 0 };
+var CJ_ERR = { pg_no_responde: 'No puedo leer la caja ahora (la base de datos no responde). No retires a ojo: espera un minuto.',
+  pg_no_configurado: 'La caja no está configurada en el sistema — avisa a Alberto.', pin_jl_invalido: 'Tu PIN no es válido para la caja.',
+  pin_jl_requerido: 'Falta tu PIN — vuelve a entrar.', pin_jl_bloqueado: 'PIN bloqueado 10 minutos por intentos fallidos.',
+  pin_jl_bloqueado_apparecchio: 'Este teléfono está bloqueado 10 minutos por intentos fallidos.', pin_jl_no_configurado: 'Los PIN de JL no están configurados en el sistema — avisa a Alberto.',
+  verbo_sconosciuto: 'La caja nueva todavía está apagada.', timeout: 'El sistema tardó demasiado — reintento solo.', sin_conexion: 'Sin conexión — reintento solo.' };
+var CJ_MOTIVI = { sopra_esperado: 'Es más de lo que tiene en la mano — confírmalo', uid_gesto_mancante: 'Falta la clave del gesto (recarga la página)',
+  mesero_mancante: 'Falta el nombre del garzón', monto_non_numerico: 'El monto no es un número válido', monto_non_positivo: 'El monto tiene que ser mayor que cero',
+  firma_jl_mancante: 'Falta tu PIN', sobre_nro_repetido: 'Ese número de sobre ya está usado esta noche', suma_ritiri_negativa: 'La suma no puede ser negativa' };
+function cjMotivo(m) { return CJ_MOTIVI[m] || ('Rechazado: ' + (m || '?')); }
+function cjUid(pre) { var r = ''; try { var a = new Uint8Array(6); crypto.getRandomValues(a); for (var i = 0; i < a.length; i++) r += ('0' + a[i].toString(16)).slice(-2); } catch (e) { r = Date.now().toString(36) + Math.random().toString(36).slice(2, 8); } return pre + '-' + r; }
+async function cjPost(payload) {
+  if (DEMO) return cjDemo(payload);
+  var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 10000);
+  try {
+    var r = await fetch(CFG.BORDE + '/caja/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T),
+      { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload), signal: ctrl.signal, cache: 'no-store' });
+    var j = null; try { j = await r.json(); } catch (e) { if (e && e.name === 'AbortError') throw e; j = null; }
+    clearTimeout(to); if (!j) throw new Error('http_' + r.status); return j;
+  } catch (e) { clearTimeout(to); throw (e && e.name === 'AbortError' ? new Error('timeout') : e); }
+}
+async function cjGiro() {
+  if ((!SES.pin && !DEMO) || CJ.inVolo) return;
+  CJ.inVolo = true; CJ.tryTs = Date.now();
+  try { var r = await cjPost({ verbo: 'estado', pin_jl: SES.pin }); if (r && r.ok) { CJ.st = r; CJ.ts = Date.now(); CJ.err = ''; } else CJ.err = (r && r.error) || 'sin_respuesta'; }
+  catch (e) { CJ.err = e && e.message === 'timeout' ? 'timeout' : 'sin_conexion'; }
+  CJ.inVolo = false; cjPallino(); if (VISTA.tab === 2) jlPinta();
+}
+/* ⑤ il pallino rosso su Caja: l'aviso aperto del bordo (stesso dato dell'app vecchia, r.1944) */
+function cjPallino() { var b = document.querySelectorAll('.tabs button')[2]; if (!b) return; var on = !!(CJ.st && CJ.st.aviso && CJ.st.aviso.abierto); b.textContent = on ? 'Caja 🔴' : 'Caja'; }
+function cjMmSs(ms) { if (!(ms > 0)) return '00:00'; var t = Math.floor(ms / 1000); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); }
+function cjNum(v) { var n = parseInt(String(v == null ? '' : v).replace(/[^0-9]/g, ''), 10); return isFinite(n) ? n : NaN; }
+function cjRiga(a, b) { return '<div class="riga"><span>' + a + '</span><span class="st">' + b + '</span></div>'; }
+function cjFalta(ret) {
+  var v = cjNum(ret && ret.monto); if (!(v > 0)) return '';
+  var att = +ret.att.en_mano || 0;
+  if (v === att) return '<span style="color:var(--ok)">✓ Cuadra</span>';
+  if (v < att) return '<span style="color:var(--oro)">Faltan ' + pesos(att - v) + ': quedan a nombre de ' + esc(ret.mesero) + ' y pasan a mañana</span>';
+  return '';
+}
+function cjFine() { CJ.enviando = false; try { var ae = document.activeElement; if (ae && ae.blur) ae.blur(); } catch (e) {} jlPinta(); }
+function cjAvviso(t) { CJ.msg = t; }
+async function cjRetEnviar() {
+  if (CJ.enviando || !CJ.ret) return;
+  var ret = CJ.ret, monto = cjNum(ret.monto);
+  if (!(monto > 0)) { cjAvviso('Escribe lo que contaste'); jlPinta(); return; }
+  var att = +ret.att.en_mano || 0;
+  if (monto > att && ret.confOk !== monto) { ret.conf = monto; cjFine(); return; }   // sopra l'atteso: la domanda, per QUEL monto (AUT-0607)
+  CJ.enviando = true; CJ.msg = ''; jlPinta();
+  try {
+    var p = { verbo: 'ritiro', pin_jl: SES.pin, mesero: ret.mesero, monto: monto, esperado_ora: att, uid_gesto: ret.uid };
+    if (ret.confOk === monto) p.confirmo_sobre_esperado = 1;
+    var r = await cjPost(p);
+    if (r && r.ok && r.accodato) {
+      delete CJ.dubbio[ret.mesero];
+      cjAvviso(r.ya ? '✓ Este retiro ya estaba registrado — no se cuenta dos veces.' : '✓ Retiro de ' + pesos(monto) + ' a ' + ret.mesero + ' · ahora confirma él en su teléfono');
+      CJ.ret = null; cjGiro();
+    } else if (r && r.error === 'rifiutato' && r.motivo === 'sopra_esperado') {
+      if (r.en_mano != null) ret.att = Object.assign({}, ret.att, { en_mano: +r.en_mano || 0 });
+      ret.conf = monto; ret.confOk = 0;
+    } else if (r && r.error === 'rifiutato') { delete CJ.dubbio[ret.mesero]; cjAvviso('✋ ' + cjMotivo(r.motivo)); }
+    else cjAvviso('✋ No se registró: ' + (CJ_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) {
+    CJ.dubbio[ret.mesero] = ret.uid;   // la clave NO muere: reintentar es el MISMO retiro
+    cjAvviso('⏳ ' + (e && e.message === 'timeout' ? 'El sistema tardó: puede que SÍ se haya registrado. Reintenta: no se duplica.' : 'Sin conexión: reintenta, no se duplica.'));
+  }
+  cjFine();
+}
+async function cjSobEnviar() {
+  if (CJ.enviando) return;
+  var el = document.getElementById('cjSob'), contado = cjNum(el && el.value);
+  if (!(contado >= 0)) { cjAvviso('Escribe lo que contaste'); jlPinta(); return; }
+  if (!CJ.sobUid) CJ.sobUid = cjUid('CJ-SOB');
+  CJ.enviando = true; CJ.msg = ''; jlPinta();
+  try {
+    var r = await cjPost({ verbo: 'sobre', pin_jl: SES.pin, contado: contado, uid_gesto: CJ.sobUid });
+    if (r && r.ok && r.sobre_nro) {
+      var f = String(r.fascia || '').toLowerCase(); if (['verde', 'ambra', 'rojo'].indexOf(f) < 0) f = r.cuadra === false ? 'rojo' : (r.con_diferencia ? 'ambra' : 'verde');
+      var d = Number(r.diferencia); CJ.sob = { nro: r.sobre_nro, fascia: f, diferencia: (r.diferencia != null && r.diferencia !== '' && isFinite(d)) ? Math.round(d) : null }; CJ.sobUid = null;
+    } else if (r && r.ok && r.cuadra === false) { CJ.sob = { intento: r.intento, de: r.de }; CJ.sobUid = null; }   // un conteo nuevo es un gesto nuevo (EMERG 08-ott)
+    else if (r && r.error === 'rifiutato') cjAvviso('✋ ' + cjMotivo(r.motivo));
+    else cjAvviso('✋ ' + (CJ_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
+  } catch (e) { cjAvviso('⏳ No sé si llegó: toca de nuevo, no se duplica.'); }
+  cjFine();
+}
+function caja() {
+  if (!SES.pin && !DEMO) return VISTA.err === 'sin_pin' ? pinHtml() : '<div class="vetro"><p>Para la caja entra desde tu app de siempre (falta tu PIN).</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
+  if (CJ.enviando && CJ.tryTs && Date.now() - CJ.tryTs > 20000) CJ.enviando = false;
+  var st = CJ.st, h = CJ.msg ? '<div class="vetro' + (/^✓/.test(CJ.msg) ? '' : ' alerta') + '"><p>' + esc(CJ.msg) + '</p></div>' : '';
+  if (CJ.err) h += '<div class="vetro alerta"><p>⚠️ ' + esc(CJ_ERR[CJ.err] || CJ.err) + '</p>' + (st ? '<p>Lo de abajo es de hace ' + Math.round((Date.now() - CJ.ts) / 60000) + ' min.</p>' : '') + '</div>';
+  if (!st) return h + (CJ.err ? '' : '<p class="vacio">Cargando la caja…</p>');
+  (st.disputas || []).forEach(function (d) { h += '<div class="vetro alerta">' + cjRiga('<b>' + esc(d.mesero) + '</b> · No coincide', pesos(d.monto)) + '</div>'; });
+  (st.por_confirmar || []).forEach(function (p) { h += '<div class="vetro">' + cjRiga('⏳ ' + esc(p.mesero) + ' · por confirmar', pesos(p.monto)) + '</div>'; });
+  if (CJ.ret) {   // ② el retiro: el JL escribe lo que contó
+    var a = CJ.ret.att, att = +a.en_mano || 0;
+    h += '<div class="vetro"><h4>El retiro de</h4><p style="font-size:26px;font-weight:900;color:var(--ink);margin:2px 0 8px">' + esc(CJ.ret.mesero) + '</p>' +
+      cjRiga('Ventas en efectivo', pesos(a.ventas_efectivo)) + cjRiga('Propinas en efectivo', pesos(a.propina_efectivo)) +
+      (a.residuo ? cjRiga('De ayer', pesos(a.residuo)) : '') + (a.entregado ? cjRiga('Ya entregó hoy', '−' + pesos(a.entregado)) : '') +
+      cjRiga('<b>Total efectivo</b>', '<b style="font-size:18px">' + pesos(att) + '</b>') +
+      '<div class="pin"><input id="cjMonto" type="text" inputmode="numeric" placeholder="$" autocomplete="off" value="' + esc(CJ.ret.monto || '') + '"></div>' +
+      '<p id="cjFalta" class="sub" style="text-align:center;font-weight:700">' + cjFalta(CJ.ret) + '</p>' +
+      (CJ.ret.conf ? '<div class="vetro alerta"><p style="font-size:15px;font-weight:800;color:var(--ink)">¿Retiras ' + pesos(CJ.ret.conf) + '? Faltaban ' + pesos(att) + '</p><p>Es ' + pesos(CJ.ret.conf - att) + ' más de lo que tiene en la mano.</p>' +
+          '<button class="azione oro" data-a="cjSi">Sí, retiro ' + pesos(CJ.ret.conf) + '</button><button class="azione" data-a="cjCorr">Corregir el monto</button></div>'
+        : '<button class="azione oro" data-a="cjRet"' + (CJ.enviando ? ' disabled' : '') + '>' + (CJ.enviando ? '…' : 'Confirmar') + '</button>') +
+      '<button class="azione" data-a="cjVolver">Volver</button></div>';
+    return h;
+  }
+  var ms = (st.meseros || []).filter(function (m) { return m.en_mano > 0; }), aviso = st.aviso && st.aviso.abierto;   // ① el aviso
+  h += '<div class="vetro' + (aviso ? ' alerta' : '') + '">' + (aviso ? '<h4>El aviso</h4>' : '') + cjRiga('Dinero en sala', '<b style="font-size:18px">' + pesos(st.totale_en_mano || 0) + '</b>') +
+    (aviso ? cjRiga('Tiempo para realizar retiro', '<b style="font-size:18px">' + cjMmSs((st.aviso.scade_ts || 0) - Date.now()) + '</b>') : '') +
+    '<h4 style="margin-top:10px">Garzones</h4>' +
+    (ms.length ? ms.map(function (m) { return '<div class="riga" data-a="cjAbre" data-k="' + esc(m.mesero) + '" style="cursor:pointer"><span><b>' + esc(m.mesero) + '</b></span><span class="st">' + pesos(m.en_mano) + ' ›</span></div>'; }).join('') + '<p class="sub">Toca al garzón que tienes enfrente para empezar su retiro.</p>' : '<p class="vacio">Nadie tiene efectivo en la mano.</p>') + '</div>';
+  var di = st.da_imbustare || { n: 0 }, sob = CJ.sob;   // ③④ el sobre: conteo ciego
+  if (sob && sob.nro) {
+    var col = sob.fascia === 'rojo' ? '#f6b0a8' : sob.fascia === 'ambra' ? 'var(--oro)' : 'var(--ok)';
+    var tx = sob.fascia === 'rojo' ? 'No cuadró en 3 conteos' : sob.fascia === 'ambra' ? 'Cuadra con diferencia' : 'Cuadra';
+    h += '<div class="vetro' + (sob.fascia === 'rojo' ? ' alerta' : '') + '"><h4>Detalle retiro efectivo</h4><p style="font-size:32px;font-weight:900;text-align:center;letter-spacing:4px;color:' + col + '">' + esc(sob.nro) + '</p>' +
+      '<p style="text-align:center;font-weight:800;color:' + col + '">' + tx + (sob.diferencia ? ' · ' + (sob.diferencia > 0 ? '+' : '−') + pesos(Math.abs(sob.diferencia)) : '') + '</p>' +
+      '<p class="sub" style="text-align:center">número del sobre — escríbelo en el sobre</p><button class="azione oro" data-a="cjListo">A la caja fuerte</button></div>';
+  } else if (di.n) {
+    h += '<div class="vetro"><h4>Detalle retiro efectivo</h4>' + cjRiga(di.n + ' retiro' + (di.n === 1 ? '' : 's') + ' del turno', '') +
+      '<p style="font-size:14px;font-weight:800;margin:10px 0 0;color:var(--ink)">¿Cuánto contaste?</p><div class="pin"><input id="cjSob" type="text" inputmode="numeric" placeholder="$ 0" autocomplete="off"></div>' +
+      (sob && sob.intento ? '<p class="sub" style="text-align:center;color:#f6b0a8;font-weight:700">No cuadró: cuenta de nuevo · conteo ' + (sob.intento + 1) + ' de ' + (sob.de || 3) + '</p>' : '') +
+      '<button class="azione oro" data-a="cjSob"' + (CJ.enviando ? ' disabled' : '') + '>' + (CJ.enviando ? '…' : 'Confirmar') + '</button>' +
+      '<p class="sub" style="text-align:center">número del sobre — lo da el sistema cuando el conteo cuadra</p></div>';
+  }
+  return h;
+}
+/* la caja finta della demo: risponde come il bordo (estado · ritiro · sobre), senza rete */
+var CJ_DEMO = { ritiri: 0 };
+function cjDemo(p) {
+  if (p.verbo === 'estado') return { ok: true, totale_en_mano: 48500, aviso: { abierto: true, scade_ts: Date.now() + 17 * 60000 },
+    meseros: [{ mesero: 'Gabriel', en_mano: 32000, ventas_efectivo: 29000, propina_efectivo: 3000 }, { mesero: 'Diego', en_mano: 16500, ventas_efectivo: 15000, propina_efectivo: 1500 }],
+    da_imbustare: { n: CJ_DEMO.ritiri }, por_confirmar: [], disputas: [] };
+  if (p.verbo === 'ritiro') { if (p.monto > 32000 && !p.confirmo_sobre_esperado) return { ok: false, error: 'rifiutato', motivo: 'sopra_esperado', en_mano: 32000 }; CJ_DEMO.ritiri++; return { ok: true, accodato: true }; }
+  if (p.verbo === 'sobre') return p.contado === 32000 ? { ok: true, sobre_nro: '4821', fascia: 'verde' } : { ok: true, cuadra: false, intento: 1, de: 3 };
+  return { ok: false, error: 'verbo_sconosciuto' };
+}
 function enApp() { return '<div class="vetro"><p>Esta parte sigue en tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>'; }
-var VIS = [servicio, local, enApp, enApp, enApp];
-function jlPinta() {
+var VIS = [servicio, local, caja, enApp, enApp];
+function jlPinta(forza) {
   jlEdad();
   var b = document.getElementById('body'), y = b.scrollTop;
+  /* [v0.3.0] mai ridisegnare sotto le dita: un giro di lettura non cancella il monto o il conteo che il JL sta scrivendo (app_jl r.~2758) */
+  var ae = document.activeElement; if (!forza && ae && ae.tagName === 'INPUT' && b.contains(ae)) return;
   b.innerHTML = (VISTA.tab === 0 && VISTA.aperta) ? detalle(VISTA.aperta.g, VISTA.aperta.m) : VIS[VISTA.tab]();
   b.scrollTop = y;
 }
@@ -563,10 +709,24 @@ document.getElementById('body').addEventListener('click', function (ev) {
   else if (a === 'volver') { VISTA.aperta = null; jlPinta(); }
   else if (a === 'entra') { var pi = document.getElementById('jlPin'); jlEntra(pi ? pi.value : ''); }
   else if (a === 'tab86') { ir(1); }
+  else if (a === 'cjAbre') { var me = el.getAttribute('data-k'), m = ((CJ.st && CJ.st.meseros) || []).filter(function (x) { return x.mesero === me; })[0];
+    if (m) { CJ.msg = ''; CJ.ret = { mesero: m.mesero, att: m, uid: CJ.dubbio[m.mesero] || cjUid('CJ-RIT'), monto: '', conf: 0, confOk: 0 }; jlPinta(); } }
+  else if (a === 'cjRet') { if (CJ.ret) { var mi = document.getElementById('cjMonto'); if (mi) CJ.ret.monto = mi.value; } cjRetEnviar(); }
+  else if (a === 'cjSi') { if (CJ.ret && CJ.ret.conf) { CJ.ret.confOk = CJ.ret.conf; CJ.ret.monto = String(CJ.ret.conf); cjRetEnviar(); } }
+  else if (a === 'cjCorr') { if (CJ.ret) { CJ.ret.conf = 0; CJ.ret.monto = ''; jlPinta(true); } }
+  else if (a === 'cjVolver') { CJ.ret = null; CJ.msg = ''; jlPinta(true); }
+  else if (a === 'cjSob') { cjSobEnviar(); }
+  else if (a === 'cjListo') { CJ.sob = null; CJ.msg = ''; cjGiro(); jlPinta(true); }
   else if (a === 'sala') { try { if (SES.codigo) sessionStorage.setItem('jl_codigo', SES.codigo); if (SES.pin) sessionStorage.setItem('jl_pin', SES.pin); if (SES.user) sessionStorage.setItem('jl_user', SES.user); } catch (e) {} }   // la nueva legge la sessione: si scrive prima di uscire
 });
 document.getElementById('body').addEventListener('keydown', function (ev) {
   if (ev.key === 'Enter' && ev.target && ev.target.id === 'jlPin') jlEntra(ev.target.value);
+});
+/* [v0.3.0] il monto del ritiro vive nel RITIRO (CJ.ret.monto), non nel DOM (app_jl v1.35.4): scriverlo toglie una conferma vecchia */
+document.getElementById('body').addEventListener('input', function (ev) {
+  var t = ev.target; if (!t) return;
+  if (t.id === 'cjMonto' || t.id === 'cjSob') { var d = String(t.value || '').replace(/[^0-9]/g, ''); t.value = d ? Number(d).toLocaleString('es-CL') : ''; }
+  if (t.id === 'cjMonto' && CJ.ret) { CJ.ret.monto = t.value; CJ.ret.conf = 0; var f = document.getElementById('cjFalta'); if (f) f.innerHTML = cjFalta(CJ.ret); }
 });
 
 /* la sala finta, NELLA FORMA DEL BORDO (sala_vista). Numeri d'esempio: non sono del sistema. */
@@ -599,5 +759,9 @@ jlLeggi();
 setInterval(function () { if (!document.hidden) jlLeggi(); }, JL_POLL_MS);
 document.addEventListener('visibilitychange', function () { if (!document.hidden) jlLeggi(); });
 setInterval(jlEdad, 1000);
+/* [v0.3.0] la caja: una lettura all'avvio (il pallino), poi ogni 20 s col tab Caja aperto, ogni 60 s altrimenti; e il cronometro dell'aviso al secondo */
+cjGiro();
+setInterval(function () { if (!document.hidden && (VISTA.tab === 2 || Date.now() - CJ.tryTs > 60000)) cjGiro(); }, JL_POLL_MS);
+setInterval(function () { if (VISTA.tab === 2 && CJ.st && CJ.st.aviso && CJ.st.aviso.abierto && !CJ.ret) jlPinta(); }, 1000);
 </script>
 </body></html>
