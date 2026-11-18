@@ -1608,10 +1608,16 @@ function L(){ return X().lin||[]; }
 function idC(){ return cid(X())||X().m; }
 function pieno(){ return X().tot; }
 function porProd(){ return L().length>0 && L().reduce(function(a,l){return a+l.p;},0)===pieno(); }
-function pct(){ if(CB&&CB.dto==='conv'&&CB.medio==='mixto') return 0; return CB&&CB.dto&&CB.pin ? MOTIVOS.filter(function(m){return m[0]===CB.dto;})[0][2] : 0; }
-function fal(){ return !!(CB&&CB.dto==='conv'&&CB.pin); }
-function nomeDto(){ return CB&&CB.dto ? MOTIVOS.filter(function(m){return m[0]===CB.dto;})[0][1] : ''; }
-function cons(pz){ return Math.round(pz*(1-pct()/100)); }
+function pct(){ var _d=(typeof snDtoAutX==='function')?snDtoAutX():null; if(_d) return Number(_d.pct)||0;   /* [v0.15.27 · AUT-1109] il descuento AUTORIZZATO dal JL */
+  if(CB&&CB.dto==='conv'&&CB.medio==='mixto') return 0; return CB&&CB.dto&&CB.pin ? MOTIVOS.filter(function(m){return m[0]===CB.dto;})[0][2] : 0; }
+function fal(){ var _d=(typeof snDtoAutX==='function')?snDtoAutX():null; if(_d) return _d.propina_sobre==='pleno';   /* [v0.15.27] la propina sul pieno (Falabella) o sul netto (i motivi): lo dice la foto */
+  return !!(CB&&CB.dto==='conv'&&CB.pin); }
+function nomeDto(){ var _d=(typeof snDtoAutX==='function')?snDtoAutX():null; if(_d) return String(_d.etiqueta||_d.codigo||'Descuento'); return CB&&CB.dto ? MOTIVOS.filter(function(m){return m[0]===CB.dto;})[0][1] : ''; }
+function cons(pz){ var _d=(typeof snDtoAutX==='function')?snDtoAutX():null;
+  /* [v0.15.27 · AUT-1109] col descuento autorizzato il conto INTERO vale il `monto` della foto, esatto: le promo non si scontano (dtoMonto del bordo), quindi
+     la percentuale da sola sbaglierebbe la cifra e il bordo risponderebbe monto_no_cuadra. Solo sul conto intero: «Lo mío» e «Partes» con descuento non ci sono. */
+  if(_d && Math.round(pz)===Math.round(Number(_d.consumo_tot)||0)) return Math.round(Number(_d.monto)||0);
+  return Math.round(pz*(1-pct()/100)); }
 function pagatoPieno(){ return CB.pagos.reduce(function(a,p){return a+p.pieno;},0); }
 function saldoPieno(){ return pieno()-pagatoPieno(); }
 function saldoCons(){ return cons(saldoPieno()); }
@@ -1734,7 +1740,7 @@ function c1Centro(){ var x=X(), s=c1(), pz=Math.min(c1Parte(),saldoPieno()), cob
       '<button type="button" class="'+(s.prop===0?'on':'')+'" onclick="c1SetProp(0)">Sin</button></div>'+
     c1WaHtml()+
     '<div class="c1mini">'+
-      '<button type="button" class="'+(CB.dto?'on':'')+'" onclick="c1DtoOpen()">'+(CB.dto?'−'+pct()+'% '+nomeDto().split(' ').pop():'Descuento ›')+'</button>'+
+      '<button type="button" class="'+(CB.dto||snDtoAutX()?'on':'')+'" onclick="c1DtoOpen()">'+(snDtoAutX()?'🏷 −'+pct()+'% '+nomeDto():snDtoPend()?'🏷 Esperando al JL…':CB.dto?'−'+pct()+'% '+nomeDto().split(' ').pop():'Descuento ›')+'</button>'+
       (X().waOk?'<span class="ok">✓ boleta</span>':'')+
       '<button type="button" onclick="c1().sheet=\'prod\';pinta()"'+(s.modo==='mio'&&!s.sel.length?' disabled':'')+'>🧾 Precuenta ›</button></div>'+   /* [v0.14.6] con «Lo mío» la precuenta è di lo mío: si apre appena c'è una riga scelta */
     /* con «Lo mío» le righe servono per scegliere: stanno qui, dentro un box ad altezza fissa */
@@ -1760,13 +1766,15 @@ function c1Pollice(){ var s=c1(), pz=Math.min(c1Parte(),saldoPieno()), vuota=pz<
       ? '<button type="button" class="vb filo'+(vuota||SNP.vuelo?' off':'')+'" '+(vuota||SNP.vuelo?'disabled':'onclick="snMixtoAbre()"')+'>🔀 Mixto</button>'+   /* [v0.14.5 · Alberto] Mixto accanto a Efectivo */
         snExpressBtn(null, vuota)   /* [20-nov · 🛎 SALA V33 · AUT-1170 · trovato da 💵 EL GIRO, forma decisa dal 🎛 V34 su «LA CURA HA DUE EFFETTI» di 🍳] era `x`, MAI dichiarata qui: col cobro vivo il pannello lanciava ReferenceError e non si disegnava (dal 64de1df, 07:33). `null` e non `X()`: con la mesa vera e un conto il bottone si sarebbe ACCESO (onclick snExpressApri), mentre la riga è «visibile e spenta» come l'ha scritta Alberto */ /* [v0.14.5 · Alberto] la riga del PAGO EXPRESS: visibile e spenta, nessun onclick */
       : '<button type="button" class="vb sec'+(pz<=0||solCred?' off':'')+'" style="grid-column:1/-1;padding:11px 8px;font-size:14px" '+(pz<=0||solCred?'disabled':'onclick="c1().qr=true;pinta()"')+'>📱 Que pague desde su teléfono'+(solCred?'<small>Falabella: solo en máquina</small>':'')+'</button>')+'</div>'; }
-function c1Modo(m){ if(m!=='todo'&&snCobroVivo()&&!SN_PARTE_ON){ flash('Por ahora «'+(m==='mio'?'Lo mío':'Partes')+'» se cobra en la sala de siempre'); return; } var s=c1(); s.modo=m; if(m!=='mio') s.sel=[]; pinta(); }   // [v0.13.0] B1: aperti sul vivo (leva ?snparte=0)
+function c1Modo(m){ if(m!=='todo'&&typeof snDtoAutX==='function'&&snDtoAutX()){ flash('Con el descuento se cobra la cuenta completa'); return; }   // [v0.15.27] aut_solo_total del bordo
+  if(m!=='todo'&&snCobroVivo()&&!SN_PARTE_ON){ flash('Por ahora «'+(m==='mio'?'Lo mío':'Partes')+'» se cobra en la sala de siempre'); return; } var s=c1(); s.modo=m; if(m!=='mio') s.sel=[]; pinta(); }   // [v0.13.0] B1: aperti sul vivo (leva ?snparte=0)
 function c1Linea(i){ var s=c1(), k=s.sel.indexOf(i); if(k<0) s.sel.push(i); else s.sel.splice(k,1); pinta(); }
 function c1Partes(d){ var s=c1(), fatte=c1Fatte(); s.partes=Math.max(fatte+1,Math.max(2,Math.min(12,s.partes+d))); pinta(); }
 function c1SetProp(v){ c1().prop=v; pinta(); if(v==='otro'){ var i=$('c1Otro'); if(i) i.focus(); } }
 /* v0.6.9 · UN'AZIONE PORTA ALLA SUA SCHERMATA (Alberto, 04-nov: «per vedere gli sconti devo scrollare… non si capisce dove sono»).
    Descuento e Productos aprono un FOGLIO sopra il pago, a tutta altezza: niente scroll per trovarli, ✕ o una scelta riportano al pago. */
-function c1DtoOpen(){ if(snCobroVivo()){ flash('Descuento o convenio (Falabella): llama al JL. No cobres todavía.'); return; } c1().sheet='dto'; pinta(); }
+function c1DtoOpen(){ if(snCobroVivo()&&typeof snDtoOn==='function'&&snDtoOn()){ snDtoApri(); return; }   // [v0.15.27 · AUT-1109] si chiede al JL
+  if(snCobroVivo()){ flash('Descuento o convenio (Falabella): llama al JL. No cobres todavía.'); return; } c1().sheet='dto'; pinta(); }
 function c1Dto(k){ CB.dto=k; CB.pin=!!k; c1().sheet=null; pinta(); }   // in prova il PIN del JL è un tocco
 function c1SheetHtml(){ var s=c1(), x=X(); if(!s.sheet) return '';
   var base=saldoPieno(), riga='display:flex;justify-content:space-between;align-items:center;width:100%;padding:16px 14px;margin:0 0 8px;border-radius:14px;font:inherit;font-size:16px;font-weight:700;text-align:left;';
@@ -3085,6 +3093,7 @@ function snLeggiSalud() {
     SN.corteBorde = leva('corte_borde_on') === '1';              /* il corte lo calcola il bordo (CERRARMESERO_BORDE_ON e CAJA_ATTO1_ON) */
     SN.corteTras = leva('corte_traspaso_borde_on') === '1';      /* il corte CON mesas da passare al bordo */
     SN.corteJl = leva('corte_senza_erede_jl_on') === '1';        /* la mesa senza erede va al JL */
+    SN.dtoAut = snSoloPlazaLeva(leva('descuento_aut_on'));   /* [v0.15.27 · AUT-1109] il descuento autorizzato dal JL (DESCUENTO_AUT_ON: elenco di locali) */
     SN.saludLetta = true;   /* [v0.15.2] T10: la leva del telefono adesso si sa */
     SN.telTurno = snSoloPlazaLeva(leva('turno_tel_on'));   /* [v0.15.0] il telefono del turno: "0"/"" spenta · "1" · elenco di locali */
     if (typeof snTelOn === 'function' && snTelOn() && !SNT.dentro && !VV.demo && !(typeof SNJL !== 'undefined' && SNJL)) snTelIngresso();   /* accesa e non ancora passato dal check-in: prima il telefono */
@@ -4034,6 +4043,48 @@ async function snPetPide() {
   if (r.ok) { flash('📝 Pedido al JL: quitar ' + nom + ' · mesa ' + g.m); vvLeggi(); return; }
   var e = r.error;
   flash('⚠️ No se pidió: ' + (r.mensaje || ({ codigo_no_verificable: 'tu código del turno no vale ahora — vuelve a entrar', peticion_ya_existe: 'ya está pedido', pedido_uuid_missing: 'falta el pedido', mesa_missing: 'falta la mesa' })[e] || e || 'respuesta desconocida'));
+}
+/* ═══ [v0.15.27 · AUT-1109] IL DESCUENTO SI CHIEDE AL JL (leva `descuento_aut_on` da /salud, più `peticiones` nella fetta) ═══
+   La lista chiusa del bordo (`PET_CONVENIOS` + `PET_MOTIVOS` di ⚙️, stessi codici): il garzón sceglie, parte `nace` tipo descuento con
+   `codigo_dto` (il codice del turno resta in `codigo`). Il JL autorizza sul suo telefono; il bordo congela la foto del conto, e la fetta la porta
+   in `peticiones[].descuento`: da lì il cobro (pct · fal · cons) e il corpo del pago. Se il consumo cambia, il JL riconferma. */
+var SN_DTO_COD = [['falabella', 'Banco Falabella', 20, 'solo crédito'], ['atraso_cocina', 'Atraso cocina', 10], ['atraso_barra', 'Atraso barra', 10],
+  ['reclamo_servicio', 'Reclamo servicio', 10], ['otro_reclamo', 'Otro reclamo', 20], ['invitado_ale', 'Invitado ALE', 40]];
+function snDtoOn() { return snPetOn() && !!(typeof SN !== 'undefined' && SN && SN.dtoAut); }
+function snDtoDi(m, stato) { if (!snDtoOn()) return null; return SN.pet.filter(function (x) { return x && x.tipo === 'descuento' && x.stato === stato && String(x.mesa) === String(m); })[0] || null; }
+function snDtoAutX() { if (!snDtoOn() || !snCobroVivo()) return null; var p = snDtoDi(X().m, 'confirmada'); return (p && p.descuento && p.descuento.aut_uid) ? p.descuento : null; }
+function snDtoPend() { if (!snDtoOn() || !snCobroVivo()) return null; return snDtoDi(X().m, 'pendiente'); }
+function snDtoChiudi() { var o = document.getElementById('snDto'); if (o) o.remove(); }
+function snDtoApri() {
+  if (snDtoAutX()) { flash('El descuento ya está autorizado: cobra la cuenta completa'); return; }
+  if (snDtoPend()) { flash('El descuento ya está pedido: espera al JL'); return; }
+  var o = document.getElementById('snDto'); if (!o) { o = document.createElement('div'); o.id = 'snDto'; document.body.appendChild(o); }
+  o.setAttribute('style', 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.72);display:flex;align-items:flex-end;justify-content:center');
+  var B = 'class="vb sec" style="width:100%;margin:4px 0;text-align:left;padding:11px 12px;font-size:15px"';
+  o.innerHTML = '<div style="width:100%;max-width:440px;max-height:88vh;overflow-y:auto;background:#1c1a16;color:#f3ead8;border-radius:18px 18px 0 0;padding:18px 16px 22px">' +
+    '<div style="font-size:19px;font-weight:800;margin-bottom:4px">Descuento · mesa ' + String(X().m).replace(/</g, '&lt;') + '</div>' +
+    '<div style="font-size:13px;opacity:.8;margin-bottom:8px">Le llega al JL en su teléfono. No cobres hasta que lo autorice.</div>' +
+    SN_DTO_COD.map(function (c) { return '<button type="button" ' + B + ' onclick="snDtoPide(\'' + c[0] + '\')">' + c[1] + ' · −' + c[2] + '%' + (c[3] ? '<small style="display:block;font-size:11.5px;opacity:.8">' + c[3] + '</small>' : '') + '</button>'; }).join('') +
+    '<button type="button" class="vb sec" style="width:100%;margin-top:10px" onclick="snDtoChiudi()">‹ volver</button></div>';
+}
+async function snDtoPide(cod) {
+  var c = SN_DTO_COD.filter(function (z) { return z[0] === cod; })[0]; if (!c || !snDtoOn()) return;
+  var x = X(), m = String(x.m), dk = 'dto|' + m + '|' + cod;
+  var ch = SN_PET_DUBBIO[dk] || { pid: snPetId('pet-' + m), uid: snPetId('pnace') };
+  var body = { verbo: 'nace', tipo: 'descuento', peticion_id: ch.pid, uid_gesto: ch.uid, codigo: VV.codigo, nombre: VV.nombre, mesa: m, codigo_dto: cod, motivo: c[1], dispositivo_id: snDispId() };
+  snDtoChiudi(); flash('Pidiendo al JL: ' + c[1] + '…');
+  var r = null;
+  try {
+    var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000);
+    var res = await fetch(VV.URL + '/peticion/' + encodeURIComponent(VV.LOCAL), { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Borde-Token': VV.T },
+      body: JSON.stringify((typeof snConDev === 'function' ? snConDev : function (o) { return o; })(Object.assign({}, body))), signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to); r = await res.json();
+  } catch (e) { r = null; }
+  if (!r) { SN_PET_DUBBIO[dk] = ch; flash('📵 No sé si llegó al JL: vuelve a pedirlo, no se duplica'); return; }
+  delete SN_PET_DUBBIO[dk];
+  if (r.ok && r.scritto === false) { flash('⛔ Los descuentos por el JL están apagados: no se pidió nada'); return; }
+  if (r.ok) { flash('🏷 Pedido al JL: ' + c[1] + ' · mesa ' + m + ' · no cobres todavía'); vvLeggi(); return; }
+  flash('⚠️ No se pidió: ' + (r.mensaje || ({ codigo_no_verificable: 'tu código del turno no vale ahora — vuelve a entrar', codigo_desconocido: 'ese descuento no existe' })[r.error] || r.error || 'respuesta desconocida'));
 }
 async function snCorrVai() {
   if (!SNC || !((typeof SNJL !== 'undefined' && SNJL) ? !!SNC.pin : SNC.pin.length === 4) || !SNC.id || !SNC.mot) return;   // [v0.14.0 · C1] il PIN della sessione non si misura
@@ -5108,6 +5159,14 @@ async function snCobrarVivo(med, partes) {
   var _pz = Math.min(c1Parte(), saldoPieno());   // [v0.13.0] B1: quello che si cobra adesso (Todo = il resto; Lo mío / Partes = la parte)
   var b = snPagoBody(x, med, partes, c1Prop(_pz), snUidPago(m), CB && CB.uu, _pz);
   if (!b.ok) { snFlashFermo('⛔ ' + b.err); return; }
+  var _da = (typeof snDtoAutX === 'function') ? snDtoAutX() : null;
+  if (_da) {   /* [v0.15.27 · AUT-1109 · ⚙️ «LE TRE RIGHE»] il pago che usa l'autorizzazione del JL. I no qui sono gli stessi del bordo (_petConsuma), detti prima */
+    if (partes) { snFlashFermo('🏷 Con el descuento se cobra con un solo medio. No se cobró nada.'); pinta(); return; }
+    if (b.body.parcial || Math.round(Number(x.tot) || 0) !== Math.round(Number(_da.consumo_tot) || 0)) { snFlashFermo('🏷 El consumo cambió desde que el JL autorizó el descuento: pídele que lo confirme de nuevo. No se cobró nada.'); pinta(); return; }
+    var _mk = String(SN_MEDIO[med] || med || '').toLowerCase();
+    if (_da.medios && _da.medios.length && _da.medios.indexOf(_mk) < 0) { snFlashFermo('🏷 Con ' + (_da.etiqueta || 'este convenio') + ' se paga solo con ' + _da.medios.map(function (z) { return ({ credito: 'crédito', debito: 'débito' })[z] || z; }).join(' / ') + '. No se cobró nada.'); pinta(); return; }
+    b.body.monto = Math.round(Number(_da.monto) || 0); b.body.monto_manual = 1; b.body.aut_uid = String(_da.aut_uid);
+  }
   var _vc = snVouCampi(med, partes);   // [v0.15.17 · AUT-1075] il sello del voucher, gli stessi campi della sala vecchia
   if (!_vc.ok) { snFlashFermo('🧾 ' + _vc.err); pinta(); return; }
   Object.keys(_vc.campi).forEach(function (k) { b.body[k] = _vc.campi[k]; });
