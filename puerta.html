@@ -220,7 +220,7 @@
   <div class="leyenda"><span class="l1">libre</span><span class="l2">¿libre?</span><span class="l3">por limpiar</span><span>ocupada</span></div>
 
   <div class="foot">
-    <span class="ver"><span id="ver">puerta v0.6.3 · 19nov · sin Google</span> <span id="fuente"></span></span>
+    <span class="ver"><span id="ver">puerta v0.6.4 · 19nov · sin Google</span> <span id="fuente"></span></span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
@@ -698,8 +698,18 @@ function mesaDesdeTexto(txt) {
   }
   return null;
 }
-function scanAbrir() {
+/* ✏️ [19-nov · v0.6.4 · AUT-1154] NIENTE SENTAR SENZA ENTRADA — Alberto: «bloccare SENTAR senza entrata» (pranzo 19-nov: 8 sedute su 13 con entrada null).
+   Senza entrada scelta, il tocco su SENTAR apre PRIMA il foglio delle entradas; scelta l'entrada, si va dritti allo scan (ENT.poiSentar).
+   Con la leva dell'entrada spenta (leva_spenta) SENTAR va avanti come prima. Se l'entrada non si riesce a leggere, SENTAR non parte e lo dice. */
+async function scanAbrir() {
   if (!STATE.sala) { toast('err', 'Aún no llega el mapa — reintenta en un momento'); return; }
+  if (!ENT.actual) {
+    const r = await entLeer();
+    if (!ENT.actual) {
+      if (ENT.viva) { ENT.poiSentar = true; $('entSub').textContent = 'Antes de sentar, elige tu entrada: así sabemos por dónde entra la gente.'; $('entErrS').textContent = ''; entOpsPinta(); $('bsEnt').classList.add('show'); return; }
+      if (!(r && r.error === 'leva_spenta')) { toast('err', 'No pude leer tu entrada — reintenta en un momento'); return; }
+    }
+  }
   $('scErr').textContent = ''; $('scNum').value = ''; STATE.bsMesa = null;
   $('scPax').classList.add('hide'); $('scMesa').classList.remove('hide');
   $('bsScan').classList.add('show');
@@ -791,7 +801,7 @@ $('scNum').addEventListener('keydown', e => { if (e.key === 'Enter') scanNumero(
    `cambiarEntrada {puerta_uid, a}` la cambia, e il bordo scrive UNA riga in pinsita.anfitriona_puerta. Il `puerta_uid` si conia UNA volta per tocco e lo
    riusa il ritento: un doppio tocco non scrive due cambi. Leva spenta ⇒ il chip resta «Entrada · pronto» e un tocco lo dice. Niente nel localStorage:
    l'entrada vive nel bordo, e al rientro si rilegge. SENTAR manda `entrada` (il codice) nel payload, se è scelta. */
-const ENT = { actual: null, nombre: null, entradas: [], viva: false, volo: false, uid: '', uidPer: '' };
+const ENT = { actual: null, nombre: null, entradas: [], viva: false, volo: false, uid: '', uidPer: '', poiSentar: false };
 function entPinta() {
   const c = $('entChip'); if (!c) return;
   if (!ENT.viva) { c.textContent = '🚪 Entrada · pronto'; c.classList.remove('on'); return; }
@@ -815,22 +825,25 @@ async function entAbrir() {
   if (!STATE.codigo || !STATE.nombre) { toast('err', 'Entra con el código del turno primero'); return; }
   const r = await entLeer();
   if (!ENT.viva) { pronto('Elegir la entrada'); return; }
+  $('entSub').textContent = 'Lo que elijas queda registrado: así sabemos por dónde entra la gente.';
   $('entErrS').textContent = (r && r.ok === false && r.error !== 'leva_spenta') ? ptMsg(r) : '';
   entOpsPinta();
   $('bsEnt').classList.add('show');
 }
-function entCerrar() { $('bsEnt').classList.remove('show'); $('entErrS').textContent = ''; }
+function entCerrar() { $('bsEnt').classList.remove('show'); $('entErrS').textContent = ''; ENT.poiSentar = false; }
 async function entElegir(cod) {
   if (ENT.volo) return;
   if (!ENT.viva) { entCerrar(); pronto('Elegir la entrada'); return; }   // la nota di 🍳 su 770b701: la stessa guardia di entAbrir, anche sul tocco
-  if (cod === ENT.actual) { entCerrar(); return; }
+  if (cod === ENT.actual) { const poi = ENT.poiSentar; entCerrar(); if (poi) scanAbrir(); return; }
   if (!ENT.uid || ENT.uidPer !== cod) { ENT.uid = ptUid('pe'); ENT.uidPer = cod; }   // un'entrada nuova = un gesto nuovo; la stessa = il ritento
   ENT.volo = true; $('entErrS').textContent = ''; entOpsPinta();
   const r = await _portaAlBorde('cambiarEntrada', { puerta_uid: ENT.uid, a: cod });
   ENT.volo = false;
   if (r && r.ok === true) {
     ENT.actual = r.actual || cod; ENT.nombre = r.actual_nombre || null; ENT.uid = ''; ENT.uidPer = '';
+    const poi = ENT.poiSentar;
     entPinta(); entCerrar(); toast('ok', '✓ Estás en ' + (ENT.nombre || cod));
+    if (poi) scanAbrir();   // v0.6.4 · AUT-1154: l'entrada chiesta da SENTAR ⇒ dritti allo scan
     return;
   }
   const e = r && r.error;
