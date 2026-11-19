@@ -143,6 +143,11 @@
   .cam.on::before{content:"";position:absolute;z-index:1;width:150px;height:150px;border:3px solid var(--oro);border-radius:18px;box-shadow:0 0 0 999px rgba(0,0,0,.35)}
   .fila-n{display:flex;gap:8px;margin-bottom:6px}
   .fila-n .vb{width:auto;padding:0 20px;justify-content:center}
+  /* v0.6.3 · AUT-1150 · Alberto 19-nov: «il rettangolo per il num di MESA non si vede bene» ⇒ alto, bordo d'oro, numero grande come le tessere */
+  #scNum{height:64px;padding:0 14px;font-size:30px;font-weight:800;text-align:center;letter-spacing:.06em;border:2px solid var(--oro);background:rgba(255,255,255,.10);color:#fff}
+  #scNum::placeholder{color:var(--ink2);font-size:18px;font-weight:600;letter-spacing:0}
+  #scNum:focus{border-color:var(--oro-hi);background:rgba(255,255,255,.14);box-shadow:0 0 0 3px rgba(224,169,74,.25)}
+  .fila-n .vb.ir{height:64px;font-size:20px;padding:0 24px}
   .sim{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
   .op{padding:9px 12px;border-radius:12px;font-size:13px;font-weight:600;border:1px solid var(--filo);background:var(--vetro);color:var(--ink)}
   .op.on{border-color:rgba(224,169,74,.6);background:rgba(224,169,74,.16);color:var(--oro)}
@@ -215,7 +220,7 @@
   <div class="leyenda"><span class="l1">libre</span><span class="l2">¿libre?</span><span class="l3">por limpiar</span><span>ocupada</span></div>
 
   <div class="foot">
-    <span class="ver"><span id="ver">puerta v0.6.2 · 19nov · sin Google</span> <span id="fuente"></span></span>
+    <span class="ver"><span id="ver">puerta v0.6.3 · 19nov · sin Google</span> <span id="fuente"></span></span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
@@ -245,7 +250,7 @@
     <button type="button" class="cam" id="scCam" onclick="scanIniciar()"><video id="scVideo" class="hide" playsinline muted></video><span id="scCamTxt">📷 Tocar para escanear</span></button>
     <div class="fila-n">
       <input id="scNum" class="inp" type="text" inputmode="numeric" maxlength="12" placeholder="N.º de mesa" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" onkeydown="if(event.key==='Enter')scanNumero()">
-      <button type="button" class="vb pieno" onclick="scanNumero()">Ir</button>
+      <button type="button" class="vb pieno ir" onclick="scanNumero()">Ir</button>
     </div>
   </div>
   <div class="hint" id="scErr"></div>
@@ -721,14 +726,48 @@ function scanParar() {
   const v = $('scVideo'); if (v) { try { v.srcObject = null; } catch (e) {} v.classList.add('hide'); }
   $('scCam').classList.remove('on'); $('scCamTxt').classList.remove('hide');
 }
+/* ✏️ [19-nov · v0.6.3 · AUT-1150] DUE MOTORI, UNA INTERFACCIA — lo stesso del registro v62 (be9b999, «EL ESCANER TAMBIEN EN IPHONE»).
+   Android/Chrome: BarcodeDetector nativo. iPhone/Safari non lo espone ⇒ `shared/zxing.min.js` (stesso dominio, già nel repo, MIT/Apache-2.0),
+   scaricato SOLO lì e solo all'apertura della camera. I due danno detect(video) → [{rawValue}], il resto dello scanner non sa quale gira.
+   Se nessuno dei due parte, o la camera non si apre: il fuoco va sul numero (la tastiera numerica si apre da sola). */
+function _qrCargarZX() {
+  if (window.ZXing) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = 'shared/zxing.min.js';
+    s.onload = () => window.ZXing ? res() : rej(new Error('lector vacío'));
+    s.onerror = () => rej(new Error('sin conexión para bajar el lector'));
+    document.head.appendChild(s);
+  });
+}
+async function _qrLector() {
+  if (typeof window.BarcodeDetector === 'function') { const d = new BarcodeDetector({ formats: ['qr_code'] }); return { motor: 'nativo', detect: (v) => d.detect(v) }; }
+  await _qrCargarZX();
+  const hints = new Map(); hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.QR_CODE]); hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  const reader = new ZXing.MultiFormatReader(); reader.setHints(hints);
+  const cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
+  return { motor: 'zxing', detect: async (vid) => {
+    const vw = vid.videoWidth || 0, vh = vid.videoHeight || 0; if (!vw || !vh) return [];
+    const e = Math.min(1, 1280 / vw), w = Math.round(vw * e), h = Math.round(vh * e);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    cx.drawImage(vid, 0, 0, w, h);
+    try {
+      const px = cx.getImageData(0, 0, w, h).data, lum = new Uint8ClampedArray(w * h);
+      for (let i = 0, j = 0; j < lum.length; i += 4, j++) lum[j] = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) | 0;
+      const r = reader.decode(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.RGBLuminanceSource(lum, w, h))));
+      return [{ rawValue: r.getText() }];
+    } catch (err) { return []; } finally { try { reader.reset(); } catch (e2) {} }
+  } };
+}
+function _scanAlNumero(msg) { $('scErr').textContent = msg; try { $('scNum').focus(); } catch (e) {} }
 async function scanIniciar() {
   if (_scanStream) return;
   $('scErr').textContent = '';
-  if (!('BarcodeDetector' in window)) { $('scErr').textContent = 'Este teléfono no lee QR desde el navegador — escribe el número de la mesa'; return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { _scanAlNumero('Este teléfono no abre la cámara desde el navegador — escribe el número de la mesa'); return; }
   try {
-    _scanDet = _scanDet || new BarcodeDetector({ formats: ['qr_code'] });
-    _scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    _scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });   // prima la camera: il permesso vale dentro il tocco su SENTAR
     const v = $('scVideo'); v.srcObject = _scanStream; v.classList.remove('hide'); $('scCam').classList.add('on'); $('scCamTxt').classList.add('hide'); await v.play();
+    try { _scanDet = _scanDet || await _qrLector(); }
+    catch (eL) { scanParar(); _scanAlNumero('No pude preparar el lector de QR — escribe el número de la mesa'); return; }
     const vuelta = async () => {
       if (!_scanStream) return;
       try {
@@ -742,7 +781,7 @@ async function scanIniciar() {
       if (_scanStream) _scanTimer = setTimeout(vuelta, 250);
     };
     vuelta();
-  } catch (e) { scanParar(); $('scErr').textContent = 'No pude abrir la cámara — escribe el número de la mesa'; }
+  } catch (e) { scanParar(); _scanAlNumero('No pude abrir la cámara — escribe el número de la mesa'); }
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') scanParar(); });
 $('scNum').addEventListener('keydown', e => { if (e.key === 'Enter') scanNumero(); });
