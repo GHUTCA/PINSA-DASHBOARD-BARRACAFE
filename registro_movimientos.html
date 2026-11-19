@@ -566,7 +566,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v109 · la firma de quien escribe · AUT-EMERG-0864 · 4nov</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v110 · Riesco sin Cocina Central · 19nov</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:4px 8px;min-width:64px;min-height:44px;font-size:19px;cursor:pointer;line-height:1.1;touch-action:manipulation;transition:transform .1s">🧾<small style="display:block;font-size:10px;font-weight:700;margin-top:2px">Mis registros</small></button>
@@ -1173,7 +1173,20 @@ function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,
 function skuItem(sku){ return VOCAB.filter(function(x){return x.sku===sku;})[0]; }
 function skuUO(sku){ var v=skuItem(sku); return (v&&v.uo)?v.uo:''; }
 function esPeso(sku){ var v=skuItem(sku); var m=(v&&v.metodo||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); return m.indexOf('peso')>=0; }
-function skuSec(sku){ var v=skuItem(sku); return (v&&v.secs&&v.secs.length)?v.secs[0]:''; }
+// v110 · 19-nov · Alberto: «a Riesco la Cocina Central non c'è, sta in Barra Alimentos».
+// Un local de esta tabla NO tiene Cocina Central: donde el producto sólo vive en Cocina Central,
+// su sección en ese local es la de la tabla. Sin entrada (cdl, exo, bks, bc) todo queda como antes.
+var SEC_EN_LUGAR_DE_CC = { rsc:'barra alimentos' };
+function _secLocal(s){
+  var alt = (typeof CTX_CODE!=='undefined') ? SEC_EN_LUGAR_DE_CC[CTX_CODE] : null;
+  return (s==='cocina central' && alt) ? alt : s;
+}
+// Cocina Central se sustituye SÓLO cuando es la ÚNICA sección del producto (banco 💵 19-nov):
+// con otra sección real, en ese local manda la otra, como en el Mapa (skuSecInv).
+function skuSec(sku){
+  if(_secLocal('cocina central')!=='cocina central') return skuSecInv(sku);   // local sin Cocina Central
+  var v=skuItem(sku); return (v&&v.secs&&v.secs.length)?v.secs[0]:'';
+}
 // v65 · sección para el GIRO de inventario (Mapa). El giro recorre la BARRA;
 // Cocina Central es una bodega de producción que se inventaría APARTE (cantiere
 // CENTRAL). Muchos insumos tienen BD Seccion = 'Cocina Central, Barra Alimentos'
@@ -1184,7 +1197,7 @@ function skuSecInv(sku){
   var v=skuItem(sku);
   if(!v||!v.secs||!v.secs.length) return '';
   for(var i=0;i<v.secs.length;i++){ if(v.secs[i]!=='cocina central') return v.secs[i]; }
-  return v.secs[0];
+  return _secLocal(v.secs[0]);   // v110 · en rsc la única Cocina Central es Barra Alimentos
 }
 // ══ v90 · R3 (B2) · AJUSTE / MERMA EN UNA SECCIÓN ════════════════════════════
 // Decisión 🎛 (bacheca «B2 DECISO LIVELLO SI CHIEDE SEZIONE SI DEDUCE»): se
@@ -1206,6 +1219,8 @@ function secsDeducidas(sku){
   var v=skuItem(sku); if(!v||!v.secs||!v.secs.length) return [];
   var out=[];
   v.secs.forEach(function(x){ if(x==='cocina central') return; var c=capSec(x); if(c && out.indexOf(c)<0) out.push(c); });
+  // v110 · sólo si Cocina Central era la ÚNICA: en un local sin ella, la sección de la tabla
+  if(!out.length && v.secs.indexOf('cocina central')>=0 && _secLocal('cocina central')!=='cocina central') out.push(capSec(_secLocal('cocina central')));
   return out;
 }
 // ✏️ banco de la segunda testa: Bodega Central no tiene secciones ⇒ ahí no se pregunta
@@ -5132,7 +5147,7 @@ $('btnConfirm').onclick=async function(){
       // v94 · R5 (auditoría Riesco 06-oct): la entrega va a la MISMA sección donde el Mapa la cuenta
       // (skuSecInv, sin Cocina Central si hay otra). Con skuSec[0] caía en Cocina Central y el conteo de
       // Barra Alimentos la buscaba en otro lado: 13 SKU, $374.182 entregados donde nadie contaba.
-      if(tipo==='Entrega Secc'){ origen='Bodega Local'; destino=capSec(skuSecInv(it.sku)||'Cocina Central'); }
+      if(tipo==='Entrega Secc'){ origen='Bodega Local'; destino=capSec(skuSecInv(it.sku)||_secLocal('cocina central')); }   // v110
       // v94 · el proveedor entrega directo a la sección (sin bodega) · sección deducida igual que el conteo
       //      ① de la segunda testa: NUNCA Cocina Central (se inventaría aparte; desde un local es la fila fantasma
       //      «Cocina Central|Riesco»). secsDeducidas ya la excluye; sin otra sección el envío se paró arriba.
