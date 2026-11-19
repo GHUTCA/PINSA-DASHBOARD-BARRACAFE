@@ -305,7 +305,7 @@
 <section id="vEntrada">
   <div class="ent-logo">🍳</div>
   <div class="ent-title">KDS · <span id="entLocal">BKS</span></div>
-  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.32</span></div>
+  <div class="ent-sub">Pantalla de producción · <span id="ver">kds.html · v1.33</span></div>
   <div class="est-pick">
     <button class="est-btn" id="pickCocina" onclick="pickEst('cocina')"><span class="ico">🍳</span>COCINA</button>
     <button class="est-btn" id="pickBarra"  onclick="pickEst('barra')"><span class="ico">🍸</span>BARRA</button>
@@ -334,6 +334,9 @@
   <div id="grid"></div>
   <div class="esp-title hide" id="espTitle">⏳ En espera</div>
   <div id="espera"></div>
+  <!-- [19-nov · D · AUT-1143] la striscia della barra: nasce vuota e nascosta, e resta così senza ?kdsbarra=1 -->
+  <div class="esp-title hide" id="barTitle">🍸 Barra</div>
+  <div id="barra"></div>
   <!-- v1.6 · IL PASS: barra fissa in fondo (il runner guarda sempre lì) -->
   <div id="listosBar">
     <div class="lst-title">✓ Listos · esperando retiro — toca cuando se retira</div>
@@ -661,6 +664,14 @@ function showTablero(){
    Leva: NASCE ACCESA (la lezione del 25: una leva che vive solo sul bordo non arriva al tablet che non lo raggiunge). `?kdsgas=1` per apparecchio = il
    mondo di ieri; `?borde=0` (il freno di sempre) spegne tutto il bordo e quindi anche questa. */
 const KDS_SIN_GAS_ON = (function () { try { return QS.get('kdsgas') !== '1'; } catch (e) { return true; } })();
+/* [19-nov · D · AUT-1143 · 🍳 COCINA V30] LA STRISCIA DELLA BARRA: il KDS chiede al bordo anche i pedidos di barra
+   (`&barra=1`, r.5964 del bordo) e li disegna A PARTE, con un renderer suo — `barraKdsItem` ha una forma diversa
+   dalla coda (niente `mesa`, `qty` invece di `llevar`, `mods` invece di `op`): `cardHTML` stamperebbe «?» e
+   conterebbe 1 ítem per un 3× Schop.
+   Leva: NASCE SPENTA, al contrario di KDS_SIN_GAS_ON qui sopra — quella tiene in vita una strada che c'è già,
+   questa APRE una strada nuova. Si accende per APPARECCHIO con `?kdsbarra=1`; senza, la query non porta `barra=1`
+   e questo file fa come oggi. Secondo cancello sul bordo (`barraVerboVivo`): due leve, due proprietari. */
+const KDS_BARRA_ON = (function () { try { return QS.get('kdsbarra') === '1'; } catch (e) { return false; } })();
 const KDS_ESPERA_MS = 120000, KDS_ESPERA_PASO_MS = 15000, KDS_GATE_FRESCO_S = 90;   // [28-ott · 4.3 ⓐ] l'attesa del codice nuovo all'apertura del turno
 const BORDE = {
   URL: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -723,7 +734,8 @@ function bordeWriteOn() {
    dall'assenza del marcatore (`via=?` diceva solo «vecchio», non QUANTO).
    Il GAS la scrive nella riga di audit accanto alla via (2 righe, stessa
    sanificazione). Client vecchio = campo assente = il GAS scrive `?`. */
-const KDS_VER = '1.32';   // v1.32 · [AUT-1096] ri-allineata alla targhetta: era '1.29' con la targhetta a v1.31,
+const KDS_VER = '1.33';   // v1.33 · [19-nov · D · AUT-1143] la striscia della barra (KDS_BARRA_ON, spenta) · si muove INSIEME alla targhetta r.308
+                          // v1.32 · [AUT-1096] ri-allineata alla targhetta: era '1.29' con la targhetta a v1.31,
                           //   quindi l'audit (`v=`) attribuiva i tap a un vetro di due versioni fa
 /* ═════ v1.32 · [AUT-1096] LA SECONDA DEL 2x1 NON RIPIEGA MAI SUL GAS ═══════
    La card del rilascio del 2x1 ha un id SUO, `<uuid>~s2x1`, che esiste solo
@@ -808,6 +820,7 @@ async function leerKds(codigo, estacion) {
       const u = BORDE.URL + '/estado/' + encodeURIComponent(CFG.LOCAL)
         + '?t=' + encodeURIComponent(BORDE.T)
         + '&seccion=kds_' + encodeURIComponent(estacion)
+        + (KDS_BARRA_ON && estacion === 'barra' ? '&barra=1' : '')   // [19-nov · D · AUT-1143] la striscia della barra, solo su kds_barra (con C arriverà anche su kds_cocina: si toglie il secondo &&)
         + '&codigo=' + encodeURIComponent(codigo);
       const ctrl = new AbortController();
       const to = setTimeout(() => ctrl.abort(), 6000);
@@ -819,11 +832,16 @@ async function leerKds(codigo, estacion) {
       // tal cual, para que el tablet renueve el código como siempre.
       if (j && j.error === 'codigo_invalid') return { ok: false, error: 'codigo_invalid', edad_gate_s: (j.edad_gate_s == null ? null : Number(j.edad_gate_s)) };   // [28-ott · 4.3 ⓐ] l'età del gate, se il bordo la porta
       if (r.ok && j && j.ok && j.datos && j.datos.datos && j.datos.datos.ok) {
+        /* [19-nov · D · AUT-1143] `barra_items` arriva ACCANTO a `datos`, non dentro (il bordo fa
+           `uno = Object.assign({}, uno, { barra_items })`, r.5964) — e questo `return` porta a casa
+           `j.datos.datos`. Senza questa riga la striscia resta vuota PER SEMPRE con tutti i cancelli
+           aperti e nessun errore da nessuna parte. Se la chiave non c'è, non si tocca niente. */
+        try { if (j.datos.barra_items) j.datos.datos.barra_items = j.datos.barra_items; } catch (e) {}
         if (j.datos.edad_ms < BORDE.MAX_EDAD_MS) {
           BORDE.fallos = 0;
           return j.datos.datos;
         }
-        fotoVieja = j.datos.datos;
+        fotoVieja = j.datos.datos;   // [19-nov · D] la foto vecchia porta la sua striscia: la riga sopra ha già attaccato il campo
         try { fotoVieja._vieja_s = Math.round(j.datos.edad_ms / 1000); } catch (e) {}
       }
       // ⚠️ VACÍO NO ES FALLO (bug encontrado antes de que doliera):
@@ -1030,6 +1048,31 @@ function render(){
     return '<div class="wchip" onclick="toggleEspera(\'' + esc(p.uuid) + '\')"><b>' + esc(p.mesa || '?') + '</b>' + multiBadge(p) +
       n + (n === 1 ? ' ítem' : ' ítems') +
       '<span class="h" data-base="' + p.hace_s + '">⏱ ' + fmtHace(haceLocal(p.hace_s)) + '</span><span class="abre">▾</span></div>';
+  }).join('');
+
+  /* [19-nov · D · AUT-1143 · 🍳 COCINA V30] LA STRISCIA DELLA BARRA.
+     ① renderer PROPRIO, non `cardHTML`: un `barra_item` non ha `mesa` (ha `porta`, `punto` o il suo
+        `numero`), porta `qty` e non `llevar`, `mods` e non `op`. Riusare la card darebbe «?» al posto
+        della mesa e «1 ítem» per un 3× Schop.
+     ② `it.est` FILTRA SOLO SE ESISTE: con `BARRA_CARTA_ON` spenta la chiave non c'è (contratto di ⚙️,
+        19-nov) e la carta si mostra INTERA, che è il mondo di oggi. Quando C accende, ogni vetro vede
+        gli item della sua stazione e una carta di sola cucina non compare affatto in barra.
+     ③ nessun tocco: la barra si segna dal suo vetro. Un «listo» da qui sarebbe un verbo nuovo. */
+  const bCartas = (KDS_BARRA_ON && r.barra_items) ? r.barra_items : [];
+  const bVis = bCartas.map(function (c) {
+    const its = (c.items || []).filter(function (it) { return !it.est || it.est === STATE.estacion; });
+    return its.length ? Object.assign({}, c, { items: its }) : null;
+  }).filter(Boolean);
+  $('barTitle').classList.toggle('hide', !bVis.length);
+  $('barTitle').textContent = '🍸 Barra — ' + bVis.length;
+  $('barra').innerHTML = bVis.map(function (c) {
+    const n = (c.items || []).reduce(function (s, it) { return s + (parseInt(it.qty, 10) || 1); }, 0);
+    const dove = c.porta ? '🚪 ' + c.porta : (c.punto || ('B' + (c.numero == null ? '?' : c.numero)));
+    return '<div class="wchip"><b>' + esc(dove) + '</b>' +
+      (c.brazalete ? '<span class="c-multi">📿 ' + esc(c.brazalete) + '</span>' : '') +
+      (c.estado === 'listo' ? '<span class="c-multi">✓ listo</span>' : '') +
+      n + (n === 1 ? ' ítem' : ' ítems') +
+      '<span class="h" data-base="' + (c.hace_s || 0) + '">⏱ ' + fmtHace(haceLocal(c.hace_s || 0)) + '</span></div>';
   }).join('');
 
   if (!cola.length) {
