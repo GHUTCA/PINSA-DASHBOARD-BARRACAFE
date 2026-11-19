@@ -450,7 +450,8 @@ function entrarMapa() {
   $('vEntrada').classList.add('hide'); $('vMapa').classList.remove('hide'); $('bar').classList.remove('hide');
   pintaSalu();
   refrescar(true);
-  entLeer();   // v0.6 · l'entrada di stasera, dal bordo
+  entCargar();   // v0.6.4 · AUT-1154: prima l'entrada scelta su questo telefono (vale anche senza rete)
+  entLeer();     // v0.6 · poi il bordo riallinea
   if (STATE.pollTimer) clearInterval(STATE.pollTimer);
   STATE.pollTimer = setInterval(() => refrescar(false), CFG.POLL_MS);
 }
@@ -700,14 +701,16 @@ function mesaDesdeTexto(txt) {
 }
 /* ✏️ [19-nov · v0.6.4 · AUT-1154] NIENTE SENTAR SENZA ENTRADA — Alberto: «bloccare SENTAR senza entrata» (pranzo 19-nov: 8 sedute su 13 con entrada null).
    Senza entrada scelta, il tocco su SENTAR apre PRIMA il foglio delle entradas; scelta l'entrada, si va dritti allo scan (ENT.poiSentar).
-   Con la leva dell'entrada spenta (leva_spenta) SENTAR va avanti come prima. Se l'entrada non si riesce a leggere, SENTAR non parte e lo dice. */
+   🎛 V34: SENTAR non si ferma MAI per la rete. Conta l'entrada scelta su questo telefono (ENT, nel telefono): se c'è, dritti; se no, il foglio si apre
+   dall'elenco che il telefono già ha, senza rete. Solo se il telefono non ha mai avuto l'elenco lo chiede al bordo; se il bordo non risponde,
+   SENTAR va avanti senza entrada (meglio una seduta senza entrada che una mesa ferma alla porta). Leva spenta ⇒ come prima. */
 async function scanAbrir() {
   if (!STATE.sala) { toast('err', 'Aún no llega el mapa — reintenta en un momento'); return; }
-  if (!ENT.actual) {
-    const r = await entLeer();
-    if (!ENT.actual) {
-      if (ENT.viva) { ENT.poiSentar = true; $('entSub').textContent = 'Antes de sentar, elige tu entrada: así sabemos por dónde entra la gente.'; $('entErrS').textContent = ''; entOpsPinta(); $('bsEnt').classList.add('show'); return; }
-      if (!(r && r.error === 'leva_spenta')) { toast('err', 'No pude leer tu entrada — reintenta en un momento'); return; }
+  if (!ENT.actual && !ENT.spenta) {
+    if (!ENT.entradas.length) await entLeer();
+    if (!ENT.actual && ENT.viva && ENT.entradas.length) {
+      ENT.poiSentar = true; $('entSub').textContent = 'Antes de sentar, elige tu entrada: así sabemos por dónde entra la gente.';
+      $('entErrS').textContent = ''; entOpsPinta(); $('bsEnt').classList.add('show'); return;
     }
   }
   $('scErr').textContent = ''; $('scNum').value = ''; STATE.bsMesa = null;
@@ -799,9 +802,29 @@ $('scNum').addEventListener('keydown', e => { if (e.key === 'Enter') scanNumero(
 /* ═════ v0.6 · LA ENTRADA (🎟 LA LISTA V30 · AUT-0754 + AUT-1132 · Alberto 18-nov: «l'entrada attiva, poterla cambiare, e in PG da dove entra la gente») ═════
    Dal bordo, stessa porta di COBRAR (`_portaAlBorde`): `entradaPuerta` dà l'elenco del locale (codice + nome della gente) e l'entrada attuale di chi è entrata;
    `cambiarEntrada {puerta_uid, a}` la cambia, e il bordo scrive UNA riga in pinsita.anfitriona_puerta. Il `puerta_uid` si conia UNA volta per tocco e lo
-   riusa il ritento: un doppio tocco non scrive due cambi. Leva spenta ⇒ il chip resta «Entrada · pronto» e un tocco lo dice. Niente nel localStorage:
-   l'entrada vive nel bordo, e al rientro si rilegge. SENTAR manda `entrada` (il codice) nel payload, se è scelta. */
-const ENT = { actual: null, nombre: null, entradas: [], viva: false, volo: false, uid: '', uidPer: '', poiSentar: false };
+   riusa il ritento: un doppio tocco non scrive due cambi. Leva spenta ⇒ il chip resta «Entrada · pronto» e un tocco lo dice.
+   SENTAR manda `entrada` (il codice) nel payload, se è scelta.
+   ✏️ [19-nov · v0.6.4 · AUT-1154 · 🎛 V34 «SENTAR non si ferma mai per la rete»] L'entrada che conta è quella SCELTA SU QUESTO TELEFONO in questo turno:
+   vive nel telefono (`puerta_ent`, valida solo per lo stesso locale + código del turno + nombre), con l'elenco delle entradas, così il foglio si apre
+   anche senza rete. La scelta vale SUBITO (chip, SENTAR, payload) e `cambiarEntrada` parte dietro (`ENT.pend`), ritentato con lo stesso puerta_uid
+   finché il bordo non risponde. La lettura dal bordo (`entLeer`) riallinea, non blocca, e non scavalca una scelta ancora in viaggio. */
+const ENT = { actual: null, nombre: null, entradas: [], viva: false, spenta: false, volo: false, uid: '', uidPer: '', poiSentar: false, pend: null, tRe: 0 };
+const ENT_SK = 'puerta_ent';
+function _entChiave() { return [CFG.LOCAL, STATE.codigo, String(STATE.nombre || '').trim().toUpperCase()].join('|'); }
+function entGuardar() {
+  try { localStorage.setItem(ENT_SK, JSON.stringify({ k: _entChiave(), actual: ENT.actual, nombre: ENT.nombre, entradas: ENT.entradas, pend: ENT.pend })); } catch (e) {}
+}
+function entCargar() {
+  try {
+    // un altro turno o un'altra persona: si riparte da zero, anche in memoria
+    ENT.actual = null; ENT.nombre = null; ENT.pend = null; ENT.poiSentar = false; clearTimeout(ENT.tRe); ENT.tRe = 0;
+    const o = JSON.parse(localStorage.getItem(ENT_SK) || 'null');
+    if (!o || o.k !== _entChiave()) { entPinta(); return; }
+    ENT.entradas = Array.isArray(o.entradas) ? o.entradas : []; ENT.viva = ENT.entradas.length > 0;
+    ENT.actual = o.actual || null; ENT.nombre = o.nombre || null; ENT.pend = o.pend || null;
+    entPinta(); if (ENT.pend) entEnviar();
+  } catch (e) {}
+}
 function entPinta() {
   const c = $('entChip'); if (!c) return;
   if (!ENT.viva) { c.textContent = '🚪 Entrada · pronto'; c.classList.remove('on'); return; }
@@ -812,46 +835,69 @@ async function entLeer() {
   if (!STATE.codigo || !STATE.nombre) return;
   const r = await _portaAlBorde('entradaPuerta', {});
   if (r && r.ok === true && Array.isArray(r.entradas)) {
-    ENT.viva = r.entradas.length > 0; ENT.entradas = r.entradas; ENT.actual = r.actual || null; ENT.nombre = r.actual_nombre || null;
-  } else if (r && r.error === 'leva_spenta') { ENT.viva = false; }
+    ENT.viva = r.entradas.length > 0; ENT.spenta = false; ENT.entradas = r.entradas;
+    if (!ENT.pend) {   // una scelta ancora in viaggio vince sulla lettura: il bordo non la sa ancora
+      if (r.actual) { ENT.actual = r.actual; ENT.nombre = r.actual_nombre || null; }
+      else if (!ENT.entradas.some(e => e.codigo === ENT.actual)) { ENT.actual = null; ENT.nombre = null; }
+    }
+    entGuardar();
+  } else if (r && r.error === 'leva_spenta') { ENT.viva = false; ENT.spenta = true; }
   entPinta();
   return r;
 }
+/* la scelta parte dietro: stesso puerta_uid a ogni ritento, finché il bordo non dice sì o no */
+async function entEnviar() {
+  const p = ENT.pend; if (!p || ENT.volo) return;
+  clearTimeout(ENT.tRe); ENT.tRe = 0;
+  ENT.volo = true;
+  const r = await _portaAlBorde('cambiarEntrada', { puerta_uid: p.uid, a: p.a });
+  ENT.volo = false;
+  if (ENT.pend !== p) { if (ENT.pend) entEnviar(); return; }   // nel frattempo ha scelto un'altra entrada: parte quella
+  if (r && r.ok === true) {
+    ENT.pend = null; if (r.actual_nombre && (r.actual || p.a) === ENT.actual) ENT.nombre = r.actual_nombre;
+    entGuardar(); entPinta(); return;
+  }
+  const e = r && r.error;
+  if (!e || e === 'red' || e === 'timeout' || /^http_5/.test(e)) {   // la rete: si ritenta, non si disturba
+    ENT.tRe = setTimeout(entEnviar, 15000); return;
+  }
+  ENT.pend = null;   // un no del bordo: la scelta non vale
+  if (e === 'leva_spenta') { ENT.viva = false; ENT.spenta = true; }
+  else { ENT.actual = null; ENT.nombre = null; }
+  entGuardar(); entPinta();
+  toast('err', e === 'entrada_desconocida' ? 'Esa entrada no existe en este local — avisa al JL'
+    : e === 'leva_spenta' ? 'Elegir la entrada todavía no está activo' : ptMsg(r));
+}
+window.addEventListener('online', () => { if (ENT.pend) entEnviar(); });
 function entOpsPinta() {
-  $('entOps').innerHTML = ENT.entradas.map(e => '<button type="button" class="vb ' + (e.codigo === ENT.actual ? 'pieno' : 'door') + '"' + (ENT.volo ? ' disabled' : '') +
+  $('entOps').innerHTML = ENT.entradas.map(e => '<button type="button" class="vb ' + (e.codigo === ENT.actual ? 'pieno' : 'door') + '"' +
     ' onclick="entElegir(\'' + esc(e.codigo) + '\')">' + esc(e.nombre) + '<small>' + (e.codigo === ENT.actual ? 'aquí estás' : 'cambiar aquí') + '</small></button>').join('');
 }
 async function entAbrir() {
   if (!STATE.codigo || !STATE.nombre) { toast('err', 'Entra con el código del turno primero'); return; }
-  const r = await entLeer();
+  if (!ENT.entradas.length) await entLeer();   // l'elenco nel telefono basta: senza rete il foglio si apre lo stesso
+  else entLeer();
   if (!ENT.viva) { pronto('Elegir la entrada'); return; }
   $('entSub').textContent = 'Lo que elijas queda registrado: así sabemos por dónde entra la gente.';
-  $('entErrS').textContent = (r && r.ok === false && r.error !== 'leva_spenta') ? ptMsg(r) : '';
+  $('entErrS').textContent = '';
   entOpsPinta();
   $('bsEnt').classList.add('show');
 }
 function entCerrar() { $('bsEnt').classList.remove('show'); $('entErrS').textContent = ''; ENT.poiSentar = false; }
-async function entElegir(cod) {
-  if (ENT.volo) return;
+function entElegir(cod) {
   if (!ENT.viva) { entCerrar(); pronto('Elegir la entrada'); return; }   // la nota di 🍳 su 770b701: la stessa guardia di entAbrir, anche sul tocco
-  if (cod === ENT.actual) { const poi = ENT.poiSentar; entCerrar(); if (poi) scanAbrir(); return; }
-  if (!ENT.uid || ENT.uidPer !== cod) { ENT.uid = ptUid('pe'); ENT.uidPer = cod; }   // un'entrada nuova = un gesto nuovo; la stessa = il ritento
-  ENT.volo = true; $('entErrS').textContent = ''; entOpsPinta();
-  const r = await _portaAlBorde('cambiarEntrada', { puerta_uid: ENT.uid, a: cod });
-  ENT.volo = false;
-  if (r && r.ok === true) {
-    ENT.actual = r.actual || cod; ENT.nombre = r.actual_nombre || null; ENT.uid = ''; ENT.uidPer = '';
-    const poi = ENT.poiSentar;
-    entPinta(); entCerrar(); toast('ok', '✓ Estás en ' + (ENT.nombre || cod));
-    if (poi) scanAbrir();   // v0.6.4 · AUT-1154: l'entrada chiesta da SENTAR ⇒ dritti allo scan
-    return;
+  const poi = ENT.poiSentar;
+  if (cod !== ENT.actual) {
+    const e = ENT.entradas.find(x => x.codigo === cod);
+    ENT.actual = cod; ENT.nombre = (e && e.nombre) || cod;
+    // un'entrada nuova = un gesto nuovo (uid nuovo); la stessa ancora in viaggio = il ritento (stesso uid)
+    if (!ENT.pend || ENT.pend.a !== cod) ENT.pend = { uid: ptUid('pe'), a: cod };
+    entGuardar(); entPinta();
+    toast('ok', '✓ Estás en ' + ENT.nombre);
+    entEnviar();   // dietro: nessuno aspetta la rete
   }
-  const e = r && r.error;
-  $('entErrS').textContent = e === 'leva_spenta' ? 'Elegir la entrada todavía no está activo'
-    : e === 'entrada_desconocida' ? 'Esa entrada no existe en este local — avisa al JL'
-    : e === 'timeout' ? 'El sistema no respondió — reintenta (no se registra dos veces)'
-    : e === 'red' ? 'Sin conexión — reintenta (no se registra dos veces)' : ptMsg(r);
-  entOpsPinta();
+  entCerrar();
+  if (poi) scanAbrir();   // v0.6.4 · AUT-1154: l'entrada chiesta da SENTAR ⇒ dritti allo scan
 }
 
 /* ═════ v0.4 · LA PORTA DEL MODO DISCOTECA: COBRAR · PULSERA (D-498 · 📖 MENU BKS V32) ═════
