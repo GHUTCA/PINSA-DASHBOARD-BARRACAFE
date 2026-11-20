@@ -104,7 +104,7 @@
 <div class="app">
   <div class="top">
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
-    <span class="ver" id="ver">jl v0.3.0</span>
+    <span class="ver" id="ver">jl v0.4.1</span>
   </div>
   <div class="edad" id="edad">leyendo la sala…</div>
   <div class="tabs" role="tablist">
@@ -118,7 +118,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.3.0';
+var JL_VER = 'jl v0.4.1';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -397,7 +397,7 @@ async function jl86Leggi() {
 /* ═══ LA LETTURA ═══ */
 async function jlLeggi() {
   jl86Leggi().then(function () { if (VISTA.tab === 1 || VISTA.tab === 0) jlPinta(); });
-  if (DEMO) { VISTA.mod = jlModelo(JL_DEMO, Date.now()); VISTA.ts = Date.now(); VISTA.err = ''; jlPinta(); return; }
+  if (DEMO) { VISTA.mod = jlModelo(JL_DEMO, Date.now()); VISTA.ts = Date.now(); VISTA.err = ''; petDa(JL_DEMO); jlPinta(); return; }
   if (!SES.pin && !SES.codigo) { VISTA.err = 'sin_pin'; jlPinta(); return; }   // [v0.2.0] senza la sessione di app_jl: il PIN qui
   if (!SES.codigo && SES.pin) await jlCodigoDalBordo();
   if (!SES.codigo) { if (!VISTA.err || VISTA.err === 'codigo_invalid') VISTA.err = 'sin_codigo'; jlPinta(); return; }
@@ -414,7 +414,7 @@ async function jlLeggi() {
     }
     var dd = j && j.ok && j.datos && j.datos.datos;
     if (!dd || !dd.meseros) { VISTA.err = 'El bordo no trae la sala (HTTP ' + http + ')'; jlPinta(); return; }
-    VISTA.mod = jlModelo(dd, Date.now()); VISTA.ts = Date.now(); VISTA.err = '';
+    VISTA.mod = jlModelo(dd, Date.now()); VISTA.ts = Date.now(); VISTA.err = ''; petDa(dd);
     VISTA.edadBordeS = (typeof dd.edad_foto_s === 'number') ? dd.edad_foto_s : null;
   } catch (e) {
     clearTimeout(to);
@@ -471,9 +471,109 @@ function jlConti(M) {
   });
   return { llam: Object.keys(call).length, venta: condivisa ? null : venta, senza: senza, condivisa: condivisa };
 }
+/* ═══ [v0.4.0 · AUT-1109 · ⚙️ H3 `e26f556`] LE SOLICITUDES: il garzón chiede, il JL decide col PIN sul SUO telefono ═══
+   Lettura: `datos.peticiones` della stessa `sala_vista` (le vive: pendiente · confirmada; il campo c'è solo a leva `PETICION_ON` accesa ⇒
+   `null` = leva spenta e il vetro non mostra niente). Gesti: `POST /peticion/<local>` (token in header) `{verbo, uid_gesto, peticion_id,
+   pin_jl, codigo, nombre, dispositivo_id}` con verbo `leer` (all'apertura, una volta) · `confirmar` · `rechazar`. Il `confirmar` di un eliminar
+   FA la correccion nel bordo (la `_correccion` di oggi); di un descuento congela la foto del conto (il cobro che la consuma: non ancora nel bordo).
+   Gli `items` della petición sono le quantità FINALI per id (come la correccion): ciò che esce = la riga del pedido meno la finale. */
+var PET = { lista: null, ped: {}, aperta: null, msg: '', vuelo: false, dubbio: {}, letti: {} };
+function petDa(dd) {
+  PET.lista = Array.isArray(dd && dd.peticiones) ? dd.peticiones : null;
+  var ped = {};   // i pedidos vivi con gli id, per dire COSA esce (jlModelo li legge senza id: non si tocca)
+  var ms = (dd && dd.meseros) || {};
+  Object.keys(ms).forEach(function (k) { var v = ms[k] || {}; (v.mios || []).concat(v.por_limpiar || []).forEach(function (it) {
+    if (!it || !it.uuid) return; var a = []; try { a = JSON.parse(it.items_json || '[]') || []; } catch (e) { a = []; }
+    ped[String(it.uuid)] = a.map(function (i) { return { id: i.id, n: String(i.nombre || i.n || '').trim(), q: Number(i.qty || i.q || i.cantidad || 1) || 1 }; });
+  }); });
+  PET.ped = ped;
+  if (PET.aperta && !(PET.lista || []).some(function (x) { return x.id === PET.aperta; })) PET.aperta = null;
+}
+function petPend() { return (PET.lista || []).filter(function (x) { return x.stato === 'pendiente'; }); }
+/* cosa esce: per ogni id, quante unità il pedido ha e quante ne restano. Pura. */
+function petEsce(p, righe) {
+  if (!p || p.tipo !== 'eliminar') return [];
+  var r = righe || [];
+  if (!p.items) return r.map(function (i) { return { n: i.n || 'producto', q: i.q }; });   // senza items: il pedido intero
+  var fin = {}; p.items.forEach(function (x) { fin[String(x.id)] = (fin[String(x.id)] || 0) + (Number(x.qty) || 0); });
+  var tot = {}, nom = {}; r.forEach(function (i) { var k = String(i.id); tot[k] = (tot[k] || 0) + i.q; if (!nom[k]) nom[k] = i.n; });
+  return Object.keys(fin).map(function (k) { var d = (tot[k] || 0) - fin[k]; return d > 0 ? { n: nom[k] || CARTA.nom[k] || k, q: d } : null; }).filter(Boolean);
+}
+var PET_MOT = { cambio_producto: 'Cambió de producto', no_le_gusto: 'No le gustó', mal_estado: 'En mal estado', error_mesero: 'Error del garzón' };
+function petTitolo(p) {
+  if (p.tipo === 'eliminar') { var e = petEsce(p, PET.ped[String(p.pedido_uuid)]); return 'Eliminar ' + (e.length ? e.map(function (x) { return (x.q > 1 ? x.q + '× ' : '') + x.n; }).join(', ') : (p.items ? 'productos' : 'el pedido')); }
+  return (p.clase === 'convenio' ? 'Convenio ' : 'Descuento ') + (p.etiqueta || p.codigo || '') + (p.pct ? ' ' + p.pct + '%' : '');
+}
+async function petPost(verbo, p) {
+  var k = p.id + ':' + verbo, uid = PET.dubbio[k] || ('pet-' + verbo + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7));
+  var body = { verbo: verbo, uid_gesto: uid, peticion_id: p.id, pin_jl: SES.pin, codigo: SES.codigo, nombre: SES.user, dispositivo_id: jlDisp() };
+  if (DEMO) return petDemo(body);
+  var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 8000);
+  try {
+    var r = await fetch(CFG.BORDE + '/peticion/' + encodeURIComponent(CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T },
+      body: JSON.stringify(body), signal: ctrl.signal, cache: 'no-store' });
+    var j = await r.json().catch(function () { return null; }); clearTimeout(to);
+    if (!j) { PET.dubbio[k] = uid; return { _rete: true }; }
+    delete PET.dubbio[k]; return j;
+  } catch (e) { clearTimeout(to); PET.dubbio[k] = uid; return { _rete: true }; }   // esito incerto: il ritocco è lo STESSO gesto (il bordo fa dedup su uid_gesto)
+}
+function petEsito(r, verbo) {
+  if (r && r._rete) return '⏳ No sé si llegó: toca de nuevo, no se duplica.';
+  if (r && r.ok === true && r.scritto === false) return '⛔ Las solicitudes están apagadas en el sistema.';
+  if (r && r.ok) return verbo === 'confirmar' ? '✓ Autorizado' : '✓ Rechazado';
+  var e = r && r.error;
+  if (e === 'pin_jl_invalido' || e === 'pin_jl_requerido') return '⛔ Tu PIN no vale para el sistema ahora: entra de nuevo desde tu app.';
+  if (/bloqueado/.test(String(e || ''))) return '⛔ PIN bloqueado' + (r.faltan_s ? ' · espera ' + Math.ceil(r.faltan_s / 60) + ' min' : '');
+  if (e === 'peticion_vencida') return '⌛ ' + (r.mensaje || 'Esa solicitud venció: que el garzón la pida de nuevo.');
+  if (e === 'pedido_cambio') return '⚠️ ' + String(r.mensaje || 'El pedido cambió desde que el garzón lo pidió').replace(/[.\s]*$/, '.') + ' Recházala para que el garzón la pida de nuevo.';   // [v0.4.1 · X1 di 💵, ⚙️ 0f56ffb] la petición resta pendiente: il no la libera
+  if (e === 'estado_no_permite') return 'Esa solicitud ya está ' + (r.stato || 'decidida') + '.';
+  if (r && r.correccion) return '⚠️ No se eliminó: ' + ((r.correccion && (r.correccion.mensaje || r.correccion.error)) || e);
+  return '⚠️ No se pudo: ' + ((r && (r.mensaje || e)) || 'sin respuesta');
+}
+async function petGesto(verbo) {
+  var p = (PET.lista || []).filter(function (x) { return x.id === PET.aperta; })[0]; if (!p || PET.vuelo) return;
+  PET.vuelo = true; PET.msg = ''; jlPinta(true);
+  var r = await petPost(verbo, p);
+  PET.vuelo = false; PET.msg = petEsito(r, verbo);
+  if (r && r.error === 'pedido_cambio') { jlLeggi(); jlPinta(true); return; }   // [v0.4.1] il dettaglio resta aperto: «Rechazar» è il gesto che serve
+  if (r && r.ok && r.scritto !== false) { if (verbo === 'confirmar' && r.foto) PET.msg += ' · ' + (r.foto.monto != null ? 'cobra ' + pesos(r.foto.monto) : ''); PET.aperta = null; jlLeggi(); }
+  jlPinta(true);
+}
+function petApri(id) {
+  PET.aperta = id; PET.msg = '';
+  var p = (PET.lista || []).filter(function (x) { return x.id === id; })[0];
+  if (p && p.stato === 'pendiente' && !p.leida_ts && !PET.letti[id] && SES.pin) { PET.letti[id] = 1; petPost('leer', p); }   // «visto»: una volta, senza aspettare
+}
+function petLista() {
+  var pend = petPend(); if (PET.lista == null) return '';
+  var h = PET.msg ? '<div class="vetro' + (/^✓/.test(PET.msg) ? '' : ' alerta') + '"><p>' + esc(PET.msg) + '</p></div>' : '';
+  if (!pend.length) return h;
+  return h + '<div class="vetro alerta"><h4>📝 ' + pend.length + (pend.length === 1 ? ' solicitud' : ' solicitudes') + ' · esperan tu PIN</h4>' +
+    pend.map(function (p) { return '<div class="riga" data-a="petApri" data-k="' + esc(p.id) + '" style="cursor:pointer"><span><b>Mesa ' + esc(p.mesa) + '</b> · ' + esc(petTitolo(p)) + '<small>' + esc(p.chi_pide || '') + (p.leida_ts ? ' · vista' : '') + '</small></span><span class="st">' + p.min + '′ ›</span></div>'; }).join('') + '</div>';
+}
+function petDettaglio() {
+  var p = (PET.lista || []).filter(function (x) { return x.id === PET.aperta; })[0]; if (!p) { PET.aperta = null; return servicio(); }
+  var h = '<span class="volver" data-a="petChiudi">‹ Servicio</span><div class="conto"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><b>Mesa ' + esc(p.mesa) + ' · ' + esc(p.chi_pide || '') + '</b><span class="pill">' + (p.stato === 'pendiente' ? 'pendiente' : p.stato) + ' · ' + p.min + ' min</span></div>';
+  if (p.tipo === 'eliminar') {
+    var e = petEsce(p, PET.ped[String(p.pedido_uuid)]);
+    h += '<div class="sub">Eliminar' + (p.items ? '' : ' el pedido entero') + ':</div>' + (e.length ? e.map(function (x) { return '<div class="l"><span>' + x.q + ' × ' + esc(x.n) + '</span><b>sale</b></div>'; }).join('') : '<p class="vacio">No veo el pedido en la sala de ahora: puede que ya haya cambiado.</p>') +
+      '<div class="sub">Motivo: ' + esc(PET_MOT[p.motivo] || p.motivo || '—') + '</div>';
+  } else {
+    h += '<div class="l"><span>' + esc(petTitolo(p)) + '</span><b>' + (p.pct ? p.pct + '%' : '') + '</b></div>' + (p.descuento ? '<div class="sub">Autorizado: cobra ' + pesos(p.descuento.monto) + '</div>' : '') +
+      '<div class="sub">El cobro con descuento en la sala nueva todavía no está: el garzón lo cobra en la sala de siempre.</div>';
+  }
+  h += '</div>' + (PET.msg ? '<div class="vetro alerta"><p>' + esc(PET.msg) + '</p></div>' : '');
+  if (p.stato === 'pendiente') {
+    if (!SES.pin && !DEMO) h += '<div class="sub">Para autorizar entra con tu PIN desde tu app.</div>';
+    else h += '<div class="fila2"><button class="azione oro" data-a="petSi"' + (PET.vuelo ? ' disabled' : '') + '>' + (PET.vuelo ? '…' : 'Autorizar') + '</button><button class="azione" data-a="petNo"' + (PET.vuelo ? ' disabled' : '') + '>Rechazar</button></div>';
+  }
+  return h;
+}
+/* la demo: una petición per tipo, e un bordo finto che risponde come `_peticion` */
+function petDemo(b) { if (b.verbo === 'leer') return { ok: true, borde: true, stato: 'pendiente' }; return { ok: true, borde: true, peticion_id: b.peticion_id, stato: b.verbo === 'confirmar' ? 'confirmada' : 'rechazada' }; }
 function testata(M) {
-  var c = jlConti(M), n86 = L86.ids ? L86.ids.length : null;
-  return '<div class="testa">' +
+  var c = jlConti(M), n86 = L86.ids ? L86.ids.length : null, nP = petPend().length;
+  return '<div class="testa">' + (PET.lista != null ? '<span class="' + (nP ? 'bad' : '') + '">📝 ' + nP + (nP === 1 ? ' solicitud' : ' solicitudes') + '</span>' : '') +
     '<span class="' + (c.llam ? 'bad' : '') + '">🔔 ' + c.llam + (c.llam === 1 ? ' llama' : ' llaman') + '</span>' +
     '<span' + (n86 ? ' class="bad"' : '') + ' data-a="tab86">86 · ' + (L86.apagado ? 'apagado' : n86 == null ? 'sin dato' : n86) + '</span>' +
     '<span>' + (c.condivisa ? 'Venta · plazas compartidas: mira cada garzón' : 'Venta de las plazas ' + pesos(c.venta) + (c.senza ? ' · ' + c.senza + ' sin dato' : '')) + '</span></div>';
@@ -495,7 +595,7 @@ function servicio() {
     if (VISTA.err === 'codigo_invalid') return '<div class="vetro alerta"><h4>El código del turno ya no vale</h4><p>Abre tu app de siempre para leer el turno nuevo.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
     return '<p class="vacio">' + (VISTA.err ? esc(VISTA.err) : 'Leyendo la sala…') + '</p>';
   }
-  var h = testata(M) + (M.nUrg
+  var h = testata(M) + petLista() + (M.nUrg
     ? '<button class="tira" data-a="filtro"><b>' + M.nUrg + ' esperan tu acción</b><span class="num">' + pesos(M.enJuego) + ' en juego · ' + (VISTA.filtro ? 'ver todas' : 'solo estas') + '</span></button>'
     : '<div class="tira ok"><b>Nadie espera tu acción</b></div>');
   if (M.sinDueno.length) h += '<div class="vetro alerta"><h4>QR sin garzón</h4>' + M.sinDueno.map(function (q) { return '<div class="riga"><span><b>Mesa ' + esc(q.m) + '</b><small>AUT QR' + (q.min != null ? ' · ' + q.min + '′' : '') + '</small></span><span class="st">' + (q.tot ? pesos(q.tot) : '—') + '</span></div>'; }).join('') + '</div>';
@@ -692,7 +792,7 @@ function jlPinta(forza) {
   var b = document.getElementById('body'), y = b.scrollTop;
   /* [v0.3.0] mai ridisegnare sotto le dita: un giro di lettura non cancella il monto o il conteo che il JL sta scrivendo (app_jl r.~2758) */
   var ae = document.activeElement; if (!forza && ae && ae.tagName === 'INPUT' && b.contains(ae)) return;
-  b.innerHTML = (VISTA.tab === 0 && VISTA.aperta) ? detalle(VISTA.aperta.g, VISTA.aperta.m) : VIS[VISTA.tab]();
+  b.innerHTML = (VISTA.tab === 0 && PET.aperta) ? petDettaglio() : (VISTA.tab === 0 && VISTA.aperta) ? detalle(VISTA.aperta.g, VISTA.aperta.m) : VIS[VISTA.tab]();
   b.scrollTop = y;
 }
 function ir(i) {
@@ -709,6 +809,10 @@ document.getElementById('body').addEventListener('click', function (ev) {
   else if (a === 'volver') { VISTA.aperta = null; jlPinta(); }
   else if (a === 'entra') { var pi = document.getElementById('jlPin'); jlEntra(pi ? pi.value : ''); }
   else if (a === 'tab86') { ir(1); }
+  else if (a === 'petApri') { petApri(el.getAttribute('data-k')); jlPinta(true); document.getElementById('body').scrollTop = 0; }
+  else if (a === 'petChiudi') { PET.aperta = null; PET.msg = ''; jlPinta(true); }
+  else if (a === 'petSi') { petGesto('confirmar'); }
+  else if (a === 'petNo') { petGesto('rechazar'); }
   else if (a === 'cjAbre') { var me = el.getAttribute('data-k'), m = ((CJ.st && CJ.st.meseros) || []).filter(function (x) { return x.mesero === me; })[0];
     if (m) { CJ.msg = ''; CJ.ret = { mesero: m.mesero, att: m, uid: CJ.dubbio[m.mesero] || cjUid('CJ-RIT'), monto: '', conf: 0, confOk: 0 }; jlPinta(); } }
   else if (a === 'cjRet') { if (CJ.ret) { var mi = document.getElementById('cjMonto'); if (mi) CJ.ret.monto = mi.value; } cjRetEnviar(); }
@@ -734,13 +838,16 @@ var _o = Date.now();
 var JL_DEMO = {
   ok: true,
   qr_espera: [{ uuid: 'q1', mesa: '84', ts: _o - 3 * 60000, total: 9800, productos: [], motivo: 'mesa_libre' }],
+  peticiones: [{ id: 'pet-demo-1', tipo: 'eliminar', stato: 'pendiente', mesa: '79', chi_pide: 'Gabriel', ts: _o - 2 * 60000, min: 2, pedido_uuid: 'p1',
+      items: [{ id: 'BKS-PIS-001', qty: 1 }, { id: 'BKS-COC-020', qty: 1 }], motivo: 'no_le_gusto' },
+    { id: 'pet-demo-2', tipo: 'descuento', stato: 'pendiente', mesa: '61', chi_pide: 'Diego', ts: _o - 1 * 60000, min: 1, codigo: 'falabella', clase: 'convenio', pct: 20, etiqueta: 'Banco Falabella' }],
   anfitriona: { plazas: [{ plaza: 'Aurora A', mesas: [{ mesa: '79', pax: 2, desde_iso: new Date(_o - 58 * 60000).toISOString() }, { mesa: '81', pax: 4, desde_iso: new Date(_o - 40 * 60000).toISOString() }] }] },
   meseros: {
     gabriel: { ok: true, nombre: 'Gabriel', plazas: ['Aurora A', 'Aurora B'],
       plazas_detalle: [{ plaza: 'Aurora A', mesas: '79, 81, 84' }, { plaza: 'Aurora B', mesas: '107, 300' }],
       mesas: [{ mesa: '79', plaza: 'Aurora A', total: 42400, items: [{ n: 'Schop LOA', q: 3, p: 4500 }, { n: 'Tabla Ganadera', q: 1, p: 18900 }, { n: 'Pisco sour', q: 2, p: 5200 }] },
               { mesa: '81', plaza: 'Aurora A', total: 14400, items: [{ n: 'Coca Zero', q: 2, p: 2400 }, { n: 'Lomo Saltado', q: 1, p: 9600 }] }],
-      mios: [{ uuid: 'p1', mesa: '79', plaza: 'Aurora A', estado: 'digitado', total: 18900, hace_s: 12 * 60, items_json: '[{"n":"Tabla Ganadera","q":1}]' }],
+      mios: [{ uuid: 'p1', mesa: '79', plaza: 'Aurora A', estado: 'digitado', total: 29300, hace_s: 12 * 60, items_json: '[{"id":"BKS-COC-020","n":"Tabla Ganadera","q":1},{"id":"BKS-PIS-001","n":"Pisco sour","q":2}]' }],
       por_limpiar: [{ uuid: 'p2', mesa: '81', plaza: 'Aurora A', estado: 'entregado', total: 14400, hace_s: 7 * 60, items_json: '[{"n":"Lomo Saltado","q":1}]' }],
       pendientes: [], llamadas: [], venta_turno: { venta: 56800 } },
     diego: { ok: true, nombre: 'Diego', plazas: ['T-Baja 2'],
