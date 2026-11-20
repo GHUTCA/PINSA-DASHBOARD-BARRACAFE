@@ -1116,7 +1116,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.126 · vieja</span>
+      <span class="ver" id="ver">sala v3.228.128 · vieja</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -14866,6 +14866,21 @@ function pagoVouIn(el) {
       (la mesa resta marcata senza voucher). Il mixto con carta NON è coperto in v1: lì vale il chip del mezzo (AUT-0716 ①).
    ⚖️ Leva spenta, o `?pagov3=0` (nessuna ③): niente campo, `_pagoPropina` e il body identici a ieri. */
 function _vouTotNum(pg) { return Math.round(parseFloat(String((pg && pg.vouTot) || '').replace(/[^0-9]/g, '')) || 0); }
+/* [19-nov · v3.228.127 · AUT-1160 · 🎛 V34 «FALABELLA: LA PROPINA SCRITTA COME «13%»»] mesa 104: consumo 58.270, Falabella 20% ⇒ 46.616,
+   propina 5.827 = il 10% del PIENO. Il vetro la divideva per lo scontato e scriveva «13%»: il JL ha creduto che il sistema sbagliasse.
+   Con un descuento della lista (`pg.dto`) la % si dice sul pieno e lo si scrive.
+   [v3.228.128 · 🎛 V34 19:18] UNA PARTE di una mesa scontata porta la SUA quota del pieno: `cobrado ÷ monto scontato × pieno` (sulla mesa intera
+   la quota è 1 ⇒ il pieno). Oltre il monto scontato non c'è quota (0, la base resta il cobrado). */
+function _propPieno(pg) {
+  if (!pg || !pg.dto || pg.medio === 'cortesia') return 0;
+  var tot = Math.round(Number(pg.dto.tot) || 0), mon = Math.round(Number(pg.dto.monto) || 0), bm = Math.round(_bMonto());
+  return (tot > mon && mon > 0 && bm > 0 && bm <= mon) ? Math.round(bm * tot / mon) : 0;
+}
+/* [v3.228.128 · AUT-1160 allargata · B29 · 1i DECISO da Alberto 19:16 «si calcola sul pieno»] la propina SUGGERITA su una mesa con descuento
+   della lista si calcola sul consumo PIENO (104: 10% di 58.270 = 5.827). Il monto scontato non cambia. UNA base per tutti: il cobro (`_pagoPropina`)
+   e le etichette dei chip (che prima ricalcolavano a mano, `pg.tot` o `_bMonto()`, e potevano dire una cifra e cobrarne un'altra).
+   Senza descuento della lista `_propPieno` è 0 e la base è `_bMonto()`, cioè quella di ieri. */
+function _propBase10(pg) { return _propPieno(pg) || _bMonto(); }
 function _vouEstado(pg) {
   if (!PROPINA_VOUCHER_ON || !PAGO_V3_ON || !pg || pg.sinVoucher || !(pg.medio === 'debito' || pg.medio === 'credito')) return { aplica: false };
   const consumo = _bMonto(), tot = _vouTotNum(pg), prop = tot - consumo;
@@ -14886,8 +14901,9 @@ function _vouTxt(ve) {
     '<div class="cs-chips" style="margin-top:8px;justify-content:center">' +
       '<div class="cs-chip" onclick="vouSinPropSi()">Sí, sin propina</div>' +
       '<div class="cs-chip" onclick="vouCorregir()">Corregir</div></div>';
-  return '<span style="color:' + (ve.pct > 25 ? '#f5a623' : '#3db876') + '">consumo $' + _fmtMiles(ve.consumo) + ' · propina <b>$' + _fmtMiles(ve.prop) + '</b> (' + ve.pct + '%)' +
-    (ve.pct > 25 ? ' — revisa' : '') + '</span>';
+  var _pp = _propPieno(STATE.pago), _pc = _pp ? Math.round(ve.prop * 100 / _pp) : ve.pct;   // [AUT-1160] con descuento la % si dice sul pieno
+  return '<span style="color:' + (_pc > 25 ? '#f5a623' : '#3db876') + '">consumo $' + _fmtMiles(ve.consumo) + ' · propina <b>$' + _fmtMiles(ve.prop) + '</b> (' + _pc + '%' +
+    (_pp ? ' sobre $' + _fmtMiles(_pp) + ', antes del descuento' : '') + ')' + (_pc > 25 ? ' — revisa' : '') + '</span>';
 }
 /* il totale si batte di fila come le 6 cifre: si ritoccano solo la riga della propina e il bottone, mai il campo */
 function pagoVouTotIn(el) {
@@ -14998,7 +15014,7 @@ function _pagoPropina() {
   /* [21-ott · AUT-0716 ②] con la carta, scritto il totale del voucher, la propina È voucher − consumo: il chip resta solo un suggerimento */
   const _ve = _vouEstado(pg);
   if (_ve.aplica && _ve.ok) return _ve.prop;
-  if (pg.prop === 'sug') return Math.round(_bMonto() * 0.10);
+  if (pg.prop === 'sug') return Math.round(_propBase10(pg) * 0.10);   // [AUT-1160 · B29 · 1i] sul pieno con descuento
   if (pg.prop === 'otro') return Math.max(0, Math.round(parseFloat(String(pg.otro).replace(/[^0-9]/g, '')) || 0));
   return 0;
 }
@@ -15686,7 +15702,7 @@ function bMedio(w, pg) {
      un'altra») — ed erano diversi entrambi, nello stesso modo.
      🎓 Quando si corregge una BASE DI CALCOLO si cerca l'ESPRESSIONE, non la
         funzione: chi la copia non la rinomina. */
-  var prop10 = Math.round(_bMonto() * 0.10);
+  var prop10 = Math.round(_propBase10(pg) * 0.10);   // [AUT-1160] la stessa base del cobro
   var queda = (pg.c4 && !pg.montoOn) ? c4Resta(pg) : 0;
   if (!pg.enviando) {   // l'aviso si può solo GUADAGNARE, mai perdere (v2.0.1)
     var yaF = _pagadaAviso(pg.mesa);
@@ -15973,7 +15989,7 @@ function c4Render(w, pg) {
            volta». Il 10% mostra la sua cifra tranne quando comanda «Otro». */
         '<div class="c4chips">' +
           '<button class="c4chip prop' + (pg.prop === 'sug' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'sug\')">10%' +
-            '<small>' + (pg.prop === 'otro' ? '&nbsp;' : fmtPrice(Math.round(parte * 0.10))) + '</small></button>' +
+            '<small>' + (pg.prop === 'otro' ? '&nbsp;' : fmtPrice(Math.round(_propBase10(pg) * 0.10))) + '</small></button>' +   // [AUT-1160] = la cifra cobrata
           '<button class="c4chip prop' + (pg.prop === 'otro' ? ' sel' : '') + '" onclick="c4OtroChip()">Otro' +
             '<small id="c4OtroSub">' + ((pg.prop === 'otro' && prop > 0) ? fmtPrice(prop) : 'monto') + '</small></button>' +
           '<button class="c4chip prop chico' + (pg.prop === 'sin' ? ' sel' : '') + '" onclick="pagoSet(\'prop\',\'sin\')">Sin' +
@@ -16290,7 +16306,7 @@ function renderPago() {
          $2.000 — chiedono al cliente quale delle due sta pagando. */
       '<div class="cs-psec">Propina</div>' +
       '<div class="cs-chips">' +
-        cChip('sug', '10%', pg.prop === 'sug' ? fmtPrice(Math.round(pg.tot * 0.10)) : '') +
+        cChip('sug', '10%', pg.prop === 'sug' ? fmtPrice(Math.round(_propBase10(pg) * 0.10)) : '') +   // [AUT-1160] = la cifra cobrata
         '<div class="cs-chip' + (pg.prop === 'otro' ? ' sel' : '') + '" onclick="pagoOtroChip()">Otro' +
           '<small id="pgSubOtro">' + ((pg.prop === 'otro' && _pagoPropina() > 0) ? fmtPrice(_pagoPropina()) : 'monto') + '</small></div>' +
         cChip('sin', 'Sin', 'propina') + '</div>' +
@@ -16690,7 +16706,7 @@ function renderPago() {
         '</div>' +
         '<div class="cs-psec">Propina (sugerida)</div>' +
         '<div class="cs-chips">' +
-          chip('prop', 'sug', 'Sugerida', '10% · ' + fmtPrice(Math.round(pg.tot * 0.10))) +
+          chip('prop', 'sug', 'Sugerida', '10% · ' + fmtPrice(Math.round(_propBase10(pg) * 0.10))) +   // [AUT-1160] = la cifra cobrata
           chip('prop', 'otro', 'Otro', 'monto') +
           chip('prop', 'sin', 'Sin', 'propina') + '</div>' +
         (pg.prop === 'otro'
@@ -16943,9 +16959,9 @@ function _cerrarResumen(mesa) {
 
 /* [07-ott · AUT-0604 · DESIGN ③] Consumo / Propina N% / Total a cobrar. «Total» è l'unica riga che il mesero
    NON ha scritto: è calcolata, ed è la riga forte. */
-function _cobroResumen(cons, prop, tot) {
-  cons = Math.round(cons || 0); prop = Math.round(prop || 0); tot = Math.round(tot || 0);
-  var pct = cons > 0 ? Math.round(prop / cons * 100) : 0;
+function _cobroResumen(cons, prop, tot, pieno) {   // [AUT-1160] il testo dice SEMPRE la base che il codice usa: con descuento, il pieno
+  cons = Math.round(cons || 0); prop = Math.round(prop || 0); tot = Math.round(tot || 0); pieno = Math.round(pieno || 0);
+  var base = pieno > cons ? pieno : cons, pct = base > 0 ? Math.round(prop / base * 100) : 0;   // [AUT-1160] con descuento: % sul pieno
   var fila = function (a, b, forte) {
     return '<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;' +
       (forte ? 'font-size:18px;font-weight:800;border-top:1px solid var(--cs-ink2,#888);margin-top:4px;padding-top:6px' : 'font-size:15px') +
@@ -16954,6 +16970,7 @@ function _cobroResumen(cons, prop, tot) {
   return '<div class="cmAsk-cuenta" style="margin:10px auto 0;max-width:280px;text-align:left">' +
     fila('Consumo', fmtPrice(cons)) +
     fila(prop > 0 ? 'Propina ' + pct + '%' : 'Sin propina', (prop > 0 ? '+' : '') + fmtPrice(prop)) +
+    (prop > 0 && pieno > cons ? '<div class="cmAsk-sobre" style="font-size:12.5px;opacity:.75;margin:-2px 0 2px">sobre ' + fmtPrice(pieno) + ' (antes del descuento)</div>' : '') +
     fila('Total a cobrar', fmtPrice(tot), true) +
     '</div>';
 }
@@ -16992,7 +17009,7 @@ function _cerrarAsk(pg) {
           /* [07-ott · AUT-0604] il conto della cifra, prima del «Sí»: alla mesa 86 la propina era già dentro il monto */
           /* [DESIGN ③] tre righe incolonnate, non una riga coi puntini: si leggono come un conto. La % la calcola il
              vetro dal numero vero (10% col suggerito, quella risultante con «otro»), il testo non la fissa. */
-          _cobroResumen(_bMonto(), _pagoPropina(), _cifraN) +
+          _cobroResumen(_bMonto(), _pagoPropina(), _cifraN, _propPieno(pg)) +
           (resto > 0 ? '<div class="cmAsk-resto">quedan ' + fmtPrice(resto) + ' de consumo sin cobrar</div>' : '') +
           '<div class="cmAsk-dat" style="margin-top:8px">' + dat2 + '</div>' +
           '<button class="cmAsk-si tarde" type="button" disabled>· · ·</button>' +
