@@ -100,7 +100,9 @@
   .pin input{width:100%;font-size:22px;letter-spacing:.3em;text-align:center;padding:10px;border-radius:14px;border:1px solid var(--filo);background:var(--vetro2);color:var(--ink);margin-top:8px}
   .pin .err{color:#f6b0a8;font-size:12px;margin-top:6px;min-height:1em}
   .ret-chiuso{padding:4px 13px;border-radius:14px}
-  .azione:disabled{opacity:.4;filter:grayscale(1);cursor:default}   /* [v0.6.3 · C3 di 🎨] un bottone spento deve sembrare spento */
+  .azione:disabled{opacity:.4;filter:grayscale(1);cursor:default}
+  .azione.sel:disabled{opacity:1;filter:none}   /* [v0.6.5 · P2] il prezzo scelto è «spento» perché è già quello: non deve sembrare spento */
+  .ist{margin-left:auto;font-size:11.5px;font-weight:700;white-space:nowrap} .ist.ok{color:var(--ok)} .ist.no{color:var(--ink3)}   /* [v0.6.5 · P1] */   /* [v0.6.3 · C3 di 🎨] un bottone spento deve sembrare spento */
   .gran{font-size:24px;font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
   /* ═══ [v0.5.0 · 🛎 SALA V35 · ordine di Alberto ven 20 «come la demo»] LA FORMA DELLA V50 (4_CANTIERE_SALA/MOCKUP_APP_JL_v50_15NOV2026.html,
      r.182-237): schede in basso, contenuto dal basso (il pollice), testata con «‹ Volver» a sinistra, 86 e campanello a destra SOLO in Servicio. ═══ */
@@ -165,7 +167,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.4</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.5</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -180,7 +182,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.4';
+var JL_VER = 'jl v0.6.5';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -1468,9 +1470,10 @@ function promos() {
     : '<button class="azione oro" style="width:auto;margin:0 0 0 auto;min-height:36px;padding:6px 14px" data-a="prConf" data-k="esca"' + (PR.vuelo ? ' disabled' : '') + '>Activar · ' + pesos(prPrecio('esca')) + '</button>';
   var r = '<div style="border-top:1px solid var(--filo);padding:8px 0 4px"><div style="display:flex;align-items:center;gap:8px;min-height:36px"><b style="font-size:13.5px">Menú del Día</b>' + est + '</div>';
   if (PR.r && dentro && on) {
-    r += '<p style="margin-top:2px">hasta <b style="color:var(--ink)">' + f.hasta + '</b> · el horario se cambia desde el admin</p>' +
+    var qm = (+f.hasta.slice(0, 2) * 60 + +f.hasta.slice(3)) - (+ahora.slice(0, 2) * 60 + +ahora.slice(3));   // [v0.6.5 · P3] quedan N′, da «hasta» e da «ahora»
+    r += '<p style="margin-top:2px">hasta <b style="color:var(--ink)">' + f.hasta + '</b> · quedan <b style="color:var(--ink)">' + Math.max(0, qm) + '′</b> · tope sin dato</p>' +
       '<div class="fila2"><button class="azione" disabled>−15′</button><button class="azione" disabled>+15′</button><button class="azione rojo" data-a="prConf" data-k="off"' + (PR.vuelo ? ' disabled' : '') + '>Desactivar</button></div>' +
-      '<div class="fila2">' + ['esca', 'estandar'].map(function (k) { return '<button class="azione' + (e === k ? ' oro' : '') + '" data-a="prConf" data-k="' + k + '"' + (PR.vuelo || e === k ? ' disabled' : '') + '>' + pesos(prPrecio(k)) + '</button>'; }).join('') + '</div>';
+      '<div class="fila2">' + ['esca', 'estandar'].map(function (k) { return '<button class="azione' + (e === k ? ' oro sel' : '') + '" data-a="prConf" data-k="' + k + '"' + (PR.vuelo || e === k ? ' disabled' : '') + '>' + pesos(prPrecio(k)) + '</button>'; }).join('') + '</div>';
   }
   if (PR.conf) {
     var tx = PR.conf === 'off' ? 'Apagar el Menú del Día' : 'Menú del Día a ' + pesos(prPrecio(PR.conf));
@@ -1530,42 +1533,70 @@ function obGarzones() {
   });
   return Object.keys(out).map(function (k2) { return out[k2]; }).sort(function (a, b) { return (b.cobrado + b.sala) - (a.cobrado + a.sala); });
 }
+/* [v0.6.5 · O1-O5 di 🎨 «CONFRONTO N.7»] una card sola come la v50 (selettore · «Hoy · data · ora» · frase · tabella · confronti); in Día la colonna
+   del turno in corso in oro con «· ahora»; i garzones divisi TURNO AM / TURNO PM («hoy · vs esperado a esta hora»), quelli del turno dopo con
+   «entra HH:MM · meta del turno»; Semana e Mes con la stessa tabella e i garzones con «meta · faltan», tutto «sin dato» dove il dato non c'è;
+   lo stesso numero detto in un modo solo (null ⇒ «sin dato» anche nella frase). Il turno di un garzón: l'inizio della sua franja in /turno/admin
+   (prima delle 17:30 = AM), altrimenti il turno in corso. */
+function obTurnoDe(nombre) {
+  var k = String(nombre || '').trim().toLowerCase(), ini = null;
+  ((TU.r && TU.r.asignaciones) || []).forEach(function (a) {
+    if (!a || !String(a.mesero || '').split(',').some(function (x) { return x.trim().toLowerCase() === k; })) return;
+    var h0 = String(a.franja || '').split('-')[0]; if (/^\d{2}:\d{2}$/.test(h0) && (ini == null || h0 < ini)) ini = h0;
+  });
+  return ini;
+}
 function objetivo() {
   if (!SES.pin && !DEMO) return '<div class="vetro"><p>Para el objetivo entra con tu PIN desde tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
   obLeggi();
   var HZ = [['turno', 'Turno'], ['dia', 'Día'], ['semana', 'Semana'], ['mes', 'Mes']];
-  var h = '<div class="fila2" style="margin-bottom:8px">' + HZ.map(function (x) { return '<button class="azione' + (OB.hz === x[0] ? ' oro' : '') + '" style="margin-top:0;min-height:40px" data-a="obHz" data-k="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
+  var sel = '<div class="fila2" style="margin:0 0 8px">' + HZ.map(function (x) { return '<button class="azione' + (OB.hz === x[0] ? ' oro' : '') + '" style="margin-top:0;min-height:40px" data-a="obHz" data-k="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
   var r = OB.r;
-  if (!r) return h + '<div class="vetro' + (OB.err ? ' alerta' : '') + '"><p>' + (OB.err ? '⚠️ No pude leer la venta (' + esc(OB.err) + ').' : 'Leyendo la venta…') + '</p></div>';
-  var ora = prAhora(), venta = +r.venta || 0, ctas = +r.cuentas || 0, tick = ctas ? venta / ctas : 0, am = obFranja(r, 'AM'), pmv = obFranja(r, 'PM');
-  var enSala = obGarzones().reduce(function (a, g) { return a + g.sala; }, 0);
-  if (OB.hz === 'semana' || OB.hz === 'mes') {
-    return h + '<div class="vetro"><h4>' + (OB.hz === 'semana' ? 'Semana' : 'Mes') + '</h4><p style="font-size:14px;color:var(--ink)">Sin meta y sin acumulado todavía.</p>' +
-      '<p>La meta de la ' + (OB.hz === 'semana' ? 'semana' : 'del mes') + ', lo vendido en el período y «si sigues así» los da 📊 STATISTICS. Hoy aquí: Día y Turno.</p></div>';
-  }
-  /* la frase in cima: senza meta, la venta (non un verdetto) */
-  h += '<div class="vetro lume"><p style="font-size:14px;color:var(--ink);font-weight:700">' + (OB.hz === 'turno' ? 'El turno ' + (ora < '17:30' ? 'AM' : 'PM') + ' lleva ' + pesos(ora < '17:30' ? (am || 0) : (pmv || 0)) : 'Hoy llevas ' + pesos(venta)) + ' cobrado' + (enSala ? ' y ' + pesos(enSala) + ' en sala' : '') + '.</p>' +
-    '<p>Sin meta todavía: «vas sobre / bajo lo esperado» y «si sigues así» aparecen cuando 📊 STATISTICS dé la meta.</p></div>';
-  /* la tabella AM · PM · Total, le stesse cinque righe in ogni orizzonte */
-  var cols = OB.hz === 'turno' ? [[ora < '17:30' ? 'AM · ahora' : 'PM · ahora', ora < '17:30' ? am : pmv]] : [['AM', am], ['PM', pmv], ['Total', venta]];
-  var riga = function (lbl, f) { return '<div class="riga" style="padding:6px 0"><span>' + lbl + '</span>' + cols.map(function (c) { return '<span class="st num" style="min-width:74px;margin-left:' + (c === cols[0] ? 'auto' : '0') + '">' + f(c) + '</span>'; }).join('') + '</div>'; };
-  h += '<div class="vetro"><div class="riga" style="padding:4px 0;font-weight:700"><span>Hoy · ' + ora + '</span>' + cols.map(function (c) { return '<span class="st" style="min-width:74px;margin-left:' + (c === cols[0] ? 'auto' : '0') + '">' + c[0] + '</span>'; }).join('') + '</div>' +
+  if (!r) return '<div class="vetro">' + sel + '<p>' + (OB.err ? '⚠️ No pude leer la venta (' + esc(OB.err) + ').' : 'Leyendo la venta…') + '</p></div>';
+  var ora = prAhora(), turnoOra = ora < '17:30' ? 'AM' : 'PM', venta = +r.venta || 0, ctas = +r.cuentas || 0, tick = ctas ? venta / ctas : 0;
+  var am = obFranja(r, 'AM'), pmv = obFranja(r, 'PM'), gs = obGarzones(), enSala = gs.reduce(function (a, g) { return a + g.sala; }, 0);
+  var periodo = OB.hz === 'semana' || OB.hz === 'mes';
+  var fecha = ''; try { fecha = new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', timeZone: 'America/Santiago' }); } catch (e) {}
+  var cab = OB.hz === 'turno' ? 'Turno ' + turnoOra + ' · ' + ora : OB.hz === 'dia' ? 'Hoy · ' + fecha + ' · ' + ora : OB.hz === 'semana' ? 'Esta semana' : 'Este mes';
+  /* la frase: senza meta la venta, non un verdetto (O5: lo stesso numero della tabella, o «sin dato» in tutti e due) */
+  var vT = turnoOra === 'AM' ? am : pmv;
+  var frase = periodo ? 'Sin meta y sin acumulado de ' + (OB.hz === 'semana' ? 'la semana' : 'el mes') + ' todavía.'
+    : OB.hz === 'turno' ? (vT == null ? 'El turno ' + turnoOra + ': venta sin dato.' : 'El turno ' + turnoOra + ' lleva ' + pesos(vT) + ' cobrado' + (enSala ? ' y ' + pesos(enSala) + ' en sala' : '') + '.')
+    : 'Hoy llevas ' + pesos(venta) + ' cobrado' + (enSala ? ' y ' + pesos(enSala) + ' en sala' : '') + '.';
+  var h = '<div class="vetro">' + sel + '<p style="font-size:12px;color:var(--ink2);margin-bottom:4px">' + esc(cab) + '</p>' +
+    '<p style="font-size:14px;color:var(--ink);font-weight:700">' + frase + '</p><p style="margin-bottom:6px">Sin meta todavía: «vas sobre / bajo lo esperado» y «si sigues así» aparecen cuando 📊 STATISTICS dé la meta.</p>';
+  /* la tabella AM · PM · Total, le stesse cinque righe in ogni orizzonte (O4: anche Semana e Mes) */
+  var cols = OB.hz === 'turno' ? [[turnoOra + ' · ahora', vT, true]]
+    : periodo ? [['AM', null], ['PM', null], ['Total', null]]
+    : [[turnoOra === 'AM' ? 'AM · ahora' : 'AM', am, turnoOra === 'AM'], [turnoOra === 'PM' ? 'PM · ahora' : 'PM', pmv, turnoOra === 'PM'], ['Total', venta]];
+  var cel = function (c, txt, i) { return '<span class="st num" style="min-width:74px;margin-left:' + (i ? '0' : 'auto') + (c[2] ? ';color:var(--oro)' : '') + '">' + txt + '</span>'; };
+  var riga = function (lbl, f) { return '<div class="riga" style="padding:6px 0"><span>' + lbl + '</span>' + cols.map(function (c, i) { return cel(c, f(c), i); }).join('') + '</div>'; };
+  h += '<div class="riga" style="padding:4px 0;font-weight:700"><span></span>' + cols.map(function (c, i) { return cel(c, c[0], i); }).join('') + '</div>' +
     riga('Meta', function () { return 'sin dato'; }) +
     riga('Vendido', function (c) { return c[1] == null ? 'sin dato' : pesos(c[1]); }) +
     riga('Esperado ahora', function () { return 'sin dato'; }) +
     riga('Si sigues así', function () { return 'sin dato'; }) +
-    riga('de la meta', function () { return 'sin dato'; }) + '</div>';
-  if (OB.hz === 'dia') h += '<div class="vetro"><div class="riga" style="padding:5px 0"><span>Ayer (día completo)</span><span class="st num">' + (OB.ayer ? pesos(OB.ayer.venta) : 'sin dato') + '</span></div>' +
+    riga('de la meta', function () { return 'sin dato'; });
+  if (OB.hz === 'dia') h += '<div class="riga" style="padding:5px 0"><span>Ayer (día completo)</span><span class="st num">' + (OB.ayer ? pesos(OB.ayer.venta) : 'sin dato') + '</span></div>' +
     '<div class="riga" style="padding:5px 0"><span>Mismo día sem. pasada</span><span class="st num">' + (OB.sem ? pesos(OB.sem.venta) : 'sin dato') + '</span></div>' +
     '<div class="riga" style="padding:5px 0"><span>Cuentas · ticket · propina</span><span class="st num">' + ctas + ' · ' + (tick ? pesos(tick) : '—') + ' · ' + pesos(+r.propinas || 0) + '</span></div>' +
-    '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Ayer y la semana pasada son del día entero: no se comparan con hoy a medias. «A esta hora» llega con 📊 STATISTICS.</p></div>';
-  /* i garzones: venta (cobrado + en sala) · ticket · % sull'atteso (sin dato); il tocco apre il sussurro */
-  var gs = obGarzones();
-  h += '<div class="vetro"><h4>Garzones · hoy</h4>' + (gs.length ? gs.map(function (g) {
-    var ab = OB.sel === g.n;
-    return '<div class="riga" data-a="obSel" data-k="' + esc(g.n) + '" style="cursor:pointer;flex-wrap:wrap"><span><b>' + esc(g.n) + '</b><small>cobrado ' + pesos(g.cobrado) + (g.sala ? ' · <span style="color:var(--oro)">' + pesos(g.sala) + ' en sala</span>' : '') + ' · ticket ' + (g.nc ? pesos(g.cobrado / g.nc) : '—') + '</small></span>' +
-      '<span class="st num"><b style="color:var(--ink)">' + pesos(g.cobrado + g.sala) + '</b><br>sin meta</span>' +
-      (ab ? '<p style="flex-basis:100%;margin-top:6px;font-size:12px">Qué enseñarle: sin dato todavía. El consejo lo escribe 📊 STATISTICS.</p>' : '') + '</div>';
+    '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Ayer y la semana pasada son del día entero: no se comparan con hoy a medias. «A esta hora» llega con 📊 STATISTICS.</p>';
+  if (periodo) h += '<p style="font-size:11px;color:var(--ink3);margin-top:4px">La meta y lo vendido del período los da 📊 STATISTICS.</p>';
+  h += '</div>';
+  /* i garzones per turno (O3): quelli del turno dopo con «entra HH:MM» */
+  var gruppi = { AM: [], PM: [] };
+  gs.forEach(function (g) { var ini = obTurnoDe(g.n); g.ini = ini; gruppi[ini ? (ini < '17:30' ? 'AM' : 'PM') : turnoOra].push(g); });
+  var tit = periodo ? (OB.hz === 'semana' ? 'Garzones · la semana' : 'Garzones · el mes') : 'Garzones · hoy · vs esperado a esta hora';
+  h += '<div class="vetro"><h4>' + tit + '</h4>' + (gs.length ? ['AM', 'PM'].filter(function (t) { return gruppi[t].length || (OB.hz !== 'turno'); }).filter(function (t) { return OB.hz !== 'turno' || t === turnoOra; }).map(function (t) {
+    var lista = gruppi[t], dopo = t === 'PM' && turnoOra === 'AM';
+    return '<p style="font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--ink3);margin:8px 0 2px">TURNO ' + t + '</p>' + (lista.length ? lista.map(function (g) {
+      var ab = OB.sel === g.n, sub, val;
+      if (periodo) { sub = 'meta sin dato · faltan sin dato'; val = '<b style="color:var(--ink)">sin dato</b>'; }
+      else if (dopo && !g.cobrado && !g.sala) { sub = 'entra ' + (g.ini || '—') + ' · meta del turno sin dato'; val = '—'; }
+      else { sub = 'cobrado ' + pesos(g.cobrado) + (g.sala ? ' · <span style="color:var(--oro)">' + pesos(g.sala) + ' en sala</span>' : '') + ' · ticket ' + (g.nc ? pesos(g.cobrado / g.nc) : '—'); val = '<b style="color:var(--ink)">' + pesos(g.cobrado + g.sala) + '</b><br>sin dato'; }
+      return '<div class="riga" data-a="obSel" data-k="' + esc(g.n) + '" style="cursor:pointer;flex-wrap:wrap"><span><b>' + esc(g.n) + '</b><small>' + sub + '</small></span><span class="st num">' + val + '</span>' +
+        (ab ? '<p style="flex-basis:100%;margin-top:6px;font-size:12px">Qué enseñarle: sin dato todavía. El consejo lo escribe 📊 STATISTICS.</p>' : '') + '</div>';
+    }).join('') : '<p class="vacio">Nadie en este turno.</p>');
   }).join('') : '<p class="vacio">Todavía no hay ventas hoy.</p>') + '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Toca un garzón: qué enseñarle.</p></div>';
   return h;
 }
