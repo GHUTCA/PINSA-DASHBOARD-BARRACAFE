@@ -164,7 +164,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.0</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.1</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -179,7 +179,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.0';
+var JL_VER = 'jl v0.6.1';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -1384,8 +1384,90 @@ function cjDemo(p) {
   }
   return { ok: false, error: 'verbo_sconosciuto' };
 }
+/* ═══ [v0.6.1 · 🛎 SALA V35 · PROMOS COME LA V50 (MOCKUP `instrCard`, r.630-655)] «Menús y 2x1» ═══
+   FUNZIONA: il Menú del Día, la leva del prezzo `POST /menuLeva/<local>` {pin_jl, accion:'get'|'set', tipo:'dia', escalon:'esca'|'estandar'|'off', uid}
+   (la stessa di app_jl `_levaAlBorde`, `menu_leva_borde_on` 1), con la finestra di `menu_leva_reloj` ("esca|08:00|15:00|…") da /salud.
+   Si mostra lo stato che TORNA dal bordo, mai quello chiesto (app_jl 06-set). Una chiave per gesto; con la rete morta «no sé si cambió» e si rilegge.
+   Una conferma prima di toccare, perché la leva vale per tutto il locale (app_jl ne chiede due: qui una, scritta sullo schermo).
+   SOLO DISEGNATO, e si dice: Menú 3 Tiempos · 2x1 Schop · 2x1 Cócteles · il push ±15′ · il «máximo 3 activos». Nessuna rotta li scrive:
+   il contratto è di 📖 MENU (bozza lun 23), la rotta di ⚙️ ARQ, ven 27. Niente Google. */
+var PR = { r: null, ts: 0, err: '', vuelo: false, msg: '', conf: null, uid: {} };
+var PR_MAX = 3;
+var PR_ALTRI = [{ n: 'Menú 3 Tiempos', desde: '20:00' }, { n: '2x1 Schop', desde: '18:00' }, { n: '2x1 Cócteles', desde: '12:00' }];
+function prAhora() { try { return new Date().toLocaleString('sv-SE', { timeZone: 'America/Santiago' }).slice(11, 16); } catch (e) { var d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); } }
+function prFascia() { var p = salFlag('menu_leva_reloj').split('|'); return (/^\d{2}:\d{2}$/.test(p[1] || '') && /^\d{2}:\d{2}$/.test(p[2] || '')) ? { de: p[1], hasta: p[2] } : { de: '08:00', hasta: '15:00' }; }
+function prNorm(e) { e = String(e || '').toLowerCase(); return e === 'apagado' || e === 'off' || !e ? 'off' : e; }
+async function prPost(body) {
+  if (DEMO) { if (body.accion === 'set') PR_DEMO.escalon = body.escalon === 'off' ? 'apagado' : body.escalon; return { ok: true, r: Object.assign({ ok: true }, PR_DEMO) }; }
+  var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000), r, j;
+  try {
+    r = await fetch(CFG.BORDE + '/menuLeva/' + encodeURIComponent(CFG.LOCAL), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8', 'X-Borde-Token': CFG.T },
+      body: JSON.stringify(Object.assign({ pin_jl: SES.pin }, body)), signal: ctrl.signal, cache: 'no-store' });
+    j = await r.json().catch(function () { return null; });
+  } catch (e) { clearTimeout(to); return { rete: true }; }
+  clearTimeout(to);
+  if (r.status === 404 || r.status === 403 || (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento')) return { spento: true };
+  if (j && j.ok === true && j.escalon) return { ok: true, r: j };
+  if (j && j.ok === false && j.error) return { ok: false, r: j };
+  return { rete: true };
+}
+async function prLeggi() {
+  if ((!SES.pin && !DEMO) || PR.vuelo || Date.now() - PR.ts < 30000) return;
+  PR.ts = Date.now();
+  var b = await prPost({ accion: 'get', tipo: 'dia' });
+  if (b.ok) { PR.r = b.r; PR.err = ''; } else PR.err = b.spento ? 'spento' : b.rete ? 'sin conexión' : ((b.r && b.r.error) || 'no');
+  if (VISTA.tab === 3) jlPinta();
+}
+async function prSet(escalon) {
+  if (PR.vuelo) return;
+  var k = 'dia:' + escalon, uid = PR.uid[k] || ('lev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+  PR.vuelo = true; PR.msg = ''; PR.conf = null; jlPinta(true);
+  var b = await prPost({ accion: 'set', tipo: 'dia', escalon: escalon, uid: uid });
+  PR.vuelo = false;
+  if (b.rete) { PR.uid[k] = uid; PR.msg = '⏳ No sé si el menú cambió: mira el estado antes de tocar de nuevo.'; PR.ts = 0; prLeggi(); }
+  else if (b.spento) PR.msg = '⛔ La leva del menú no está en el sistema nuevo para este local: hazlo desde tu app de siempre.';
+  else if (!b.ok) { delete PR.uid[k]; PR.msg = '✋ ' + ((b.r && (b.r.mensaje || b.r.error)) || 'No se pudo'); }
+  else {
+    delete PR.uid[k]; PR.r = b.r; PR.ts = Date.now();
+    var real = prNorm(b.r.escalon);   // lo stato che TORNA, mai quello chiesto
+    PR.msg = real === escalon ? (real === 'off' ? '✓ Menú del Día apagado' : '✓ Menú del Día activo · ' + pesos(prPrecio(real))) : real === 'mixto' ? '⚠️ El menú quedó MIXTO (dos precios a la vez): avísale a MENU.' : '⚠️ Pediste otra cosa, pero el menú quedó ' + (real === 'off' ? 'apagado' : 'en ' + pesos(prPrecio(real))) + '.';
+  }
+  jlPinta(true);
+}
+function prPrecio(e) { var r = PR.r || {}; return e === 'esca' ? ((r.esca && r.esca.precio) || 11990) : ((r.estandar && r.estandar.precio) || 16990); }
+function promos() {
+  if (!SES.pin && !DEMO) return '<div class="vetro"><p>Para las promos entra con tu PIN desde tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
+  prLeggi();
+  var ahora = prAhora(), f = prFascia(), dentro = ahora >= f.de && ahora < f.hasta;
+  var e = PR.r ? prNorm(PR.r.escalon) : null, on = e && e !== 'off';
+  var h = '<div class="vetro"><h4>Menús y 2x1 <span class="pill no">' + (on ? 1 : 0) + ' de ' + PR_MAX + ' activos</span><span class="pill no" style="margin-left:auto">ahora ' + ahora + '</span></h4>';
+  if (PR.msg) h += '<p style="color:' + (PR.msg.indexOf('✓') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin-bottom:4px">' + esc(PR.msg) + '</p>';
+  /* il Menú del Día: la riga che funziona */
+  var est = !PR.r ? '<span class="ist no">' + (PR.err === 'spento' ? 'en tu app' : PR.err ? 'sin conexión' : 'leyendo…') + '</span>'
+    : !dentro ? '<span class="ist no">abre ' + f.de + '</span>'
+    : on ? '<span class="ist ok">activo · ' + pesos(prPrecio(e === 'mixto' ? 'esca' : e)) + (e === 'mixto' ? ' (mixto)' : '') + '</span>'
+    : '<button class="azione oro" style="width:auto;margin:0 0 0 auto;min-height:36px;padding:6px 14px" data-a="prConf" data-k="esca"' + (PR.vuelo ? ' disabled' : '') + '>Activar · ' + pesos(prPrecio('esca')) + '</button>';
+  var r = '<div style="border-top:1px solid var(--filo);padding:8px 0 4px"><div style="display:flex;align-items:center;gap:8px;min-height:36px"><b style="font-size:13.5px">Menú del Día</b>' + est + '</div>';
+  if (PR.r && dentro && on) {
+    r += '<p style="margin-top:2px">hasta <b style="color:var(--ink)">' + f.hasta + '</b> · el horario se cambia desde el admin</p>' +
+      '<div class="fila2"><button class="azione" disabled>−15′</button><button class="azione" disabled>+15′</button><button class="azione rojo" data-a="prConf" data-k="off"' + (PR.vuelo ? ' disabled' : '') + '>Desactivar</button></div>' +
+      '<div class="fila2">' + ['esca', 'estandar'].map(function (k) { return '<button class="azione' + (e === k ? ' oro' : '') + '" data-a="prConf" data-k="' + k + '"' + (PR.vuelo || e === k ? ' disabled' : '') + '>' + pesos(prPrecio(k)) + '</button>'; }).join('') + '</div>';
+  }
+  if (PR.conf) {
+    var tx = PR.conf === 'off' ? 'Apagar el Menú del Día' : 'Menú del Día a ' + pesos(prPrecio(PR.conf));
+    r += '<div class="vetro alerta" style="margin:8px 0 0"><p style="color:var(--ink);font-weight:700">¿' + tx + ' para TODO el local?</p><p>Se ve en el QR y en la sala al instante.</p>' +
+      '<div class="fila2"><button class="azione" data-a="prNo">No</button><button class="azione oro" data-a="prSi"' + (PR.vuelo ? ' disabled' : '') + '>' + (PR.vuelo ? '…' : 'Sí') + '</button></div></div>';
+  }
+  h += r + '</div>';
+  /* gli altri strumenti: disegnati come la demo, ancora senza rotta */
+  h += PR_ALTRI.map(function (s) {
+    return '<div style="border-top:1px solid var(--filo);padding:8px 0 4px"><div style="display:flex;align-items:center;gap:8px;min-height:36px"><b style="font-size:13.5px">' + esc(s.n) + '</b><span class="ist no">todavía no</span></div></div>';
+  }).join('');
+  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:4px">El push mueve el final de 15 en 15, siempre dentro del horario. Menú 3 Tiempos, los 2x1 y el push llegan con 📖 MENU (vie 27). El horario y los precios se cambian desde el admin.</p></div>';
+}
+var PR_DEMO = { escalon: 'esca', esca: { precio: 11990 }, estandar: { precio: 16990 } };
 function enApp() { return '<div class="vetro"><p>Esta parte sigue en tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>'; }
-var VIS = [servicio, local, caja, enApp, enApp];
+var VIS = [servicio, local, caja, promos, enApp];
 function jlPinta(forza) {
   jlEdad();
   var b = document.getElementById('body'), y = b.scrollTop;
@@ -1471,6 +1553,9 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   else if (a === 'cjVolver') { CJ.ret = null; CJ.msg = ''; jlPinta(true); }
   else if (a === 'cjSob') { cjSobEnviar(); }
   else if (a === 'cjListo') { CJ.sob = null; CJ.msg = ''; CJ.fin = false; cjGiro(); jlPinta(true); }
+  else if (a === 'prConf') { PR.conf = el.getAttribute('data-k'); PR.msg = ''; jlPinta(true); }
+  else if (a === 'prNo') { PR.conf = null; jlPinta(true); }
+  else if (a === 'prSi') { if (PR.conf) prSet(PR.conf); }
   else if (a === 'cjReg') { CJ.reg = !CJ.reg; updateDock(); }
   else if (a === 'cjCie') { CJ.cie = el.getAttribute('data-k'); CJ.msg = ''; jlPinta(true); document.getElementById('body').scrollTop = 0; }
   else if (a === 'cjFin') { CJ.fin = true; CJ.ret = null; CJ.msg = ''; jlPinta(true); document.getElementById('body').scrollTop = 0; }
