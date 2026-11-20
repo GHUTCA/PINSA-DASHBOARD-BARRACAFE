@@ -104,7 +104,7 @@
 <div class="app">
   <div class="top">
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
-    <span class="ver" id="ver">jl v0.4.1</span>
+    <span class="ver" id="ver">jl v0.4.2</span>
   </div>
   <div class="edad" id="edad">leyendo la sala…</div>
   <div class="tabs" role="tablist">
@@ -118,7 +118,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.4.1';
+var JL_VER = 'jl v0.4.2';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -341,7 +341,27 @@ function jlDisp() {
   if (!d) { d = 'jl-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); try { localStorage.setItem('jl_disp', d); } catch (e) {} }
   return d;
 }
-var ENTRA = { vuelo: false, err: '' };
+/* [v0.4.2 · 🛎 SALA V35 · bacheca «JL.HTML: ALBERTO NON RIESCE A ENTRARE», 20-nov] a leva `JL_ENTRA_ON` spenta il form del PIN NON può
+   entrare (il bordo risponde `gate_spento`): Alberto ha scritto il PIN e il vetro gli ha chiesto un turno che non si può scrivere.
+   Ora il form si mostra SOLO se /salud dice che la leva è accesa per questo locale; spenta, o /salud muto, il vetro dice la strada vera
+   (l'app di sempre, poi qui). `gate`: null = non ancora saputo · true = accesa · false = spenta. Stesso parser della sala nueva
+   ("" spenta · "1"/"true" tutti · elenco di locali). Nessuna rotta nuova, nessuna leva nuova. */
+var ENTRA = { vuelo: false, err: '', gate: null };
+function jlLevaLocali(v) {
+  v = String(v == null ? '' : v).trim(); if (!v || v === '0') return false;
+  if (/^(1|true)$/i.test(v)) return true;
+  return v.split(/[\s,;|]+/).some(function (x) { return x.trim().toUpperCase() === CFG.LOCAL; });
+}
+async function jlEntraLeva() {
+  if (DEMO) return;
+  var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000);
+  try {
+    var j = await fetch(CFG.BORDE + '/salud', { cache: 'no-store', signal: ctrl.signal }).then(function (r) { return r.json(); });
+    var x = null; (function c(o) { if (!o || typeof o !== 'object' || x != null) return; if (o.jl_entra_on != null) { x = o.jl_entra_on; return; } for (var q in o) c(o[q]); })(j);
+    ENTRA.gate = jlLevaLocali(x);
+  } catch (e) { /* /salud muto: gate resta null ⇒ si mostra la strada dell'app, che funziona sempre */ }
+  clearTimeout(to);
+}
 async function jlEntra(pin) {
   if (ENTRA.vuelo) return; pin = String(pin || '').replace(/\D/g, '');
   if (pin.length < 4) { ENTRA.err = 'El PIN tiene al menos 4 números'; jlPinta(); return; }
@@ -353,7 +373,7 @@ async function jlEntra(pin) {
     j = await r.json().catch(function () { return null; });
   } catch (e) { j = null; }
   clearTimeout(to); ENTRA.vuelo = false;
-  if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') { ENTRA.err = ''; VISTA.err = 'sin_codigo'; jlPinta(); return; }   // leva spenta: l'app di sempre
+  if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') { ENTRA.err = ''; ENTRA.gate = false; VISTA.err = 'sin_codigo'; jlPinta(); return; }   // leva spenta: l'app di sempre (e il form non torna)
   if (j && j.ok === true && j.quien) {
     SES.pin = pin; SES.user = String(j.quien);
     try { sessionStorage.setItem('jl_pin', SES.pin); sessionStorage.setItem('jl_user', SES.user); } catch (e) {}
@@ -366,6 +386,10 @@ async function jlEntra(pin) {
   jlPinta();
 }
 function pinHtml() {
+  /* [v0.4.2] il form solo a leva accesa e confermata: altrimenti la strada che funziona */
+  if (ENTRA.gate !== true) return '<div class="vetro lume"><h4>Entra desde tu app de siempre</h4>' +
+    '<p>Abre tu app de JL, entra con tu PIN y espera que lea el turno. Después vuelve aquí en la misma pestaña.</p>' +
+    '<a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
   return '<div class="vetro lume pin"><h4>Entra con tu PIN de JL</h4><p>El mismo PIN de tu app.</p>' +
     '<input id="jlPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="••••">' +
     '<div class="err">' + esc(ENTRA.err) + '</div>' +
@@ -861,6 +885,7 @@ var JL_DEMO = {
 
 document.getElementById('yo').textContent = DEMO ? 'Prueba' : (SES.user || 'JL');
 document.getElementById('ver').textContent = JL_VER;
+jlEntraLeva().then(function () { if (VISTA.err === 'sin_pin') jlPinta(); });   // [v0.4.2] una GET a /salud, solo all'ingresso
 jlLeggi();
 /* il poll (N2, debito dichiarato in testa): solo a pagina visibile */
 setInterval(function () { if (!document.hidden) jlLeggi(); }, JL_POLL_MS);
