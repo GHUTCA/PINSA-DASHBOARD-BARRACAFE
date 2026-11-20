@@ -1116,7 +1116,7 @@ body{padding-bottom:300px}                   /* il pannello vive fisso in basso 
            AGGIUNGE il qualificatore, non si rinomina.**
            📌 L'altra metà (il GAS che smette di chiamarsi «sala») è di 📖 MENU
            e non è fatta: finché non lo è, questa dichiara solo il proprio lato. -->
-      <span class="ver" id="ver">sala v3.228.128 · vieja</span>
+      <span class="ver" id="ver">sala v3.228.131 · vieja</span>
       <!-- v3.21.0 · [AUT-EMERG-0004] · IL TESTIMONE DELLA PENNA. Il 22-ago i
            gesti ricadevano sul GAS e da fuori NON si poteva sapere perché: il
            fallback è muto per disegno (è la sua virtù), ma un ripiego che non
@@ -5395,13 +5395,14 @@ function _dispositivoId() {
    `bodyBorde` è un oggetto A SÉ (non il `body` del GAS): porta `clase` e
    `cancelado`, due campi che il bordo pretende e il GAS non vuole. */
 async function _corregirAlBorde(bodyBorde) {
-  if (!CORRBORDE_ON) return null;
+  if (!TOPE_SALUD_OK && !(await _corrAspettaSalud())) return { ok: false, error: 'borde_cerrado' };   // [v3.228.131 · AUT-1163] prima del primo /salud: si aspetta, mai il GAS
+  if (!CORRBORDE_ON && !TOPE_ELIM_ON) return null;   // [AUT-1163] col tetto acceso il freno del telefono non apre il GAS
   /* [24-set] il controllo era `!STATE.editVoid || !bodyBorde.pin_jl` — ma
      questa funzione ora serve DUE chiamanti (guardarCorreccion via
      STATE.editVoid, e il ramo «Un producto» di _dtGo via `_dt`, che non
      tocca mai STATE.editVoid). L'unico invariante vero è «c'è un PIN in
      gioco», non DA DOVE arriva lo stato: si controlla solo quello. */
-  if (!bodyBorde.pin_jl && !CORR_SIN_GAS_ON) return null;   // senza PIN in gioco, nulla da mandare qui [1.5: a leva accesa va al bordo anche la correzione libera]
+  if (!bodyBorde.pin_jl && !CORR_SIN_GAS_ON && !TOPE_ELIM_ON) return null;   // senza PIN in gioco, nulla da mandare qui [1.5: a leva accesa va al bordo anche la correzione libera]
   try {
     const u = BORDE_SALA.URL + '/correccion/' + encodeURIComponent(CFG.LOCAL || 'BKS');
     const ctrl = new AbortController();
@@ -5415,13 +5416,64 @@ async function _corregirAlBorde(bodyBorde) {
     clearTimeout(to);
     const j = _vediNoAsignado(await r.json());   // [29-set] solo chi è nel turno
     _telTurnoVede(j);   // [31-ott] il no del telefono: la schermata giusta, e il no resta FINALE come ogni rifiuto con merito
-    if (j && j.scritto === false && j.motivo === 'gate_spento') return CORR_SIN_GAS_ON ? { ok: false, error: 'borde_cerrado' } : null;   // leva del bordo spenta: vai di là [1.5: niente più «di là»]
+    if (j && j.scritto === false && j.motivo === 'gate_spento') return (CORR_SIN_GAS_ON || TOPE_ELIM_ON) ? { ok: false, error: 'borde_cerrado' } : null;   // leva del bordo spenta: vai di là [1.5: niente più «di là»]
+    if (j && j.error === 'supera_tope_eliminar') return await _topeFirma(bodyBorde, j);   // [v3.228.129 · AUT-1163] oltre il 40%: la firma dell'encargado
+    if (j && j.error === 'tope_no_verificable') { alert((j.mensaje || 'No se pudo verificar el tope de eliminación.') + '\n\nNo se quitó nada.'); return { ok: false, error: 'tope_no_firmado' }; }
     return j;   // {ok:true,scritto:true,...} O un rifiuto con merito — sempre FINALE
   } catch (e) {
     /* [1.5] a leva accesa un timeout NON è «non è entrato»: può essere atterrato. Si rilancia, così il chiamante dice «No sé si entró» (il suo catch) */
-    if (CORR_SIN_GAS_ON) throw e;
+    if (CORR_SIN_GAS_ON || TOPE_ELIM_ON) throw e;   // [AUT-1163] col tetto acceso: «No sé si entró», mai il GAS
     return null;   // rete morta/timeout: vai di là, come sempre
   }
+}
+/* ═══ [19-nov · v3.228.129 · AUT-1163 · contratto di ⚙️ ARQ «IL CONTRATTO DELLA «FIRMA DEL ENCARGADO»»] OLTRE IL 40% FIRMA L'ENCARGADO ═══
+   Il bordo rifiuta INTERO un Eliminar che porta ciò che il conto ha perso oltre il 40% del suo consumo (`supera_tope_eliminar`, `definitivo:true`).
+   Qui si mostra il `mensaje` del bordo (il nome di chi firma non è nel codice) e si chiede «Firma del encargado»: lo STESSO corpo, lo STESSO
+   `corr_uid`, col `pin_jl` dell'encargado. Il bordo decide se quel PIN può firmare (`TOPE_ELIMINAR_SOBRE`). «No quitar» ⇒ `tope_no_firmado`, che i due
+   chiamanti dicono come «no se quitó nada». Nessun ritento da solo. Senza la leva del bordo questo codice non si vede mai. */
+function _topeChiedi(j, mesa, avviso) {
+  return new Promise(function (resolve) {
+    var o = document.getElementById('topeFirma'); if (o) o.remove();
+    o = document.createElement('div'); o.id = 'topeFirma';
+    o.setAttribute('style', 'position:fixed;inset:0;z-index:99990;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:16px');
+    var pct = (j && j.pct != null) ? Math.round(Number(j.pct)) : null;
+    o.innerHTML = '<div style="background:#1d1a16;color:#f4ede1;border:1px solid #e57373;border-radius:18px;padding:20px;max-width:360px;width:100%;text-align:center">' +
+      '<div style="font-size:30px">⛔</div>' +
+      '<div style="font-size:17px;font-weight:800;margin:6px 0 4px">' + esc((j && j.mensaje) || 'Eliminar más del 40% de la cuenta lo autoriza el encargado del turno.') + '</div>' +
+      '<div style="font-size:13px;opacity:.8;margin-bottom:10px">' + (mesa ? 'Mesa ' + esc(mesa) + ' · ' : '') + (pct != null ? 'quedaría en ' + pct + '% eliminado · ' : '') + 'no se quitó nada</div>' +
+      (avviso ? '<div style="font-size:13.5px;color:#f3c96a;margin-bottom:8px">' + esc(avviso) + '</div>' : '') +
+      '<input id="topeFirmaPin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN del encargado" style="width:100%;font-size:20px;text-align:center;padding:10px;border-radius:12px;border:1px solid rgba(243,234,216,.3);background:transparent;color:inherit;margin-bottom:10px">' +
+      '<button type="button" id="topeFirmaSi" disabled style="width:100%;padding:13px;border-radius:12px;border:0;background:#e5b85c;color:#1d1a16;font-weight:800;font-size:16px;margin-bottom:8px">Firma del encargado</button>' +
+      '<button type="button" id="topeFirmaNo" style="width:100%;padding:12px;border-radius:12px;border:1px solid rgba(243,234,216,.35);background:transparent;color:inherit;font-size:15px">No quitar</button></div>';
+    document.body.appendChild(o);
+    var inp = document.getElementById('topeFirmaPin'), si = document.getElementById('topeFirmaSi');
+    inp.oninput = function () { inp.value = String(inp.value || '').replace(/[^0-9]/g, '').slice(0, 6); si.disabled = inp.value.length < 4; };
+    document.getElementById('topeFirmaNo').onclick = function () { o.remove(); resolve(''); };
+    si.onclick = function () { var p = inp.value; if (p.length < 4) return; o.remove(); resolve(p); };
+    try { inp.focus(); } catch (e) {}
+  });
+}
+async function _topeFirma(bodyBorde, j) {
+  var avviso = '';
+  for (var giro = 0; giro < 5; giro++) {   // al massimo 5 firme di fila: poi decide il freno del PIN del bordo
+    var pin = await _topeChiedi(j, bodyBorde.mesa, avviso);
+    if (!pin) return { ok: false, error: 'tope_no_firmado' };
+    var j2 = null;
+    try {
+      var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000);
+      var r = await fetch(BORDE_SALA.URL + '/correccion/' + encodeURIComponent(CFG.LOCAL || 'BKS'), { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE_SALA.T },
+        body: JSON.stringify(_conDev(Object.assign({ verbo: 'correccion', dispositivo_id: _dispositivoId(), app: APP_ID }, bodyBorde, { pin_jl: pin }))),   // lo stesso corpo e lo stesso corr_uid: cambia solo chi firma
+        signal: ctrl.signal, cache: 'no-store' });
+      clearTimeout(to); j2 = _vediNoAsignado(await r.json()); _telTurnoVede(j2);
+    } catch (e) { pin = ''; throw e; }   // un timeout non è «non è entrato»: il chiamante dice «No sé si entró»
+    pin = '';
+    if (j2 && j2.error === 'supera_tope_eliminar') { j = j2; avviso = 'Ese PIN no puede autorizar más del 40%.'; continue; }
+    if (j2 && (j2.error === 'pin_jl_invalido' || j2.error === 'pin_jl_requerido')) { avviso = 'PIN incorrecto — no se quitó nada.'; continue; }
+    if (j2 && j2.error === 'tope_no_verificable') { alert((j2.mensaje || 'No se pudo verificar el tope de eliminación.') + '\n\nNo se quitó nada.'); return { ok: false, error: 'tope_no_firmado' }; }
+    return j2;   // ok (firmó el encargado) o un altro rifiuto con merito: lo dice il chiamante, come sempre
+  }
+  return { ok: false, error: 'tope_no_firmado' };
 }
 /* ═══ [24-set, reperto di Alberto su mesa 997] IL RIFIUTO CHE SPARIVA E IL
    SILENZIO DOPO IL FRENO ═══════════════════════════════════════════════════
@@ -5582,6 +5634,10 @@ async function guardarCorreccion__in(uuid, btn) {
     } else if (r && r.error === 'no_es_tuyo') {
       toast('warn', 'Es de ' + (r.mesero || 'otro') + ' — que lo corrija él');
       STATE.editando = null;
+    } else if (r && r.error === 'tope_no_firmado') {
+      toast('warn', 'No se quitó nada — más del 40% lo firma el encargado del turno');   // [AUT-1163]
+      if (btn) btn.disabled = false;
+      return;
     } else if (r && r.error === 'borde_cerrado') {
       // [21-ott · 1.5] il bordo ha detto di no PRIMA di scrivere: non è cambiato niente, si può riprovare
       toast('warn', 'El sistema no recibe correcciones ahora — no se cambió nada. Reintenta o avisa al JL');
@@ -10489,6 +10545,27 @@ var PROPINA_VOUCHER_ON = false;
    e se il bordo non risponde il vetro lo dice invece di girare la correzione al GAS (`corregirPedido`). Leva del bordo `corregir_sin_gas_on`, nasce "0".
    ⚠️ Si accende SOLO quando il bordo accetta la correzione libera senza PIN (oggi `/correccion` vuole sempre `pin_jl`). Freno per telefono: `?corrborde=0`. */
 var CORR_SIN_GAS_ON = false;
+/* [19-nov · v3.228.130 · AUT-1163 · 💵 EL GIRO «AUT-1163 I DUE VETRI · VERDE» (b)] COL TETTO ACCESO LA CORREZIONE NON VA MAI AL GAS.
+   `corregirPedido` del GAS non ha il tetto del 40%: col telefono frenato (`?corrborde=0`) o con `corregir_sin_gas_on` spenta, un `null` di
+   `_corregirAlBorde` portava la correzione al GAS e il tetto aveva una porta di lato. Con `tope_eliminar_on` del bordo acceso per questo locale
+   ⇒ si bussa sempre al bordo, e rete giù / timeout / bordo chiuso dicono «No sé si entró» o «no recibe correcciones», MAI il GAS.
+   [v3.228.131 · 🎛 V34 «su AUT-1163 B5D65CD»: condizione per accendere il tetto] LA FINESTRA PRIMA DEL PRIMO /salud: il telefono NON
+   ricorda la leva. Una correzione che nasce prima del primo /salud riuscito ASPETTA quel /salud (la promessa `SALUD_LEVE_P`, al massimo 6 s), e
+   solo dopo decide la strada. Se il /salud non arriva, la correzione non parte: «borde_cerrado», mai il GAS. Vale per ogni correzione, col freno
+   `?corrborde=0` e senza: prima del /salud anche `corregir_sin_gas_on` è ancora spenta, e un `null` porterebbe al GAS. */
+var TOPE_ELIM_ON = false, TOPE_SALUD_OK = false;
+async function _corrAspettaSalud() {
+  if (TOPE_SALUD_OK) return true;
+  try { await Promise.race([Promise.resolve(typeof SALUD_LEVE_P !== 'undefined' ? SALUD_LEVE_P : null), new Promise(function (r) { setTimeout(r, 6000); })]); } catch (e) {}
+  return TOPE_SALUD_OK;
+}
+function _topeLeva(v) {
+  v = String(v == null ? '' : v).trim().toUpperCase();
+  if (!v || v === '0') return false;
+  if (v === '1' || v === 'TRUE') return true;
+  var cl = String((typeof CFG !== 'undefined' && CFG.LOCAL) || 'BKS').trim().toUpperCase();
+  return v.split(',').map(function (x) { return x.trim(); }).indexOf(cl) >= 0;
+}
 /* [21-ott · pezzo 1.16] la cola offline dei pedidos entra dal bordo (`staffPost`) invece che dritta al GAS. Leva del bordo `cola_borde_on`, nasce "0".
    Toglie la riga «La cola offline resta puntata al GAS (cintura)» di v3.3: era la cintura di un bordo nuovo, oggi il bordo è la porta dei pedidos vivi. */
 var COLA_BORDE_ON = false;
@@ -10602,6 +10679,7 @@ function _saludLeggi() {
       PROPINA_MIXTO_MEDIO_ON = String(cercaK(j, 'propina_mixto_medio_on')) === '1';   // [19-ott · AUT-0716]
       PROPINA_VOUCHER_ON = String(cercaK(j, 'propina_voucher_on')) === '1';   // [21-ott · AUT-0716 ②]
       CORR_SIN_GAS_ON = String(cercaK(j, 'corregir_sin_gas_on')) === '1';     // [21-ott · pezzo 1.5]
+      if (!(j && j.ok === false)) { TOPE_ELIM_ON = _topeLeva(cercaK(j, 'tope_eliminar_on')); TOPE_SALUD_OK = true; }   // [AUT-1163] un JSON d'errore non spegne il tetto, e non conta come /salud letto
       COLA_BORDE_ON = String(cercaK(j, 'cola_borde_on')) === '1';             // [21-ott · pezzo 1.16]
       COLN_STAFF_BORDE_ON = String(cercaK(j, 'colacion_staff_borde_on')) === '1';   // [21-ott · pezzo 2.6b]
       SOLTAR2X1_BORDE_ON = String(cercaK(j, 'soltar2x1_borde_on')) === '1';         // [21-ott · pezzo 1.7]
@@ -11812,6 +11890,8 @@ function _dtGo() {
              il mesero deve LEGGERE prima di lasciare il tavolo — ≥4s. */
           toast('ok', '🍽 ' + (pr.quita > 1 ? pr.quita + '× ' : '') + pr.n + ' fuera · mesa ' + mesa, 4500);
           refrescar();
+        } else if (r && r.error === 'tope_no_firmado') {
+          toast('warn', 'No se quitó nada — más del 40% lo firma el encargado del turno', 4500);   // [AUT-1163]
         } else if (r && r.error === 'borde_cerrado') {
           toast('warn', 'El sistema no recibe correcciones ahora — no se quitó nada. Reintenta o avisa al JL', 4500);   // [21-ott · 1.5] un no PRIMA di scrivere
         } else if (!_pinErrorPersistente(r)) {
