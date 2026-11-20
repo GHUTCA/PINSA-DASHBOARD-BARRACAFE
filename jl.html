@@ -164,7 +164,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.1</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.2</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -179,7 +179,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.1';
+var JL_VER = 'jl v0.6.2';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -1466,8 +1466,95 @@ function promos() {
   return h + '<p style="font-size:11px;color:var(--ink3);margin-top:4px">El push mueve el final de 15 en 15, siempre dentro del horario. Menú 3 Tiempos, los 2x1 y el push llegan con 📖 MENU (vie 27). El horario y los precios se cambian desde el admin.</p></div>';
 }
 var PR_DEMO = { escalon: 'esca', esca: { precio: 11990 }, estandar: { precio: 16990 } };
+/* ═══ [v0.6.2 · 🛎 SALA V35 · OBJETIVO COME LA V50 (MOCKUP v47-v49)] ═══
+   FUNZIONA (dati che il bordo dà già, lo stesso verbo di app_jl `giroServicio`/`giroHistorico`): `POST /caja/<local>` {verbo:'servicio', pin_jl[, dia]}
+   → venta · cuentas · propinas · por_mesero{nombre:{cobrado,n_cobros}} · por_franja{DÍA,HH,NOCHE,TRASNOCHE:{venta,ctas}} · dia_operativo.
+   Ieri e lo stesso giorno della settimana scorsa: lo stesso verbo con `dia`, creduto SOLO se torna lo stesso `dia_operativo` (app_jl 21-ott).
+   «En sala» per garzón: le mesas aperte della sala del bordo (la stessa fetta di Servicio).
+   SIN DATO, e la schermata lo dice (non resta vuota): le METAS (turno · día · semana · mes), l'«esperado a esta altura», «si sigues así», il %
+   per garzón e i sussurri → 📊 STATISTICS (oggi nessuna sessione aperta, 🎛). Senza meta la frase in cima dice la venta, non un verdetto.
+   Semana e Mes: il bordo dà un giorno per chiamata; l'accumulato del periodo è «sin dato» finché non c'è una lettura sua.
+   AM = la fascia DÍA (06:00–17:30) · PM = HH + NOCHE + TRASNOCHE (le chiavi del bordo). */
+var OB = { hz: 'dia', r: null, ts: 0, err: '', ayer: null, sem: null, hts: 0, sel: null, inVolo: false };
+function obDia(meno) { var t = Date.now() - 6 * 3600000 - (meno || 0) * 86400000; try { return new Date(t).toLocaleDateString('en-CA', { timeZone: 'America/Santiago' }); } catch (e) { return new Date(t).toISOString().slice(0, 10); } }
+async function obServicio(dia) {
+  if (DEMO) return Object.assign({}, OB_DEMO, dia ? { venta: dia === obDia(1) ? 1180000 : 1240000, cuentas: 61, dia_operativo: dia } : {});
+  var p = { verbo: 'servicio', pin_jl: SES.pin }; if (dia) p.dia = dia;
+  try { var r = await cjPost(p); return (r && r.ok) ? r : { _err: (r && r.error) || 'no' }; } catch (e) { return { _err: e && e.message === 'timeout' ? 'timeout' : 'sin conexión' }; }
+}
+async function obLeggi() {
+  if ((!SES.pin && !DEMO) || OB.inVolo || Date.now() - OB.ts < 60000) return;
+  OB.inVolo = true; OB.ts = Date.now();
+  var r = await obServicio(null);
+  if (r && !r._err) { OB.r = r; OB.err = ''; } else OB.err = r ? r._err : 'no';
+  if (Date.now() - OB.hts > 600000) {   // i giorni passati non cambiano: una lettura ogni 10 minuti
+    OB.hts = Date.now();
+    var a = await obServicio(obDia(1)), s = await obServicio(obDia(7));
+    OB.ayer = (a && a.dia_operativo === obDia(1)) ? a : null; OB.sem = (s && s.dia_operativo === obDia(7)) ? s : null;
+  }
+  OB.inVolo = false; if (VISTA.tab === 4) jlPinta();
+}
+function obFranja(r, cual) {
+  var f = (r && r.por_franja) || null; if (!f) return null;
+  var ks = cual === 'AM' ? ['DÍA', 'DIA'] : ['HH', 'NOCHE', 'TRASNOCHE'], v = 0, hay = false;
+  Object.keys(f).forEach(function (k) { if (ks.indexOf(String(k).toUpperCase()) >= 0) { v += +(f[k] && f[k].venta) || 0; hay = true; } });
+  return hay ? v : null;
+}
+function obPct(a, b) { return (a != null && b) ? Math.round(100 * (a - b) / b) : null; }
+function obSegno(p) { return p == null ? 'sin dato' : (p > 0 ? '+' : '') + p + '%'; }
+function obGarzones() {
+  var r = OB.r || {}, pm = r.por_mesero || {}, out = {}, k;
+  Object.keys(pm).forEach(function (n) { if (!String(n).trim()) return; out[n.toLowerCase()] = { n: n, cobrado: +pm[n].cobrado || 0, nc: +pm[n].n_cobros || 0, sala: 0 }; });
+  ((VISTA.mod && VISTA.mod.gente) || []).forEach(function (g) {
+    k = g.n.toLowerCase(); var o = out[k] || (out[k] = { n: g.n, cobrado: 0, nc: 0, sala: 0 });
+    g.mesas.forEach(function (x) { if (x.st !== 'libre' && x.st !== 'pagado') o.sala += x.tot || 0; });
+  });
+  return Object.keys(out).map(function (k2) { return out[k2]; }).sort(function (a, b) { return (b.cobrado + b.sala) - (a.cobrado + a.sala); });
+}
+function objetivo() {
+  if (!SES.pin && !DEMO) return '<div class="vetro"><p>Para el objetivo entra con tu PIN desde tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
+  obLeggi();
+  var HZ = [['turno', 'Turno'], ['dia', 'Día'], ['semana', 'Semana'], ['mes', 'Mes']];
+  var h = '<div class="fila2" style="margin-bottom:8px">' + HZ.map(function (x) { return '<button class="azione' + (OB.hz === x[0] ? ' oro' : '') + '" style="margin-top:0;min-height:40px" data-a="obHz" data-k="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
+  var r = OB.r;
+  if (!r) return h + '<div class="vetro' + (OB.err ? ' alerta' : '') + '"><p>' + (OB.err ? '⚠️ No pude leer la venta (' + esc(OB.err) + ').' : 'Leyendo la venta…') + '</p></div>';
+  var ora = prAhora(), venta = +r.venta || 0, ctas = +r.cuentas || 0, tick = ctas ? venta / ctas : 0, am = obFranja(r, 'AM'), pmv = obFranja(r, 'PM');
+  var enSala = obGarzones().reduce(function (a, g) { return a + g.sala; }, 0);
+  if (OB.hz === 'semana' || OB.hz === 'mes') {
+    return h + '<div class="vetro"><h4>' + (OB.hz === 'semana' ? 'Semana' : 'Mes') + '</h4><p style="font-size:14px;color:var(--ink)">Sin meta y sin acumulado todavía.</p>' +
+      '<p>La meta de la ' + (OB.hz === 'semana' ? 'semana' : 'del mes') + ', lo vendido en el período y «si sigues así» los da 📊 STATISTICS. Hoy aquí: Día y Turno.</p></div>';
+  }
+  /* la frase in cima: senza meta, la venta (non un verdetto) */
+  h += '<div class="vetro lume"><p style="font-size:14px;color:var(--ink);font-weight:700">' + (OB.hz === 'turno' ? 'El turno ' + (ora < '17:30' ? 'AM' : 'PM') + ' lleva ' + pesos(ora < '17:30' ? (am || 0) : (pmv || 0)) : 'Hoy llevas ' + pesos(venta)) + ' cobrado' + (enSala ? ' y ' + pesos(enSala) + ' en sala' : '') + '.</p>' +
+    '<p>Sin meta todavía: «vas sobre / bajo lo esperado» y «si sigues así» aparecen cuando 📊 STATISTICS dé la meta.</p></div>';
+  /* la tabella AM · PM · Total, le stesse cinque righe in ogni orizzonte */
+  var cols = OB.hz === 'turno' ? [[ora < '17:30' ? 'AM · ahora' : 'PM · ahora', ora < '17:30' ? am : pmv]] : [['AM', am], ['PM', pmv], ['Total', venta]];
+  var riga = function (lbl, f) { return '<div class="riga" style="padding:6px 0"><span>' + lbl + '</span>' + cols.map(function (c) { return '<span class="st num" style="min-width:74px;margin-left:' + (c === cols[0] ? 'auto' : '0') + '">' + f(c) + '</span>'; }).join('') + '</div>'; };
+  h += '<div class="vetro"><div class="riga" style="padding:4px 0;font-weight:700"><span>Hoy · ' + ora + '</span>' + cols.map(function (c) { return '<span class="st" style="min-width:74px;margin-left:' + (c === cols[0] ? 'auto' : '0') + '">' + c[0] + '</span>'; }).join('') + '</div>' +
+    riga('Meta', function () { return 'sin dato'; }) +
+    riga('Vendido', function (c) { return c[1] == null ? 'sin dato' : pesos(c[1]); }) +
+    riga('Esperado ahora', function () { return 'sin dato'; }) +
+    riga('Si sigues así', function () { return 'sin dato'; }) +
+    riga('de la meta', function () { return 'sin dato'; }) + '</div>';
+  if (OB.hz === 'dia') h += '<div class="vetro"><div class="riga" style="padding:5px 0"><span>Ayer (día completo)</span><span class="st num">' + (OB.ayer ? pesos(OB.ayer.venta) : 'sin dato') + '</span></div>' +
+    '<div class="riga" style="padding:5px 0"><span>Mismo día sem. pasada</span><span class="st num">' + (OB.sem ? pesos(OB.sem.venta) : 'sin dato') + '</span></div>' +
+    '<div class="riga" style="padding:5px 0"><span>Cuentas · ticket · propina</span><span class="st num">' + ctas + ' · ' + (tick ? pesos(tick) : '—') + ' · ' + pesos(+r.propinas || 0) + '</span></div>' +
+    '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Ayer y la semana pasada son del día entero: no se comparan con hoy a medias. «A esta hora» llega con 📊 STATISTICS.</p></div>';
+  /* i garzones: venta (cobrado + en sala) · ticket · % sull'atteso (sin dato); il tocco apre il sussurro */
+  var gs = obGarzones();
+  h += '<div class="vetro"><h4>Garzones · hoy</h4>' + (gs.length ? gs.map(function (g) {
+    var ab = OB.sel === g.n;
+    return '<div class="riga" data-a="obSel" data-k="' + esc(g.n) + '" style="cursor:pointer;flex-wrap:wrap"><span><b>' + esc(g.n) + '</b><small>cobrado ' + pesos(g.cobrado) + (g.sala ? ' · <span style="color:var(--oro)">' + pesos(g.sala) + ' en sala</span>' : '') + ' · ticket ' + (g.nc ? pesos(g.cobrado / g.nc) : '—') + '</small></span>' +
+      '<span class="st num"><b style="color:var(--ink)">' + pesos(g.cobrado + g.sala) + '</b><br>sin meta</span>' +
+      (ab ? '<p style="flex-basis:100%;margin-top:6px;font-size:12px">Qué enseñarle: sin dato todavía. El consejo lo escribe 📊 STATISTICS.</p>' : '') + '</div>';
+  }).join('') : '<p class="vacio">Todavía no hay ventas hoy.</p>') + '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Toca un garzón: qué enseñarle.</p></div>';
+  return h;
+}
+var OB_DEMO = { ok: true, venta: 598400, cuentas: 41, propinas: 52300, dia_operativo: '2026-11-20',
+  por_mesero: { Gabriel: { cobrado: 241000, n_cobros: 16 }, Diego: { cobrado: 198400, n_cobros: 14 }, Anthony: { cobrado: 159000, n_cobros: 11 } },
+  por_franja: { 'DÍA': { venta: 598400, ctas: 41 } } };
 function enApp() { return '<div class="vetro"><p>Esta parte sigue en tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>'; }
-var VIS = [servicio, local, caja, promos, enApp];
+var VIS = [servicio, local, caja, promos, objetivo];
 function jlPinta(forza) {
   jlEdad();
   var b = document.getElementById('body'), y = b.scrollTop;
@@ -1496,7 +1583,7 @@ function jlVolver() {
 /* [v0.5.0 · v50 della demo] si riparte sempre da Servicio, a schermata pulita: quando l'app torna visibile e dopo IDLE_MIN minuti senza tocchi
    (3, deciso da Alberto il 15-nov). Un ritiro in corso NON si perde: CJ.ret resta, e il pallino su Caja lo dice. */
 var IDLE_MIN = 3, _idleT = null;
-function aServicio() { VISTA.filtro = false; PET.msg = ''; LV.pl = null; LV.ed = null; LV.arm = null; LV.abrir = false; LV.msg = ''; CJ.cie = null; ir(0); }
+function aServicio() { VISTA.filtro = false; PET.msg = ''; LV.pl = null; LV.ed = null; LV.arm = null; LV.abrir = false; LV.msg = ''; CJ.cie = null; OB.sel = null; ir(0); }
 function despierta() { clearTimeout(_idleT); _idleT = setTimeout(aServicio, IDLE_MIN * 60000); }
 ['pointerdown', 'keydown'].forEach(function (e) { document.addEventListener(e, despierta, true); });
 document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') aServicio(); });
@@ -1553,6 +1640,8 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   else if (a === 'cjVolver') { CJ.ret = null; CJ.msg = ''; jlPinta(true); }
   else if (a === 'cjSob') { cjSobEnviar(); }
   else if (a === 'cjListo') { CJ.sob = null; CJ.msg = ''; CJ.fin = false; cjGiro(); jlPinta(true); }
+  else if (a === 'obHz') { OB.hz = el.getAttribute('data-k'); OB.sel = null; jlPinta(true); document.getElementById('body').scrollTop = 0; }
+  else if (a === 'obSel') { var on2 = el.getAttribute('data-k'); OB.sel = OB.sel === on2 ? null : on2; jlPinta(true); }
   else if (a === 'prConf') { PR.conf = el.getAttribute('data-k'); PR.msg = ''; jlPinta(true); }
   else if (a === 'prNo') { PR.conf = null; jlPinta(true); }
   else if (a === 'prSi') { if (PR.conf) prSet(PR.conf); }
