@@ -167,7 +167,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.7</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.8</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -182,7 +182,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.7';
+var JL_VER = 'jl v0.6.8';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -1192,12 +1192,12 @@ function cjRiga(a, b) { return '<div class="riga"><span>' + a + '</span><span cl
 /* [v0.6.6 · D-554, Alberto 20-nov] «si conta in base a ciò che c'è da ritirare · si inserisce il monto · se c'è di più passa · se c'è di meno gli si dà
    un'opportunità per ricontare · se non quadra nuovamente passa con differenza, che dobbiamo far vedere nel controllo della caja».
    Tolleranza $2.000, come il cierre del mesero e la v50 («cuadra ±$2.000»). Via la frase «quedan a nombre de X y pasan a mañana» (🎛). */
-var CJ_TOL = 2000;
+var CJ_TOL = 0;   // [v0.6.8 · T1, 🎛 «NIENTE ✓ CUADRA SE NON CUADRA»] D-554 non ha tolleranza: un peso in meno = il riconto. Se Alberto la vuole, la dice lui con la cifra.
 function cjFalta(ret) {
   var v = cjNum(ret && ret.monto); if (!(v > 0)) return '';
   var att = +ret.att.en_mano || 0;
-  if (v > att) return '<span style="color:var(--ok)">Sobran ' + pesos(v - att) + ' · pasa</span>';
-  if (att - v <= CJ_TOL) return '<span style="color:var(--ok)">✓ Cuadra</span>';
+  if (v > att) return '<span style="color:var(--oro)">Sobran ' + pesos(v - att) + ' · pasa</span>';
+  if (v === att) return '<span style="color:var(--ok)">✓ Cuadra</span>';
   return '<span style="color:var(--urge)">Faltan ' + pesos(att - v) + '</span>';
 }
 function cjFine() { CJ.enviando = false; try { var ae = document.activeElement; if (ae && ae.blur) ae.blur(); } catch (e) {} jlPinta(); }
@@ -1216,7 +1216,7 @@ async function cjRetEnviar() {
     if (r && r.ok && r.accodato) {
       delete CJ.dubbio[ret.mesero];
       if (!r.ya) { CJ.esiti = CJ.esiti || {}; CJ.esiti[ret.mesero] = { monto: monto, att: att }; }   // [v0.6.3 · C2] l'esito resta nella lista del giro
-      cjAvviso(r.ya ? '✓ Este retiro ya estaba registrado — no se cuenta dos veces.' : '✓ Retiro de ' + pesos(monto) + ' a ' + ret.mesero + (att - monto > CJ_TOL ? ' · con diferencia: faltan ' + pesos(att - monto) + ' (la ve el control de caja)' : '') + ' · ahora confirma él en su teléfono');
+      cjAvviso(r.ya ? '✓ Este retiro ya estaba registrado — no se cuenta dos veces.' : '✓ Retiro de ' + pesos(monto) + ' a ' + ret.mesero + (att - monto > CJ_TOL ? ' · con diferencia: faltan ' + pesos(att - monto) + ' (la ve el control de caja)' : monto > att ? ' · con diferencia: sobran ' + pesos(monto - att) + ' (la ve el control de caja)' : '') + ' · ahora confirma él en su teléfono');
       CJ.ret = null; cjGiro();
     } else if (r && r.error === 'rifiutato' && r.motivo === 'sopra_esperado') {
       if (r.en_mano != null) ret.att = Object.assign({}, ret.att, { en_mano: +r.en_mano || 0 });
@@ -1293,7 +1293,8 @@ function cjEnRetiro() { var a = CJ.st && CJ.st.aviso && CJ.st.aviso.abierto; ret
 function cjListaRet() { return ((CJ.st && CJ.st.meseros) || []).filter(function (m) { return (+m.en_mano || 0) > 0; }); }
 function cjApri(m) { CJ.ret = { mesero: m.mesero, att: m, uid: CJ.dubbio[m.mesero] || cjUid('CJ-RIT'), monto: '', conf: 0, confOk: 0 }; }
 /* [v0.6.3 · C2 · C1 di 🎨] chi ha già consegnato resta nella lista col suo esito («✓ cuadra» · «faltan $X»), e il titolo conta l'avanzamento */
-function cjEsitoTxt(e) { var d = (+e.att || 0) - (+e.monto || 0); return d > 2000 ? '<span class="st num" style="color:var(--urge)">faltan ' + pesos(d) + '</span>' : '<span class="st" style="color:var(--ok)">✓ cuadra</span>'; }
+function cjEsitoTxt(e) { var d = (+e.att || 0) - (+e.monto || 0);   // [v0.6.8 · T1 · T2] «✓ cuadra» solo al peso; il di più si dice «sobran»
+  return d > 0 ? '<span class="st num" style="color:var(--urge)">faltan ' + pesos(d) + '</span>' : d < 0 ? '<span class="st num" style="color:var(--oro)">sobran ' + pesos(-d) + '</span>' : '<span class="st" style="color:var(--ok)">✓ cuadra</span>'; }
 function cjFatti(lista) { var pend = {}; lista.forEach(function (m) { pend[String(m.mesero).toLowerCase()] = 1; }); return Object.keys(CJ.esiti || {}).filter(function (k) { return !pend[k.toLowerCase()]; }); }
 function cjEsitiLista() { var f = cjFatti([]); return f.length ? '<div class="vetro" style="padding:4px 13px">' + f.map(function (k) { return '<div class="riga" style="min-height:40px"><span><b>' + esc(k) + '</b></span>' + cjEsitoTxt(CJ.esiti[k]) + '</div>'; }).join('') + '</div>' : ''; }
 function cjRetiro(st) {
@@ -1575,7 +1576,7 @@ function objetivo() {
     : OB.hz === 'turno' ? (vT == null ? 'El turno ' + turnoOra + ': venta sin dato.' : 'El turno ' + turnoOra + ' lleva ' + pesos(vT) + ' cobrado' + (enSala ? ' y ' + pesos(enSala) + ' en sala' : '') + '.')
     : 'Hoy llevas ' + pesos(venta) + ' cobrado' + (enSala ? ' y ' + pesos(enSala) + ' en sala' : '') + '.';
   var h = '<div class="vetro">' + sel + '<p style="font-size:12px;color:var(--ink2);margin-bottom:4px">' + esc(cab) + '</p>' +
-    '<p style="font-size:14px;color:var(--ink);font-weight:700">' + frase + '</p><p style="margin-bottom:6px">Sin meta todavía: «vas sobre / bajo lo esperado» y «si sigues así» aparecen cuando 📊 STATISTICS dé la meta.</p>';
+    '<p style="font-size:14px;color:var(--ink);font-weight:700">' + frase + '</p><p style="margin-bottom:6px">Sin meta todavía: «vas sobre / bajo lo esperado» y «si sigues así» aparecen cuando 🧠 FARO dé la meta.</p>';
   /* la tabella AM · PM · Total, le stesse cinque righe in ogni orizzonte (O4: anche Semana e Mes) */
   var cols = OB.hz === 'turno' ? [[turnoOra + ' · ahora', vT, true]]
     : periodo ? [['AM', null], ['PM', null], ['Total', null]]
@@ -1591,8 +1592,8 @@ function objetivo() {
   if (OB.hz === 'dia') h += '<div class="riga" style="padding:5px 0"><span>Ayer (día completo)</span><span class="st num">' + (OB.ayer ? pesos(OB.ayer.venta) : 'sin dato') + '</span></div>' +
     '<div class="riga" style="padding:5px 0"><span>Mismo día sem. pasada</span><span class="st num">' + (OB.sem ? pesos(OB.sem.venta) : 'sin dato') + '</span></div>' +
     '<div class="riga" style="padding:5px 0"><span>Cuentas · ticket · propina</span><span class="st num">' + ctas + ' · ' + (tick ? pesos(tick) : '—') + ' · ' + pesos(+r.propinas || 0) + '</span></div>' +
-    '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Ayer y la semana pasada son del día entero: no se comparan con hoy a medias. «A esta hora» llega con 📊 STATISTICS.</p>';
-  if (periodo) h += '<p style="font-size:11px;color:var(--ink3);margin-top:4px">La meta y lo vendido del período los da 📊 STATISTICS.</p>';
+    '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Ayer y la semana pasada son del día entero: no se comparan con hoy a medias. «A esta hora» llega con 🧠 FARO.</p>';
+  if (periodo) h += '<p style="font-size:11px;color:var(--ink3);margin-top:4px">La meta y lo vendido del período los da 🧠 FARO.</p>';
   h += '</div>';
   /* i garzones per turno (O3): quelli del turno dopo con «entra HH:MM» */
   var gruppi = { AM: [], PM: [] };
@@ -1606,7 +1607,7 @@ function objetivo() {
       else if (dopo && !g.cobrado && !g.sala) { sub = 'entra ' + (g.ini || '—') + ' · meta del turno sin dato'; val = '—'; }
       else { sub = 'cobrado ' + pesos(g.cobrado) + (g.sala ? ' · <span style="color:var(--oro)">' + pesos(g.sala) + ' en sala</span>' : '') + ' · ticket ' + (g.nc ? pesos(g.cobrado / g.nc) : '—'); val = '<b style="color:var(--ink)">' + pesos(g.cobrado + g.sala) + '</b><br>sin dato'; }
       return '<div class="riga" data-a="obSel" data-k="' + esc(g.n) + '" style="cursor:pointer;flex-wrap:wrap"><span><b>' + esc(g.n) + '</b><small>' + sub + '</small></span><span class="st num">' + val + '</span>' +
-        (ab ? '<p style="flex-basis:100%;margin-top:6px;font-size:12px">Qué enseñarle: sin dato todavía. El consejo lo escribe 📊 STATISTICS.</p>' : '') + '</div>';
+        (ab ? '<p style="flex-basis:100%;margin-top:6px;font-size:12px">Qué enseñarle: sin dato todavía. El consejo lo escribe 🧠 FARO.</p>' : '') + '</div>';
     }).join('') : '<p class="vacio">Nadie en este turno.</p>');
   }).join('') : '<p class="vacio">Todavía no hay ventas hoy.</p>') + '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Toca un garzón: qué enseñarle.</p></div>';
   return h;
