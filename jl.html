@@ -165,7 +165,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.3</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.4</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -180,7 +180,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.3';
+var JL_VER = 'jl v0.6.4';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -899,7 +899,7 @@ async function tuGesto(g) {
   if (r.status === 404 || r.status === 403) return { spento: true };
   if (j && j.ok === false) { delete LV.uid[k]; return { ok: false, err: (j.error === 'entrada_en_franja_anterior' && j.mensaje) || TU_ERR_G[j.error] || (/^pin_jl_bloqueado/.test(String(j.error)) ? 'PIN bloqueado' + (+j.faltan_s ? ' · espera ' + Math.ceil(+j.faltan_s / 60) + ' min' : '') : j.error) || 'no' }; }
   if (!r.ok || !j || j.ok !== true) { LV.uid[k] = uid; return { dudoso: true }; }
-  delete LV.uid[k]; return { ok: true, sust: j.sustituye_franjas };
+  delete LV.uid[k]; return { ok: true, sust: j.sustituye_franjas, ya: !!(j.ya_visto || j.ya) };
 }
 /* una catena di gesti in ordine; si ferma al primo che non va, e dice a che punto */
 async function tuCatena(gs, okMsg) {
@@ -912,7 +912,9 @@ async function tuCatena(gs, okMsg) {
     if (r.spento) { esito = '⛔ El turno no está en el sistema nuevo para este local: hazlo desde tu app de siempre.'; break; }
     if (r.dudoso) { esito = '⏳ No sé si llegó' + (i ? ' (iba en el paso ' + (i + 1) + ' de ' + gs.length + ')' : '') + ': toca de nuevo, no se duplica.'; break; }
     if (!r.ok) { esito = '✋ ' + r.err + (i ? ' · se hizo ' + i + ' de ' + gs.length : ''); break; }
-    if (gs[i].sustituye_franjas && r.sust === 'aplicado') gs.forEach(function (x) { if (x._dopoSust) x._salta = true; });   // il bordo ha già tolto la franja vecchia
+    /* [v0.6.4 · Y di 🍳] dopo un timeout il ritocco torna lo stesso uid e il bordo risponde ya_visto SENZA sustituye_franjas: le franjas si mandano
+       solo con la leva accesa, quindi il primo giro le ha già tolte. Senza questo il quitar partiva lo stesso: un fatto doppio in hechos_turno. */
+    if (gs[i].sustituye_franjas && (r.sust === 'aplicado' || r.ya)) gs.forEach(function (x) { if (x._dopoSust) x._salta = true; });   // il bordo ha già tolto la franja vecchia
   }
   LV.vuelo = false; LV.msg = esito || ('✓ ' + okMsg);
   if (!esito) { LV.ed = null; }
@@ -921,7 +923,17 @@ async function tuCatena(gs, okMsg) {
 function tuFranja(e, s) { return e + '-' + s; }
 var TU_RE_F = /^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]|24):[0-5][0-9]$/;
 function tuRiga(plaza, f) { return ((TU.r && TU.r.asignaciones) || []).filter(function (a) { return a && a.plaza === plaza && String(a.franja || '') === f; })[0] || null; }
-function tuEntro(plaza, f) { var a = tuRiga(plaza, f); return !!(a && a.hora_entrada_iso); }
+/* [v0.6.4 · X di 🍳 «LA GUARDIA DELL'ENTRATA GUARDA LA RIGA SBAGLIATA»] l'entrata vive sulla chiave plaza|franja|PERSONA: il bordo dà una riga
+   per persona, e due garzones sulla stessa plaza e franja sono due righe. Si guarda la riga di QUELLA persona (il nome dentro `mesero`, diviso per
+   virgola: la riga del GAS con più nomi resta prudente, ferma tutti). Prima si guardava la prima riga della cella: Quitar/Mover Ana passava sulla riga
+   di Luis e cancellava l'entrata di Ana; e «Quitar Luis» veniva fermato dall'entrata di Ana. */
+function tuEntro(plaza, f, nombre) {
+  var k = String(nombre || '').trim().toLowerCase();
+  return ((TU.r && TU.r.asignaciones) || []).some(function (a) {
+    return a && a.plaza === plaza && String(a.franja || '') === f && a.hora_entrada_iso &&
+      String(a.mesero || '').split(',').some(function (x) { return x.trim().toLowerCase() === k; });
+  });
+}
 /* i quattro gesti della demo (v45-v46), con le regole di app_jl */
 function tuAgregar(plaza, nombre, e, s) {
   var p = staffPor(nombre); if (!p) { LV.msg = '✋ No encuentro a ' + nombre + ' en la lista del local.'; jlPinta(true); return; }
@@ -931,7 +943,7 @@ function tuAgregar(plaza, nombre, e, s) {
 function tuHorario(plaza, nombre, fOld, e, s) {
   var p = staffPor(nombre), f = tuFranja(e, s); if (!p) { LV.msg = '✋ No encuentro a ' + nombre + ' en la lista del local.'; jlPinta(true); return; }
   if (f === fOld) { LV.ed = null; jlPinta(true); return; }
-  if (tuEntro(plaza, fOld)) { LV.msg = '✋ ' + nombre + ' ya marcó su entrada en ' + plaza + ' ' + fOld + ': cambiarle la hora le borraría la entrada. No se cambió nada.'; LV.ed = null; jlPinta(true); return; }
+  if (tuEntro(plaza, fOld, nombre)) { LV.msg = '✋ ' + nombre + ' ya marcó su entrada en ' + plaza + ' ' + fOld + ': cambiarle la hora le borraría la entrada. No se cambió nada.'; LV.ed = null; jlPinta(true); return; }
   var sf = false; try { sf = salLocale('turno_sostituisce_franja_on') && QS.get('sustf') !== '0'; } catch (er) {}
   var a = { accion: 'asignar', plaza: plaza, franja: f, persona_id: p.persona_id, motivo: 'cambio de hora (JL)' };
   if (sf && TU_RE_F.test(fOld)) a.sustituye_franjas = [fOld];
@@ -939,12 +951,12 @@ function tuHorario(plaza, nombre, fOld, e, s) {
 }
 function tuMover(plaza, nombre, f, plazaNew) {
   var p = staffPor(nombre); if (!p) { LV.msg = '✋ No encuentro a ' + nombre + ' en la lista del local.'; jlPinta(true); return; }
-  if (tuEntro(plaza, f)) { LV.msg = '✋ ' + nombre + ' ya marcó su entrada en ' + plaza + ': moverlo le borraría la entrada. No se cambió nada.'; LV.ed = null; jlPinta(true); return; }
+  if (tuEntro(plaza, f, nombre)) { LV.msg = '✋ ' + nombre + ' ya marcó su entrada en ' + plaza + ': moverlo le borraría la entrada. No se cambió nada.'; LV.ed = null; jlPinta(true); return; }
   tuCatena([{ accion: 'asignar', plaza: plazaNew, franja: f, persona_id: p.persona_id, motivo: 'cambio de plaza (JL)' }, { accion: 'quitar', plaza: plaza, franja: f, persona_id: p.persona_id, motivo: 'cambio de plaza (JL)' }], nombre + ' pasa a ' + plazaNew);
 }
 function tuQuitar(plaza, nombre, f) {
   var p = staffPor(nombre); if (!p) { LV.msg = '✋ No encuentro a ' + nombre + ' en la lista del local.'; jlPinta(true); return; }
-  if (tuEntro(plaza, f)) { LV.msg = '✋ ' + nombre + ' ya marcó su entrada en ' + plaza + ': quitarlo le borraría la entrada. No se cambió nada.'; LV.ed = null; jlPinta(true); return; }
+  if (tuEntro(plaza, f, nombre)) { LV.msg = '✋ ' + nombre + ' ya marcó su entrada en ' + plaza + ': quitarlo le borraría la entrada. No se cambió nada.'; LV.ed = null; jlPinta(true); return; }
   tuCatena([{ accion: 'quitar', plaza: plaza, franja: f, persona_id: p.persona_id, motivo: 'quitar de la plaza (JL)' }], nombre + ' sale de ' + plaza);
 }
 function tuArmar() {
