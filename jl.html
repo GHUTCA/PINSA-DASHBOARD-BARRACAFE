@@ -100,6 +100,7 @@
   .pin input{width:100%;font-size:22px;letter-spacing:.3em;text-align:center;padding:10px;border-radius:14px;border:1px solid var(--filo);background:var(--vetro2);color:var(--ink);margin-top:8px}
   .pin .err{color:#f6b0a8;font-size:12px;margin-top:6px;min-height:1em}
   .ret-chiuso{padding:4px 13px;border-radius:14px}
+  .azione:disabled{opacity:.4;filter:grayscale(1);cursor:default}   /* [v0.6.3 · C3 di 🎨] un bottone spento deve sembrare spento */
   .gran{font-size:24px;font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
   /* ═══ [v0.5.0 · 🛎 SALA V35 · ordine di Alberto ven 20 «come la demo»] LA FORMA DELLA V50 (4_CANTIERE_SALA/MOCKUP_APP_JL_v50_15NOV2026.html,
      r.182-237): schede in basso, contenuto dal basso (il pollice), testata con «‹ Volver» a sinistra, 86 e campanello a destra SOLO in Servicio. ═══ */
@@ -164,7 +165,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.2</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.3</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -179,7 +180,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.2';
+var JL_VER = 'jl v0.6.3';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -1196,6 +1197,7 @@ async function cjRetEnviar() {
     var r = await cjPost(p);
     if (r && r.ok && r.accodato) {
       delete CJ.dubbio[ret.mesero];
+      if (!r.ya) { CJ.esiti = CJ.esiti || {}; CJ.esiti[ret.mesero] = { monto: monto, att: att }; }   // [v0.6.3 · C2] l'esito resta nella lista del giro
       cjAvviso(r.ya ? '✓ Este retiro ya estaba registrado — no se cuenta dos veces.' : '✓ Retiro de ' + pesos(monto) + ' a ' + ret.mesero + ' · ahora confirma él en su teléfono');
       CJ.ret = null; cjGiro();
     } else if (r && r.error === 'rifiutato' && r.motivo === 'sopra_esperado') {
@@ -1272,17 +1274,22 @@ function cjBanner() {
 function cjEnRetiro() { var a = CJ.st && CJ.st.aviso && CJ.st.aviso.abierto; return !!(a || CJ.fin); }
 function cjListaRet() { return ((CJ.st && CJ.st.meseros) || []).filter(function (m) { return (+m.en_mano || 0) > 0; }); }
 function cjApri(m) { CJ.ret = { mesero: m.mesero, att: m, uid: CJ.dubbio[m.mesero] || cjUid('CJ-RIT'), monto: '', conf: 0, confOk: 0 }; }
+/* [v0.6.3 · C2 · C1 di 🎨] chi ha già consegnato resta nella lista col suo esito («✓ cuadra» · «faltan $X»), e il titolo conta l'avanzamento */
+function cjEsitoTxt(e) { var d = (+e.att || 0) - (+e.monto || 0); return d > 2000 ? '<span class="st num" style="color:var(--urge)">faltan ' + pesos(d) + '</span>' : '<span class="st" style="color:var(--ok)">✓ cuadra</span>'; }
+function cjFatti(lista) { var pend = {}; lista.forEach(function (m) { pend[String(m.mesero).toLowerCase()] = 1; }); return Object.keys(CJ.esiti || {}).filter(function (k) { return !pend[k.toLowerCase()]; }); }
+function cjEsitiLista() { var f = cjFatti([]); return f.length ? '<div class="vetro" style="padding:4px 13px">' + f.map(function (k) { return '<div class="riga" style="min-height:40px"><span><b>' + esc(k) + '</b></span>' + cjEsitoTxt(CJ.esiti[k]) + '</div>'; }).join('') + '</div>' : ''; }
 function cjRetiro(st) {
   var lista = cjListaRet(), a = st.aviso && st.aviso.abierto ? st.aviso : null;
   var left = a && a.scade_ts ? a.scade_ts - Date.now() : null, venc = left != null && left <= 0;
   if (!CJ.ret && lista.length) cjApri(lista[0]);
   if (CJ.ret && !lista.some(function (m) { return m.mesero === CJ.ret.mesero; }) && !CJ.ret.conf) { CJ.ret = null; if (lista.length) cjApri(lista[0]); }
-  var tit = CJ.fin && !a ? 'Retiro final · ' + lista.length + (lista.length === 1 ? ' garzón' : ' garzones') : 'Retiro de sala · ' + lista.length + (lista.length === 1 ? ' garzón' : ' garzones');
+  var fatti = cjFatti(lista), tot = lista.length + fatti.length;
+  var tit = (CJ.fin && !a ? 'Retiro final · ' : 'Retiro de sala · ') + fatti.length + ' de ' + tot;
   var sub = venc ? 'Queda anotado para el informe de la mañana. Todavía puedes hacerlo.' : CJ.fin && !a ? 'Fin del turno · un solo sobre para todos.' : 'Dinero en sala ' + pesos(st.totale_en_mano || 0) + ' · uno por uno.';
   var reloj = a ? (left > 0 ? '<div class="gran num" id="cjReloj" style="font-size:24px;font-weight:700">' + cjMmSs(left) + '</div>'
     : '<div class="num" style="color:var(--urge);font-size:16px;font-weight:700;text-align:right">Vencido<br>hace ' + Math.ceil(-left / 60000) + '′</div>') : '';
   var h = lista.length ? '<div class="vetro alerta" style="display:flex;align-items:center;gap:10px' + (venc ? ';border-color:var(--urge);background:rgba(240,121,110,.2)' : '') + '"><span style="flex:1"><h4 style="margin:0">' + tit + '</h4><p>' + sub + '</p></span>' + reloj + '</div>' : '';
-  if (lista.length > 1) h += '<div class="vetro" style="padding:4px 13px">' + lista.map(function (m) {
+  if (tot > 1) h += '<div class="vetro" style="padding:4px 13px">' + fatti.map(function (k) { return '<div class="riga" style="min-height:40px"><span><b>' + esc(k) + '</b></span>' + cjEsitoTxt(CJ.esiti[k]) + '</div>'; }).join('') + lista.map(function (m) {
     var sel = CJ.ret && CJ.ret.mesero === m.mesero;
     return '<div class="riga" data-a="cjAbre" data-k="' + esc(m.mesero) + '" style="cursor:pointer;min-height:40px' + (sel ? ';color:var(--oro)' : '') + '"><span><b>' + (sel ? '› ' : '') + esc(m.mesero) + '</b></span><span class="st num">' + pesos(m.en_mano) + '</span></div>';
   }).join('') + '</div>';
@@ -1334,7 +1341,7 @@ function cjCierreDet(n) {
     h += '<div class="vetro alerta"><h4>No se puede cerrar todavía</h4><p>' + ms.length + (ms.length === 1 ? ' cuenta abierta' : ' cuentas abiertas') + '. Una a la vez.</p>' +
       ms.map(function (x) {
         return '<div style="border-top:1px solid var(--filo);margin-top:8px;padding-top:6px"><div class="riga" style="border:0;padding:2px 0"><span><b>Mesa ' + esc(x.m) + '</b><small>' + esc(ESTADO[x.st]) + '</small></span><span class="st num">' + pesos(x.tot) + '</span></div>' +
-          '<div class="fila2"><button class="azione oro" style="margin-top:4px" disabled>Pasar al PM</button><button class="azione" style="margin-top:4px" disabled>Cerrar sin pago</button></div></div>';
+          '<div class="fila2"><button class="azione" style="margin-top:4px" disabled>Pasar al PM</button><button class="azione" style="margin-top:4px" disabled>Cerrar sin pago</button></div></div>';
       }).join('') + '<p style="font-size:11px;color:var(--ink3);margin-top:6px">«Pasar al PM» y «Cerrar sin pago» todavía no están en el sistema nuevo: por ahora en tu app de siempre, o cóbrala desde la mesa.</p></div>';
   }
   h += '<div class="vetro"><h4>Propinas del turno</h4>' +
@@ -1358,7 +1365,7 @@ function caja() {
   if (cjEnRetiro() && cjListaRet().length) return h + cjRetiro(st);
   if (CJ.fin && !cjListaRet().length) CJ.fin = false;
   var sob = cjSobre(st);
-  return h + (sob || cjCierres());
+  return h + (sob ? cjEsitiLista() + sob : cjCierres());
 }
 /* la caja finta della demo [v0.6.0]: risponde come il bordo (estado · ritiro · sobre) e RICORDA i ritiri, così il giro si vede da capo a fondo:
    l'avviso aperto → i ritiri uno per uno → il sobre → la lista dei cierres. Numeri d'esempio. */
@@ -1639,7 +1646,7 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   else if (a === 'cjCorr') { if (CJ.ret) { CJ.ret.conf = 0; CJ.ret.monto = ''; jlPinta(true); } }
   else if (a === 'cjVolver') { CJ.ret = null; CJ.msg = ''; jlPinta(true); }
   else if (a === 'cjSob') { cjSobEnviar(); }
-  else if (a === 'cjListo') { CJ.sob = null; CJ.msg = ''; CJ.fin = false; cjGiro(); jlPinta(true); }
+  else if (a === 'cjListo') { CJ.sob = null; CJ.msg = ''; CJ.fin = false; CJ.esiti = {}; cjGiro(); jlPinta(true); }
   else if (a === 'obHz') { OB.hz = el.getAttribute('data-k'); OB.sel = null; jlPinta(true); document.getElementById('body').scrollTop = 0; }
   else if (a === 'obSel') { var on2 = el.getAttribute('data-k'); OB.sel = OB.sel === on2 ? null : on2; jlPinta(true); }
   else if (a === 'prConf') { PR.conf = el.getAttribute('data-k'); PR.msg = ''; jlPinta(true); }
