@@ -162,7 +162,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.5.1</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.5.2</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -177,7 +177,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.5.1';
+var JL_VER = 'jl v0.5.2';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -421,6 +421,7 @@ async function jlEntraLeva() {
     var j = await fetch(CFG.BORDE + '/salud', { cache: 'no-store', signal: ctrl.signal }).then(function (r) { return r.json(); });
     var x = null; (function c(o) { if (!o || typeof o !== 'object' || x != null) return; if (o.jl_entra_on != null) { x = o.jl_entra_on; return; } for (var q in o) c(o[q]); })(j);
     ENTRA.gate = jlLevaLocali(x);
+    SAL = (j && j.flags && typeof j.flags === 'object') ? j.flags : {};   // [v0.5.2] le leve del turno, dalla stessa lettura
   } catch (e) { /* /salud muto: gate resta null ⇒ si mostra la strada dell'app, che funziona sempre */ }
   clearTimeout(to);
 }
@@ -483,6 +484,7 @@ async function jl86Leggi() {
 
 /* ═══ LA LETTURA ═══ */
 async function jlLeggi() {
+  tuGiro();   // [v0.5.2] il turno serve anche a Servicio (lo stato d'entrata del garzón): una lettura ogni 30 s al più
   jl86Leggi().then(function () { if (VISTA.tab === 1 || VISTA.tab === 0) jlPinta(); });
   if (DEMO) { VISTA.mod = jlModelo(JL_DEMO, Date.now()); VISTA.ts = Date.now(); VISTA.err = ''; petDa(JL_DEMO); jlPinta(); return; }
   if (!SES.pin && !SES.codigo) { VISTA.err = 'sin_pin'; jlPinta(); return; }   // [v0.2.0] senza la sessione di app_jl: il PIN qui
@@ -535,9 +537,30 @@ function tarjeta(x, gi, pm) {
 }
 /* [v0.5.0 · S7 di 🎨] lo stato del turno: la demo dice «en turno» o «llegó tarde · N′». L'ora d'entrata del garzón il vetro non ce l'ha
    (`turno_presenza_pg_on` "0", ⚙️ + 🚚 ven 27): si dice, non si scrive «en turno» per tutti. */
+/* [v0.5.2 · S7] l'ora d'entrata c'è: /turno/admin porta `hora_entrada_iso` per ogni assegnazione (la marca il clock-in del garzón).
+   «en turno» se è entrato · «llegó tarde · N′» se è entrato più di JL_TARDE_MIN dopo l'inizio della sua franja (10′, provvisorio come nella demo) ·
+   «sin entrada» se ha la plaza e non ha marcato · «entrada sin dato» se il turno non è ancora letto o il nome non è fra le assegnazioni. */
+var JL_TARDE_MIN = 10;
+function tuEstadoDe(nombre) {
+  if (!TU.r || !Array.isArray(TU.r.asignaciones)) return null;
+  var k = String(nombre || '').trim().toLowerCase(), mie = TU.r.asignaciones.filter(function (a) { return a && a.mesero && String(a.mesero).split(',').some(function (x) { return x.trim().toLowerCase() === k; }); });
+  if (!mie.length) return null;
+  var ent = mie.filter(function (a) { return a.hora_entrada_iso; });
+  if (!ent.length) return { estado: 'sin entrada' };
+  var tarde = 0;
+  ent.forEach(function (a) {
+    var hi = String(a.franja || '').split('-')[0], m = /^(\d{2}):(\d{2})$/.exec(hi), te = Date.parse(a.hora_entrada_iso); if (!m || !(te > 0)) return;
+    var d = new Date(te), ini = new Date(d); ini.setHours(+m[1], +m[2], 0, 0);
+    var min = Math.round((te - ini.getTime()) / 60000); if (min > 12 * 60) min -= 24 * 60;   // una franja che passa la mezzanotte
+    if (min > tarde) tarde = min;
+  });
+  return tarde > JL_TARDE_MIN ? { estado: 'tarde', min: tarde } : { estado: 'en turno' };
+}
 function turnoChip(g) {
-  if (g.turno && g.turno.estado === 'tarde') return '<span class="tc oro">llegó tarde · ' + g.turno.min + '′</span>';
-  if (g.turno && g.turno.estado === 'en turno') return '<span class="tc ok">en turno</span>';
+  var t = g.turno || tuEstadoDe(g.n);
+  if (t && t.estado === 'tarde') return '<span class="tc oro">llegó tarde · ' + t.min + '′</span>';
+  if (t && t.estado === 'en turno') return '<span class="tc ok">en turno</span>';
+  if (t && t.estado === 'sin entrada') return '<span class="tc bad">sin entrada</span>';
   return '<span class="tc">entrada sin dato</span>';
 }
 function garzon(g, gi, pm) {
@@ -693,7 +716,7 @@ function petDemo(b) { if (b.verbo === 'leer') return { ok: true, borde: true, st
    A sinistra «‹ Volver» quando c'è un dettaglio. A destra, SOLO in Servicio: il badge 86 (🚫 0 grigio, rosso col numero; tocca → Local) e il
    campanello 🔔 col numero delle solicitudes pendientes (il numero solo se ce n'è almeno una; tocca → la lista). La venta in testata non c'è più.
    Sotto: la striscia «Retiro vencido» su OGNI schermata (v36) e, solo in Servicio, il riassunto «N esperan tu acción». */
-function jlDettaglioAperto() { return VISTA.tab === 0 && !!(VISTA.aperta || PET.aperta || VISTA.sol || VISTA.plz); }
+function jlDettaglioAperto() { return (VISTA.tab === 0 && !!(VISTA.aperta || PET.aperta || VISTA.sol || VISTA.plz)) || (VISTA.tab === 1 && !!(LV.pl || LV.arm)); }
 function vencStrip() {
   var a = CJ.st && CJ.st.aviso; if (!(a && a.abierto && a.scade_ts)) return '';
   var dt = Date.now() - a.scade_ts; if (dt <= 0) return '';
@@ -809,24 +832,235 @@ function tuPlazas() {
   });
 }
 function tuSinG() { return tuPlazas().filter(function (x) { return !x.chi.length; }).length; }
+/* ═══ [v0.5.2 · LOCAL, SECONDA METÀ] I GESTI DEL TURNO — portati da app_jl v1.44.x (`_asignarPorBordo`, `_aperturaPorBordo`, `cjSaldosGate`), non riscritti ═══
+   · La persona si manda per `persona_id`, dalla lista `GET /turno/estado/<LOC_PG>` (staff con `en_plaza`). Un nome che non si risolve: non si scrive.
+   · Ogni gesto è `POST /turno/gesto/<LOC_PG>` {accion:'asignar'|'quitar', plaza, franja 'HH:MM-HH:MM', persona_id, uid_gesto, pin_jl, motivo?}.
+     `uid_gesto` lo conia il TELEFONO e il ritocco dopo un esito incerto è lo STESSO gesto (il bordo non scrive due volte).
+   · CAMBIARE L'ORA = asignar la franja nuova POI quitar la vecchia (mai un istante senza plaza). Con `turno_sostituisce_franja_on` il bordo toglie la vecchia
+     nello stesso asignar (`sustituye_franjas`, risposta `'aplicado'`) e il quitar non parte. Freno per telefono `?sustf=0`, come app_jl.
+   · L'ENTRATA vive sulla chiave plaza|franja|persona: cambiare l'ora, muovere o togliere chi ha già marcato l'entrata la cancellerebbe ⇒ NON si scrive e si dice.
+   · ABRIR TURNO: `POST /turno/apertura/<LOC_PG>` {accion:'abrir', uid_gesto, nombre, pin_jl}; idempotente per giorno (`ya_abierto` torna lo stesso codice).
+     Prima, se `saldo_sin_padron_on`, le mesas a saldo bloccano (aprire il turno chiude il precedente). Su timeout NON si sa se ha aperto: si dice e si riprova.
+   · NIENTE GOOGLE: dove app_jl ripiegava sul GAS (leva spenta, 404), qui si dice e si rimanda all'app di sempre. */
+var SAL = {};   // i flag di /salud (letti da jlEntraLeva all'ingresso)
+function salFlag(k) { return String(SAL[k] == null ? '' : SAL[k]); }
+function salLocale(k) { var s = salFlag(k).trim().toUpperCase(); if (s === '' || s === '0' || s === 'FALSE') return false; if (s === '1' || s === 'TRUE') return true; var loc = String(LOC_PG[CFG.LOCAL] || CFG.LOCAL).toUpperCase(); return s.split(',').map(function (x) { return x.trim(); }).indexOf(loc) >= 0; }
+var STAFF = { list: null, err: '', ts: 0 };
+async function staffCarga() {
+  if (DEMO) { STAFF.list = ['Gabriel', 'Diego', 'Anthony', 'Isa', 'Nacho', 'Carla'].map(function (n, i) { return { nombre: n, persona_id: 'demo-' + i }; }); return; }
+  if (!SES.pin || (STAFF.list && Date.now() - STAFF.ts < 600000) || Date.now() - STAFF.ts < 15000) return;
+  STAFF.ts = Date.now();
+  var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000);
+  try {
+    var r = await fetch(CFG.BORDE + '/turno/estado/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, cache: 'no-store', signal: ctrl.signal });
+    var j = await r.json().catch(function () { return null; }); clearTimeout(to);
+    if (j && j.ok && Array.isArray(j.staff) && j.staff.length) { STAFF.list = j.staff.filter(function (s) { return s && s.en_plaza && s.persona_id; }).map(function (s) { return { nombre: String(s.nombre), persona_id: s.persona_id }; }); STAFF.err = ''; }
+    else STAFF.err = (j && j.error) || ('HTTP ' + r.status);
+  } catch (e) { clearTimeout(to); STAFF.err = 'sin conexión'; }
+  if (VISTA.tab === 1) jlPinta();
+}
+function staffPor(n) { var k = String(n || '').trim().toLowerCase(); return (STAFF.list || []).filter(function (s) { return String(s.nombre).trim().toLowerCase() === k; })[0] || null; }
+var TU_ERR_G = { pin_jl_invalido: 'PIN incorrecto', pin_jl_requerido: 'Falta el PIN', persona_fuera_del_locale: 'Esa persona no está asignada a este local', sustituida_fuera_del_locale: 'La persona que sale no está asignada a este local',
+  motivo_requerido: 'Falta el motivo del cambio', franja_invalida: 'La franja no tiene el formato HH:MM-HH:MM', plaza_missing: 'Falta la plaza', persona_id_invalido: 'Persona no válida' };
+var LV = { pl: null, ed: null, arm: null, abrir: false, msg: '', vuelo: false, uid: {} };
+/* un gesto al bordo. Esito: {ok} · {ok:false, err} · {dudoso} (rete o timeout: NON si sa se ha scritto) · {spento} (leva spenta: l'app di sempre) */
+async function tuGesto(g) {
+  var k = [g.accion, g.plaza, g.franja, g.persona_id].join('|'), uid = LV.uid[k] || ('g' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12));
+  var b = Object.assign({ uid_gesto: uid, pin_jl: SES.pin }, g);
+  if (DEMO) return tuDemo(b);
+  var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 8000), r, j;
+  try {
+    r = await fetch(CFG.BORDE + '/turno/gesto/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T }, body: JSON.stringify(b), signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(to); j = await r.json().catch(function () { return null; });
+  } catch (e) { clearTimeout(to); LV.uid[k] = uid; return { dudoso: true }; }
+  if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') return { spento: true };
+  if (r.status === 404 || r.status === 403) return { spento: true };
+  if (j && j.ok === false) { delete LV.uid[k]; return { ok: false, err: (j.error === 'entrada_en_franja_anterior' && j.mensaje) || TU_ERR_G[j.error] || (/^pin_jl_bloqueado/.test(String(j.error)) ? 'PIN bloqueado' + (+j.faltan_s ? ' · espera ' + Math.ceil(+j.faltan_s / 60) + ' min' : '') : j.error) || 'no' }; }
+  if (!r.ok || !j || j.ok !== true) { LV.uid[k] = uid; return { dudoso: true }; }
+  delete LV.uid[k]; return { ok: true, sust: j.sustituye_franjas };
+}
+/* una catena di gesti in ordine; si ferma al primo che non va, e dice a che punto */
+async function tuCatena(gs, okMsg) {
+  if (LV.vuelo) return; LV.vuelo = true; LV.msg = ''; jlPinta(true);
+  var esito = '';
+  for (var i = 0; i < gs.length; i++) {
+    if (gs[i]._salta) continue;
+    var g = Object.assign({}, gs[i]); delete g._dopoSust; delete g._salta;
+    var r = await tuGesto(g);
+    if (r.spento) { esito = '⛔ El turno no está en el sistema nuevo para este local: hazlo desde tu app de siempre.'; break; }
+    if (r.dudoso) { esito = '⏳ No sé si llegó' + (i ? ' (iba en el paso ' + (i + 1) + ' de ' + gs.length + ')' : '') + ': toca de nuevo, no se duplica.'; break; }
+    if (!r.ok) { esito = '✋ ' + r.err + (i ? ' · se hizo ' + i + ' de ' + gs.length : ''); break; }
+    if (gs[i].sustituye_franjas && r.sust === 'aplicado') gs.forEach(function (x) { if (x._dopoSust) x._salta = true; });   // il bordo ha già tolto la franja vecchia
+  }
+  LV.vuelo = false; LV.msg = esito || ('✓ ' + okMsg);
+  if (!esito) { LV.ed = null; }
+  TU.ts = 0; await tuGiro(); jlPinta(true);
+}
+function tuFranja(e, s) { return e + '-' + s; }
+var TU_RE_F = /^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]|24):[0-5][0-9]$/;
+function tuRiga(plaza, f) { return ((TU.r && TU.r.asignaciones) || []).filter(function (a) { return a && a.plaza === plaza && String(a.franja || '') === f; })[0] || null; }
+function tuEntro(plaza, f) { var a = tuRiga(plaza, f); return !!(a && a.hora_entrada_iso); }
+/* i quattro gesti della demo (v45-v46), con le regole di app_jl */
+function tuAgregar(plaza, nombre, e, s) {
+  var p = staffPor(nombre); if (!p) { LV.msg = '✋ No encuentro a ' + nombre + ' en la lista del local.'; jlPinta(true); return; }
+  var f = tuFranja(e, s); if (!TU_RE_F.test(f)) { LV.msg = '✋ El horario no es válido.'; jlPinta(true); return; }
+  tuCatena([{ accion: 'asignar', plaza: plaza, franja: f, persona_id: p.persona_id }], nombre + ' en ' + plaza + ' · ' + f.replace('-', '–'));
+}
+function tuHorario(plaza, nombre, fOld, e, s) {
+  var p = staffPor(nombre), f = tuFranja(e, s); if (!p) { LV.msg = '✋ No encuentro a ' + nombre + ' en la lista del local.'; jlPinta(true); return; }
+  if (f === fOld) { LV.ed = null; jlPinta(true); return; }
+  if (tuEntro(plaza, fOld)) { LV.msg = '✋ ' + nombre + ' ya marcó su entrada en ' + plaza + ' ' + fOld + ': cambiarle la hora le borraría la entrada. No se cambió nada.'; LV.ed = null; jlPinta(true); return; }
+  var sf = false; try { sf = salLocale('turno_sostituisce_franja_on') && QS.get('sustf') !== '0'; } catch (er) {}
+  var a = { accion: 'asignar', plaza: plaza, franja: f, persona_id: p.persona_id, motivo: 'cambio de hora (JL)' };
+  if (sf && TU_RE_F.test(fOld)) a.sustituye_franjas = [fOld];
+  tuCatena([a, { accion: 'quitar', plaza: plaza, franja: fOld, persona_id: p.persona_id, motivo: 'cambio de hora (JL)', _dopoSust: true }], nombre + ' · ' + f.replace('-', '–'));
+}
+function tuMover(plaza, nombre, f, plazaNew) {
+  var p = staffPor(nombre); if (!p) { LV.msg = '✋ No encuentro a ' + nombre + ' en la lista del local.'; jlPinta(true); return; }
+  if (tuEntro(plaza, f)) { LV.msg = '✋ ' + nombre + ' ya marcó su entrada en ' + plaza + ': moverlo le borraría la entrada. No se cambió nada.'; LV.ed = null; jlPinta(true); return; }
+  tuCatena([{ accion: 'asignar', plaza: plazaNew, franja: f, persona_id: p.persona_id, motivo: 'cambio de plaza (JL)' }, { accion: 'quitar', plaza: plaza, franja: f, persona_id: p.persona_id, motivo: 'cambio de plaza (JL)' }], nombre + ' pasa a ' + plazaNew);
+}
+function tuQuitar(plaza, nombre, f) {
+  var p = staffPor(nombre); if (!p) { LV.msg = '✋ No encuentro a ' + nombre + ' en la lista del local.'; jlPinta(true); return; }
+  if (tuEntro(plaza, f)) { LV.msg = '✋ ' + nombre + ' ya marcó su entrada en ' + plaza + ': quitarlo le borraría la entrada. No se cambió nada.'; LV.ed = null; jlPinta(true); return; }
+  tuCatena([{ accion: 'quitar', plaza: plaza, franja: f, persona_id: p.persona_id, motivo: 'quitar de la plaza (JL)' }], nombre + ' sale de ' + plaza);
+}
+function tuArmar() {
+  var A = LV.arm, p = staffPor(A.g); if (!p || !A.ps.length) return;
+  var f = tuFranja(A.e, A.s), ya = tuPlazas();
+  var gs = A.ps.filter(function (pl) { var x = ya.filter(function (y) { return y.p === pl; })[0]; return !(x && x.chi.some(function (c) { return c.n.toLowerCase() === A.g.toLowerCase() && c.f === f; })); })
+    .map(function (pl) { return { accion: 'asignar', plaza: pl, franja: f, persona_id: p.persona_id }; });
+  var g0 = A.g;
+  if (!gs.length) { tuArmarSig(); return; }
+  tuCatena(gs, g0 + ' · ' + A.ps.join(', ') + ' · ' + f.replace('-', '–')).then(function () { if (/^✓/.test(LV.msg)) { tuArmarSig(); jlPinta(true); } });
+}
+function tuArmarSig() {   // il prossimo: il primo garzón ancora senza plaza (v46)
+  var con = {}; tuPlazas().forEach(function (x) { x.chi.forEach(function (c) { con[c.n.toLowerCase()] = 1; }); });
+  var sig = (STAFF.list || []).map(function (s) { return s.nombre; }).filter(function (n) { return !con[n.toLowerCase()]; })[0] || null;
+  LV.arm = { g: sig, ps: [], e: LV.arm ? LV.arm.e : '10:00', s: LV.arm ? LV.arm.s : '18:30' };
+}
+async function tuAbrir() {
+  if (LV.vuelo) return; LV.vuelo = true; LV.msg = ''; jlPinta(true);
+  if (salFlag('saldo_sin_padron_on') === '1' && !DEMO) {   // [AUT-0666] aprire il turno nuovo CHIUDE il precedente: non con un saldo senza dueño
+    try {
+      var c0 = new AbortController(), t0 = setTimeout(function () { c0.abort(); }, 5000);
+      var r0 = await fetch(CFG.BORDE + '/saldi/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, cache: 'no-store', signal: c0.signal });
+      var j0 = await r0.json().catch(function () { return null; }); clearTimeout(t0);
+      if (j0 && j0.ok && Array.isArray(j0.mesas) && j0.mesas.length) { LV.vuelo = false; LV.abrir = false; LV.msg = '✋ Hay ' + j0.mesas.length + (j0.mesas.length === 1 ? ' mesa a saldo' : ' mesas a saldo') + ': el turno no se cierra con un resto sin dueño. Míralas en tu app de siempre («Caja»).'; jlPinta(true); return; }
+    } catch (e0) {}
+  }
+  var k = 'abrir', uid = LV.uid[k] || ('g' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12)), j = null, r = null;
+  if (DEMO) { TU_DEMO.turno = { codigo: '5193', desde_iso: '2026-11-20T08:00:00' }; j = { ok: true, codigo: '5193' }; r = { ok: true, status: 200 }; }
+  else {
+    var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 8000);
+    try {
+      r = await fetch(CFG.BORDE + '/turno/apertura/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T },
+        body: JSON.stringify({ accion: 'abrir', uid_gesto: uid, nombre: SES.user || 'JL', pin_jl: SES.pin }), signal: ctrl.signal, cache: 'no-store' });
+      clearTimeout(to); j = await r.json().catch(function () { return null; });
+    } catch (e) { clearTimeout(to); r = null; }
+  }
+  LV.vuelo = false;
+  if (!r) { LV.uid[k] = uid; LV.msg = '⏳ El sistema está lento: puede que el turno SÍ se haya abierto. Toca «Abrir turno» otra vez: si ya estaba, te muestra el mismo código.'; }
+  else if (r.status === 404 || r.status === 403 || (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento')) { LV.msg = '⛔ La apertura no está en el sistema nuevo para este local: ábrelo desde tu app de siempre.'; LV.abrir = false; }
+  else if (j && j.ok === false && j.error) { delete LV.uid[k]; LV.msg = '✋ ' + (/^pin(_jl)?_bloqueado/.test(String(j.error)) ? 'Demasiados intentos con el PIN, espera ' + Math.ceil((+j.faltan_s || 60) / 60) + ' min' : (TU_ERR_G[j.error] || j.error)); LV.abrir = false; }
+  else if (!r.ok || !j || j.ok !== true || !j.codigo) { LV.uid[k] = uid; LV.msg = '⏳ El sistema está lento: puede que el turno SÍ se haya abierto. Toca «Abrir turno» otra vez.'; }
+  else { delete LV.uid[k]; LV.abrir = false; LV.msg = '✓ Turno abierto · código ' + j.codigo + (j.ya_abierto ? ' (ya estaba' + (j.abierto_por ? ' · abierto por ' + j.abierto_por : '') + ')' : ''); try { sessionStorage.setItem('jl_codigo', String(j.codigo)); SES.codigo = String(j.codigo); } catch (e2) {} }
+  TU.ts = 0; await tuGiro(); jlPinta(true);
+}
+/* le ore della demo: 06:00 → 04:00 a passi di 30′, la Salida solo dopo l'Entrada; le franjas di sempre come scorciatoie */
+var FRANJAS = ['10:00-18:30', '12:00-18:30', '18:30-03:00', '19:00-03:00', '19:30-03:00'];
+var HORAS = (function () { var o = []; for (var i = 0; i <= 44; i++) { var t = (6 * 60 + i * 30) % 1440; o.push(String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0')); } return o; })();
+var ENT_FIN = 36;
+function horasHTML(E) {
+  var ei = HORAS.indexOf(E.e);
+  var optE = HORAS.slice(0, ENT_FIN).map(function (t) { return '<option' + (t === E.e ? ' selected' : '') + '>' + t + '</option>'; }).join('');
+  var optS = HORAS.slice(ei + 1).map(function (t) { return '<option' + (t === E.s ? ' selected' : '') + '>' + t + '</option>'; }).join('');
+  var SEL = 'width:100%;margin-top:4px;padding:10px;font-size:15px;background:var(--vetro2);border:1px solid var(--filo);border-radius:12px;color:var(--ink)';
+  return '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px">' + FRANJAS.map(function (f) {
+      var on = f === E.e + '-' + E.s;
+      return '<button class="chip" style="margin:0;' + (on ? 'color:var(--oro);border-color:rgba(224,169,74,.5)' : '') + '" data-a="lvFr" data-k="' + f + '">' + f.replace('-', '–') + '</button>'; }).join('') + '</div>' +
+    '<div style="display:flex;gap:8px;margin-top:6px"><label style="flex:1;font-size:11px;color:var(--ink3)">Entrada<select id="lvE" style="' + SEL + '">' + optE + '</select></label>' +
+    '<label style="flex:1;font-size:11px;color:var(--ink3)">Salida<select id="lvS" style="' + SEL + '">' + optS + '</select></label></div>';
+}
+function lvMsg() { return LV.msg ? '<p style="color:' + (LV.msg.indexOf('✓') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin:4px 0 8px">' + esc(LV.msg) + '</p>' : ''; }
+function staffAviso() { return STAFF.list ? '' : '<p style="font-size:11.5px;color:var(--oro);margin-top:6px">' + (STAFF.err ? '⚠️ No pude traer la lista de garzones (' + esc(STAFF.err) + '): reintento solo.' : 'Cargando la lista de garzones…') + '</p>'; }
+function armarCard() {
+  var A = LV.arm, pls = tuPlazas(), sin = pls.filter(function (x) { return !x.chi.length; }).length;
+  var con = {}; pls.forEach(function (x) { x.chi.forEach(function (c) { (con[c.n.toLowerCase()] = con[c.n.toLowerCase()] || []).push(x.p); }); });
+  var h = '<div class="vetro"><h4>Armar el turno <span class="pill ' + (sin ? 'bad' : 'ok') + '">' + (pls.length - sin) + ' de ' + pls.length + ' plazas</span></h4>' + lvMsg() + staffAviso();
+  h += '<p style="margin-bottom:2px"><b style="color:var(--ink)">1 · ¿Quién?</b></p><div class="fila2" style="flex-wrap:wrap">' + (STAFF.list || []).map(function (s) {
+    var sue = con[s.nombre.toLowerCase()] || [], on = A.g === s.nombre;
+    return '<button class="azione' + (on ? ' oro' : '') + '" style="flex:1 0 30%;margin-top:6px;padding:8px 4px" data-a="armG" data-k="' + esc(s.nombre) + '">' + esc(s.nombre) +
+      '<small style="display:block;font-size:10.5px;font-weight:500;' + (sue.length ? 'color:' + (on ? 'inherit' : 'var(--ok)') : 'opacity:.6') + '">' + (sue.length ? '✓ ' + esc(sue.join(', ')) : 'sin plaza') + '</small></button>'; }).join('') + '</div>';
+  if (A.g) {
+    h += '<p style="margin:10px 0 2px"><b style="color:var(--ink)">2 · ¿Qué plazas tiene ' + esc(A.g) + '?</b> <span style="font-size:11px">una o más</span></p><div class="fila2" style="flex-wrap:wrap">' +
+      pls.map(function (x) { var on = A.ps.indexOf(x.p) >= 0, ya = x.chi.map(function (c) { return c.n; }).filter(function (n) { return n !== A.g; });
+        return '<button class="azione' + (on ? ' oro' : '') + '" style="flex:1 0 45%;margin-top:6px;padding:8px 4px" data-a="armP" data-k="' + esc(x.p) + '">' + (on ? '✓ ' : '') + esc(x.p) +
+          '<small style="display:block;font-size:10.5px;font-weight:500;opacity:.8">' + (ya.length ? 'con ' + esc(ya.join(', ')) : 'libre') + '</small></button>'; }).join('') + '</div>';
+    h += '<p style="margin:10px 0 0"><b style="color:var(--ink)">3 · Horario</b></p>' + horasHTML(A);
+    h += '<div class="fila2"><button class="azione" data-a="armFin">Listo</button><button class="azione oro" data-a="armOk"' + (A.ps.length && !LV.vuelo ? '' : ' disabled') + '>' + (LV.vuelo ? '…' : 'Guardar y seguir') + '</button></div>';
+  } else h += '<button class="azione" data-a="armFin">Listo</button>';
+  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:6px">Queda firmado a tu nombre. Para corregir: toca la plaza en la lista.</p></div>';
+}
+function plazaEditor() {
+  var x = tuPlazas().filter(function (y) { return y.p === LV.pl; })[0]; if (!x) { LV.pl = null; return turnoCard(); }
+  var E = LV.ed, h = '<div class="vetro' + (x.chi.length ? '' : ' alerta') + '"><h4>' + esc(x.p) + ' <span class="pill no">mesas ' + esc(x.mesas || '—') + '</span></h4>' + lvMsg() + staffAviso();
+  if (!x.chi.length && !E) h += '<p style="color:var(--urge);font-weight:700">Sin garzón. No puede quedar así.</p>';
+  h += x.chi.map(function (c, i) {
+    var sel = E && E.i === i;
+    var r = '<div style="border-top:1px solid var(--filo);padding:8px 0 4px"><div style="display:flex;align-items:center;gap:8px"><b style="font-size:14px">' + esc(c.n) + '</b>' + (c.entro ? '<span class="tc ok">entró</span>' : '') +
+      '<span class="num" style="margin-left:auto;color:var(--ink2)">' + esc(c.f.replace('-', ' – ')) + '</span></div>';
+    if (sel && E.modo === 'hora') r += horasHTML(E) + '<div class="fila2"><button class="azione" data-a="lvNo">Cancelar</button><button class="azione oro" data-a="lvHoraOk"' + (LV.vuelo ? ' disabled' : '') + '>' + (LV.vuelo ? '…' : 'Guardar horario') + '</button></div>';
+    else if (sel && E.modo === 'mover') r += '<p style="margin-top:4px">¿A qué plaza?</p><div class="fila2" style="flex-wrap:wrap">' +
+        tuPlazas().filter(function (o) { return o.p !== x.p; }).map(function (o) { return '<button class="azione oro" style="flex:1 0 45%;margin-top:6px" data-a="lvMoverA" data-k="' + esc(o.p) + '"' + (LV.vuelo ? ' disabled' : '') + '>' + esc(o.p) + '</button>'; }).join('') +
+        '</div><button class="azione" data-a="lvNo">Cancelar</button>';
+    else if (sel && E.modo === 'quitar') r += '<p style="margin-top:4px;color:var(--ink)">¿Quitar a ' + esc(c.n) + ' de ' + esc(x.p) + '?</p>' + (x.chi.length === 1 ? '<p style="color:var(--urge)">La plaza queda sin garzón.</p>' : '') +
+        '<div class="fila2"><button class="azione" data-a="lvNo">No</button><button class="azione rojo" data-a="lvQuitarOk"' + (LV.vuelo ? ' disabled' : '') + '>' + (LV.vuelo ? '…' : 'Sí, quitar') + '</button></div>';
+    else if (!E) r += '<div class="fila2"><button class="azione" data-a="lvHora" data-i="' + i + '">Horario</button><button class="azione" data-a="lvMover" data-i="' + i + '">Mover</button><button class="azione rojo" data-a="lvQuitar" data-i="' + i + '">Quitar</button></div>';
+    return r + '</div>';
+  }).join('');
+  if (E && E.modo === 'nuevo') {
+    var ya = x.chi.map(function (c) { return c.n; }), con = {};
+    tuPlazas().forEach(function (y) { y.chi.forEach(function (c) { (con[c.n] = con[c.n] || []).push(y.p); }); });
+    h += '<div style="border-top:1px solid var(--filo);padding-top:8px;margin-top:4px"><b>' + (x.chi.length ? 'Agregar otro garzón' : 'Asignar garzón') + '</b><div class="fila2" style="flex-wrap:wrap">' +
+      (STAFF.list || []).filter(function (s) { return ya.indexOf(s.nombre) < 0; }).map(function (s) {
+        return '<button class="azione' + (E.g === s.nombre ? ' oro' : '') + '" style="flex:1 0 30%;margin-top:6px" data-a="lvNuevoG" data-k="' + esc(s.nombre) + '">' + esc(s.nombre) + (con[s.nombre] ? '<small style="display:block;font-size:10.5px;font-weight:500;opacity:.8">+ ' + esc(con[s.nombre].join(', ')) + '</small>' : '') + '</button>'; }).join('') + '</div>' +
+      horasHTML(E) + '<div class="fila2"><button class="azione" data-a="lvNo">Cancelar</button><button class="azione oro" data-a="lvNuevoOk"' + (E.g && !LV.vuelo ? '' : ' disabled') + '>' + (LV.vuelo ? '…' : 'Guardar') + '</button></div></div>';
+  } else if (!E) h += '<button class="azione oro" data-a="lvNuevo">＋ ' + (x.chi.length ? 'Agregar otro garzón a esta plaza' : 'Asignar garzón') + '</button>';
+  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:6px">Queda firmado a tu nombre.</p></div>';
+}
 function turnoCard() {
   if (!SES.pin && !DEMO) return '<div class="vetro"><h4>Turno</h4><p>Para ver el turno entra con tu PIN desde tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
   if (!TU.r) return '<div class="vetro' + (TU.err ? ' alerta' : '') + '"><h4>Turno</h4><p>' + (TU.err ? '⚠️ ' + esc(TU_ERR[TU.err] || ('No pude leer el turno (' + TU.err + ').')) : 'Leyendo el turno…') + '</p></div>';
+  staffCarga();
+  if (LV.arm) return armarCard();
+  if (LV.pl) return plazaEditor();
   var tt = TU.r.turno, pls = tuPlazas(), sin = pls.filter(function (x) { return !x.chi.length; }).length;
-  if (!tt && TU.r.fuente !== 'ponte') return '<div class="vetro alerta"><h4>Turno <span class="pill bad">cerrado</span></h4><p>El turno de hoy todavía no está abierto. Por ahora se abre desde tu app de siempre.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Abrir turno en mi app</a></div>';
+  /* [v0.5.2 · decisione del 🎛 V35] per lunedì il bottone «Abrir turno» (la demo dice «se abre solo a las 08:00»: lo costruisce ⚙️ ARQ, mer 25) */
+  if (!tt && TU.r.fuente !== 'ponte') return '<div class="vetro alerta"><h4>Turno <span class="pill bad">cerrado</span></h4>' + lvMsg() +
+    (LV.abrir ? '<p style="color:var(--ink);font-weight:700">¿Abrir el turno de hoy?</p><p>Al abrir, el sistema da el código del día. Ábrelo 5 min antes de que llegue la gente.</p><div class="fila2"><button class="azione" data-a="abrNo">No</button><button class="azione oro" data-a="abrOk"' + (LV.vuelo ? ' disabled' : '') + '>' + (LV.vuelo ? '…' : 'Sí, abrir') + '</button></div>'
+      : '<button class="azione oro" data-a="abr">Abrir turno</button>') + '</div>';
   var cod = (tt && tt.codigo) || SES.codigo || '';
   var h = '<div class="vetro' + (sin ? ' alerta' : '') + '"><h4>Turno <span class="pill ok">abierto' + (tt && tt.desde_iso ? ' ' + esc(String(tt.desde_iso).slice(11, 16)) : '') + '</span>' +
-    '<span class="pill ' + (sin ? 'bad' : 'ok') + '">' + (pls.length - sin) + ' de ' + pls.length + ' plazas</span></h4>';
+    '<span class="pill ' + (sin ? 'bad' : 'ok') + '">' + (pls.length - sin) + ' de ' + pls.length + ' plazas</span></h4>' + lvMsg();
   h += '<div style="display:flex;align-items:baseline;gap:10px;margin:0 0 2px"><span style="font-size:12px;color:var(--ink2)">Código de hoy</span><b class="num" style="font-size:26px;letter-spacing:.14em">' + (cod ? esc(cod) : '<span style="font-size:13px;letter-spacing:0">sin dato</span>') + '</b></div>';
   if (sin) h += '<p style="color:var(--urge);font-weight:700;margin-bottom:4px">' + (sin === pls.length ? 'Ninguna plaza tiene garzón todavía.' : sin === 1 ? 'Falta 1 plaza sin garzón.' : 'Faltan ' + sin + ' plazas sin garzón.') + ' No puede quedar así.</p>' +
-    '<a class="azione oro" style="margin:4px 0 6px" href="' + esc(jlAppUrl()) + '">' + (sin === pls.length ? 'Armar el turno' : 'Asignar las plazas que faltan') + ' · en tu app</a>';
+    '<button class="azione oro" style="margin:4px 0 6px" data-a="arm">' + (sin === pls.length ? 'Armar el turno' : 'Asignar las plazas que faltan') + '</button>';
   h += pls.map(function (x) {
-    return '<div class="riga" style="min-height:44px;align-items:flex-start"><span><b>' + esc(x.p) + '</b><small>mesas ' + esc(x.mesas || '—') + '</small></span>' +
+    return '<div class="riga" data-a="lvPl" data-k="' + esc(x.p) + '" style="cursor:pointer;min-height:44px;align-items:flex-start"><span><b>' + esc(x.p) + '</b><small>mesas ' + esc(x.mesas || '—') + '</small></span>' +
       '<span style="margin-left:auto;text-align:right;font-size:12px">' + (x.chi.length
         ? x.chi.map(function (y) { return '<span style="display:block;color:var(--ink2)"><b style="color:var(--ink)">' + esc(y.n) + '</b> ' + esc(y.f.replace('-', '–')) + '</span>'; }).join('')
-        : '<span style="color:var(--urge);font-weight:700">sin garzón</span>') + '</span></div>';
+        : '<span style="color:var(--urge);font-weight:700">sin garzón · asignar</span>') + '</span><span style="color:var(--ink3);margin-left:6px">›</span></div>';
   }).join('');
-  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Para cambiar una plaza: por ahora en tu app de siempre. Aquí llega en el próximo paso.</p></div>';
+  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Toca una plaza para cambiarla.</p></div>';
+}
+/* la demo: un bordo finto che risponde come /turno/gesto e muove le righe di TU_DEMO */
+function tuDemo(b) {
+  var as = TU_DEMO.asignaciones, n = ((STAFF.list || []).filter(function (s) { return s.persona_id === b.persona_id; })[0] || {}).nombre;
+  if (b.accion === 'asignar') { if (!as.some(function (a) { return a.plaza === b.plaza && a.franja === b.franja && a.mesero === n; })) as.push({ plaza: b.plaza, franja: b.franja, mesero: n });
+    if (b.sustituye_franjas) { TU_DEMO.asignaciones = as.filter(function (a) { return !(a.plaza === b.plaza && a.mesero === n && b.sustituye_franjas.indexOf(a.franja) >= 0); }); return { ok: true, sust: 'aplicado' }; } }
+  if (b.accion === 'quitar') TU_DEMO.asignaciones = as.filter(function (a) { return !(a.plaza === b.plaza && a.franja === b.franja && a.mesero === n); });
+  return { ok: true };
 }
 /* L'86 (v42 della demo): cerca → «86 hoy» → conferma «¿Sacar X del menú?» → «volvió». Il gesto è `POST /admin86/<local>` (`admin86_pg_write_on` 1),
    la stessa forma di app_jl `adminToggle86Via` ({action:'adminToggle86', pin, prod_id, value, uid}, text/plain, token in header), una chiave
@@ -879,7 +1113,7 @@ function card86() {
   return h + '<p style="font-size:11px;color:var(--ink3);margin-top:6px">Vuelve solo en cada cambio de turno: si sigue agotado, el JL que entra lo vuelve a poner. Para sacarlo por más tiempo: desde el admin.</p></div>';
 }
 /* v43 della demo: Local = Turno + 86. L'86, il gesto più frequente in servizio, in fondo vicino al pollice. */
-function local() { tuGiro(); return turnoCard() + card86(); }
+function local() { tuGiro(); return (LV.pl || LV.arm) ? turnoCard() : turnoCard() + card86(); }   // v45: con una plaza aperta (o armando) si vede solo lei
 /* ═══ [v0.3.0 · FASE 2 · LA CAJA MINIMA — solo vetro, ordine di Alberto mer 18 «fai programmare app JL appena possibile»] ═══
    Gli STESSI verbi e gli STESSI payload che `app_jl.html` v1.44.x manda oggi (`cajaPost1`, r.663-954), nessuna rotta nuova:
    `POST /caja/<local>?t=` text/plain · `estado` · `ritiro` CONTATO (`monto`, `esperado_ora`, `uid_gesto`, e `confirmo_sobre_esperado:1` dopo il «Sí»)
@@ -1043,6 +1277,7 @@ function ir(i) {
 }
 /* «‹ Volver»: chiude il dettaglio più in alto (la solicitud → la mesa → le plazas → la lista delle solicitudes) */
 function jlVolver() {
+  if (VISTA.tab === 1) { if (LV.ed) LV.ed = null; else { LV.pl = null; LV.arm = null; } LV.msg = ''; jlPinta(true); document.getElementById('body').scrollTop = 0; return; }
   if (PET.aperta) { PET.aperta = null; PET.msg = ''; }
   else if (VISTA.aperta) VISTA.aperta = null;
   else if (VISTA.plz) VISTA.plz = null;
@@ -1052,7 +1287,7 @@ function jlVolver() {
 /* [v0.5.0 · v50 della demo] si riparte sempre da Servicio, a schermata pulita: quando l'app torna visibile e dopo IDLE_MIN minuti senza tocchi
    (3, deciso da Alberto il 15-nov). Un ritiro in corso NON si perde: CJ.ret resta, e il pallino su Caja lo dice. */
 var IDLE_MIN = 3, _idleT = null;
-function aServicio() { VISTA.filtro = false; PET.msg = ''; ir(0); }
+function aServicio() { VISTA.filtro = false; PET.msg = ''; LV.pl = null; LV.ed = null; LV.arm = null; LV.abrir = false; LV.msg = ''; ir(0); }
 function despierta() { clearTimeout(_idleT); _idleT = setTimeout(aServicio, IDLE_MIN * 60000); }
 ['pointerdown', 'keydown'].forEach(function (e) { document.addEventListener(e, despierta, true); });
 document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') aServicio(); });
@@ -1076,6 +1311,25 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   else if (a === 'n86') { C86 = null; jlPinta(true); }
   else if (a === 's86') { if (C86) gesto86(C86, true); }
   else if (a === 'v86') { gesto86(el.getAttribute('data-k'), false); }
+  /* [v0.5.2] i gesti del turno in Local */
+  else if (a === 'lvPl') { LV.pl = el.getAttribute('data-k'); LV.ed = null; LV.msg = ''; jlPinta(true); document.getElementById('body').scrollTop = 0; }
+  else if (a === 'lvHora' || a === 'lvMover' || a === 'lvQuitar') { var xi = +el.getAttribute('data-i'), xp = tuPlazas().filter(function (y) { return y.p === LV.pl; })[0], c = xp && xp.chi[xi]; if (c) { var hh = c.f.split('-'); LV.ed = { modo: a === 'lvHora' ? 'hora' : a === 'lvMover' ? 'mover' : 'quitar', i: xi, n: c.n, f: c.f, e: hh[0] || '10:00', s: hh[1] || '18:30' }; LV.msg = ''; jlPinta(true); } }
+  else if (a === 'lvNo') { LV.ed = null; jlPinta(true); }
+  else if (a === 'lvHoraOk') { if (LV.ed) tuHorario(LV.pl, LV.ed.n, LV.ed.f, LV.ed.e, LV.ed.s); }
+  else if (a === 'lvMoverA') { if (LV.ed) tuMover(LV.pl, LV.ed.n, LV.ed.f, el.getAttribute('data-k')); }
+  else if (a === 'lvQuitarOk') { if (LV.ed) tuQuitar(LV.pl, LV.ed.n, LV.ed.f); }
+  else if (a === 'lvNuevo') { LV.ed = { modo: 'nuevo', g: null, e: '10:00', s: '18:30' }; LV.msg = ''; jlPinta(true); }
+  else if (a === 'lvNuevoG') { if (LV.ed) { LV.ed.g = el.getAttribute('data-k'); jlPinta(true); } }
+  else if (a === 'lvNuevoOk') { if (LV.ed && LV.ed.g) tuAgregar(LV.pl, LV.ed.g, LV.ed.e, LV.ed.s); }
+  else if (a === 'lvFr') { var E = LV.arm || LV.ed; if (E) { var fr = el.getAttribute('data-k').split('-'); E.e = fr[0]; E.s = fr[1]; jlPinta(true); } }
+  else if (a === 'arm') { LV.arm = { g: null, ps: [], e: '10:00', s: '18:30' }; tuArmarSig(); LV.msg = ''; jlPinta(true); document.getElementById('body').scrollTop = 0; }
+  else if (a === 'armG') { LV.arm.g = el.getAttribute('data-k'); LV.arm.ps = []; jlPinta(true); }
+  else if (a === 'armP') { var pp2 = el.getAttribute('data-k'), ix = LV.arm.ps.indexOf(pp2); if (ix >= 0) LV.arm.ps.splice(ix, 1); else LV.arm.ps.push(pp2); jlPinta(true); }
+  else if (a === 'armFin') { LV.arm = null; LV.msg = ''; jlPinta(true); }
+  else if (a === 'armOk') { tuArmar(); }
+  else if (a === 'abr') { LV.abrir = true; LV.msg = ''; jlPinta(true); }
+  else if (a === 'abrNo') { LV.abrir = false; jlPinta(true); }
+  else if (a === 'abrOk') { tuAbrir(); }
   else if (a === 'entra') { var pi = document.getElementById('jlPin'); jlEntra(pi ? pi.value : ''); }
   else if (a === 'tab86') { ir(1); }
   else if (a === 'petApri') { petApri(el.getAttribute('data-k')); jlPinta(true); document.getElementById('body').scrollTop = 0; }
@@ -1091,6 +1345,12 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   else if (a === 'cjSob') { cjSobEnviar(); }
   else if (a === 'cjListo') { CJ.sob = null; CJ.msg = ''; cjGiro(); jlPinta(true); }
   else if (a === 'sala') { try { if (SES.codigo) sessionStorage.setItem('jl_codigo', SES.codigo); if (SES.pin) sessionStorage.setItem('jl_pin', SES.pin); if (SES.user) sessionStorage.setItem('jl_user', SES.user); } catch (e) {} }   // la nueva legge la sessione: si scrive prima di uscire
+});
+/* [v0.5.2] Entrada / Salida: la Salida resta sempre dopo l'Entrada (come la demo e app_jl) */
+document.getElementById('body').addEventListener('change', function (ev) {
+  var t2 = ev.target, E = LV.arm || LV.ed; if (!t2 || !E) return;
+  if (t2.id === 'lvE') { E.e = t2.value; if (HORAS.indexOf(E.s) <= HORAS.indexOf(E.e)) E.s = HORAS[HORAS.indexOf(E.e) + 1]; jlPinta(true); }
+  else if (t2.id === 'lvS') { E.s = t2.value; }
 });
 document.getElementById('body').addEventListener('keydown', function (ev) {
   if (ev.key === 'Enter' && ev.target && ev.target.id === 'jlPin') jlEntra(ev.target.value);
