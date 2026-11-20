@@ -167,7 +167,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.5</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.6</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -182,7 +182,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.5';
+var JL_VER = 'jl v0.6.6';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -1189,12 +1189,16 @@ function cjPallino() { jlPallini(); updateDock(); }   // [v0.5.0 · S9] il palli
 function cjMmSs(ms) { if (!(ms > 0)) return '00:00'; var t = Math.floor(ms / 1000); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); }
 function cjNum(v) { var n = parseInt(String(v == null ? '' : v).replace(/[^0-9]/g, ''), 10); return isFinite(n) ? n : NaN; }
 function cjRiga(a, b) { return '<div class="riga"><span>' + a + '</span><span class="st">' + b + '</span></div>'; }
+/* [v0.6.6 · D-554, Alberto 20-nov] «si conta in base a ciò che c'è da ritirare · si inserisce il monto · se c'è di più passa · se c'è di meno gli si dà
+   un'opportunità per ricontare · se non quadra nuovamente passa con differenza, che dobbiamo far vedere nel controllo della caja».
+   Tolleranza $2.000, come il cierre del mesero e la v50 («cuadra ±$2.000»). Via la frase «quedan a nombre de X y pasan a mañana» (🎛). */
+var CJ_TOL = 2000;
 function cjFalta(ret) {
   var v = cjNum(ret && ret.monto); if (!(v > 0)) return '';
   var att = +ret.att.en_mano || 0;
-  if (v === att) return '<span style="color:var(--ok)">✓ Cuadra</span>';
-  if (v < att) return '<span style="color:var(--oro)">Faltan ' + pesos(att - v) + ': quedan a nombre de ' + esc(ret.mesero) + ' y pasan a mañana</span>';
-  return '';
+  if (v > att) return '<span style="color:var(--ok)">Sobran ' + pesos(v - att) + ' · pasa</span>';
+  if (att - v <= CJ_TOL) return '<span style="color:var(--ok)">✓ Cuadra</span>';
+  return '<span style="color:var(--urge)">Faltan ' + pesos(att - v) + '</span>';
 }
 function cjFine() { CJ.enviando = false; try { var ae = document.activeElement; if (ae && ae.blur) ae.blur(); } catch (e) {} jlPinta(); }
 function cjAvviso(t) { CJ.msg = t; }
@@ -1203,20 +1207,20 @@ async function cjRetEnviar() {
   var ret = CJ.ret, monto = cjNum(ret.monto);
   if (!(monto > 0)) { cjAvviso('Escribe lo que contaste'); jlPinta(); return; }
   var att = +ret.att.en_mano || 0;
-  if (monto > att && ret.confOk !== monto) { ret.conf = monto; cjFine(); return; }   // sopra l'atteso: la domanda, per QUEL monto (AUT-0607)
+  if (att - monto > CJ_TOL && !ret.recontado) { ret.noCoincide = monto; cjFine(); return; }   // [D-554] di meno: UNA volta «Volver a contar», senza scrivere niente
   CJ.enviando = true; CJ.msg = ''; jlPinta();
   try {
     var p = { verbo: 'ritiro', pin_jl: SES.pin, mesero: ret.mesero, monto: monto, esperado_ora: att, uid_gesto: ret.uid };
-    if (ret.confOk === monto) p.confirmo_sobre_esperado = 1;
+    if (monto > att) p.confirmo_sobre_esperado = 1;   // [D-554] di più: passa, senza la domanda (il bordo vuole il flag, AUT-0607)
     var r = await cjPost(p);
     if (r && r.ok && r.accodato) {
       delete CJ.dubbio[ret.mesero];
       if (!r.ya) { CJ.esiti = CJ.esiti || {}; CJ.esiti[ret.mesero] = { monto: monto, att: att }; }   // [v0.6.3 · C2] l'esito resta nella lista del giro
-      cjAvviso(r.ya ? '✓ Este retiro ya estaba registrado — no se cuenta dos veces.' : '✓ Retiro de ' + pesos(monto) + ' a ' + ret.mesero + ' · ahora confirma él en su teléfono');
+      cjAvviso(r.ya ? '✓ Este retiro ya estaba registrado — no se cuenta dos veces.' : '✓ Retiro de ' + pesos(monto) + ' a ' + ret.mesero + (att - monto > CJ_TOL ? ' · con diferencia: faltan ' + pesos(att - monto) + ' (la ve el control de caja)' : '') + ' · ahora confirma él en su teléfono');
       CJ.ret = null; cjGiro();
     } else if (r && r.error === 'rifiutato' && r.motivo === 'sopra_esperado') {
       if (r.en_mano != null) ret.att = Object.assign({}, ret.att, { en_mano: +r.en_mano || 0 });
-      ret.conf = monto; ret.confOk = 0;
+      cjAvviso('✋ El sistema no aceptó más de lo esperado (' + pesos(+r.en_mano || 0) + '): mira el monto y toca Confirmar de nuevo.');   // [D-554] non dovrebbe succedere: il flag parte sempre
     } else if (r && r.error === 'rifiutato') { delete CJ.dubbio[ret.mesero]; cjAvviso('✋ ' + cjMotivo(r.motivo)); }
     else cjAvviso('✋ No se registró: ' + (CJ_ERR[r && r.error] || (r && (r.error || r.motivo)) || 'sin motivo'));
   } catch (e) {
@@ -1307,11 +1311,18 @@ function cjRetiro(st) {
     var sel = CJ.ret && CJ.ret.mesero === m.mesero;
     return '<div class="riga" data-a="cjAbre" data-k="' + esc(m.mesero) + '" style="cursor:pointer;min-height:40px' + (sel ? ';color:var(--oro)' : '') + '"><span><b>' + (sel ? '› ' : '') + esc(m.mesero) + '</b></span><span class="st num">' + pesos(m.en_mano) + '</span></div>';
   }).join('') + '</div>';
+  if (CJ.ret && CJ.ret.noCoincide) {   // [D-554] il primo conteggio è sotto: «No coincide» e UN solo «Volver a contar»
+    var at0 = +CJ.ret.att.en_mano || 0, nc = CJ.ret.noCoincide;
+    return h + '<div class="vetro alerta"><h4>' + esc(CJ.ret.mesero) + ' · No coincide</h4><div class="gran num" style="color:var(--urge)">Faltan ' + pesos(at0 - nc) + '</div>' +
+      '<p style="margin-top:4px">Debía entregar ' + pesos(at0) + ' · recibiste ' + pesos(nc) + '.</p><p>Cuenta de nuevo delante de ' + esc(CJ.ret.mesero) + '. Si vuelve a faltar, pasa con la diferencia y la ve el control de caja.</p>' +
+      '<button class="azione oro" data-a="cjRecontar">Volver a contar</button></div>';
+  }
   if (CJ.ret) {
     var at = CJ.ret.att, att = +at.en_mano || 0;
     h += '<div class="vetro"><h4 style="justify-content:space-between;margin-bottom:2px">Retira a ' + esc(CJ.ret.mesero) + '<span class="num" style="font-size:18px">' + pesos(att) + '</span></h4>' +
       '<p style="font-size:11.5px">Ventas en efectivo <b class="num" style="color:var(--ink)">' + pesos(at.ventas_efectivo) + '</b> · Propinas en efectivo <b class="num" style="color:var(--ink)">' + pesos(at.propina_efectivo) + '</b>' +
       (at.residuo ? ' · De ayer <b class="num" style="color:var(--ink)">' + pesos(at.residuo) + '</b>' : '') + (at.entregado ? ' · Ya entregó <b class="num" style="color:var(--ink)">−' + pesos(at.entregado) + '</b>' : '') + '</p>' +
+      (CJ.ret.recontado ? '<p style="font-size:12px;color:var(--oro);font-weight:700;margin-top:6px">Segundo conteo: si no coincide, pasa con la diferencia.</p>' : '') +
       '<div class="pin"><input id="cjMonto" type="text" inputmode="numeric" placeholder="$" autocomplete="off" value="' + esc(CJ.ret.monto || '') + '"></div>' +
       '<p id="cjFalta" class="sub" style="text-align:center;font-weight:700">' + cjFalta(CJ.ret) + '</p>' +
       (CJ.ret.conf ? '<div class="vetro alerta"><p style="font-size:15px;font-weight:800;color:var(--ink)">¿Retiras ' + pesos(CJ.ret.conf) + '? Debía entregar ' + pesos(att) + '</p><p>Es ' + pesos(CJ.ret.conf - att) + ' más de lo que tiene en la mano.</p>' +
@@ -1686,6 +1697,7 @@ document.querySelector('.app').addEventListener('click', function (ev) {
     if (m) { CJ.msg = ''; CJ.ret = { mesero: m.mesero, att: m, uid: CJ.dubbio[m.mesero] || cjUid('CJ-RIT'), monto: '', conf: 0, confOk: 0 }; jlPinta(); } }
   else if (a === 'cjRet') { if (CJ.ret) { var mi = document.getElementById('cjMonto'); if (mi) CJ.ret.monto = mi.value; } cjRetEnviar(); }
   else if (a === 'cjSi') { if (CJ.ret && CJ.ret.conf) { CJ.ret.confOk = CJ.ret.conf; CJ.ret.monto = String(CJ.ret.conf); cjRetEnviar(); } }
+  else if (a === 'cjRecontar') { if (CJ.ret) { CJ.ret.noCoincide = 0; CJ.ret.recontado = true; CJ.ret.monto = ''; CJ.msg = ''; jlPinta(true); } }
   else if (a === 'cjCorr') { if (CJ.ret) { CJ.ret.conf = 0; CJ.ret.monto = ''; jlPinta(true); } }
   else if (a === 'cjVolver') { CJ.ret = null; CJ.msg = ''; jlPinta(true); }
   else if (a === 'cjSob') { cjSobEnviar(); }
