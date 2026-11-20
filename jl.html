@@ -162,7 +162,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.5.0</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.5.1</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -177,7 +177,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.5.0';
+var JL_VER = 'jl v0.5.1';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -460,7 +460,7 @@ function pinHtml() {
 }
 /* [v0.2.0 · P5] l'86 e i nomi della carta: una lettura al minuto, a parte dal giro della sala */
 async function jl86Leggi() {
-  if (DEMO) { L86 = { ids: ['BKS-POS-003', 'BKS-COC-011'], apagado: false, err: '', ts: Date.now() }; CARTA.nom = { 'BKS-POS-003': 'Tiramisú', 'BKS-COC-011': 'Mojito Monster Mango' }; return; }
+  if (DEMO) { if (!L86.ts) { L86 = { ids: ['BKS-POS-003', 'BKS-COC-011'], apagado: false, err: '', ts: Date.now() }; CARTA.nom = { 'BKS-POS-003': 'Tiramisú', 'BKS-COC-011': 'Mojito Monster Mango', 'BKS-COC-020': 'Tabla Ganadera', 'BKS-PIS-001': 'Pisco sour', 'BKS-COC-030': 'Lomo Saltado', 'BKS-BAR-005': 'Schop LOA', 'BKS-BAR-012': 'Tropical Gin' }; CARTA.ts = Date.now(); } return; }   // [v0.5.1] la demo si inizializza una volta: i gesti dell'86 restano
   if (Date.now() - L86.ts < JL_86_MS) return;
   L86.ts = Date.now();
   try {
@@ -470,7 +470,8 @@ async function jl86Leggi() {
     if (j && j.ok) { L86.ids = Array.isArray(j.ids) ? j.ids.map(String) : []; L86.apagado = !!j.apagado; L86.err = ''; }
     else L86.err = (j && j.error) || ('HTTP ' + r.status);
   } catch (e) { L86.err = 'sin conexión'; }
-  if (L86.ids && L86.ids.length && Date.now() - CARTA.ts > 10 * JL_86_MS) {
+  /* [v0.5.1] la carta serve anche alla RICERCA dell'86 in Local (v50): si legge anche senza agotados, con la stessa cadenza lenta */
+  if (L86.ids && (L86.ids.length || VISTA.tab === 1) && Date.now() - CARTA.ts > 10 * JL_86_MS) {
     try {
       var c2 = new AbortController(), t2 = setTimeout(function () { c2.abort(); }, 6000);
       var r2 = await fetch(CFG.BORDE + '/catalogoMesero/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T), { signal: c2.signal, cache: 'no-store' });
@@ -717,6 +718,7 @@ function updateDock() {
 /* i pallini delle schede (v36): Caja finché il ritiro è aperto, e pulsa se è scaduto */
 function jlPallini() {
   var bs = document.querySelectorAll('.tabs button'), a = CJ.st && CJ.st.aviso, on = !!(a && a.abierto);
+  if (bs[1]) bs[1].classList.toggle('dot', !!(TU.r && TU.r.turno !== undefined && tuSinG() > 0));   // [v0.5.1] plaza senza garzón (v42)
   if (bs[2]) { bs[2].classList.toggle('dot', on); bs[2].classList.toggle('venc', on && !!a.scade_ts && Date.now() > a.scade_ts); }
 }
 /* [v0.2.0 · bottoni dalla mesa] la mesa si apre nella sala nueva in modo JL (`?jl=1`, vista = il garzón padrone, firma = il JL): lì ci sono
@@ -773,24 +775,111 @@ function detalle(gi, m) {
     '<div class="sub" style="color:var(--ink3)">Reserva y cliente frecuente: sin dato todavía.</div></div>' +
     sol + bot;
 }
-/* [v0.2.0 · P5] LOCAL: chi è in sala stasera e dove, e l'86. Solo lettura: reservas e turnos restano nell'app di sempre (fase 3). */
-function local() {
-  var M = VISTA.mod, h = '';
-  if (L86.apagado) h += '<div class="vetro"><h4>86</h4><p>El 86 del bordo está apagado: míralo en tu app de siempre.</p></div>';
-  else if (!L86.ids) h += '<div class="vetro"><h4>86</h4><p>' + (L86.err ? 'No pude leer el 86 (' + esc(L86.err) + ').' : 'Leyendo el 86…') + '</p></div>';
-  else h += '<div class="vetro' + (L86.ids.length ? ' alerta' : '') + '"><h4>86 · ' + L86.ids.length + (L86.ids.length === 1 ? ' producto agotado' : ' productos agotados') + '</h4>' +
-    (L86.ids.length ? L86.ids.map(function (id) { return '<div class="riga"><span>' + esc(CARTA.nom[id] || id) + '</span><span class="st">' + esc(id) + '</span></div>'; }).join('') : '<p>Nada agotado.</p>') + '</div>';
-  if (M) {
-    h += '<div class="vetro"><h4>En sala · ' + M.gente.length + (M.gente.length === 1 ? ' garzón' : ' garzones') + '</h4>' +
-      (M.gente.length ? M.gente.map(function (g) {
-        var abiertas = g.mesas.filter(function (x) { return x.st !== 'libre'; }).length;
-        return '<div class="riga"><span><b>' + esc(g.n) + '</b><small>' + (g.plazas.length ? g.plazas.map(function (p) { return esc(p.nombre) + (p.mesas.length ? ' (' + esc(p.mesas.join(' · ')) + ')' : ''); }).join(' · ') : 'sin plaza') + '</small></span>' +
-          '<span class="st">' + abiertas + (abiertas === 1 ? ' mesa' : ' mesas') + '<br>' + (g.venta == null ? 'venta sin dato' : pesos(g.venta)) + '</span></div>';
-      }).join('') : '<p>No hay garzones en la sala de hoy.</p>') + '</div>';
-  } else if (VISTA.err === 'sin_pin') h += pinHtml();
-  h += '<div class="vetro"><h4>Reservas · turnos</h4><p>Todavía en tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
-  return h;
+/* ═══ [v0.5.1 · 🛎 SALA V35 · LOCAL COME LA V50, PRIMA METÀ] il turno (lettura) e l'86 (lettura e gesto) ═══
+   IL TURNO: `POST /turno/admin/<LOC_PG>` {pin_jl} (la stessa lettura di app_jl v1.44.x `_turnoAdminPorBordo`, `turno_abre_borde_on` BKS):
+   `turno.turno` {codigo, desde_iso} · `plazas` [{plaza, mesas}] · `asignaciones` [{plaza, franja, mesero, hora_entrada_iso}]. Niente Google: col bordo
+   che non risponde la card lo dice. I GESTI del turno (Armar · Horario · Mover · Quitar · Abrir turno) arrivano nella seconda metà, con le regole di
+   app_jl (`_asignarPorBordo`: la franja vecchia, l'entrata già segnata, i saldi prima di aprire); fino ad allora si fanno dall'app di sempre, e si dice. */
+var LOC_PG = { BKS: 'BKS', RIESCO: 'RSC', CANDELARIA: 'CDL' };
+var TU = { r: null, ts: 0, err: '', inVolo: false };
+var TU_ERR = { pin_jl_invalido: 'Tu PIN no vale para el turno: entra de nuevo desde tu app.', pin_jl_requerido: 'Falta tu PIN: entra desde tu app.', gate_spento: 'El turno de hoy no está en el sistema nuevo: míralo en tu app de siempre.' };
+async function tuGiro() {
+  if (DEMO) { if (!TU.r) { TU.r = TU_DEMO; TU.ts = Date.now(); } return; }
+  if (!SES.pin || TU.inVolo || Date.now() - TU.ts < 30000) return;
+  TU.inVolo = true; TU.ts = Date.now();
+  var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 8000);
+  try {
+    var r = await fetch(CFG.BORDE + '/turno/admin/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T },
+      body: JSON.stringify({ pin_jl: SES.pin }), signal: ctrl.signal, cache: 'no-store' });
+    var j = await r.json().catch(function () { return null; }); clearTimeout(to);
+    if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') TU.err = 'gate_spento';
+    else if (j && j.ok === true && (j.fuente === 'borde' || j.fuente === 'ponte')) { TU.r = j; TU.err = ''; }
+    else if (j && j.ok === false && /^pin(_jl)?_bloqueado/.test(String(j.error || ''))) TU.err = 'PIN bloqueado' + (+j.faltan_s ? ' · espera ' + Math.ceil(+j.faltan_s / 60) + ' min' : '');
+    else TU.err = (j && j.error) || ('HTTP ' + r.status);
+  } catch (e) { clearTimeout(to); TU.err = 'sin conexión'; }
+  TU.inVolo = false; if (VISTA.tab === 1) jlPinta(); else jlPallini();
 }
+function tuPlazas() {
+  var r = TU.r || {}, as = r.asignaciones || [];
+  return (r.plazas || []).map(function (p) {
+    var chi = [];
+    as.forEach(function (a) { if (!a || a.plaza !== p.plaza || !a.mesero) return;
+      String(a.mesero).split(',').forEach(function (n) { n = n.trim(); if (n) chi.push({ n: n, f: String(a.franja || ''), entro: !!a.hora_entrada_iso }); }); });
+    return { p: String(p.plaza), mesas: String(p.mesas || '').split(/[,\s·]+/).filter(Boolean).join(' · '), chi: chi };
+  });
+}
+function tuSinG() { return tuPlazas().filter(function (x) { return !x.chi.length; }).length; }
+function turnoCard() {
+  if (!SES.pin && !DEMO) return '<div class="vetro"><h4>Turno</h4><p>Para ver el turno entra con tu PIN desde tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
+  if (!TU.r) return '<div class="vetro' + (TU.err ? ' alerta' : '') + '"><h4>Turno</h4><p>' + (TU.err ? '⚠️ ' + esc(TU_ERR[TU.err] || ('No pude leer el turno (' + TU.err + ').')) : 'Leyendo el turno…') + '</p></div>';
+  var tt = TU.r.turno, pls = tuPlazas(), sin = pls.filter(function (x) { return !x.chi.length; }).length;
+  if (!tt && TU.r.fuente !== 'ponte') return '<div class="vetro alerta"><h4>Turno <span class="pill bad">cerrado</span></h4><p>El turno de hoy todavía no está abierto. Por ahora se abre desde tu app de siempre.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Abrir turno en mi app</a></div>';
+  var cod = (tt && tt.codigo) || SES.codigo || '';
+  var h = '<div class="vetro' + (sin ? ' alerta' : '') + '"><h4>Turno <span class="pill ok">abierto' + (tt && tt.desde_iso ? ' ' + esc(String(tt.desde_iso).slice(11, 16)) : '') + '</span>' +
+    '<span class="pill ' + (sin ? 'bad' : 'ok') + '">' + (pls.length - sin) + ' de ' + pls.length + ' plazas</span></h4>';
+  h += '<div style="display:flex;align-items:baseline;gap:10px;margin:0 0 2px"><span style="font-size:12px;color:var(--ink2)">Código de hoy</span><b class="num" style="font-size:26px;letter-spacing:.14em">' + (cod ? esc(cod) : '<span style="font-size:13px;letter-spacing:0">sin dato</span>') + '</b></div>';
+  if (sin) h += '<p style="color:var(--urge);font-weight:700;margin-bottom:4px">' + (sin === pls.length ? 'Ninguna plaza tiene garzón todavía.' : sin === 1 ? 'Falta 1 plaza sin garzón.' : 'Faltan ' + sin + ' plazas sin garzón.') + ' No puede quedar así.</p>' +
+    '<a class="azione oro" style="margin:4px 0 6px" href="' + esc(jlAppUrl()) + '">' + (sin === pls.length ? 'Armar el turno' : 'Asignar las plazas que faltan') + ' · en tu app</a>';
+  h += pls.map(function (x) {
+    return '<div class="riga" style="min-height:44px;align-items:flex-start"><span><b>' + esc(x.p) + '</b><small>mesas ' + esc(x.mesas || '—') + '</small></span>' +
+      '<span style="margin-left:auto;text-align:right;font-size:12px">' + (x.chi.length
+        ? x.chi.map(function (y) { return '<span style="display:block;color:var(--ink2)"><b style="color:var(--ink)">' + esc(y.n) + '</b> ' + esc(y.f.replace('-', '–')) + '</span>'; }).join('')
+        : '<span style="color:var(--urge);font-weight:700">sin garzón</span>') + '</span></div>';
+  }).join('');
+  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Para cambiar una plaza: por ahora en tu app de siempre. Aquí llega en el próximo paso.</p></div>';
+}
+/* L'86 (v42 della demo): cerca → «86 hoy» → conferma «¿Sacar X del menú?» → «volvió». Il gesto è `POST /admin86/<local>` (`admin86_pg_write_on` 1),
+   la stessa forma di app_jl `adminToggle86Via` ({action:'adminToggle86', pin, prod_id, value, uid}, text/plain, token in header), una chiave
+   per GESTO che il ritocco riusa. SENZA ripiego sul GAS (niente Google): se il bordo non risponde, si dice. Torna da solo a `reset86_horas`. */
+var Q86 = '', C86 = null, E86 = { vuelo: false, msg: '', uid: {} };
+function hits86() {
+  var q = Q86.trim().toLowerCase(); if (q.length < 2) return [];
+  var ag = {}; (L86.ids || []).forEach(function (id) { ag[id] = 1; });
+  return Object.keys(CARTA.nom).filter(function (id) { return !ag[id] && String(CARTA.nom[id]).toLowerCase().indexOf(q) >= 0; }).slice(0, 5);
+}
+function hits86Html() {
+  var q = Q86.trim(); if (q.length < 2) return '';
+  var hs = hits86();
+  if (!hs.length) return '<p style="margin-top:6px">' + (Object.keys(CARTA.nom).length ? 'Nada con ese nombre.' : 'Todavía no tengo la carta: espera un momento.') + '</p>';
+  return hs.map(function (id) { return '<div class="riga"><span><b>' + esc(CARTA.nom[id]) + '</b></span><button class="azione" style="width:auto;margin:0 0 0 auto;min-height:36px;padding:6px 12px" data-a="c86" data-k="' + esc(id) + '">86 hoy</button></div>'; }).join('');
+}
+async function gesto86(id, value) {
+  if (E86.vuelo) return;
+  var k = id + ':' + (value ? 1 : 0), uid = E86.uid[k] || ('a86-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+  E86.vuelo = true; E86.msg = ''; jlPinta(true);
+  var j = null;
+  if (DEMO) { j = { ok: true }; if (value) L86.ids.push(id); else L86.ids = L86.ids.filter(function (x) { return x !== id; }); }
+  else {
+    var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000);
+    try {
+      var r = await fetch(CFG.BORDE + '/admin86/' + encodeURIComponent(CFG.LOCAL), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8', 'X-Borde-Token': CFG.T },
+        body: JSON.stringify({ action: 'adminToggle86', pin: SES.pin, prod_id: id, value: value, uid: uid }), signal: ctrl.signal });
+      j = await r.json().catch(function () { return null; }); clearTimeout(to);
+    } catch (e) { clearTimeout(to); j = null; }
+  }
+  E86.vuelo = false;
+  if (j && j.ok === true) { delete E86.uid[k]; C86 = null; Q86 = ''; E86.msg = value ? '🚫 ' + (CARTA.nom[id] || id) + ' fuera del menú' : '✓ ' + (CARTA.nom[id] || id) + ' volvió'; if (!DEMO) { L86.ts = 0; jl86Leggi().then(function () { jlPinta(true); }); } }   // dal bordo si rilegge l'86 vero; la demo tiene il suo
+  else if (!j) { E86.uid[k] = uid; E86.msg = '⏳ No sé si llegó: toca de nuevo, no se duplica.'; }
+  else E86.msg = '✋ No se pudo: ' + (j.mensaje || j.error || 'sin motivo') + (j.definitivo ? '' : ' · hazlo desde tu app de siempre');
+  jlPinta(true);
+}
+function card86() {
+  if (L86.apagado) return '<div class="vetro"><h4>86 · se acabó</h4><p>El 86 del bordo está apagado: míralo en tu app de siempre.</p></div>';
+  if (!L86.ids) return '<div class="vetro"><h4>86 · se acabó</h4><p>' + (L86.err ? 'No pude leer el 86 (' + esc(L86.err) + ').' : 'Leyendo el 86…') + '</p></div>';
+  var h = '<div class="vetro"><h4>86 · se acabó' + (L86.ids.length ? ' <span class="pill bad">' + L86.ids.length + '</span>' : '') + '</h4>';
+  if (E86.msg) h += '<p style="color:' + (E86.msg.indexOf('🚫') === 0 || E86.msg.indexOf('✓') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin-bottom:4px">' + esc(E86.msg) + '</p>';
+  h += L86.ids.map(function (id) {
+    return '<div class="riga"><span><b>' + esc(CARTA.nom[id] || 'producto ' + id) + '</b></span>' + (SES.pin || DEMO ? '<button class="azione" style="width:auto;margin:0 0 0 auto;min-height:36px;padding:6px 12px" data-a="v86" data-k="' + esc(id) + '"' + (E86.vuelo ? ' disabled' : '') + '>volvió</button>' : '') + '</div>';
+  }).join('');
+  if (!SES.pin && !DEMO) h += '<p style="margin-top:6px">Para poner o quitar un 86 entra con tu PIN desde tu app.</p>';
+  else if (C86) h += '<div class="vetro alerta" style="margin:8px 0 0"><p style="color:var(--ink);font-weight:700">¿Sacar «' + esc(CARTA.nom[C86] || C86) + '» del menú?</p><p>Deja de verse en el QR y en la sala al instante.</p>' +
+      '<div class="fila2"><button class="azione" data-a="n86">No</button><button class="azione rojo" data-a="s86"' + (E86.vuelo ? ' disabled' : '') + '>' + (E86.vuelo ? '…' : 'Sí, 86') + '</button></div></div>';
+  else h += '<input id="q86" value="' + esc(Q86) + '" placeholder="Busca el producto…" autocomplete="off" style="width:100%;margin:8px 0 0;padding:11px;font-size:15px;background:var(--vetro2);border:1px solid var(--filo);border-radius:14px;color:var(--ink)">' +
+      '<div id="l86">' + hits86Html() + '</div>';
+  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:6px">Vuelve solo en cada cambio de turno: si sigue agotado, el JL que entra lo vuelve a poner. Para sacarlo por más tiempo: desde el admin.</p></div>';
+}
+/* v43 della demo: Local = Turno + 86. L'86, il gesto più frequente in servizio, in fondo vicino al pollice. */
+function local() { tuGiro(); return turnoCard() + card86(); }
 /* ═══ [v0.3.0 · FASE 2 · LA CAJA MINIMA — solo vetro, ordine di Alberto mer 18 «fai programmare app JL appena possibile»] ═══
    Gli STESSI verbi e gli STESSI payload che `app_jl.html` v1.44.x manda oggi (`cajaPost1`, r.663-954), nessuna rotta nuova:
    `POST /caja/<local>?t=` text/plain · `estado` · `ritiro` CONTATO (`monto`, `esperado_ora`, `uid_gesto`, e `confirmo_sobre_esperado:1` dopo il «Sí»)
@@ -983,6 +1072,10 @@ document.querySelector('.app').addEventListener('click', function (ev) {
     if (dove) VISTA.aperta = dove; else if (pp) petApri(pid);
     jlPinta(true); document.getElementById('body').scrollTop = 0; }
   else if (a === 'tabCaja') { ir(2); }
+  else if (a === 'c86') { C86 = el.getAttribute('data-k'); Q86 = ''; E86.msg = ''; jlPinta(true); }
+  else if (a === 'n86') { C86 = null; jlPinta(true); }
+  else if (a === 's86') { if (C86) gesto86(C86, true); }
+  else if (a === 'v86') { gesto86(el.getAttribute('data-k'), false); }
   else if (a === 'entra') { var pi = document.getElementById('jlPin'); jlEntra(pi ? pi.value : ''); }
   else if (a === 'tab86') { ir(1); }
   else if (a === 'petApri') { petApri(el.getAttribute('data-k')); jlPinta(true); document.getElementById('body').scrollTop = 0; }
@@ -1005,10 +1098,15 @@ document.getElementById('body').addEventListener('keydown', function (ev) {
 /* [v0.3.0] il monto del ritiro vive nel RITIRO (CJ.ret.monto), non nel DOM (app_jl v1.35.4): scriverlo toglie una conferma vecchia */
 document.getElementById('body').addEventListener('input', function (ev) {
   var t = ev.target; if (!t) return;
+  if (t.id === 'q86') { Q86 = t.value; var l = document.getElementById('l86'); if (l) l.innerHTML = hits86Html(); return; }   // [v0.5.1] la ricerca dell'86 non ridisegna sotto le dita
   if (t.id === 'cjMonto' || t.id === 'cjSob') { var d = String(t.value || '').replace(/[^0-9]/g, ''); t.value = d ? Number(d).toLocaleString('es-CL') : ''; }
   if (t.id === 'cjMonto' && CJ.ret) { CJ.ret.monto = t.value; CJ.ret.conf = 0; var f = document.getElementById('cjFalta'); if (f) f.innerHTML = cjFalta(CJ.ret); }
 });
 
+/* [v0.5.1] il turno finto, NELLA FORMA DI /turno/admin (plazas · asignaciones · turno). Numeri d'esempio. */
+var TU_DEMO = { ok: true, fuente: 'borde', turno: { codigo: '4827', desde_iso: '2026-11-20T08:00:00' },
+  plazas: [{ plaza: 'Aurora A', mesas: '79, 81, 84' }, { plaza: 'Aurora B', mesas: '107, 300' }, { plaza: 'T-Baja 2', mesas: '61, 15, 14' }, { plaza: 'Terraza 1', mesas: '20, 21, 22' }],
+  asignaciones: [{ plaza: 'Aurora A', franja: '10:00-18:30', mesero: 'Gabriel' }, { plaza: 'Aurora B', franja: '10:00-18:30', mesero: 'Gabriel' }, { plaza: 'T-Baja 2', franja: '12:00-18:30', mesero: 'Diego' }, { plaza: 'T-Baja 2', franja: '19:00-03:00', mesero: 'Anthony' }] };
 /* la sala finta, NELLA FORMA DEL BORDO (sala_vista). Numeri d'esempio: non sono del sistema. */
 var _o = Date.now();
 var JL_DEMO = {
