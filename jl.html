@@ -162,7 +162,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.5.2</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.5.3</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -177,7 +177,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.5.2';
+var JL_VER = 'jl v0.5.3';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -635,9 +635,9 @@ function petTitolo(p) {
   if (p.tipo === 'eliminar') { var e = petEsce(p, PET.ped[String(p.pedido_uuid)]); return 'Eliminar ' + (e.length ? e.map(function (x) { return (x.q > 1 ? x.q + '× ' : '') + x.n; }).join(', ') : (p.items ? 'productos' : 'el pedido')); }
   return (p.clase === 'convenio' ? 'Convenio ' : 'Descuento ') + (p.etiqueta || p.codigo || '') + (p.pct ? ' ' + p.pct + '%' : '');
 }
-async function petPost(verbo, p) {
+async function petPost(verbo, p, pin) {
   var k = p.id + ':' + verbo, uid = PET.dubbio[k] || ('pet-' + verbo + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7));
-  var body = { verbo: verbo, uid_gesto: uid, peticion_id: p.id, pin_jl: SES.pin, codigo: SES.codigo, nombre: SES.user, dispositivo_id: jlDisp() };
+  var body = { verbo: verbo, uid_gesto: uid, peticion_id: p.id, pin_jl: pin != null ? pin : SES.pin, codigo: SES.codigo, nombre: SES.user, dispositivo_id: jlDisp() };
   if (DEMO) return petDemo(body);
   var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 8000);
   try {
@@ -666,10 +666,14 @@ function petEsito(r, verbo, tipo) {
   if (r && r.correccion) return '⚠️ No se eliminó: ' + ((r.correccion && (r.correccion.mensaje || r.correccion.error)) || e);
   return '⚠️ No se pudo: ' + ((r && (r.mensaje || e)) || 'sin respuesta');
 }
+/* [v0.5.3 · D1 di 🎨, decisione del 🎛 «D1: IL PIN SI SCRIVE OGNI VOLTA»] il gesto di denaro lo firma chi è davanti al telefono ADESSO:
+   il PIN si scrive nella solicitud ogni volta (come la v50), non si prende dalla sessione. Si legge dal campo e non si conserva. */
 async function petGesto(verbo) {
   var p = (PET.lista || []).filter(function (x) { return x.id === PET.aperta; })[0]; if (!p || PET.vuelo) return;
+  var el = document.getElementById('petPin'), pin = String((el && el.value) || '').replace(/\D/g, '');
+  if (!DEMO && pin.length < 4) { PET.msg = '✋ Escribe tu PIN de JL para ' + (verbo === 'confirmar' ? 'autorizar' : 'rechazar') + '.'; jlPinta(true); return; }
   PET.vuelo = true; PET.msg = ''; jlPinta(true);
-  var r = await petPost(verbo, p);
+  var r = await petPost(verbo, p, DEMO ? (pin || 'DEMO') : pin); pin = '';
   PET.vuelo = false; PET.msg = petEsito(r, verbo, p.tipo);
   if (r && r.error === 'pedido_cambio') { jlLeggi(); jlPinta(true); return; }   // [v0.4.1] il dettaglio resta aperto: «Rechazar» è il gesto che serve
   if (r && r.ok && r.scritto !== false) { if (verbo === 'confirmar' && r.foto) PET.msg += ' · ' + (r.foto.monto != null ? 'cobra ' + pesos(r.foto.monto) : ''); PET.aperta = null; jlLeggi(); }
@@ -686,7 +690,7 @@ function petLista() {
   var pend = petPend();
   var h = PET.msg ? '<div class="vetro' + (/^✓/.test(PET.msg) ? '' : ' alerta') + '"><p>' + esc(PET.msg) + '</p></div>' : '';
   if (PET.lista == null) return '<span class="volver" data-a="volver">‹ Servicio</span>' + h + '<div class="vetro"><h4>Solicitudes</h4><p>Las solicitudes están apagadas en el sistema: el garzón pide el eliminar con tu PIN, como siempre.</p></div>';
-  h = '<span class="volver" data-a="volver">‹ Servicio</span>' + h + '<div class="vetro"><h4>Solicitudes <span class="pill bad">' + pend.length + '</span></h4><p>' + (pend.length ? 'Las lees en la mesa. Aquí solo se abre la mesa.' : 'No hay solicitudes ahora.') + '</p></div>';
+  h = h + '<div class="vetro"><h4>Solicitudes <span class="pill bad">' + pend.length + '</span></h4><p>' + (pend.length ? 'Las lees en la mesa. Aquí solo se abre la mesa.' : 'No hay solicitudes ahora.') + '</p></div>';
   return h + pend.map(function (p) {
     return '<div class="solic" data-a="solMesa" data-k="' + esc(p.id) + '"><div class="h"><span class="pill bad">' + petClase(p) + '</span> Mesa ' + esc(p.mesa) + ' · ' + esc(petCosa(p)) + ' <small>' + esc(p.chi_pide || '') + '</small></div>' +
       '<p>' + esc(petMotivo(p)) + ' · hace ' + (p.min || 0) + '′</p><div class="leido">' + (p.leida_ts || PET.letti[p.id] ? 'leída' : 'sin leer · toca la mesa para leer') + '</div></div>';
@@ -711,12 +715,14 @@ function petDettaglio() {
   return h;
 }
 /* la demo: una petición per tipo, e un bordo finto che risponde come `_peticion` */
-function petDemo(b) { if (b.verbo === 'leer') return { ok: true, borde: true, stato: 'pendiente' }; return { ok: true, borde: true, peticion_id: b.peticion_id, stato: b.verbo === 'confirmar' ? 'confirmada' : 'rechazada' }; }
+function petDemo(b) { if (b.verbo === 'leer') return { ok: true, borde: true, stato: 'pendiente' };
+  (JL_DEMO.peticiones || []).forEach(function (x) { if (x.id === b.peticion_id) x.stato = b.verbo === 'confirmar' ? 'confirmada' : 'rechazada'; });   /* [v0.5.3] la demo ricorda l'esito */ return { ok: true, borde: true, peticion_id: b.peticion_id, stato: b.verbo === 'confirmar' ? 'confirmada' : 'rechazada' }; }
 /* ═══ [v0.5.0 · S2 di 🎨] LA TESTATA DELLA V50 (demo `updateDock`, r.1137-1153) ═══
    A sinistra «‹ Volver» quando c'è un dettaglio. A destra, SOLO in Servicio: il badge 86 (🚫 0 grigio, rosso col numero; tocca → Local) e il
    campanello 🔔 col numero delle solicitudes pendientes (il numero solo se ce n'è almeno una; tocca → la lista). La venta in testata non c'è più.
    Sotto: la striscia «Retiro vencido» su OGNI schermata (v36) e, solo in Servicio, il riassunto «N esperan tu acción». */
-function jlDettaglioAperto() { return (VISTA.tab === 0 && !!(VISTA.aperta || PET.aperta || VISTA.sol || VISTA.plz)) || (VISTA.tab === 1 && !!(LV.pl || LV.arm)); }
+function jlDettaglioAperto() { return (VISTA.tab === 0 && !!(VISTA.aperta || PET.aperta || VISTA.plz))   /* [v0.5.3 · D3] la lista del 🔔 non ha «‹ Volver», come la v50 */
+     || (VISTA.tab === 1 && !!(LV.pl || LV.arm)); }
 function vencStrip() {
   var a = CJ.st && CJ.st.aviso; if (!(a && a.abierto && a.scade_ts)) return '';
   var dt = Date.now() - a.scade_ts; if (dt <= 0) return '';
@@ -782,9 +788,22 @@ function detalle(gi, m) {
   /* [v0.5.0 · la demo `mesa()`] il conto, la solicitud della mesa (si LEGGE qui: la lista apre solo la mesa), poi ＋ Pedir · Cobrar · Mover.
      ★ cliente frecuente, socio e reserva: il dato non c'è ancora (🎟 LA LISTA ven 27 · F2 mer 25) e si dice. */
   var p = petMesas()[x.m];
-  var sol = p ? '<div class="solic" data-a="petApri" data-k="' + esc(p.id) + '"><div class="h"><span class="pill bad">' + petClase(p) + '</span> ' + esc(petCosa(p)) + ' <small>' + esc(p.chi_pide || '') + '</small></div>' +
-      '<p>' + esc(petMotivo(p)) + ' · hace ' + (p.min || 0) + '′</p>' +
-      (p.leida_ts || PET.letti[p.id] ? '<div class="leido">✓ leída por ti</div>' : '') + '<button class="azione rojo" data-a="petApri" data-k="' + esc(p.id) + '">Leer la solicitud</button></div>' : '';
+  /* [v0.5.3 · D1 di 🎨] si resta nella MESA (la v50 `mesa()`): sotto il conto la card della solicitud. «Leer la solicitud» la apre QUI
+     (cosa esce, il motivo) e sblocca il campo «PIN del JL» e il bottone; prima di leggere sono spenti. «Rechazar» resta, piccolo, sotto
+     (decisione del 🎛, differenza dichiarata ad Alberto). */
+  var sol = '';
+  if (p) {
+    var letta = PET.aperta === p.id, dentro = '';
+    if (letta && p.tipo === 'eliminar') { var es = petEsce(p, PET.ped[String(p.pedido_uuid)]); dentro = es.length ? es.map(function (z) { return '<div class="riga"><span>' + z.q + ' × ' + esc(z.n) + '</span><span class="st">sale</span></div>'; }).join('') : '<p class="vacio">No veo el pedido en la sala de ahora: puede que ya haya cambiado.</p>'; }
+    else if (letta && p.descuento) dentro = '<p>Autorizado: cobra ' + pesos(p.descuento.monto) + '</p>';
+    sol = '<div class="solic"><div class="h"><span class="pill bad">' + petClase(p) + '</span> ' + esc(petCosa(p)) + ' <small>' + esc(p.chi_pide || '') + '</small></div>' +
+      '<p>' + esc(petMotivo(p)) + ' · hace ' + (p.min || 0) + '′</p>' + dentro +
+      (PET.msg && letta ? '<p style="color:' + (PET.msg.indexOf('✓') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin-top:6px">' + esc(PET.msg) + '</p>' : '') +
+      (letta ? '<div class="leido">✓ leída por ti</div>' : '<button class="azione" data-a="petApri" data-k="' + esc(p.id) + '">Leer la solicitud</button>') +
+      '<input id="petPin" class="azione" style="text-align:left;margin-top:8px" type="password" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="PIN del JL"' + (letta && !PET.vuelo ? '' : ' disabled') + '>' +
+      '<button class="azione rojo" data-a="petSi"' + (letta && !PET.vuelo ? '' : ' disabled') + '>' + (PET.vuelo ? '…' : SOL_OK[p.tipo === 'eliminar' ? 'eliminar' : 'descuento'][0]) + '</button>' +
+      (letta ? '<button class="azione" style="min-height:36px;padding:6px;font-size:11.5px;opacity:.8" data-a="petNo"' + (PET.vuelo ? ' disabled' : '') + '>Rechazar</button>' : '') + '</div>';
+  } else if (PET.msg && /^✓/.test(PET.msg)) sol = '<div class="vetro lume"><h4>' + esc(PET.msg) + '</h4><p>El garzón recibe la confirmación en su teléfono. Queda escrito con tu nombre y el motivo.</p></div>';
   var url = jlSessioneCompleta() ? esc(jlSalaUrl(g, x.m)) : '';
   var bot = url
     ? '<div class="fila2"><a class="azione oro" data-a="sala" href="' + url + '">＋ Pedir</a><a class="azione" data-a="sala" href="' + url + '">Cobrar</a><a class="azione" data-a="sala" href="' + url + '">Mover</a></div>'
@@ -1266,7 +1285,7 @@ function jlPinta(forza) {
   /* [v0.3.0] mai ridisegnare sotto le dita: un giro di lettura non cancella il monto o il conteo che il JL sta scrivendo (app_jl r.~2758) */
   var ae = document.activeElement; if (!forza && ae && ae.tagName === 'INPUT' && b.contains(ae)) return;
   var t0 = VISTA.tab === 0;
-  b.innerHTML = (t0 && PET.aperta) ? petDettaglio() : (t0 && VISTA.aperta) ? detalle(VISTA.aperta.g, VISTA.aperta.m) : (t0 && VISTA.plz) ? plazasVista(VISTA.plz) : (t0 && VISTA.sol) ? petLista() : VIS[VISTA.tab]();
+  b.innerHTML = (t0 && VISTA.aperta) ? detalle(VISTA.aperta.g, VISTA.aperta.m) : (t0 && PET.aperta) ? petDettaglio() : (t0 && VISTA.plz) ? plazasVista(VISTA.plz) : (t0 && VISTA.sol) ? petLista() : VIS[VISTA.tab]();
   b.scrollTop = y;
   updateDock(); jlPallini();
 }
@@ -1278,8 +1297,8 @@ function ir(i) {
 /* «‹ Volver»: chiude il dettaglio più in alto (la solicitud → la mesa → le plazas → la lista delle solicitudes) */
 function jlVolver() {
   if (VISTA.tab === 1) { if (LV.ed) LV.ed = null; else { LV.pl = null; LV.arm = null; } LV.msg = ''; jlPinta(true); document.getElementById('body').scrollTop = 0; return; }
-  if (PET.aperta) { PET.aperta = null; PET.msg = ''; }
-  else if (VISTA.aperta) VISTA.aperta = null;
+  if (VISTA.aperta) { VISTA.aperta = null; PET.aperta = null; PET.msg = ''; }   // [v0.5.3] la solicitud vive nella mesa: si esce insieme
+  else if (PET.aperta) { PET.aperta = null; PET.msg = ''; }
   else if (VISTA.plz) VISTA.plz = null;
   else VISTA.sol = false;
   jlPinta(true); document.getElementById('body').scrollTop = 0;
