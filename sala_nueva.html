@@ -2,7 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BKS Sala</title>
-<meta name="ver" content="sala_nueva v0.15.61.1 · 20-nov · sopra la coda di sabato: il cobro si disegna di nuovo (snExpressBtn(X()), AUT-1170)">
+<meta name="ver" content="sala_nueva v0.15.62 · 21-nov · AUT-1177: il voucher stretto, esattamente 6 cifre e senza voucher solo col PIN del JL">
 <meta name="claude:viewport-fit-sides" content="cover">
 <!-- DEVICE-CLASS: 1 · cattura in movimento — si guarda SUL TELEFONO
      🎨 DESIGN V32 · 24-ott-2026 · la SALA NUOVA (v4, 23-set) col COBRO montato dentro.
@@ -2999,7 +2999,7 @@ $('simLl').onclick=function(){ var s=SIMLL[llI++%SIMLL.length], x=M2(s.m); if(x.
       in un gruppo `multiple` · un'opzione senza prezzo (vuoto ≠ zero, come la sala viva).
    ⚠️ `app:'sala'` NON è un'etichetta: il bordo applica le guardie del mesero (`_soloAsignados`, r.22280 di a8b50d8) SOLO ai gesti con
       `app:'sala'`. Mandare un altro nome le salterebbe. La versione della sala nueva viaggia in `cli_ver`. */
-var SN_VER = 'sala_nueva v0.15.61.1';
+var SN_VER = 'sala_nueva v0.15.62';
 var SN = { cartaOk: false, cartaErr: '', catalogo: [], porNombre: {}, fuera: {}, plazasSalud: null, cola: [], enVuelo: false };
 var SN_MODS2_ON = false, SN_MODS2_VOC = null, SN_MODS2_RECARGO = null, SN_TERMINO_OPS = [];
 (function () {
@@ -4845,17 +4845,30 @@ var SN_MEDIO = { 'Efectivo': 'efectivo', 'Débito': 'debito', 'Crédito': 'credi
 var SN_VOU_CARTA = ['Débito', 'Crédito'];
 function snVouPide(medio) { return SN_VOU_CARTA.indexOf(medio) >= 0; }
 function snVouDig(v) { return String(v == null ? '' : v).replace(/[^0-9]/g, ''); }
-function snVouMisura(d) { return !d || (d.length >= 6 && d.length <= 12); }
+/* [21-nov · v0.15.62 · 🛎 SALA V35 · AUT-1177 · Alberto «Sì, stringila»] IL VOUCHER STRETTO: ESATTAMENTE 6 CIFRE, E SENZA VOUCHER SOLO COL PIN DEL JL ═══
+   🩸 Notte del 20-nov su BKS: 4 pagos con 7 cifre (la misura era 6-12) e 9 pagos di carta senza numero («puedes cobrar igual», firma facoltativa).
+   Ora: ogni carta (anche ogni riga carta del Mixto) vuole esattamente 6 cifre; il vuoto non passa più. «No hay voucher» passa solo col PIN del JL
+   (4 cifre, `voucher_pin_jl`, mai scritto da nessuna parte); senza PIN il COBRAR resta spento. Il Mixto non ha «No hay voucher»: la tarjeta senza
+   papelito si cobra da sola, fuori dal Mixto. 🔴 TAMPONE DICHIARATO: il bordo PORTA `voucher_pin_jl` senza verificarlo (lo giudica il GAS, dopo che il
+   bordo ha già accettato) ⇒ un PIN inventato di 4 cifre passa il vetro. Lo uccide la verifica del PIN al bordo: passaggio ad ⚙️ ARQ, data sua.
+   E un numero inventato ma ben scritto lo ferma solo il confronto con MP (🧾 ADMIN), non il formato. Ritorno: git revert del commit AUT-1177. */
+function snVouMisura(d) { return !!d && d.length === 6; }
+function snVouPinOk(p) { return /^\d{4}$/.test(String(p == null ? '' : p).trim()); }
+/* il perché del no, o '' se si può cobrare (pago singolo con carta) */
+function snVouNo1(s) { var d = snVouDig(s.vou);
+  if (s.vouNo) return snVouPinOk(s.vouPin) ? '' : 'Falta el PIN del JL (4 cifras)';
+  if (!d) return 'Escribe el N° de operación (6 cifras)';
+  return snVouMisura(d) ? '' : 'El N° de operación son las 6 últimas cifras'; }
 function snVouPulisci(s) { if (!s) return; s.vou = ''; s.vouNo = false; s.vouPin = ''; s.vouMed = ''; (s.mxR || []).forEach(function (r) { if (r) r.vou = ''; }); }
 function snVouAbre(medio) { var s = c1(); s.vouMed = medio; s.sheet = 'vou'; pinta(); setTimeout(function () { var i = document.getElementById('snVouIn'); if (i) i.focus(); }, 60); }
 function snVouSet(k, v) { var s = c1(); s[k] = String(v == null ? '' : v); if (k === 'vou') snVouAvvisoVia('snVouIn'); var b = document.getElementById('snVouGo'); if (b) b.outerHTML = snVouBoton(); }
 function snVouNo(on) { var s = c1(); s.vouNo = !!on; if (on) s.vou = ''; else s.vouPin = ''; pinta(); }
 function snVouBoton() { var s = c1(), d = snVouDig(s.vou), pz = Math.min(c1Parte(), saldoPieno()), tot = cons(pz) + c1Prop(pz);
-  var mal = !s.vouNo && d && !snVouMisura(d);
+  var mal = snVouNo1(s);
   return '<button type="button" id="snVouGo" class="vb pieno full' + (mal ? ' off' : '') + '"' + (mal ? ' disabled' : '') + ' onclick="snVouCobra()">' +
-    (mal ? 'El N° de operación son 6 cifras' : 'COBRAR ' + P(tot) + '<small>' + (s.vouMed || '') + (s.vouNo ? ' · sin voucher' : (d ? ' · operación ' + d.slice(-6) : '')) + '</small>') + '</button>'; }
+    (mal ? mal : 'COBRAR ' + P(tot) + '<small>' + (s.vouMed || '') + (s.vouNo ? ' · sin voucher' : (d ? ' · operación ' + d.slice(-6) : '')) + '</small>') + '</button>'; }
 function snVouCobra() { var s = c1(), d = snVouDig(s.vou);
-  if (!s.vouNo && d && !snVouMisura(d)) { snVouAvviso('snVouIn', 'El N° de operación son 6 cifras (o toca «No hay voucher»)'); return; }   /* [v0.15.19 · AUT-1078] resta sul foglio, cursore nel campo */
+  var _no = snVouNo1(s); if (_no) { snVouAvviso(s.vouNo ? 'snVouPin' : 'snVouIn', _no + (s.vouNo ? '' : ' (o toca «No hay voucher»)')); return; }   /* [v0.15.62 · AUT-1177] anche vuoto, e senza PIN */   /* [v0.15.19 · AUT-1078] resta sul foglio, cursore nel campo */
   var med = s.vouMed; s.sheet = null; pinta(); snCobrarVivo(med, null); }
 function snVouHtml() { var s = c1(), x = X(), pz = Math.min(c1Parte(), saldoPieno());
   return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><b style="flex:1;font-size:19px;color:#f3ead8">🧾 Voucher · ' + (s.vouMed || '') + ' · Mesa ' + x.m + '</b>' +
@@ -4865,9 +4878,9 @@ function snVouHtml() { var s = c1(), x = X(), pz = Math.min(c1Parte(), saldoPien
     (!s.vouNo
       ? '<input id="snVouIn" inputmode="numeric" autocomplete="off" placeholder="Últimas 6 cifras del nº de operación" value="' + snJlEsc(s.vou || '') + '" oninput="snVouSet(\'vou\',this.value)" style="width:100%;box-sizing:border-box;padding:14px 12px;border-radius:12px;border:1.5px solid rgba(224,169,74,.6);background:transparent;color:var(--oro);font:inherit;font-size:22px;font-weight:700;text-align:center">' +
         '<div style="font-size:12.5px;color:#cbbfa9;margin:8px 4px 12px">Está en el papelito de la máquina · «Operación #»</div>' +
-        '<button type="button" onclick="snVouNo(true)" style="width:100%;padding:11px;margin:0 0 12px;border-radius:12px;border:1px dashed rgba(243,234,216,.35);background:transparent;color:#e9dfcb;font:inherit;font-size:14px;font-weight:700">No hay voucher<small style="display:block;font-weight:600;opacity:.7">puedes cobrar igual</small></button>'
-      : '<div style="font-size:14px;color:#e9dfcb;margin:0 4px 8px">Sin voucher — <b>puedes cobrar igual</b>. Si hay un JL cerca, que firme: queda escrito con su nombre.</div>' +
-        '<input id="snVouPin" type="password" inputmode="numeric" autocomplete="new-password" data-1p-ignore="true" placeholder="PIN del JL (si está)" value="' + snJlEsc(s.vouPin || '') + '" oninput="snVouSet(\'vouPin\',this.value)" style="width:100%;box-sizing:border-box;padding:12px;border-radius:12px;border:1px solid rgba(243,234,216,.35);background:transparent;color:#f3ead8;font:inherit;font-size:18px;text-align:center">' +
+        '<button type="button" onclick="snVouNo(true)" style="width:100%;padding:11px;margin:0 0 12px;border-radius:12px;border:1px dashed rgba(243,234,216,.35);background:transparent;color:#e9dfcb;font:inherit;font-size:14px;font-weight:700">No hay voucher<small style="display:block;font-weight:600;opacity:.7">solo con el PIN del JL</small></button>'
+      : '<div style="font-size:14px;color:#e9dfcb;margin:0 4px 8px">Sin voucher — <b>solo con el PIN del JL</b>. Llama al JL: queda escrito con su nombre.</div>' +
+        '<input id="snVouPin" type="password" inputmode="numeric" autocomplete="new-password" data-1p-ignore="true" placeholder="PIN del JL" value="' + snJlEsc(s.vouPin || '') + '" oninput="snVouSet(\'vouPin\',this.value)" style="width:100%;box-sizing:border-box;padding:12px;border-radius:12px;border:1px solid rgba(243,234,216,.35);background:transparent;color:#f3ead8;font:inherit;font-size:18px;text-align:center">' +
         '<button type="button" onclick="snVouNo(false)" style="width:100%;padding:11px;margin:10px 0 12px;border-radius:12px;border:1px dashed rgba(243,234,216,.35);background:transparent;color:#e9dfcb;font:inherit;font-size:14px;font-weight:700">← Sí hay voucher</button>') +
     snVouBoton() + '</div>'; }
 function snVouMx(i, v) { var s = c1(); if (s.mxR && s.mxR[i]) s.mxR[i].vou = String(v == null ? '' : v); snVouAvvisoVia('snMxVou' + i); }
@@ -4894,8 +4907,9 @@ function snVouCampi(med, partes) {
   var s = c1(), out = {};
   if (partes) {
     var raws = (s.mxR || []).filter(function (r) { return r && snVouPide(r.k) && (parseInt(r.v, 10) || 0) > 0; })
-      .map(function (r) { return String(r.vou || '').trim(); }).filter(Boolean);
-    for (var i = 0; i < raws.length; i++) if (!snVouMisura(snVouDig(raws[i]))) return { ok: false, err: 'El N° de operación de cada tarjeta son 6 cifras (o déjalo vacío)' };
+      .map(function (r) { return String(r.vou || '').trim(); });
+    for (var i = 0; i < raws.length; i++) if (!snVouMisura(snVouDig(raws[i]))) return { ok: false, err: 'El N° de operación de cada tarjeta son las 6 últimas cifras' };   /* [v0.15.62 · AUT-1177] anche vuoto */
+    raws = raws.filter(Boolean);
     /* [🎛 V34 «RISPONDO ① E ②»] in cima `voucher` = la riga carta PIÙ GRANDE con le cifre (forma della vecchia); ogni riga porta il suo in medios_json */
     var best = null;
     (s.mxR || []).forEach(function (r) { var v = parseInt(r && r.v, 10) || 0, d = r && snVouPide(r.k) ? snVouDig(r.vou) : '';
@@ -4906,9 +4920,9 @@ function snVouCampi(med, partes) {
   }
   if (!snVouPide(med)) return { ok: true, campi: out };   // efectivo: niente sello
   var d = snVouDig(s.vou);
-  if (!s.vouNo && !snVouMisura(d)) return { ok: false, err: 'El N° de operación son 6 cifras (o toca «No hay voucher»)' };
-  if (!s.vouNo && d) out.voucher = d;
-  else if (s.vouNo && String(s.vouPin || '').trim()) out.voucher_pin_jl = String(s.vouPin).trim();
+  var _no = snVouNo1(s); if (_no) return { ok: false, err: _no + (s.vouNo ? '' : ' (o toca «No hay voucher»)') };   /* [v0.15.62 · AUT-1177] */
+  if (!s.vouNo) out.voucher = d;
+  else out.voucher_pin_jl = String(s.vouPin).trim();
   var raw = s.vouNo ? '' : String(s.vou || '').trim();
   if (raw) out.voucher_raw = raw;
   return { ok: true, campi: out };
@@ -5226,7 +5240,7 @@ function snMixtoTot() { var _ft = snMixtoFalta(), dev = _ft.dev, /* [v0.13.0] la
 function snMixtoOk() { var _mc = snMixtoCalc(); return (_mc.f === 0 || (_mc.vuelto > 0 && _mc.nRighe >= 1)) && snMixtoPropOk(); }   /* [v0.15.7] e la propina ha il suo medio */   /* [v0.14.10] esatta, o un vuelto in efectivo */   /* [v0.14.9] «Cobrar mixto» solo quando la somma è esatta */
 /* [v0.11.1 · collaudo di Alberto sulla 997: «cuadra, premo Cobrar con varios medios e lo schermo resta lì»] il foglio si chiudeva senza ridisegnare,
    e ogni no di snCobrarVivo (boleta mancante: muto · junta · somma) restava SOTTO il foglio. Ora il foglio si chiude e si ridisegna PRIMA, e ogni no si vede. */
-function snMixtoPaga() { var _vm = snVouMxMala(); if (_vm >= 0) { snVouAvviso('snMxVou' + _vm, 'El N° de operación de esta tarjeta son 6 cifras (o déjalo vacío)'); return; }   /* [v0.15.19 · AUT-1078] il foglio resta aperto */
+function snMixtoPaga() { var _vm = snVouMxMala(); if (_vm >= 0) { snVouAvviso('snMxVou' + _vm, 'El N° de operación de esta tarjeta son las 6 últimas cifras (sin voucher: cóbrala sola, con el PIN del JL)'); return; }   /* [v0.15.62 · AUT-1177] anche vuoto */   /* [v0.15.19 · AUT-1078] il foglio resta aperto */
   var _mc = snMixtoCalc();
   if (!snMixtoPropOk()) { var _pp = snMixtoPropMonto(); flash(c1().mxProp === '_div' ? '⛔ La propina dividida debe sumar ' + P(_pp) : '¿La propina de ' + P(_pp) + ' en qué medio? Elígelo en el Mixto'); return; }   /* [v0.15.7] mai dedotta */
   if (_mc.vuelto > 0 && _mc.nRighe >= 1) { var _sv = c1(); _sv.sheet = null; pinta(); flash('💵 Vuelto ' + P(_mc.vuelto) + ' en efectivo');
