@@ -2,7 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BKS Sala</title>
-<meta name="ver" content="sala_nueva v0.15.64 · 21-nov · AUT-1109 le Solicitudes dal lato del garzón (con PETICION_ON Eliminar e Descuento si chiedono al JL; leva spenta: come v0.15.63.2) sopra AUT-1181 «Dividir» e AUT-1177 il voucher stretto">
+<meta name="ver" content="sala_nueva v0.15.66 · 22-nov · l'entrata accesa per BKS (?entrada=0 la spegne) e il primo sussurro di LUZ «La cocina cierra en media hora» (dal bordo cocina_cierra; senza: nessuna riga) sopra v0.15.64 · AUT-1109 le Solicitudes dal lato del garzón (con PETICION_ON Eliminar e Descuento si chiedono al JL; leva spenta: come v0.15.63.2) sopra AUT-1181 «Dividir» e AUT-1177 il voucher stretto">
 <meta name="claude:viewport-fit-sides" content="cover">
 <!-- DEVICE-CLASS: 1 · cattura in movimento — si guarda SUL TELEFONO
      🎨 DESIGN V32 · 24-ott-2026 · la SALA NUOVA (v4, 23-set) col COBRO montato dentro.
@@ -3007,7 +3007,7 @@ $('simLl').onclick=function(){ var s=SIMLL[llI++%SIMLL.length], x=M2(s.m); if(x.
       in un gruppo `multiple` · un'opzione senza prezzo (vuoto ≠ zero, come la sala viva).
    ⚠️ `app:'sala'` NON è un'etichetta: il bordo applica le guardie del mesero (`_soloAsignados`, r.22280 di a8b50d8) SOLO ai gesti con
       `app:'sala'`. Mandare un altro nome le salterebbe. La versione della sala nueva viaggia in `cli_ver`. */
-var SN_VER = 'sala_nueva v0.15.64';
+var SN_VER = 'sala_nueva v0.15.66';
 var SN = { cartaOk: false, cartaErr: '', catalogo: [], porNombre: {}, fuera: {}, plazasSalud: null, cola: [], enVuelo: false };
 var SN_MODS2_ON = false, SN_MODS2_VOC = null, SN_MODS2_RECARGO = null, SN_TERMINO_OPS = [];
 (function () {
@@ -5930,7 +5930,14 @@ function snVerAggiorna() {
    giorno operativo + nome + turno) e alle pillole colorate della testata (SNE.r, per tutto il turno). Mai in modo JL. Mai bloccante: senza risposta,
    `ruta_apagada` o errore si entra dritti come oggi. Un campo che manca non ha la sua riga; dato più vecchio di 24 h ⇒ resta solo la frase.
    Leva del vetro `SN_ENTRADA_ON` (nasce SPENTA; `?entrada=1` per un telefono di prova) — e dietro c'è quella del bordo, `ENTRADA_MESERO_ON`. */
-var SN_ENTRADA_ON = (function () { try { return new URLSearchParams(location.search).get('entrada') === '1'; } catch (e) { return false; } })();
+/* [v0.15.66 · 🎛 V35 dom 22 «L'ENTRATA DEL GARZÓN … IN SERVIZIO LUN 23»] accesa di default per BKS; `?entrada=0` la spegne su un telefono, `?entrada=1` la accende
+   su un altro locale (prova). Il bordo resta il secondo interruttore: con `ENTRADA_MESERO_ON` spenta risponde `ruta_apagada` e si entra dritti come prima. */
+var SN_ENTRADA_LOCALES = ['BKS'];
+function snEntradaLeva(qs) {
+  try { var q = new URLSearchParams(qs), e = q.get('entrada'); if (e === '0') return false; if (e === '1') return true;
+    return SN_ENTRADA_LOCALES.indexOf(String(q.get('l') || 'BKS').toUpperCase()) >= 0; } catch (x) { return false; }
+}
+var SN_ENTRADA_ON = snEntradaLeva(location.search);
 var SNE = { r: null, ts: 0 };
 function snEntFrase(r, nombre) {
   var noche = r.turno === 'PM', nb = String(nombre || '').split(' ')[0] || '';
@@ -5968,6 +5975,7 @@ async function snEntrada() {
   if (!r || r.ok !== true) return;   // ruta_apagada, pg_no_responde, rete: si entra dritti, nessuna pillola, testata neutra
   SNE.r = r; SNE.ts = Date.now();
   if (typeof snTestataOra === 'function') snTestataOra();   // [v0.15.51 · O1] al primo ingresso le pillole si colorano appena arriva l'entrata, non al primo tocco
+  snLuzCocina();   // [v0.15.66] se si entra già dentro la mezz'ora, la riga c'è subito
   var k = snEntChiave(r), visto = false; try { visto = localStorage.getItem(k) === '1'; } catch (e) {}
   if (visto) return;
   try { localStorage.setItem(k, '1'); } catch (e) {}
@@ -5976,12 +5984,41 @@ async function snEntrada() {
   o.style.cssText = 'position:fixed;inset:0;z-index:94;background:rgba(0,0,0,.66);display:flex;align-items:center;justify-content:center;padding:16px';
   o.innerHTML = snEntHtml(r, VV.nombre, Date.now()); document.body.appendChild(o);
 }
+/* ═══ [v0.15.66 · 🎛 V35 dom 22] IL PRIMO SUSSURRO DI LUZ — «La cocina cierra en media hora» (deciso il 14-nov), regola v1 dichiarata:
+   l'ora la dà il bordo nella risposta dell'entrata (`cocina_cierra` «HH:MM» del giorno operativo, `aviso_min` minuti, 30 se manca).
+   Dentro gli ultimi `aviso_min` minuti prima della chiusura, a un garzón che ha almeno una mesa aperta nella sua plaza: UNA riga in testa,
+   UNA volta per giorno operativo + nome + turno (ricordata nel telefono), che si toglie con «Visto». Mai in modo JL, mai in prova.
+   Il bordo non manda `cocina_cierra` (o la manda rotta) ⇒ nessuna riga: niente ora inventata. Il ragionamento vero di LUZ con 🧠 FARO sostituisce la v1 dopo. */
+function snLuzMinAlCierre(r, ms) {
+  var c = r ? snHHMM(r.cocina_cierra) : null; if (c == null) return null;
+  return (c - snMinCL(ms) + 1440) % 1440;   // la mezzanotte la fa il modulo: la cucina dell'01:00 dalle 00:30
+}
+function snLuzDebe(r, ms, aperte) {
+  if (!r || r.ok !== true || !(aperte > 0)) return false;
+  var av = Number(r.aviso_min); if (!(av > 0 && av <= 180)) av = 30;
+  var d = snLuzMinAlCierre(r, ms); return d != null && d > 0 && d <= av;
+}
+function snLuzChiave(r) { return 'sn_luz_cocina_' + (typeof snFechaOp === 'function' ? snFechaOp() : '') + '_' + String(VV.nombre || '').toLowerCase() + '_' + ((r && r.turno) || ''); }
+function snLuzVisto() { var o = document.getElementById('snLuz'); if (o) o.remove(); }
+function snLuzCocina() {
+  if (!SN_ENTRADA_ON || VV.demo || (typeof SNJL !== 'undefined' && SNJL)) return;
+  var r = (typeof SNE !== 'undefined' && SNE && SNE.r) || null; if (!r) return;
+  var aperte = 0; try { aperte = MESAS.filter(function (x) { return enPlaza(x) && !x.libre && !x.junta; }).length; } catch (e) {}
+  if (!snLuzDebe(r, Date.now(), aperte)) return;
+  var k = snLuzChiave(r), visto = false; try { visto = localStorage.getItem(k) === '1'; } catch (e) {}
+  if (visto || document.getElementById('snLuz')) return;
+  try { localStorage.setItem(k, '1'); } catch (e) {}
+  var el = document.createElement('div'); el.id = 'snLuz';
+  el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:93;display:flex;align-items:center;gap:12px;padding:12px 16px;padding-top:calc(env(safe-area-inset-top,0px) + 12px);background:#2b2114;color:#f4ede1;border-bottom:2px solid var(--oro);font-family:inherit;font-size:15.5px;font-weight:700;line-height:1.25';
+  el.innerHTML = '<span style="flex:1">🍳 La cocina cierra en media hora</span><button type="button" class="vb pieno" style="min-width:0;width:auto;margin:0;padding:8px 14px;font-size:14px" onclick="snLuzVisto()">Visto</button>';
+  document.body.appendChild(el);
+}
 function vvParti() {
   document.getElementById('vvLogin').hidden = true;
   if (!VV.demo) { snLeggiSalud(); snCargarCarta().then(function () { vvDisegna(); }); }   // v0.8.0 · la carta vera e la leva, una volta all'ingresso
   if (!VV.demo) { clearInterval(SNVER.t); SNVER.t = setInterval(snVerControlla, 60000); setTimeout(function () { snVerControlla(true); }, 30000); }   // [v0.15.46] l'avviso della versione nuova
   if (!VV.demo) snEntrada();   // [v0.15.50] l'entrata: una volta per turno, mai bloccante
-  if (!VV.demo && SN_ENTRADA_ON) { clearInterval(SNE.t); SNE.t = setInterval(snTestataOra, 60000); }   // [v0.15.51 · O1] le pillole seguono l'ora
+  if (!VV.demo && SN_ENTRADA_ON && !(typeof SNJL !== 'undefined' && SNJL)) { clearInterval(SNE.t); SNE.t = setInterval(function () { snTestataOra(); snLuzCocina(); }, 60000); }   // [v0.15.51 · O1] le pillole seguono l'ora · [v0.15.66] e la riga della cucina
   vvLeggi();
   clearInterval(VV.timer);
   if (!VV.demo) VV.timer = setInterval(function () { if (!document.hidden) vvLeggi(); }, VV.POLL_MS);
