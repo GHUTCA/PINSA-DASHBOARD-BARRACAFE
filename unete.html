@@ -106,7 +106,7 @@
     <div class="s">Todavía no puedes unirte desde aquí. Pregunta en el local.</div>
   </section>
 
-  <div class="foot"><span id="ver">unete v0.1.0 · 24nov · ramo</span></div>
+  <div class="foot"><span id="ver">unete v0.1.1 · 24nov · ramo</span></div>
 </div>
 
 <script>
@@ -115,11 +115,13 @@
 const QS = new URLSearchParams(location.search);
 const LOCAL = String(QS.get('loc') || QS.get('l') || 'BKS').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 12) || 'BKS';
 const DEMO = QS.get('demo') === '1';
+/* 📖 «IL LINK VA BENE»: il QR del tavolo passa `mesa`, e la carta torna al tavolo giusto. Solo la forma corta del QR (come snExpressUrl). */
+const MESA = String(QS.get('mesa') || '').replace(/[^0-9A-Za-z-]/g, '').slice(0, 6);
 const BORDE = { URL: 'https://pinsita-borde.alberto-agostini.workers.dev', T: '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ' };   // il token di lettura dei vetri: pubblico per costruzione
 const MENU_URL = 'https://menu.pinsita.cl/menu.html';
 const CONSENSO = 'lista-v1';
-/* il testo della versione lista-v1 — PROPOSTA (contratto §④), da firmare da Alberto e ⚖️ LEGALES. Se il testo cambia, cambia la versione. */
-const AVISO = '<b>Acepto entrar a La Lista de Pinsita.</b> Pinsita guarda mi nombre, mi celular y, si los doy, mi correo y mi fecha de nacimiento, para reconocerme cuando vengo, darme los precios y beneficios de La Lista y saludarme en mi cumpleaños. No los vende ni los entrega a otros. Puedo pedir que me borren cuando quiera («Olvídame»).';
+/* il testo della versione lista-v1 (contratto §④, Ley 19.628). Se il testo cambia, cambia la versione: mai un testo nuovo sotto un nome vecchio. */
+const AVISO = '<b>Acepto entrar a La Lista de Pinsita y declaro que tengo 18 años o más.</b> Pinsita guarda mi nombre y mi celular, y también mi correo y mi fecha de nacimiento si los doy. Los usa solo para reconocerme cuando vengo a sus locales, darme los precios y beneficios de La Lista y saludarme en mi cumpleaños. No los vende ni los entrega a terceros. Puedo pedir que me borren cuando quiera («Olvídame») en cualquier local de Pinsita.';
 const SK_ID = 'pinsita_member_' + LOCAL + (DEMO ? '_demo' : '');   // la prova non sporca il member vero dello stesso telefono
 
 const $ = id => document.getElementById(id);
@@ -128,6 +130,9 @@ function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k) ||
 function nuovoUid() { const a = new Uint8Array(12); crypto.getRandomValues(a); return 'un-' + Array.from(a, b => b.toString(16).padStart(2, '0')).join(''); }
 function mostra(v) { ['vForm', 'vOk', 'vPronto'].forEach(x => $(x).classList.toggle('hide', x !== v)); window.scrollTo(0, 0); }
 
+/* gli anni compiuti alla data di oggi (ora del telefono). PG ricontrolla alla data dell'alta (menor_de_edad, D-567: 18 anni, Alberto). */
+function oggiIso() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function anni(nac) { const o = oggiIso(); let a = Number(o.slice(0, 4)) - Number(nac.slice(0, 4)); if (o.slice(5) < nac.slice(5)) a--; return a; }
 function telE164(pre, raw) {
   let d = String(raw || '').replace(/[^0-9]/g, '');
   if (d.startsWith(pre) && d.length > 9) d = d.slice(pre.length);
@@ -143,6 +148,7 @@ const MSG = {
   fecha_futuro: 'Revisa tu fecha de cumpleaños.', fecha_prima_1900: 'Revisa tu fecha de cumpleaños.',
   consenso_vuoto: 'Para unirte tienes que aceptar el aviso.',
   rate_limit: 'Muchos intentos seguidos desde aquí. Prueba en un rato.',
+  menor_de_edad: 'La Lista es para mayores de 18 años.',
   red: 'Sin conexión. Tus datos siguen aquí: toca «Unirme a La Lista» otra vez.',
 };
 const ERR_NOSTRI = ['uid_forma', 'uid_riusato', 'via_forma', 'enrolado_vuoto', 'persona_ignota', 'local_vuoto'];
@@ -165,6 +171,7 @@ async function finto(b) {
   if (FINTO.visti[b.uid]) return { ok: true, esito: 'uguale', id: FINTO.visti[b.uid], nombre: String(b.nombre).trim().split(/\s+/)[0] };
   if (++FINTO.n > 5) return { ok: false, error: 'rate_limit', retry_s: 1800 };
   if (/0000$/.test(b.telefono)) return { ok: false, error: 'telefono_ya_registrado' };
+  if (b.fecha_nacimiento && anni(b.fecha_nacimiento) < 18) return { ok: false, error: 'menor_de_edad' };
   const id = 'm' + Array.from(crypto.getRandomValues(new Uint8Array(6)), x => x.toString(16).padStart(2, '0')).join('');
   FINTO.visti[b.uid] = id;
   return { ok: true, esito: 'creado', id: id, nombre: String(b.nombre).trim().split(/\s+/)[0] };
@@ -181,7 +188,8 @@ $('bManda').onclick = async () => {
   const nac = $('fNac').value, mail = $('fMail').value.trim();
   if (!nombre) { $('fErr').textContent = MSG.nombre_vuoto; return; }
   if (!tel) { $('fErr').textContent = MSG.telefono_forma; return; }
-  if (nac && (nac > new Date().toISOString().slice(0, 10) || nac < '1900-01-01')) { $('fErr').textContent = MSG.fecha_futuro; return; }
+  if (nac && (nac > oggiIso() || nac < '1900-01-01')) { $('fErr').textContent = MSG.fecha_futuro; return; }
+  if (nac && anni(nac) < 18) { $('fErr').textContent = MSG.menor_de_edad; return; }
   if (mail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) { $('fErr').textContent = MSG.correo_forma; return; }
   if (!$('fOk').checked) { $('fErr').textContent = MSG.consenso_vuoto; return; }
   ST.vuelo = true; $('bManda').disabled = true; $('bManda').textContent = 'Uniéndote…';
@@ -199,7 +207,7 @@ $('bManda').onclick = async () => {
 
 function dentro(nombre, come) {
   const id = ls(SK_ID);
-  $('bCarta').href = MENU_URL + '?l=' + encodeURIComponent(LOCAL) + '&member=' + encodeURIComponent(id);
+  $('bCarta').href = MENU_URL + '?l=' + encodeURIComponent(LOCAL) + (MESA ? '&mesa=' + encodeURIComponent(MESA) : '') + '&member=' + encodeURIComponent(id);
   $('okTit').textContent = come === 'nuevo' ? '¡Bienvenido a La Lista' + (nombre ? ', ' + nombre : '') + '!'
     : (come === 'ya' ? '¡Ya estás en La Lista' + (nombre ? ', ' + nombre : '') + '!' : '¡Ya estás en La Lista!');
   mostra('vOk');
