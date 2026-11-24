@@ -168,7 +168,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.19</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.20</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -183,7 +183,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.19';
+var JL_VER = 'jl v0.6.20';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -608,8 +608,9 @@ function turnoChip(g) {
 /* [v0.6.16] le mesas aperte di un garzón (né libre né pagado): il numero della card chiusa */
 function gzAbiertas(g) { return g.mesas.filter(function (x) { return x.st !== 'libre' && x.st !== 'pagado'; }).length; }
 /* [v0.6.16] la card aperta si ricorda nel telefono, come Turno e 86 */
-function gzCarica() { try { var k = localStorage.getItem('jl_gz_aperta'); if (k) { VISTA.exp = {}; VISTA.exp[k] = true; } } catch (e) {} }
-function gzApri(s) { var era = !!VISTA.exp[s]; VISTA.exp = {}; if (!era) VISTA.exp[s] = true; try { if (era) localStorage.removeItem('jl_gz_aperta'); else localStorage.setItem('jl_gz_aperta', s); } catch (e) {} }
+function gzCarica() { VISTA.exp = {}; try { var k = localStorage.getItem('jl_gz_aperta'); if (k) VISTA.exp[k] = true; } catch (e) {} }   // [v0.6.20] riparte pulita: niente resta aperto da un tocco fatto col filtro
+function gzApri(s) { var era = !!VISTA.exp[s]; VISTA.exp = {}; if (!era) VISTA.exp[s] = true; if (VISTA.filtro) return;   // [v0.6.20] col filtro il tocco vale solo adesso: non si ricorda
+  try { if (era) localStorage.removeItem('jl_gz_aperta'); else localStorage.setItem('jl_gz_aperta', s); } catch (e) {} }
 /* [v0.6.18] il garzón con la mesa più urgente: la priorità più bassa (AUT 0 · Llamando 1 · Cuenta 2 · solicitud 3 · Pidió 5), a parità chi aspetta
    da più minuti. La solicitud conta con la sua soglia, come nella fascia. Nessuna urgente ⇒ null. */
 function gzTop(M, pm) {
@@ -626,7 +627,9 @@ function gzTop(M, pm) {
 function garzon(g, gi, pm) {
   /* [v0.6.18 · 🎛 «SÌ A TUTTE E DUE», nota 1 di 🍳] senza filtro: chiusa, una alla volta (v0.6.16). Col filtro «N esperan tu acción» si apre da sola
      la card della mesa più urgente, e SOLO quella: il filtro serve ad arrivare alla mesa che aspetta, senza un tocco in più. */
-  var abierto = VISTA.filtro ? (g.slug === VISTA._gzTop) : !!VISTA.exp[g.slug];
+  /* [v0.6.20 · 🔴 di 🍳 su 6240303] col filtro si apre da sola la più urgente FINCHÉ il JL non tocca una card: dal primo tocco comanda la mano, come
+     senza filtro (una alla volta). Prima il tocco col filtro non faceva niente, e la mesa di un altro garzón non si raggiungeva. */
+  var abierto = (VISTA.filtro && !VISTA._filtroMano) ? (g.slug === VISTA._gzTop) : !!VISTA.exp[g.slug];
   /* [v0.6.17 · nota di 🍳 su dd830e7] «te esperan» conta anche la mesa con una solicitud pendiente oltre la soglia, come la fascia in cima:
      la somma delle card non resta più bassa del numero in cima */
   var urg = g.mesas.filter(function (x) { var p = pm && pm[x.m]; return jlUrgente(x) || !!(p && (p.min == null || p.min >= JL_ALLARME.solicitud_min)); }).length;
@@ -1730,7 +1733,8 @@ function jlVolver() {
 /* [v0.5.0 · v50 della demo] si riparte sempre da Servicio, a schermata pulita: quando l'app torna visibile e dopo IDLE_MIN minuti senza tocchi
    (3, deciso da Alberto il 15-nov). Un ritiro in corso NON si perde: CJ.ret resta, e il pallino su Caja lo dice. */
 var IDLE_MIN = 3, _idleT = null;
-function aServicio() { VISTA.filtro = false; PET.msg = ''; LV.pl = null; LV.ed = null; LV.arm = null; LV.abrir = false; LV.msg = ''; CJ.cie = null; OB.sel = null; ir(0); }
+function aServicio() { if (VISTA.filtro) { VISTA._filtroMano = false; gzCarica(); } VISTA.filtro = false;   // [v0.6.20]
+  PET.msg = ''; LV.pl = null; LV.ed = null; LV.arm = null; LV.abrir = false; LV.msg = ''; CJ.cie = null; OB.sel = null; ir(0); }
 function despierta() { clearTimeout(_idleT); _idleT = setTimeout(aServicio, IDLE_MIN * 60000); }
 ['pointerdown', 'keydown'].forEach(function (e) { document.addEventListener(e, despierta, true); });
 document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') aServicio(); });
@@ -1739,8 +1743,9 @@ despierta();
 document.querySelector('.app').addEventListener('click', function (ev) {
   var el = ev.target.closest('[data-a]'); if (!el) return;
   var a = el.getAttribute('data-a');
-  if (a === 'filtro') { VISTA.filtro = !VISTA.filtro; jlPinta(); }
-  else if (a === 'gz') { gzApri(el.getAttribute('data-s')); jlPinta(); }   // [v0.6.16] aprirne una chiude l'altra
+  if (a === 'filtro') { VISTA.filtro = !VISTA.filtro; VISTA._filtroMano = false; if (VISTA.filtro) VISTA.exp = {}; else gzCarica(); jlPinta(); }   // [v0.6.20] col filtro si riparte dalla più urgente; senza, torna la card ricordata
+  else if (a === 'gz') { if (VISTA.filtro && !VISTA._filtroMano) { VISTA._filtroMano = true; VISTA.exp = {}; if (VISTA._gzTop) VISTA.exp[VISTA._gzTop] = true; }   // [v0.6.20] il primo tocco col filtro parte dalla card aperta da sola
+    gzApri(el.getAttribute('data-s')); jlPinta(); }   // [v0.6.16] aprirne una chiude l'altra
   else if (a === 'plazas') { VISTA.plz = el.getAttribute('data-s'); jlPinta(true); document.getElementById('body').scrollTop = 0; }
   else if (a === 'mesa') { VISTA.aperta = { g: +el.getAttribute('data-g'), m: el.getAttribute('data-m') }; jlPinta(); document.getElementById('body').scrollTop = 0; }
   else if (a === 'volver' || a === 'volverTop') { jlVolver(); }
