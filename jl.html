@@ -167,7 +167,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.9</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.10</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -182,7 +182,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.9';
+var JL_VER = 'jl v0.6.10';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -638,6 +638,7 @@ function petEsce(p, righe) {
 var PET_MOT = { cambio_producto: 'Cambió de producto', no_le_gusto: 'No le gustó', mal_estado: 'En mal estado', error_mesero: 'Error del garzón' };
 function petTitolo(p) {
   if (p.tipo === 'eliminar') { var e = petEsce(p, PET.ped[String(p.pedido_uuid)]); return 'Eliminar ' + (e.length ? e.map(function (x) { return (x.q > 1 ? x.q + '× ' : '') + x.n; }).join(', ') : (p.items ? 'productos' : 'el pedido')); }
+  if (petEsFam(p)) return 'FAM · mesa en $0' + (p.fam && p.fam.para ? ' · para ' + p.fam.para : '');   // [v0.6.10 · AUT-1189 ③]
   return (p.clase === 'convenio' ? 'Convenio ' : 'Descuento ') + (p.etiqueta || p.codigo || '') + (p.pct ? ' ' + p.pct + '%' : '');
 }
 async function petPost(verbo, p, pin) {
@@ -654,14 +655,19 @@ async function petPost(verbo, p, pin) {
   } catch (e) { clearTimeout(to); PET.dubbio[k] = uid; return { _rete: true }; }   // esito incerto: il ritocco è lo STESSO gesto (il bordo fa dedup su uid_gesto)
 }
 /* [v0.5.0 · v41 della demo] ogni solicitud dice la sua CLASSE, il bottone dice cosa fa e la conferma dice cosa è successo */
-var SOL_OK = { eliminar: ['Eliminar y avisar al garzón', '✓ Eliminado'], descuento: ['Aplicar descuento y avisar al garzón', '✓ Descuento aplicado'] };
+var SOL_OK = { eliminar: ['Eliminar y avisar al garzón', '✓ Eliminado'], descuento: ['Aplicar descuento y avisar al garzón', '✓ Descuento aplicado'],
+  fam: ['Autorizar FAM y avisar al garzón', '✓ FAM autorizada'] };   // [v0.6.10 · AUT-1189 ③]
+/* [v0.6.10 · 🛎 SALA V35 · AUT-1189 ③ · D-563 #9] la FAM arriva come un descuento al 100% col `codigo:'fam'` (⚙️ `arq-fam-peticion`): ha la sua classe,
+   il suo bottone e dice di chi è il código (`fam.quien`, mai il código), per chi è la mesa (`fam.para`) e il perché (`motivo`) */
+function petEsFam(p) { return !!(p && p.tipo === 'descuento' && p.codigo === 'fam'); }
+function petTipoOk(p) { return p && p.tipo === 'eliminar' ? 'eliminar' : (petEsFam(p) ? 'fam' : 'descuento'); }
 /* il titolo accanto alla pill della classe: senza ripetere «Eliminar» (la pill lo dice già) */
 function petCosa(p) { return String(petTitolo(p)).replace(/^Eliminar /, ''); }
-function petClase(p) { return p && p.tipo === 'eliminar' ? 'Eliminar' : 'Descuento'; }
+function petClase(p) { return p && p.tipo === 'eliminar' ? 'Eliminar' : (petEsFam(p) ? 'FAM' : 'Descuento'); }
 function petEsito(r, verbo, tipo) {
   if (r && r._rete) return '⏳ No sé si llegó: toca de nuevo, no se duplica.';
   if (r && r.ok === true && r.scritto === false) return '⛔ Las solicitudes están apagadas en el sistema.';
-  if (r && r.ok) return verbo === 'confirmar' ? (SOL_OK[tipo === 'eliminar' ? 'eliminar' : 'descuento'][1]) : '✓ Rechazado';
+  if (r && r.ok) return verbo === 'confirmar' ? (SOL_OK[SOL_OK[tipo] ? tipo : 'descuento'][1]) : '✓ Rechazado';
   var e = r && r.error;
   if (e === 'pin_jl_invalido' || e === 'pin_jl_requerido') return '⛔ Tu PIN no vale para el sistema ahora: entra de nuevo desde tu app.';
   if (/bloqueado/.test(String(e || ''))) return '⛔ PIN bloqueado' + (r.faltan_s ? ' · espera ' + Math.ceil(r.faltan_s / 60) + ' min' : '');
@@ -679,9 +685,9 @@ async function petGesto(verbo) {
   if (!DEMO && pin.length < 4) { PET.msg = '✋ Escribe tu PIN de JL para ' + (verbo === 'confirmar' ? 'autorizar' : 'rechazar') + '.'; jlPinta(true); return; }
   PET.vuelo = true; PET.msg = ''; jlPinta(true);
   var r = await petPost(verbo, p, DEMO ? (pin || 'DEMO') : pin); pin = '';
-  PET.vuelo = false; PET.msg = petEsito(r, verbo, p.tipo);
+  PET.vuelo = false; PET.msg = petEsito(r, verbo, petTipoOk(p));
   if (r && r.error === 'pedido_cambio') { jlLeggi(); jlPinta(true); return; }   // [v0.4.1] il dettaglio resta aperto: «Rechazar» è il gesto che serve
-  if (r && r.ok && r.scritto !== false) { if (verbo === 'confirmar' && r.foto) PET.msg += ' · ' + (r.foto.monto != null ? 'cobra ' + pesos(r.foto.monto) : ''); PET.aperta = null; jlLeggi(); }
+  if (r && r.ok && r.scritto !== false) { if (verbo === 'confirmar' && r.foto) PET.msg += ' · ' + (petEsFam(p) ? 'mesa en $0' : (r.foto.monto != null ? 'cobra ' + pesos(r.foto.monto) : '')); PET.aperta = null; jlLeggi(); }
   jlPinta(true);
 }
 function petApri(id) {
@@ -690,7 +696,8 @@ function petApri(id) {
   if (p && p.stato === 'pendiente' && !p.leida_ts && !PET.letti[id] && SES.pin) { PET.letti[id] = 1; petPost('leer', p); }   // «visto»: una volta, senza aspettare
 }
 /* [v0.5.0 · S3 di 🎨] le solicitudes NON stanno in Servicio: si aprono dal campanello (la demo `solicitudes()`), e da lì si va alla mesa */
-function petMotivo(p) { return p.tipo === 'eliminar' ? (PET_MOT[p.motivo] || p.motivo || '') : (p.clase === 'convenio' ? 'Convenio' : 'Descuento') + (p.pct ? ' · ' + p.pct + '%' : ''); }
+function petMotivo(p) { if (petEsFam(p)) return 'Código de ' + ((p.fam && p.fam.quien) || '(sin nombre)') + (p.motivo ? ' · ' + p.motivo : '');   // [v0.6.10] di chi è il código, mai il código
+  return p.tipo === 'eliminar' ? (PET_MOT[p.motivo] || p.motivo || '') : (p.clase === 'convenio' ? 'Convenio' : 'Descuento') + (p.pct ? ' · ' + p.pct + '%' : ''); }
 function petLista() {
   var pend = petPend();
   var h = PET.msg ? '<div class="vetro' + (/^✓/.test(PET.msg) ? '' : ' alerta') + '"><p>' + esc(PET.msg) + '</p></div>' : '';
@@ -708,6 +715,10 @@ function petDettaglio() {
     var e = petEsce(p, PET.ped[String(p.pedido_uuid)]);
     h += '<div class="sub">Eliminar' + (p.items ? '' : ' el pedido entero') + ':</div>' + (e.length ? e.map(function (x) { return '<div class="l"><span>' + x.q + ' × ' + esc(x.n) + '</span><b>sale</b></div>'; }).join('') : '<p class="vacio">No veo el pedido en la sala de ahora: puede que ya haya cambiado.</p>') +
       '<div class="sub">Motivo: ' + esc(PET_MOT[p.motivo] || p.motivo || '—') + '</div>';
+  } else if (petEsFam(p)) {   // [v0.6.10 · AUT-1189 ③]
+    h += '<div class="l"><span>' + esc(petTitolo(p)) + '</span><b>$0</b></div>' + '<div class="sub">' + esc(petMotivo(p)) + '</div>' +
+      (p.descuento ? '<div class="sub">Autorizada: la mesa queda en $0</div>' : '') +
+      '<div class="sub">El garzón cierra la mesa entera en $0 en la sala nueva, sin propina. Si el consumo cambia, te pide confirmarla de nuevo.</div>';
   } else {
     h += '<div class="l"><span>' + esc(petTitolo(p)) + '</span><b>' + (p.pct ? p.pct + '%' : '') + '</b></div>' + (p.descuento ? '<div class="sub">Autorizado: cobra ' + pesos(p.descuento.monto) + '</div>' : '') +
       '<div class="sub">El garzón lo cobra en la sala nueva: toda la cuenta, con un solo medio. Si el consumo cambia, te pide confirmarlo de nuevo.</div>';   // [v0.6.9 · 🛎 SALA V35] la frase vecchia diceva che il cobro non c'era: c'è (sala_nueva snDtoAutX · bordo _petConsuma)
@@ -715,7 +726,7 @@ function petDettaglio() {
   h += '</div>' + (PET.msg ? '<div class="vetro alerta"><p>' + esc(PET.msg) + '</p></div>' : '');
   if (p.stato === 'pendiente') {
     if (!SES.pin && !DEMO) h += '<div class="sub">Para autorizar entra con tu PIN desde tu app.</div>';
-    else h += '<button class="azione rojo" data-a="petSi"' + (PET.vuelo ? ' disabled' : '') + '>' + (PET.vuelo ? '…' : SOL_OK[p.tipo === 'eliminar' ? 'eliminar' : 'descuento'][0]) + '</button><button class="azione" data-a="petNo"' + (PET.vuelo ? ' disabled' : '') + '>Rechazar</button>';
+    else h += '<button class="azione rojo" data-a="petSi"' + (PET.vuelo ? ' disabled' : '') + '>' + (PET.vuelo ? '…' : SOL_OK[petTipoOk(p)][0]) + '</button><button class="azione" data-a="petNo"' + (PET.vuelo ? ' disabled' : '') + '>Rechazar</button>';
   }
   return h;
 }
@@ -800,13 +811,13 @@ function detalle(gi, m) {
   if (p) {
     var letta = PET.aperta === p.id, dentro = '';
     if (letta && p.tipo === 'eliminar') { var es = petEsce(p, PET.ped[String(p.pedido_uuid)]); dentro = es.length ? es.map(function (z) { return '<div class="riga"><span>' + z.q + ' × ' + esc(z.n) + '</span><span class="st">sale</span></div>'; }).join('') : '<p class="vacio">No veo el pedido en la sala de ahora: puede que ya haya cambiado.</p>'; }
-    else if (letta && p.descuento) dentro = '<p>Autorizado: cobra ' + pesos(p.descuento.monto) + '</p>';
+    else if (letta && p.descuento) dentro = petEsFam(p) ? '<p>Autorizada: la mesa queda en $0</p>' : '<p>Autorizado: cobra ' + pesos(p.descuento.monto) + '</p>';   // [v0.6.10]
     sol = '<div class="solic"><div class="h"><span class="pill bad">' + petClase(p) + '</span> ' + esc(petCosa(p)) + ' <small>' + esc(p.chi_pide || '') + '</small></div>' +
       '<p>' + esc(petMotivo(p)) + ' · hace ' + (p.min || 0) + '′</p>' + dentro +
       (PET.msg && letta ? '<p style="color:' + (PET.msg.indexOf('✓') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin-top:6px">' + esc(PET.msg) + '</p>' : '') +
       (letta ? '<div class="leido">✓ leída por ti</div>' : '<button class="azione" data-a="petApri" data-k="' + esc(p.id) + '">Leer la solicitud</button>') +
       '<input id="petPin" class="azione" style="text-align:left;margin-top:8px" type="password" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="PIN del JL"' + (letta && !PET.vuelo ? '' : ' disabled') + '>' +
-      '<button class="azione rojo" data-a="petSi"' + (letta && !PET.vuelo ? '' : ' disabled') + '>' + (PET.vuelo ? '…' : SOL_OK[p.tipo === 'eliminar' ? 'eliminar' : 'descuento'][0]) + '</button>' +
+      '<button class="azione rojo" data-a="petSi"' + (letta && !PET.vuelo ? '' : ' disabled') + '>' + (PET.vuelo ? '…' : SOL_OK[petTipoOk(p)][0]) + '</button>' +
       (letta ? '<button class="azione" style="min-height:36px;padding:6px;font-size:11.5px;opacity:.8" data-a="petNo"' + (PET.vuelo ? ' disabled' : '') + '>Rechazar</button>' : '') + '</div>';
   } else if (PET.msg && /^✓/.test(PET.msg)) sol = '<div class="vetro lume"><h4>' + esc(PET.msg) + '</h4><p>El garzón recibe la confirmación en su teléfono. Queda escrito con tu nombre y el motivo.</p></div>';
   var url = jlSessioneCompleta() ? esc(jlSalaUrl(g, x.m)) : '';
