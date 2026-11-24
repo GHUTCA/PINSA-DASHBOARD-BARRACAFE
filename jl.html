@@ -167,7 +167,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.13</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.14</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -182,7 +182,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.13';
+var JL_VER = 'jl v0.6.14';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -358,8 +358,8 @@ function jlModelo(dd, ora) {
 
 /* ═══ LA SESSIONE DEL JL (fase 1: quella che app_jl ha già) ═══ */
 var SES = (function () {
-  var pin = '', user = '', codigo = '';
-  try { pin = sessionStorage.getItem('jl_pin') || ''; user = sessionStorage.getItem('jl_user') || ''; codigo = sessionStorage.getItem('jl_codigo') || ''; } catch (e) {}
+  var pin = '', user = '', codigo = '', nombre = '';
+  try { pin = sessionStorage.getItem('jl_pin') || ''; user = sessionStorage.getItem('jl_user') || ''; codigo = sessionStorage.getItem('jl_codigo') || ''; nombre = sessionStorage.getItem('jl_nombre') || ''; } catch (e) {}
   if (!codigo) {
     try {
       var c = JSON.parse(localStorage.getItem('jl_cache_' + CFG.LOCAL) || 'null');
@@ -369,8 +369,12 @@ var SES = (function () {
       if (!user && c && c.user) user = String(c.user);
     } catch (e) {}
   }
-  return { pin: pin, user: user, codigo: codigo };
+  return { pin: pin, user: user, codigo: codigo, nombre: nombre };
 })();
+/* [24-nov · v0.6.14 · osservazione 7 di Alberto «JL2 è EDUARDO, JL1 è PEDRO: li prendi dove sono registrati»] il NOME della persona per lo
+   schermo arriva da `/jl/entra` (`nombre`, ⚙️ `3cc23cd`, risolto da `jl_pin_persona` → `staff_locale_vigente.nombre_visible`). Resta solo a
+   vista: `SES.user` («JL2») è la chiave che viaggia verso il bordo nei gesti e NON cambia. Senza ponte `nombre` non arriva e si vede «JL2» come ieri. */
+function jlYo() { return SES.nombre ? SES.nombre + ' · ' + SES.user : SES.user; }
 function jlAppUrl() { return 'app_jl.html?loc=' + ({ BKS: 'bks', RIESCO: 'rsc', CANDELARIA: 'cdl' })[CFG.LOCAL] + (DEMO ? '&demo=1' : ''); }
 
 var VISTA = { mod: null, ts: 0, edadBordeS: null, err: '', filtro: false, exp: {}, tab: 0, aperta: null };
@@ -453,9 +457,9 @@ async function jlEntra(pin) {
   clearTimeout(to); ENTRA.vuelo = false;
   if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') { ENTRA.err = ''; ENTRA.gate = false; VISTA.err = 'sin_codigo'; jlPinta(); return; }   // leva spenta: l'app di sempre (e il form non torna)
   if (j && j.ok === true && j.quien) {
-    SES.pin = pin; SES.user = String(j.quien);
-    try { sessionStorage.setItem('jl_pin', SES.pin); sessionStorage.setItem('jl_user', SES.user); } catch (e) {}
-    document.getElementById('yo').textContent = SES.user; VISTA.err = ''; jlLeggi(); return;
+    SES.pin = pin; SES.user = String(j.quien); SES.nombre = j.nombre ? String(j.nombre).trim().slice(0, 60) : '';   // [v0.6.14] il nome solo a vista
+    try { sessionStorage.setItem('jl_pin', SES.pin); sessionStorage.setItem('jl_user', SES.user); if (SES.nombre) sessionStorage.setItem('jl_nombre', SES.nombre); else sessionStorage.removeItem('jl_nombre'); } catch (e) {}
+    document.getElementById('yo').textContent = jlYo(); VISTA.err = ''; jlLeggi(); return;
   }
   if (j && j.ok === false && j.error === 'token_invalid') ENTRA.err = 'Esta app no está autorizada en el sistema (no es tu PIN): avisa a Alberto';   // [v0.2.1 · 🟡 ⓑ di 💵]
   else if (j && j.ok === false && /bloqueado/.test(String(j.error || ''))) ENTRA.err = 'PIN bloqueado' + (+j.faltan_s ? ' · espera ' + Math.ceil(+j.faltan_s / 60) + ' min' : '');
@@ -1749,7 +1753,7 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   else if (a === 'cjReg') { CJ.reg = !CJ.reg; updateDock(); }
   else if (a === 'cjCie') { CJ.cie = el.getAttribute('data-k'); CJ.msg = ''; jlPinta(true); document.getElementById('body').scrollTop = 0; }
   else if (a === 'cjFin') { CJ.fin = true; CJ.ret = null; CJ.msg = ''; jlPinta(true); document.getElementById('body').scrollTop = 0; }
-  else if (a === 'sala') { try { if (SES.codigo) sessionStorage.setItem('jl_codigo', SES.codigo); if (SES.pin) sessionStorage.setItem('jl_pin', SES.pin); if (SES.user) sessionStorage.setItem('jl_user', SES.user); } catch (e) {} }   // la nueva legge la sessione: si scrive prima di uscire
+  else if (a === 'sala') { try { if (SES.codigo) sessionStorage.setItem('jl_codigo', SES.codigo); if (SES.pin) sessionStorage.setItem('jl_pin', SES.pin); if (SES.user) sessionStorage.setItem('jl_user', SES.user); if (SES.nombre) sessionStorage.setItem('jl_nombre', SES.nombre); } catch (e) {} }   // la nueva legge la sessione: si scrive prima di uscire
 });
 /* [v0.5.2] Entrada / Salida: la Salida resta sempre dopo l'Entrada (come la demo e app_jl) */
 document.getElementById('body').addEventListener('change', function (ev) {
@@ -1798,7 +1802,7 @@ var JL_DEMO = {
   }
 };
 
-document.getElementById('yo').textContent = DEMO ? 'Prueba' : (SES.user || 'JL');
+document.getElementById('yo').textContent = DEMO ? 'Prueba' : (SES.user ? jlYo() : 'JL');   // [v0.6.14]
 document.getElementById('ver').textContent = JL_VER;
 jlEntraLeva().then(function () { if (VISTA.err === 'sin_pin') jlPinta(); });   // [v0.4.2] una GET a /salud, solo all'ingresso
 jlLeggi();
