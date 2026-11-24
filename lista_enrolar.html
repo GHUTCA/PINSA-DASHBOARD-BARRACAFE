@@ -99,7 +99,7 @@
         <select id="fPre" class="inp"><option value="56">🇨🇱 +56</option><option value="55">🇧🇷 +55</option><option value="54">🇦🇷 +54</option></select>
         <input id="fTel" class="inp" inputmode="tel" autocomplete="off" maxlength="16" placeholder="9 1234 5678">
       </div></div>
-    <div class="f"><label class="lbl" for="fNac">Fecha de nacimiento <i>· opcional, para su cumpleaños</i></label>
+    <div class="f"><label class="lbl" for="fNac">Fecha de nacimiento <i>· mira su carnet: La Lista es para mayores de 18</i></label>
       <input id="fNac" class="inp" type="date"></div>
     <div class="f"><label class="lbl" for="fMail">Correo <i>· opcional</i></label>
       <input id="fMail" class="inp" type="email" inputmode="email" autocomplete="off" maxlength="200" placeholder="nombre@correo.cl"></div>
@@ -125,7 +125,7 @@
     <div class="e">🎟</div><b>La Lista abre muy pronto</b><span>Todavía no se puede agregar gente desde aquí.</span>
   </section>
 
-  <div class="foot"><span id="ver">lista_enrolar v0.1.1 · 24nov · ramo</span><button id="bSalir" class="hide">Salir</button></div>
+  <div class="foot"><span id="ver">lista_enrolar v0.1.2 · 24nov · ramo</span><button id="bSalir" class="hide">Salir</button></div>
 </div>
 
 <script>
@@ -138,7 +138,7 @@ const BORDE = { URL: 'https://pinsita-borde.alberto-agostini.workers.dev', T: '7
 const MENU_URL = 'https://menu.pinsita.cl/menu.html';
 const CONSENSO = 'lista-v1';
 /* il testo della versione lista-v1 (contratto §④, Ley 19.628). Se il testo cambia, cambia la versione: mai un testo nuovo sotto un nome vecchio. */
-const AVISO = '<b>Acepto entrar a La Lista de Pinsita y declaro que tengo 18 años o más.</b> Pinsita guarda mi nombre y mi celular, y también mi correo y mi fecha de nacimiento si los doy. Los usa solo para reconocerme cuando vengo a sus locales, darme los precios y beneficios de La Lista y saludarme en mi cumpleaños. No los vende ni los entrega a terceros. Puedo pedir que me borren cuando quiera («Olvídame») en cualquier local de Pinsita.';
+const AVISO = '<b>Acepto entrar a La Lista de Pinsita y declaro que tengo 18 años o más.</b> Pinsita guarda mi nombre, mi celular y mi fecha de nacimiento, y también mi correo si lo doy. Los usa solo para reconocerme cuando vengo a sus locales, darme los precios y beneficios de La Lista y saludarme en mi cumpleaños. No los vende ni los entrega a terceros. Puedo pedir que me borren cuando quiera («Olvídame») en cualquier local de Pinsita.';
 const SK = { COD: 'lista_host_codigo', NOM: 'lista_host_nombre' };   // come la Puerta: il telefono dell'host ricorda il turno, MAI i dati del cliente
 
 const $ = id => document.getElementById(id);
@@ -167,6 +167,7 @@ const MSG = {
   consenso_vuoto: 'Para entrar a La Lista el cliente tiene que aceptar el aviso.',
   rate_limit: 'Muchos intentos seguidos. Prueba en un rato.',
   menor_de_edad: 'La Lista es para mayores de 18 años.',
+  fecha_vuota: 'Falta la fecha de nacimiento: mírala en su carnet.',
   /* i nomi del bordo vivo (⚙️ «I TRE NOMI ESISTONO GIÀ NEL BORDO»): gli stessi di /jl/entra e delle peticiones */
   sesion_invalida: 'Tu turno se cerró o el código cambió. Entra de nuevo.',
   pin_jl_invalido: 'Ese PIN no vale. Entra de nuevo.', pin_jl_requerido: 'Falta tu PIN. Entra de nuevo.',
@@ -195,7 +196,8 @@ async function finto(path, b) {
   if (b.pin_jl !== undefined && b.pin_jl !== '1234') return { ok: false, error: 'pin_jl_invalido' };
   if (FINTO.visti[b.uid]) return { ok: true, esito: 'uguale', id: FINTO.visti[b.uid], nombre: String(b.nombre).trim().split(/\s+/)[0] };
   if (/0000$/.test(b.telefono)) return { ok: false, error: 'telefono_ya_registrado' };
-  if (b.fecha_nacimiento && anni(b.fecha_nacimiento) < 18) return { ok: false, error: 'menor_de_edad' };
+  if (!b.fecha_nacimiento) return { ok: false, error: 'fecha_vuota' };
+  if (anni(b.fecha_nacimiento) < 18) return { ok: false, error: 'menor_de_edad' };
   const id = 'm' + Array.from(crypto.getRandomValues(new Uint8Array(6)), x => x.toString(16).padStart(2, '0')).join('');
   FINTO.visti[b.uid] = id;
   return { ok: true, esito: 'creado', id: id, nombre: String(b.nombre).trim().split(/\s+/)[0] };
@@ -252,8 +254,10 @@ $('bManda').onclick = async () => {
   const nac = $('fNac').value, mail = $('fMail').value.trim();
   if (!nombre) { $('fErr').textContent = MSG.nombre_vuoto; return; }
   if (!tel) { $('fErr').textContent = MSG.telefono_forma; return; }
-  if (nac && (nac > oggiIso() || nac < '1900-01-01')) { $('fErr').textContent = MSG.fecha_futuro; return; }
-  if (nac && anni(nac) < 18) { $('fErr').textContent = MSG.menor_de_edad; return; }
+  /* 🎛 «LA DATA DI NASCITA: LE PAGINE LA DANNO FACOLTATIVA»: obbligatoria (18 anni + cumpleaños), come la vuole PG (fecha_vuota) */
+  if (!nac) { $('fErr').textContent = MSG.fecha_vuota; return; }
+  if (nac > oggiIso() || nac < '1900-01-01') { $('fErr').textContent = MSG.fecha_futuro; return; }
+  if (anni(nac) < 18) { $('fErr').textContent = MSG.menor_de_edad; return; }
   if (mail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) { $('fErr').textContent = MSG.correo_forma; return; }
   if (!$('fOk').checked) { $('fErr').textContent = MSG.consenso_vuoto; return; }
   const body = { uid: ST.uid, nombre: nombre, telefono: tel, correo: mail, fecha_nacimiento: nac, consenso: CONSENSO };
