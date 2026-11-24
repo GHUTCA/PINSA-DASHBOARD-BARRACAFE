@@ -113,6 +113,7 @@
   .campana{position:relative;width:44px;height:44px;border-radius:14px;background:var(--vetro2);border:1px solid var(--filo);font-size:15px;flex:0 0 auto}
   .campana b{position:absolute;top:-5px;right:-5px;background:var(--urge);color:#12101a;border-radius:99px;font-size:10.5px;padding:0 6px;font-weight:800}
   .b86{height:44px;padding:0 12px;border-radius:14px;flex:0 0 auto;background:rgba(240,121,110,.12);border:1px solid rgba(240,121,110,.4);color:var(--urge);font-size:12px;font-weight:700}
+  .b86.neutro{background:var(--vetro2);border-color:var(--filo);color:var(--ink2)}   /* [v0.6.16] un 86 non aspetta un gesto: niente rosso */
   .b86.zero{opacity:.45;background:var(--vetro2);border-color:var(--filo);color:var(--ink3)}
   .edad{display:flex;gap:8px}
   .edad .ver{margin-left:auto;font-size:10px;color:var(--ink3);font-weight:400}
@@ -167,7 +168,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.15</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.16</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -182,7 +183,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.15';
+var JL_VER = 'jl v0.6.16';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -192,7 +193,11 @@ var CFG = {
 var DEMO = QS.get('demo') === '1' || location.hash === '#demo';
 /* le costanti PROVVISORIE del v16 (bacheca «SÌ AL PIANO» ⑦): si cambiano qui, con una riga, quando Alberto dà i numeri */
 var JL_REFILL_MIN = 15;     // Entregado da 15′ senza un pedido nuovo ⇒ «Refill»
-var JL_PIDIO_URGE_MIN = 10; // un pedido che aspetta da 10′ ⇒ «esperan tu acción»
+/* [24-nov · v0.6.16 · osservazione 9 di Alberto, «quando tutto è rosso, niente è rosso» (N8) · 🎛 «③ SÌ»] LE SOGLIE DEL ROSSO, IN UN PUNTO SOLO.
+   Proposte da 🛎, il 🎛 le porta ad Alberto: cambiarle costa una riga. Il rosso vive SOLO nella fascia in cima («N esperan tu acción»), non nelle card.
+   Una mesa senza minuti (il bordo non li ha dati) resta rossa: un dato che manca non nasconde denaro. */
+var JL_ALLARME = { solicitud_min: 2, cuenta_min: 3, llamando_min: 3, pidio_min: 10 };
+var JL_PIDIO_URGE_MIN = JL_ALLARME.pidio_min; // un pedido che aspetta da 10′ ⇒ «esperan tu acción»
 var JL_POLL_MS = 20000;
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -229,10 +234,11 @@ function jlItemsDe(it) {
 var ESTADO = { aut: 'AUT QR', llamando: 'Llamando', cuenta: 'Cuenta pedida', refill: 'Refill', pidio: 'Pidió', entregado: 'Entregado', pagado: 'Pagado', libre: 'Libre' };
 /* l'ordine d'urgenza del v16: chi blocca la vendita sta in cima. null = non aspetta un gesto adesso */
 function jlPrioridad(x) {
+  var su = function (soglia) { return x.min == null || x.min >= soglia; };   // [v0.6.16] senza minuti: rossa
   if (x.st === 'aut') return 0;
-  if (x.st === 'llamando') return 1;
-  if (x.st === 'cuenta') return 2;
-  if (x.st === 'refill') return 4;
+  if (x.st === 'llamando' && su(JL_ALLARME.llamando_min)) return 1;
+  if (x.st === 'cuenta' && su(JL_ALLARME.cuenta_min)) return 2;
+  /* [v0.6.16] il Refill non è più rosso: non è un gesto che il JL deve fare adesso (la proposta del 9) */
   if (x.st === 'pidio' && x.min != null && x.min >= JL_PIDIO_URGE_MIN) return 5;
   return null;
 }
@@ -350,6 +356,13 @@ function jlModelo(dd, ora) {
     /* [v0.1.3 · K8b] lo stato dalla fetta più urgente, la cifra dalla fetta più alta */
     if (!p) perMesa[x.m] = { pr: jlPrioridad(x), v: v }; else { if (jlPrioridad(x) < p.pr) p.pr = jlPrioridad(x); if (v > p.v) p.v = v; }
   }); });
+  /* [v0.6.16] una solicitud (eliminar · descuento · FAM) PENDIENTE da più di JL_ALLARME.solicitud_min: è il JL che deve agire */
+  ((dd && dd.peticiones) || []).forEach(function (p) {
+    if (!p || p.stato !== 'pendiente' || p.mesa == null || !(p.min == null || p.min >= JL_ALLARME.solicitud_min)) return;
+    var m = String(p.mesa); if (perMesa[m]) return;
+    var v = 0; gente.forEach(function (g) { g.mesas.forEach(function (x) { if (x.m === m && x.tot > v) v = x.tot; }); });
+    perMesa[m] = { pr: 3, v: v };
+  });
   var nT = 0, tot = 0;
   Object.keys(perMesa).forEach(function (m) { nT++; tot += perMesa[m].v; });
   sinDueno.forEach(function (q) { nT++; tot += q.tot; });
@@ -382,6 +395,7 @@ function jlYo() { return SES.nombre ? SES.nombre + ' · ' + SES.user : SES.user;
 function jlAppUrl() { return 'app_jl.html?loc=' + ({ BKS: 'bks', RIESCO: 'rsc', CANDELARIA: 'cdl' })[CFG.LOCAL] + (DEMO ? '&demo=1' : ''); }
 
 var VISTA = { mod: null, ts: 0, edadBordeS: null, err: '', filtro: false, exp: {}, tab: 0, aperta: null };
+gzCarica();   // [v0.6.16]
 /* [v0.2.0 · P5] l'86 del bordo (GET /ago86/<local>, token in header) e i nomi dalla carta (/catalogoMesero): una lettura al minuto, non a ogni giro */
 var L86 = { ids: null, apagado: false, err: '', ts: 0 }, CARTA = { nom: {}, ts: 0 };
 /* [24-nov · v0.6.12 · Alberto, tab Local: «l'86 mostra BKS-PIZ-011… non so cosa sia, dovremmo mettere il nome»] LA CAUSA: la carta del garzón
@@ -584,19 +598,25 @@ function turnoChip(g) {
   var t = g.turno || tuEstadoDe(g.n);
   if (t && t.estado === 'tarde') return '<span class="tc oro">llegó tarde · ' + t.min + '′</span>';
   if (t && t.estado === 'en turno') return '<span class="tc ok">en turno</span>';
-  if (t && t.estado === 'sin entrada') return '<span class="tc bad">sin entrada</span>';
-  return '<span class="tc">entrada sin dato</span>';
+  /* [v0.6.16] il clock-in mancato non è un allarme di Servicio: grigio se il garzón sta lavorando, niente se non ha niente in sala */
+  if (t && t.estado === 'sin entrada') return g.mesas.some(function (x) { return x.st !== 'libre' && x.st !== 'pagado'; }) ? '<span class="tc">sin marcar entrada</span>' : '';
+  return '';
 }
+/* [v0.6.16] le mesas aperte di un garzón (né libre né pagado): il numero della card chiusa */
+function gzAbiertas(g) { return g.mesas.filter(function (x) { return x.st !== 'libre' && x.st !== 'pagado'; }).length; }
+/* [v0.6.16] la card aperta si ricorda nel telefono, come Turno e 86 */
+function gzCarica() { try { var k = localStorage.getItem('jl_gz_aperta'); if (k) { VISTA.exp = {}; VISTA.exp[k] = true; } } catch (e) {} }
+function gzApri(s) { var era = !!VISTA.exp[s]; VISTA.exp = {}; if (!era) VISTA.exp[s] = true; try { if (era) localStorage.removeItem('jl_gz_aperta'); else localStorage.setItem('jl_gz_aperta', s); } catch (e) {} }
 function garzon(g, gi, pm) {
-  var abierto = VISTA.filtro ? true : !!VISTA.exp[g.slug];
+  var abierto = !!VISTA.exp[g.slug];   // [v0.6.16 · osservazione 8] chiusa sempre, anche col filtro; una alla volta
   var urg = g.mesas.filter(jlUrgente).length;
   /* [v0.5.0 · S5 · S6] niente pallino davanti al nome · il chip «N plazas ›» apre le plazas (come la demo, `plazas()`) */
   var chip = g.plazas.length > 1
     ? '<button class="chip" data-a="plazas" data-s="' + esc(g.slug) + '">' + g.plazas.length + ' plazas ›</button>'
     : (g.plazas[0] ? '<span class="pill no">' + esc(g.plazas[0].nombre) + '</span>' : '<span class="pill no">sin plaza</span>');
   var h = '<div class="vetro gz"><div class="gz-h" data-a="gz" data-s="' + esc(g.slug) + '"><b>' + esc(g.n) + '</b>' + chip + '<span class="chev">' + (abierto ? '▾' : '▸') + '</span></div>' +
-    '<div class="gz-s">' + turnoChip(g) + (urg ? '<span class="tc bad">' + urg + ' esperan</span>' : '') +
-    '<span class="num">venta ' + (g.venta == null ? 'sin dato' : pesos(g.venta)) + ' · obj. sin dato</span></div>';
+    '<div class="gz-s">' + turnoChip(g) + (urg ? '<span class="tc">' + urg + ' te esperan</span>' : '') +   // [v0.6.16] grigio: il rosso è solo in cima
+    '<span class="num">' + gzAbiertas(g) + (gzAbiertas(g) === 1 ? ' mesa' : ' mesas') + ' · ' + (g.venta == null ? 'venta sin dato' : pesos(g.venta)) + '</span></div>';   // senza meta niente «obj.»
   if (abierto) {
     var ms = g.mesas.filter(function (x) { return !VISTA.filtro || jlUrgente(x) || (pm && pm[x.m]); });
     /* [v0.5.0 · S4 · il punto 1 di Alberto, ven 20] dal garzón si va DIRETTAMENTE ai tavoli: la riga «Aurora A 79 · 81 · 84 | …» non c'è più.
@@ -610,7 +630,7 @@ function plazasVista(slug) {
   var g = VISTA.mod && VISTA.mod.gente.filter(function (x) { return x.slug === slug; })[0];
   if (!g) { VISTA.plz = null; return servicio(); }
   return '<span class="volver" data-a="volver">‹ Servicio</span><div class="vetro"><h4>' + esc(g.n) + ' · plazas</h4>' + g.plazas.map(function (p) {
-    return '<div class="riga"><span><b>' + esc(p.nombre) + '</b><small>mesas ' + esc(p.mesas.join(' · ') || '—') + '</small></span><span class="st">venta sin dato · obj. sin dato</span></div>';
+    return '<div class="riga"><span><b>' + esc(p.nombre) + '</b><small>mesas ' + esc(p.mesas.join(' · ') || '—') + '</small></span><span class="st">venta por plaza sin dato</span></div>';
   }).join('') + '<div class="sub">Venta de ' + esc(g.n) + ' en sus plazas: ' + (g.venta == null ? 'sin dato' : pesos(g.venta)) + '</div></div>';
 }
 /* [v0.2.0 · la testata v50 + P4] campanella (mesas che chiamano o chiedono il conto, una volta per mesa) · 86 · la venta del turno
@@ -780,7 +800,7 @@ function updateDock() {
   if (VISTA.tab !== 0) { row.innerHTML = ''; slot.innerHTML = v + (VISTA.tab === 2 ? cjBanner() : ''); return; }   // [v0.6.0] in Caja il banner dei sobres (v50)
   slot.innerHTML = v + tiraHtml(VISTA.mod);
   var n86 = L86.ids ? L86.ids.length : 0, nP = petPend().length;
-  row.innerHTML = '<button class="b86' + (n86 ? '' : ' zero') + '" data-a="tab86">🚫 ' + n86 + '</button>' +
+  row.innerHTML = '<button class="b86' + (n86 ? ' neutro' : ' zero') + '" data-a="tab86">🚫 ' + n86 + '</button>' +
     '<button class="campana" data-a="sol">🔔<b' + (nP ? '' : ' style="display:none"') + '>' + nP + '</b></button>';
 }
 /* i pallini delle schede (v36): Caja finché il ritiro è aperto, e pulsa se è scaduto */
@@ -1699,7 +1719,7 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   var el = ev.target.closest('[data-a]'); if (!el) return;
   var a = el.getAttribute('data-a');
   if (a === 'filtro') { VISTA.filtro = !VISTA.filtro; jlPinta(); }
-  else if (a === 'gz') { var s = el.getAttribute('data-s'); VISTA.exp[s] = !VISTA.exp[s]; jlPinta(); }
+  else if (a === 'gz') { gzApri(el.getAttribute('data-s')); jlPinta(); }   // [v0.6.16] aprirne una chiude l'altra
   else if (a === 'plazas') { VISTA.plz = el.getAttribute('data-s'); jlPinta(true); document.getElementById('body').scrollTop = 0; }
   else if (a === 'mesa') { VISTA.aperta = { g: +el.getAttribute('data-g'), m: el.getAttribute('data-m') }; jlPinta(); document.getElementById('body').scrollTop = 0; }
   else if (a === 'volver' || a === 'volverTop') { jlVolver(); }
