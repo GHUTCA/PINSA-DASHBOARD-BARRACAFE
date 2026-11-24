@@ -168,7 +168,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.17</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.18</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -183,7 +183,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.17';
+var JL_VER = 'jl v0.6.18';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -607,8 +607,23 @@ function gzAbiertas(g) { return g.mesas.filter(function (x) { return x.st !== 'l
 /* [v0.6.16] la card aperta si ricorda nel telefono, come Turno e 86 */
 function gzCarica() { try { var k = localStorage.getItem('jl_gz_aperta'); if (k) { VISTA.exp = {}; VISTA.exp[k] = true; } } catch (e) {} }
 function gzApri(s) { var era = !!VISTA.exp[s]; VISTA.exp = {}; if (!era) VISTA.exp[s] = true; try { if (era) localStorage.removeItem('jl_gz_aperta'); else localStorage.setItem('jl_gz_aperta', s); } catch (e) {} }
+/* [v0.6.18] il garzón con la mesa più urgente: la priorità più bassa (AUT 0 · Llamando 1 · Cuenta 2 · solicitud 3 · Pidió 5), a parità chi aspetta
+   da più minuti. La solicitud conta con la sua soglia, come nella fascia. Nessuna urgente ⇒ null. */
+function gzTop(M, pm) {
+  var best = null;
+  (M && M.gente || []).forEach(function (g) { g.mesas.forEach(function (x) {
+    var pr = jlPrioridad(x), p = pm && pm[x.m], min = x.min;
+    if (pr === null && p && (p.min == null || p.min >= JL_ALLARME.solicitud_min)) { pr = 3; min = p.min; }
+    if (pr === null) return;
+    var mm = min == null ? 1e9 : min;   // senza minuti: la più urgente fra le pari
+    if (!best || pr < best.pr || (pr === best.pr && mm > best.min)) best = { pr: pr, min: mm, slug: g.slug };
+  }); });
+  return best ? best.slug : null;
+}
 function garzon(g, gi, pm) {
-  var abierto = !!VISTA.exp[g.slug];   // [v0.6.16 · osservazione 8] chiusa sempre, anche col filtro; una alla volta
+  /* [v0.6.18 · 🎛 «SÌ A TUTTE E DUE», nota 1 di 🍳] senza filtro: chiusa, una alla volta (v0.6.16). Col filtro «N esperan tu acción» si apre da sola
+     la card della mesa più urgente, e SOLO quella: il filtro serve ad arrivare alla mesa che aspetta, senza un tocco in più. */
+  var abierto = VISTA.filtro ? (g.slug === VISTA._gzTop) : !!VISTA.exp[g.slug];
   /* [v0.6.17 · nota di 🍳 su dd830e7] «te esperan» conta anche la mesa con una solicitud pendiente oltre la soglia, come la fascia in cima:
      la somma delle card non resta più bassa del numero in cima */
   var urg = g.mesas.filter(function (x) { var p = pm && pm[x.m]; return jlUrgente(x) || !!(p && (p.min == null || p.min >= JL_ALLARME.solicitud_min)); }).length;
@@ -832,6 +847,7 @@ function servicio() {
   var h = '', pm = petMesas(), lista = '';
   if (PET.msg) h += '<div class="vetro' + (/^✓/.test(PET.msg) ? '' : ' alerta') + '"><p>' + esc(PET.msg) + '</p></div>';
   if (M.sinDueno.length) h += '<div class="vetro alerta"><h4>QR sin garzón</h4>' + M.sinDueno.map(function (q) { return '<div class="riga"><span><b>Mesa ' + esc(q.m) + '</b><small>AUT QR' + (q.min != null ? ' · ' + q.min + '′' : '') + '</small></span><span class="st">' + (q.tot ? pesos(q.tot) : '—') + '</span></div>'; }).join('') + '</div>';
+  VISTA._gzTop = VISTA.filtro ? gzTop(M, pm) : null;   // [v0.6.18]
   M.gente.forEach(function (g, gi) {
     if (VISTA.filtro && !g.mesas.some(function (x) { return jlUrgente(x) || pm[x.m]; })) return;
     lista += garzon(g, gi, pm);
