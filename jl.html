@@ -167,7 +167,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.11</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.12</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -182,7 +182,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.11';
+var JL_VER = 'jl v0.6.12';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -376,6 +376,15 @@ function jlAppUrl() { return 'app_jl.html?loc=' + ({ BKS: 'bks', RIESCO: 'rsc', 
 var VISTA = { mod: null, ts: 0, edadBordeS: null, err: '', filtro: false, exp: {}, tab: 0, aperta: null };
 /* [v0.2.0 · P5] l'86 del bordo (GET /ago86/<local>, token in header) e i nomi dalla carta (/catalogoMesero): una lettura al minuto, non a ogni giro */
 var L86 = { ids: null, apagado: false, err: '', ts: 0 }, CARTA = { nom: {}, ts: 0 };
+/* [24-nov · v0.6.12 · Alberto, tab Local: «l'86 mostra BKS-PIZ-011… non so cosa sia, dovremmo mettere il nome»] LA CAUSA: la carta del garzón
+   (`/catalogoMesero`) toglie apposta i prodotti in 86 (bordo `catalogo_pg.js` r.343, `if (ago[id]) continue`), quindi proprio i nomi degli esauriti
+   non arrivavano mai, e ogni lettura RIMPIAZZAVA la mappa dei nomi. Ora: ① i nomi si SOMMANO (un prodotto visto una volta resta col suo nome);
+   ② si ricordano nel telefono (`jl_nomi_<LOCAL>`), così un 86 messo prima di aprire l'app ha il nome se il telefono l'ha visto un'altra volta;
+   ③ se il bordo un giorno porta `nombres` in `/ago86`, si usano (la cura vera, chiesta a ⚙️/📖 in bacheca); ④ senza nome si DICE, col codice piccolo. */
+function jlNomiChiave() { return 'jl_nomi_' + CFG.LOCAL; }
+function jlNomiCarica() { try { var o = JSON.parse(localStorage.getItem(jlNomiChiave()) || 'null'); if (o && typeof o === 'object') Object.keys(o).forEach(function (k) { if (!CARTA.nom[k] && o[k]) CARTA.nom[k] = String(o[k]); }); } catch (e) {} }
+function jlNomiSomma(nm) { var n = 0; Object.keys(nm || {}).forEach(function (k) { var v = String(nm[k] || '').trim(); if (v && v !== k && CARTA.nom[k] !== v) { CARTA.nom[k] = v; n++; } }); if (n) { try { localStorage.setItem(jlNomiChiave(), JSON.stringify(CARTA.nom)); } catch (e) {} } return n; }
+function jl86Nome(id) { return CARTA.nom[id] || ''; }
 var JL_86_MS = 60000;
 
 /* ═══ IL CODIGO DEL TURNO DAL BORDO (⚙️ ARQ, bacheca «A BKS IL TURNO SI APRE GIÀ SUL BORDO») ═══
@@ -466,6 +475,7 @@ function pinHtml() {
 }
 /* [v0.2.0 · P5] l'86 e i nomi della carta: una lettura al minuto, a parte dal giro della sala */
 async function jl86Leggi() {
+  if (!CARTA._caricati) { CARTA._caricati = true; jlNomiCarica(); }   // [v0.6.12] ② i nomi ricordati, una volta
   if (DEMO) { if (!L86.ts) { L86 = { ids: ['BKS-POS-003', 'BKS-COC-011'], apagado: false, err: '', ts: Date.now() }; CARTA.nom = { 'BKS-POS-003': 'Tiramisú', 'BKS-COC-011': 'Mojito Monster Mango', 'BKS-COC-020': 'Tabla Ganadera', 'BKS-PIS-001': 'Pisco sour', 'BKS-COC-030': 'Lomo Saltado', 'BKS-BAR-005': 'Schop LOA', 'BKS-BAR-012': 'Tropical Gin' }; CARTA.ts = Date.now(); } return; }   // [v0.5.1] la demo si inizializza una volta: i gesti dell'86 restano
   if (Date.now() - L86.ts < JL_86_MS) return;
   L86.ts = Date.now();
@@ -473,7 +483,7 @@ async function jl86Leggi() {
     var c1 = new AbortController(), t1 = setTimeout(function () { c1.abort(); }, 6000);
     var r = await fetch(CFG.BORDE + '/ago86/' + encodeURIComponent(CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, signal: c1.signal, cache: 'no-store' });
     var j = await r.json().catch(function () { return null; }); clearTimeout(t1);
-    if (j && j.ok) { L86.ids = Array.isArray(j.ids) ? j.ids.map(String) : []; L86.apagado = !!j.apagado; L86.err = ''; }
+    if (j && j.ok) { L86.ids = Array.isArray(j.ids) ? j.ids.map(String) : []; L86.apagado = !!j.apagado; L86.err = ''; if (j.nombres && typeof j.nombres === 'object') jlNomiSomma(j.nombres); }   // [v0.6.12] ③
     else L86.err = (j && j.error) || ('HTTP ' + r.status);
   } catch (e) { L86.err = 'sin conexión'; }
   /* [v0.5.1] la carta serve anche alla RICERCA dell'86 in Local (v50): si legge anche senza agotados, con la stessa cadenza lenta */
@@ -482,7 +492,7 @@ async function jl86Leggi() {
       var c2 = new AbortController(), t2 = setTimeout(function () { c2.abort(); }, 6000);
       var r2 = await fetch(CFG.BORDE + '/catalogoMesero/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T), { signal: c2.signal, cache: 'no-store' });
       var j2 = await r2.json().catch(function () { return null; }); clearTimeout(t2);
-      if (j2 && j2.ok && Array.isArray(j2.productos)) { var nm = {}; j2.productos.forEach(function (p) { if (p && p.id) nm[String(p.id)] = String(p.nombre || p.id); }); CARTA.nom = nm; CARTA.ts = Date.now(); }
+      if (j2 && j2.ok && Array.isArray(j2.productos)) { var nm = {}; j2.productos.forEach(function (p) { if (p && p.id) nm[String(p.id)] = String(p.nombre || p.id); }); jlNomiSomma(nm); CARTA.ts = Date.now(); }   // [v0.6.12] ① si sommano, non si rimpiazzano
     } catch (e) {}
   }
 }
@@ -1092,11 +1102,12 @@ function turnoCard() {
     (LV.abrir ? '<p style="color:var(--ink);font-weight:700">¿Abrir el turno de hoy?</p><p>Al abrir, el sistema da el código del día. Ábrelo 5 min antes de que llegue la gente.</p><div class="fila2"><button class="azione" data-a="abrNo">No</button><button class="azione oro" data-a="abrOk"' + (LV.vuelo ? ' disabled' : '') + '>' + (LV.vuelo ? '…' : 'Sí, abrir') + '</button></div>'
       : '<button class="azione oro" data-a="abr">Abrir turno</button>') + '</div>';
   var cod = (tt && tt.codigo) || SES.codigo || '';
-  var h = '<div class="vetro' + (sin ? ' alerta' : '') + '"><h4>Turno <span class="pill ok">abierto' + (tt && tt.desde_iso ? ' ' + esc(String(tt.desde_iso).slice(11, 16)) : '') + '</span>' +
-    '<span class="pill ' + (sin ? 'bad' : 'ok') + '">' + (pls.length - sin) + ' de ' + pls.length + ' plazas</span></h4>' + lvMsg();
+  var h = '<div class="vetro' + (sin ? ' alerta' : '') + '">' + locTitolo('locT', LOC.turno, 'Turno <span class="pill ok">abierto' + (tt && tt.desde_iso ? ' ' + esc(String(tt.desde_iso).slice(11, 16)) : '') + '</span>' +
+    '<span class="pill ' + (sin ? 'bad' : 'ok') + '">' + (pls.length - sin) + ' de ' + pls.length + ' plazas</span>') + lvMsg();
   h += '<div style="display:flex;align-items:baseline;gap:10px;margin:0 0 2px"><span style="font-size:12px;color:var(--ink2)">Código de hoy</span><b class="num" style="font-size:26px;letter-spacing:.14em">' + (cod ? esc(cod) : '<span style="font-size:13px;letter-spacing:0">sin dato</span>') + '</b></div>';
   if (sin) h += '<p style="color:var(--urge);font-weight:700;margin-bottom:4px">' + (sin === pls.length ? 'Ninguna plaza tiene garzón todavía.' : sin === 1 ? 'Falta 1 plaza sin garzón.' : 'Faltan ' + sin + ' plazas sin garzón.') + ' No puede quedar así.</p>' +
     '<button class="azione oro" style="margin:4px 0 6px" data-a="arm">' + (sin === pls.length ? 'Armar el turno' : 'Asignar las plazas que faltan') + '</button>';
+  if (!LOC.turno) return h + '<p style="color:var(--ink2);margin:2px 0 0">' + (pls.length - sin) + ' de ' + pls.length + ' plazas' + (sin ? ' · faltan ' + sin : ' · todas con garzón') + ' · toca para ver las plazas</p></div>';   // [v0.6.12] ⑥ chiusa
   h += pls.map(function (x) {
     return '<div class="riga" data-a="lvPl" data-k="' + esc(x.p) + '" style="cursor:pointer;min-height:44px;align-items:flex-start"><span><b>' + esc(x.p) + '</b><small>mesas ' + esc(x.mesas || '—') + '</small></span>' +
       '<span style="margin-left:auto;text-align:right;font-size:12px">' + (x.chi.length
@@ -1148,13 +1159,22 @@ async function gesto86(id, value) {
   else E86.msg = '✋ No se pudo: ' + (j.mensaje || j.error || 'sin motivo') + (j.definitivo ? '' : ' · hazlo desde tu app de siempre');
   jlPinta(true);
 }
+/* [24-nov · v0.6.12 · Alberto, tab Local: «liste interminabili»] Turno e 86 sono card che si aprono e si chiudono con un tocco sul titolo.
+   Chiuse mostrano il riassunto («Turno · 14 de 18 plazas · faltan 4» · «86 · 7 agotados»); l'avviso rosso delle plazas senza garzón e il suo
+   bottone restano visibili anche a card chiusa, e così il codice del giorno. Nascono CHIUSE; la scelta si ricorda nel telefono (`jl_local_aperte`). */
+var LOC = (function () { var o = null; try { o = JSON.parse(localStorage.getItem('jl_local_aperte') || 'null'); } catch (e) {} return { turno: !!(o && o.turno), a86: !!(o && o.a86) }; })();
+function locSalva() { try { localStorage.setItem('jl_local_aperte', JSON.stringify({ turno: LOC.turno, a86: LOC.a86 })); } catch (e) {} }
+function locTitolo(a, aperta, html) { return '<h4 data-a="' + a + '" style="cursor:pointer;display:flex;align-items:center;gap:6px">' + html + '<span style="margin-left:auto;color:var(--ink2);font-size:14px">' + (aperta ? '▾' : '▸') + '</span></h4>'; }
 function card86() {
   if (L86.apagado) return '<div class="vetro"><h4>86 · se acabó</h4><p>El 86 del bordo está apagado: míralo en tu app de siempre.</p></div>';
   if (!L86.ids) return '<div class="vetro"><h4>86 · se acabó</h4><p>' + (L86.err ? 'No pude leer el 86 (' + esc(L86.err) + ').' : 'Leyendo el 86…') + '</p></div>';
-  var h = '<div class="vetro"><h4>86 · se acabó' + (L86.ids.length ? ' <span class="pill bad">' + L86.ids.length + '</span>' : '') + '</h4>';
+  var ap86 = LOC.a86 || !!C86;   // un 86 da confermare tiene la card aperta
+  var h = '<div class="vetro">' + locTitolo('loc86', ap86, '86 · se acabó' + (L86.ids.length ? ' <span class="pill bad">' + L86.ids.length + '</span>' : '')) ;
+  if (!ap86) return h + (E86.msg ? '<p style="color:' + (E86.msg.indexOf('🚫') === 0 || E86.msg.indexOf('✓') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin-bottom:4px">' + esc(E86.msg) + '</p>' : '') +
+    '<p style="color:var(--ink2);margin:0">' + (L86.ids.length ? L86.ids.length + (L86.ids.length === 1 ? ' agotado' : ' agotados') : 'Nada agotado') + ' · toca para ' + (L86.ids.length ? 'verlos o sacar otro' : 'sacar un producto') + '</p></div>';
   if (E86.msg) h += '<p style="color:' + (E86.msg.indexOf('🚫') === 0 || E86.msg.indexOf('✓') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin-bottom:4px">' + esc(E86.msg) + '</p>';
   h += L86.ids.map(function (id) {
-    return '<div class="riga"><span><b>' + esc(CARTA.nom[id] || 'producto ' + id) + '</b></span>' + (SES.pin || DEMO ? '<button class="azione" style="width:auto;margin:0 0 0 auto;min-height:36px;padding:6px 12px" data-a="v86" data-k="' + esc(id) + '"' + (E86.vuelo ? ' disabled' : '') + '>volvió</button>' : '') + '</div>';
+    return '<div class="riga"><span>' + (jl86Nome(id) ? '<b>' + esc(jl86Nome(id)) + '</b>' : '<b style="color:var(--oro)">Sin nombre en la carta</b>') + '<small style="display:block;font-size:11px;color:var(--ink3)">' + esc(id) + '</small></span>' + (SES.pin || DEMO ? '<button class="azione" style="width:auto;margin:0 0 0 auto;min-height:36px;padding:6px 12px" data-a="v86" data-k="' + esc(id) + '"' + (E86.vuelo ? ' disabled' : '') + '>volvió</button>' : '') + '</div>';
   }).join('');
   if (!SES.pin && !DEMO) h += '<p style="margin-top:6px">Para poner o quitar un 86 entra con tu PIN desde tu app.</p>';
   else if (C86) h += '<div class="vetro alerta" style="margin:8px 0 0"><p style="color:var(--ink);font-weight:700">¿Sacar «' + esc(CARTA.nom[C86] || C86) + '» del menú?</p><p>Deja de verse en el QR y en la sala al instante.</p>' +
@@ -1680,6 +1700,8 @@ document.querySelector('.app').addEventListener('click', function (ev) {
     if (dove) VISTA.aperta = dove; else if (pp) petApri(pid);
     jlPinta(true); document.getElementById('body').scrollTop = 0; }
   else if (a === 'tabCaja') { ir(2); }
+  else if (a === 'locT') { LOC.turno = !LOC.turno; locSalva(); jlPinta(true); }   // [v0.6.12] ⑥
+  else if (a === 'loc86') { LOC.a86 = !LOC.a86; if (!LOC.a86) { C86 = null; Q86 = ''; } locSalva(); jlPinta(true); }
   else if (a === 'c86') { C86 = el.getAttribute('data-k'); Q86 = ''; E86.msg = ''; jlPinta(true); }
   else if (a === 'n86') { C86 = null; jlPinta(true); }
   else if (a === 's86') { if (C86) gesto86(C86, true); }
