@@ -174,7 +174,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.22</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.23</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -189,7 +189,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.22';
+var JL_VER = 'jl v0.6.23';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -584,7 +584,7 @@ function tarjeta(x, gi, pm) {
   var mon = x.tot || (x.st === 'aut' ? (x.qrTot || 0) : 0);
   var pid = !!(pm && pm[x.m]);
   var inner = x.st === 'libre' ? '<small>libre</small>' : '<em class="mon">' + (mon ? pesos(mon) : '—') + '</em><small>' + esc(lbl) + '</small>';
-  return '<div class="m ' + x.st + (pid ? ' pid' : '') + juCls(x.m) + '" data-a="mesa" data-g="' + gi + '" data-m="' + esc(x.m) + '" oncontextmenu="event.preventDefault()">' + (pid ? '<i class="sol">!</i>' : '') + '<b>' + esc(x.m) + '</b>' + px + inner + juTag(x.m) + '</div>';   // [v0.6.22] junta: la scelta, il segno, niente menù del browser
+  return '<div class="m ' + x.st + (pid ? ' pid' : '') + juCls(x.m) + '" data-a="mesa" data-g="' + gi + '" data-m="' + esc(x.m) + '" oncontextmenu="event.preventDefault()"' + (x.lbl ? ' style="grid-column:span ' + Math.min(x.jn || 2, 3) + '"' : '') + '>' + ((pid || x.jpid) ? '<i class="sol">!</i>' : '') + '<b>' + esc(x.lbl || x.m) + '</b>' + px + inner + (x.lbl ? '' : juTag(x.m)) + '</div>';   // [v0.6.22] junta: la scelta, il segno, niente menù del browser
 }
 /* [v0.5.0 · S7 di 🎨] lo stato del turno: la demo dice «en turno» o «llegó tarde · N′». L'ora d'entrata del garzón il vetro non ce l'ha
    (`turno_presenza_pg_on` "0", ⚙️ + 🚚 ven 27): si dice, non si scrive «en turno» per tutti. */
@@ -654,7 +654,7 @@ function garzon(g, gi, pm) {
     var ms = g.mesas.filter(function (x) { return !VISTA.filtro || jlUrgente(x) || (pm && pm[x.m]); });
     /* [v0.5.0 · S4 · il punto 1 di Alberto, ven 20] dal garzón si va DIRETTAMENTE ai tavoli: la riga «Aurora A 79 · 81 · 84 | …» non c'è più.
        Le mesas di ogni plaza si leggono toccando «N plazas ›». */
-    h += '<div class="mesas">' + ms.map(function (x) { return tarjeta(x, gi, pm); }).join('') + '</div>';
+    h += '<div class="mesas">' + juVista(ms, pm).map(function (x) { return tarjeta(x, gi, pm); }).join('') + '</div>';   // [v0.6.23] la junta è una tessera
   }
   return h + '</div>';
 }
@@ -1859,6 +1859,27 @@ async function juSeparar() {
     if (DEMO) JU.demo = JU.demo.filter(function (x) { return x.principal !== g.principal; });
     juAviso('✂ ' + g.mesas.join(' · ') + ' separadas' + (upm ? ' — cada plato vuelve con su mesa' : '')); jlLeggi(); return; }
   juAviso('⚠️ La separación de ' + g.mesas.join(' · ') + ' NO se guardó: ' + juErr(r)); jlLeggi();
+}
+/* ═══ [25-nov · v0.6.23 · 🛎 SALA V35 · 🎛 «LA JUNTA DAL JL FUNZIONA»: in sala una tessera «997-998», nel JL erano due] ═══
+   Nella griglia del JL una junta del bordo (`grupos`) è UNA tessera, quella della principal, che porta tutte le mesas nel nome («997-998»), la
+   somma dei conti e lo stato più urgente fra le sue mesas. Le altre mesas della junta non si disegnano, in nessuna card. Il tocco apre la PRINCIPAL:
+   l'ordine del JL va nel conto unico della junta (JUNTA_UN_CONTO_ON) e non su una mesa unita. Una junta di cui nessuna card ha la principal resta
+   com'è (mesa per mesa, col segno «997·998»): non si nasconde mai un conto. */
+function juVista(ms, pm) {
+  var out = [];
+  ms.forEach(function (x) {
+    var g = juGrupo(x.m);
+    if (!g || !juMesa(g.principal)) { out.push(x); return; }
+    if (g.principal !== x.m) return;   // un'unita: la porta la tessera della principal
+    var mem = g.mesas.map(juMesa).filter(Boolean), best = null, tot = 0;
+    mem.forEach(function (y) { tot += Math.round(Number(y.tot) || 0);
+      if (y.st === 'libre') return; var p = jlPrioridad(y);
+      if (!best || (p != null && (best.p == null || p < best.p))) best = { y: y, p: p }; });
+    var j = Object.assign({}, x, { lbl: g.mesas.join('-'), jn: g.mesas.length, tot: tot, jpid: !!(pm && g.mesas.some(function (k) { return pm[k]; })) });
+    if (best) { j.st = best.y.st; j.min = best.y.min; if (best.y.st === 'aut') j.qrTot = best.y.qrTot; }
+    out.push(j);
+  });
+  return out;
 }
 function juBarHtml() {
   var X = '<button type="button" class="jux" data-ju="x" aria-label="Cancelar">✕</button>';
