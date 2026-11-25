@@ -108,6 +108,27 @@
     <div class="err" id="fErr"></div>
     <button class="vb pieno" id="bManda">Agregar a La Lista</button>
     <button class="vb sec" id="bLimpia">Borrar y empezar de nuevo</button>
+    <button class="vb sec" id="bVaOlv" style="margin-top:18px;border-top:1px solid var(--filo);border-radius:0">Un cliente pide que lo borren («Olvídame»)</button>
+  </section>
+
+  <!-- ═════ OLVÍDAME ═════ -->
+  <section id="vOlv" class="hide">
+    <h1>Borrar de La Lista</h1>
+    <div class="sub">Lo pide el cliente, en persona. Se borran su celular, su correo y su fecha de nacimiento.</div>
+    <div class="f"><label class="lbl" for="oTel">Su celular</label>
+      <div class="tel">
+        <select id="oPre" class="inp"><option value="56">🇨🇱 +56</option><option value="55">🇧🇷 +55</option><option value="54">🇦🇷 +54</option></select>
+        <input id="oTel" class="inp" inputmode="tel" autocomplete="off" maxlength="16" placeholder="9 1234 5678">
+      </div></div>
+    <label class="aviso"><input type="checkbox" id="oOk"><span>El cliente me lo pidió y entiende que pierde su precio de La Lista.</span></label>
+    <div class="err" id="oErr"></div>
+    <button class="vb pieno" id="bOlv">Borrar</button>
+    <button class="vb sec" id="bOlvNo">Volver</button>
+  </section>
+  <section id="vOlvOk" class="hide ok">
+    <div class="big">Listo</div>
+    <div class="s">Si ese celular estaba en La Lista, ya no está. El link que tenía deja de funcionar.</div>
+    <button class="vb filo" id="bOlvFin">Volver</button>
   </section>
 
   <!-- ═════ ESITO ═════ -->
@@ -125,7 +146,7 @@
     <div class="e">🎟</div><b>La Lista abre muy pronto</b><span>Todavía no se puede agregar gente desde aquí.</span>
   </section>
 
-  <div class="foot"><span id="ver">lista_enrolar v0.1.4 · 24nov · ramo</span><button id="bSalir" class="hide">Salir</button></div>
+  <div class="foot"><span id="ver">lista_enrolar v0.2.0 · 24nov · ramo</span><button id="bSalir" class="hide">Salir</button></div>
 </div>
 
 <script>
@@ -147,7 +168,7 @@ const $ = id => document.getElementById(id);
 const ST = { cod: '', nom: '', tok: '', pin: '', quien: '', uid: '', vuelo: false, ultimo: null };
 function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k) || ''; if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return ''; } }
 function nuovoUid() { const a = new Uint8Array(12); (crypto || window.msCrypto).getRandomValues(a); return 'en-' + Array.from(a, b => b.toString(16).padStart(2, '0')).join(''); }
-function mostra(v) { ['vEnt', 'vForm', 'vOk', 'vPronto'].forEach(x => $(x).classList.toggle('hide', x !== v)); $('bSalir').classList.toggle('hide', v === 'vEnt' || v === 'vPronto'); window.scrollTo(0, 0); }
+function mostra(v) { ['vEnt', 'vForm', 'vOk', 'vPronto', 'vOlv', 'vOlvOk'].forEach(x => $(x).classList.toggle('hide', x !== v)); $('bSalir').classList.toggle('hide', v === 'vEnt' || v === 'vPronto'); window.scrollTo(0, 0); }
 
 /* ═══ IL CELLULARE: la pagina compone l'E.164, il bordo e PG lo rivalidano (contratto reservas §⑦-4) ═══ */
 /* gli anni compiuti alla data di oggi (ora del telefono). PG ricontrolla alla data dell'alta (menor_de_edad, D-567: 18 anni, Alberto). */
@@ -196,6 +217,7 @@ async function finto(path, b) {
   await new Promise(r => setTimeout(r, 600));
   if (path.startsWith('/pedido-staff/')) return b.codigo === '1234' ? { ok: true, nombre: b.nombre || 'Host', session_tok: 'demo-tok' } : { ok: false, error: 'codigo_invalid' };
   if (b.pin_jl !== undefined && b.pin_jl !== '1234') return { ok: false, error: 'pin_jl_invalido' };
+  if (path.startsWith('/miembro/olvidame/')) return { ok: true, esito: 'hecho' };   // come il bordo: non dice se il telefono c'era
   if (FINTO.visti[b.uid]) return { ok: true, esito: 'uguale', id: FINTO.visti[b.uid], nombre: String(b.nombre).trim().split(/\s+/)[0] };
   if (/0000$/.test(b.telefono)) return { ok: false, error: 'telefono_ya_registrado' };
   if (!b.fecha_nacimiento) return { ok: false, error: 'fecha_vuota' };
@@ -276,6 +298,32 @@ $('bManda').onclick = async () => {
   if (e === 'red' || e === 'pg_no_responde') { $('fErr').textContent = MSG.red; return; }   // stesso uid: il ritento è idempotente
   ST.uidUsato = true;
   $('fErr').textContent = MSG[e] || 'No pudimos guardarlo. Prueba otra vez.';
+};
+
+/* ═══ OLVÍDAME · POST /miembro/olvidame/<LOCAL> {uid, telefono} + identità dello staff (⚙️ «I BUCHI DELLE APP VECCHIE, LATO BORDO», in fondo).
+   La risposta NON dice se quel telefono c'era: la pagina dice lo stesso in tutti e due i casi. Promessa del consenso lista-v1. ═══ */
+const OLV = { uid: '', vuelo: false };
+$('bVaOlv').onclick = () => { $('oTel').value = ''; $('oPre').value = '56'; $('oOk').checked = false; $('oErr').textContent = ''; OLV.uid = nuovoUid().replace('en-', 'ol-'); mostra('vOlv'); };
+['oTel', 'oPre'].forEach(x => $(x).addEventListener('input', () => { OLV.uid = nuovoUid().replace('en-', 'ol-'); }));
+$('bOlvNo').onclick = () => mostra('vForm');
+$('bOlvFin').onclick = () => mostra('vForm');
+$('bOlv').onclick = async () => {
+  if (OLV.vuelo) return;
+  $('oErr').textContent = '';
+  const tel = telE164($('oPre').value, $('oTel').value);
+  if (!tel) { $('oErr').textContent = MSG.telefono_forma; return; }
+  if (!$('oOk').checked) { $('oErr').textContent = 'Marca la casilla: lo tiene que pedir el cliente.'; return; }
+  const body = { uid: OLV.uid, telefono: tel };
+  if (ST.pin) body.pin_jl = ST.pin; else body.session_tok = ST.tok;
+  OLV.vuelo = true; $('bOlv').disabled = true; $('bOlv').textContent = 'Borrando…';
+  const r = await post('/miembro/olvidame/' + encodeURIComponent(LOCAL), body);
+  OLV.vuelo = false; $('bOlv').disabled = false; $('bOlv').textContent = 'Borrar';
+  if (r && r.ok === true) { $('oTel').value = ''; mostra('vOlvOk'); return; }
+  const e = (r && r.error) || 'red';
+  if (e === 'ruta_apagada') { $('oErr').textContent = 'Todavía no se puede borrar desde aquí. Anota la hora y avísale al JL.'; return; }
+  if (/^(sesion_invalida|pin_jl_)/.test(e)) { esci(); $('entErr').textContent = MSG[e] || MSG.pin_jl_invalido; return; }
+  if (e === 'red' || e === 'pg_no_responde') { $('oErr').textContent = 'Sin conexión. Toca «Borrar» otra vez.'; return; }   // stesso uid
+  $('oErr').textContent = MSG[e] || 'No pude borrarlo. Prueba otra vez.';
 };
 
 /* ═══ ESITO ═══ */
