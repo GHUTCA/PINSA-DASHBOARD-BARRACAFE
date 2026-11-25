@@ -88,6 +88,12 @@
   .pollice .vb{height:84px;justify-content:center;font-size:15px;line-height:1.15;padding:8px 8px}
   .vb:disabled{opacity:.55}
   .dos{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .tres{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
+  /* v0.7 · ★ La Lista: l'esito della tarjeta letta alla porta */
+  .lsok{border-radius:18px;padding:16px 14px;text-align:center;margin:4px 0 10px}
+  .lsok b{display:block;font-size:24px;font-weight:800;line-height:1.15} .lsok span{display:block;font-size:13.5px;margin-top:4px}
+  .lsok.si{background:linear-gradient(180deg,#6fdda7,var(--ok));color:#08221a}
+  .lsok.no{background:var(--vetro2);border:1px solid var(--filo);color:var(--ink)} .lsok.no span{color:var(--ink3)}
 
   /* casa */
   #vMapa{padding-bottom:calc(230px + env(safe-area-inset-bottom,0px))}   /* v0.6: i bottoni pieni da 84px sono più alti, l'ultima zona non finisce sotto il pollice. ✏️ 🍳: la barra conta la safe-area, la mappa deve contarla uguale (iPhone col home indicator) */
@@ -226,7 +232,7 @@
   <div class="leyenda"><span class="l1">libre</span><span class="l2">¿libre?</span><span class="l3">por limpiar</span><span>ocupada</span></div>
 
   <div class="foot">
-    <span class="ver"><span id="ver">puerta v0.6.6 · 27nov · sin Google</span> <span id="fuente"></span></span>
+    <span class="ver"><span id="ver">puerta v0.7.0 · 27nov · sin Google</span> <span id="fuente"></span></span>
     <span style="display:flex;gap:8px">
       <button onclick="window.open('guia_turno.html','_blank','noopener')">📖 Guía</button>
       <button onclick="salir()">Salgo · cerrar</button>
@@ -236,8 +242,9 @@
 
 <!-- ═════ SOTTO IL POLLICE: quello che si fa ═════ -->
 <div class="pollice hide" id="bar"><div class="wrap">
-  <div class="dos" style="margin-bottom:8px">
+  <div class="tres" style="margin-bottom:8px">
     <button type="button" class="vb door pronto" onclick="pronto('Reservas')">📅 Reservas<small>pronto</small></button>
+    <button type="button" class="vb door" style="color:var(--oro);border-color:rgba(224,169,74,.55)" onclick="lsAbrir()">★ La Lista<small>su tarjeta</small></button>
     <button type="button" class="vb door pronto" onclick="pronto('La fila')">⏳ Fila<small>pronto</small></button>
   </div>
   <div class="dos">
@@ -296,6 +303,17 @@
   <div id="ptPed"></div>
   <div class="hint" id="ptErr"></div>
   <button type="button" class="vb sec" onclick="ptCerrar()">Cerrar</button>
+</div></div>
+
+<!-- ═════ FOGLIO · ★ LA LISTA (v0.7 · D-567 «entra sin hacer fila») ═════ -->
+<div class="sheet" id="bsLista" onclick="if(event.target===this)lsCerrar()"><div class="shb">
+  <h3>¿Es de La Lista?</h3>
+  <div class="s2">Escanea su tarjeta de La Lista (o el QR de su link).</div>
+  <button type="button" class="cam" id="lsCam" onclick="lsScanIniciar()"><video id="lsVideo" class="hide" playsinline muted></video><span id="lsCamTxt">📷 Tocar para escanear</span></button>
+  <div id="lsRes"></div>
+  <div class="hint" id="lsErr"></div>
+  <button type="button" class="vb sec" id="lsOtra" onclick="lsOtra()">Escanear otra tarjeta</button>
+  <button type="button" class="vb sec" onclick="lsCerrar()">Cerrar</button>
 </div></div>
 
 <div class="toast" id="toast"></div>
@@ -804,7 +822,78 @@ async function scanIniciar() {
     vuelta();
   } catch (e) { scanParar(); _scanAlNumero('No pude abrir la cámara — escribe el número de la mesa'); }
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') scanParar(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') { scanParar(); lsScanParar(); } });
+
+/* ═════ v0.7 · ★ LA LISTA ALLA PORTA (🎟 LA LISTA V35 · D-567 · la pubblicità promette «entra sin hacer fila») ═════
+   L'anfitriona scansiona la tarjeta del cliente (mi_tarjeta.html) o il QR del suo link: dentro c'è `menu.pinsita.cl/menu.html?l=<LOC>&member=<id>`.
+   La pagina chiede `GET /member/<LOCAL>?id=` al bordo (la rotta che esiste, header X-Borde-Token = token di lettura, leva MEMBER_PG_ON) e dice
+   «✓ La Lista · <nombre>». Il bordo dà solo la prima parola del nome: niente telefono, niente cognome.
+   🔴 La Puerta DICE chi è della Lista, non salta la fila da sola: farlo passare è un gesto dell'anfitriona. Nessuna scrittura: è una lettura.
+   A leva spenta (ruta_apagada) dice «La Lista todavía no está activa». Nessuna lettura da Google. */
+let _lsStream = null, _lsTimer = 0, _lsVuelo = false;
+function memberDesdeTexto(txt) {
+  const s = String(txt || '').trim(), ok = (x) => /^[A-Za-z0-9_-]{2,30}$/.test(x || '');
+  try { const u = new URL(s); const id = u.searchParams.get('member'); const l = (u.searchParams.get('l') || u.searchParams.get('loc') || '').toUpperCase();
+    return ok(id) ? { id: id, local: l } : null; } catch (e) { /* non è un link */ }
+  return ok(s) ? { id: s, local: '' } : null;
+}
+function lsAbrir() { $('lsRes').innerHTML = ''; $('lsErr').textContent = ''; $('lsOtra').classList.add('hide'); $('bsLista').classList.add('show'); lsScanIniciar(); }
+function lsCerrar() { lsScanParar(); $('bsLista').classList.remove('show'); }
+function lsOtra() { $('lsRes').innerHTML = ''; $('lsErr').textContent = ''; $('lsOtra').classList.add('hide'); lsScanIniciar(); }
+function lsScanParar() {
+  clearTimeout(_lsTimer); _lsTimer = 0;
+  if (_lsStream) { try { _lsStream.getTracks().forEach(t => t.stop()); } catch (e) {} _lsStream = null; }
+  const v = $('lsVideo'); if (v) { try { v.srcObject = null; } catch (e) {} v.classList.add('hide'); }
+  const c = $('lsCam'); if (c) c.classList.remove('on'); const t = $('lsCamTxt'); if (t) t.classList.remove('hide');
+}
+async function lsScanIniciar() {
+  if (_lsStream) return;
+  $('lsErr').textContent = '';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { $('lsErr').textContent = 'Este teléfono no abre la cámara desde el navegador'; return; }
+  try {
+    _lsStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    const v = $('lsVideo'); v.srcObject = _lsStream; v.classList.remove('hide'); $('lsCam').classList.add('on'); $('lsCamTxt').classList.add('hide'); await v.play();
+    try { _scanDet = _scanDet || await _qrLector(); }   // lo stesso lettore di SENTAR (nativo o zxing su iPhone)
+    catch (eL) { lsScanParar(); $('lsErr').textContent = 'No pude preparar el lector de QR'; return; }
+    const vuelta = async () => {
+      if (!_lsStream) return;
+      try {
+        const r = await _scanDet.detect(v);
+        if (r && r.length) {
+          const m = memberDesdeTexto(r[0].rawValue);
+          if (m) { lsScanParar(); await lsLeer(m); return; }
+          $('lsErr').textContent = 'Ese QR no es una tarjeta de La Lista';
+        }
+      } catch (e) {}
+      if (_lsStream) _lsTimer = setTimeout(vuelta, 250);
+    };
+    vuelta();
+  } catch (e) { lsScanParar(); $('lsErr').textContent = 'No pude abrir la cámara'; }
+}
+function lsPinta(si, tit, sub) {
+  $('lsRes').innerHTML = '<div class="lsok ' + (si ? 'si' : 'no') + '"><b></b><span></span></div>';
+  $('lsRes').querySelector('b').textContent = tit; $('lsRes').querySelector('span').textContent = sub;
+  $('lsOtra').classList.remove('hide');
+}
+async function lsLeer(m) {
+  if (_lsVuelo) return;
+  if (m.local && m.local !== CFG.LOCAL) { lsPinta(false, 'Es de otro local', 'Esta tarjeta es de La Lista de ' + m.local + '.'); return; }
+  _lsVuelo = true; $('lsErr').textContent = 'Buscando…';
+  let j = null;
+  try {
+    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 5000);
+    const r = await fetch(BORDE_SALA.URL + '/member/' + encodeURIComponent(CFG.LOCAL) + '?id=' + encodeURIComponent(m.id),
+      { headers: { 'X-Borde-Token': BORDE_SALA.T }, cache: 'no-store', signal: ctrl.signal });
+    clearTimeout(to);
+    try { j = await r.json(); } catch (e) { j = null; }
+  } catch (e) { j = { ok: false, error: 'red' }; }
+  _lsVuelo = false; $('lsErr').textContent = '';
+  if (j && j.ok === true) { lsPinta(true, '✓ La Lista · ' + (j.nombre || ''), 'Puede pasar sin hacer fila.'); return; }
+  const e = (j && j.error) || 'red';
+  if (e === 'no_encontrado') { lsPinta(false, 'No está en La Lista', 'Puede unirse escaneando el QR de «Únete» en la mesa.'); return; }
+  if (e === 'ruta_apagada') { lsPinta(false, 'La Lista todavía no está activa', 'Por ahora, entra como todos.'); return; }
+  $('lsErr').textContent = 'Sin conexión: no pude confirmarlo. Toca «Escanear otra tarjeta» y prueba de nuevo.'; $('lsOtra').classList.remove('hide');
+}
 $('scNum').addEventListener('keydown', e => { if (e.key === 'Enter') scanNumero(); });
 
 /* ═════ v0.6 · LA ENTRADA (🎟 LA LISTA V30 · AUT-0754 + AUT-1132 · Alberto 18-nov: «l'entrada attiva, poterla cambiare, e in PG da dove entra la gente») ═════
