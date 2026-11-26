@@ -4810,6 +4810,25 @@ function snCiePaso4Dedup(r) {
     snCieBox(snCieRiga('Declaraste', P(c.declarado || 0)) + snCieRiga(d === 0 ? 'Cuadró exacto' : (d < 0 ? 'Faltaron' : 'Sobraron'), d === 0 ? '✓' : P(Math.abs(d))), 'ok') +
     '<button type="button" class="vb pieno" ' + SNC_B + ' onclick="snCieListo()">Listo — me voy</button>');
 }
+/* ═══ [25-nov · v0.15.98 · 🛎 SALA V35 · 🎛 V35 «AGGIUNTA: anche la schermata «Turno cerrado»», AUT-1206] ═══
+   Jurley (CM-20261124) leggeva «Tu propina · En tarjeta $117.727 · En efectivo $12.660» sopra «Hoy la propina va al pozo común»: il LORDO chiamato suo.
+   A leva del bordo accesa (la risposta del corte porta `propina_regla` {tarjeta_pct, garzon_pct}, stesso calcolo della fascia):
+   · regimen individual: «Tu propina · estimada» = `propina_neta` del bordo (assente ⇒ «—», mai il lordo); sotto, piccolo, la scomposizione
+     «en tarjeta $X · en efectivo $Y · −5% tarjeta · 70% tuyo» (il −5% solo se c'è tarjeta).
+   · regimen pozo: titolo «Propinas que cobraste», le due righe lorde, nessuna cifra «tuya», e la frase del pozo resta.
+   Senza `propina_regla`: il riquadro di ieri. Il riquadro «El efectivo» non si tocca: lì le propinas en efectivo sono denaro da consegnare. */
+function snCiePropBox(r) {
+  var fr = (r.regimen == null ? '' : '<div style="font-size:13px;opacity:.85;margin-top:4px">' + (r.regimen === 'individual' ? 'Hoy la propina es <b>individual</b>.' : 'Hoy la propina va al <b>pozo común</b>: el JL la reparte al cerrar el turno.') + '</div>');
+  var pt = +(r.propina_tarjeta) || 0, pe = +(r.propina_efectivo) || 0, rg = (r.propina_regla && typeof r.propina_regla === 'object') ? r.propina_regla : null;
+  if (!rg) return snCieBox('<b>Tu propina</b>' + snCieRiga('En tarjeta', P(pt)) + snCieRiga('En efectivo', P(pe)) + fr);
+  if (r.regimen !== 'individual') return snCieBox('<b>Propinas que cobraste</b>' + snCieRiga('En tarjeta', P(pt)) + snCieRiga('En efectivo', P(pe)) + fr);
+  var nt = (typeof r.propina_neta === 'number' && isFinite(r.propina_neta)) ? r.propina_neta : null;
+  var okn = function (v) { return typeof v === 'number' && isFinite(v) && v > 0; }, pz = ['en tarjeta ' + P(pt), 'en efectivo ' + P(pe)];
+  if (okn(rg.tarjeta_pct) && pt > 0) pz.push('−' + rg.tarjeta_pct + '% tarjeta');
+  if (okn(rg.garzon_pct)) pz.push(rg.garzon_pct + '% tuyo');
+  return snCieBox('<b>Tu propina <span style="font-weight:400;opacity:.8">· estimada</span></b>' + snCieRiga('Te toca', nt != null ? P(nt) : '—') +
+    (nt != null ? '<div style="font-size:12px;opacity:.75;margin-top:2px">' + pz.join(' · ') + '</div>' : '') + fr);
+}
 function snCiePaso4(r) {
   var d = Math.round(r.diferencia || 0), MED = { efectivo: '💵 Efectivo', debito: '💳 Débito', credito: '💳 Crédito', transfer: '🏦 Transfer', mpago: '📲 MercadoPago', fintoc: '📲 Fintoc' };
   var med = Object.keys(r.por_medio || {}).map(function (k) { return snCieRiga(snCieEsc(MED[k] || k) + ' <span style="opacity:.6">(' + r.por_medio[k].n + ')</span>', P(r.por_medio[k].monto)); }).join('');
@@ -4818,8 +4837,7 @@ function snCiePaso4(r) {
     snCieBox('<b>El efectivo</b>' + snCieRiga('Ventas en efectivo', P(r.efectivo_ventas || 0)) + snCieRiga('Propinas en efectivo', P(r.propina_efectivo || 0)) +
       snCieRiga('Debería haber', P(r.esperado || 0)) + snCieRiga('Entregaste', P(r.declarado || 0)) +
       snCieRiga(d === 0 ? 'Cuadra exacto' : (d < 0 ? 'Faltan' : 'Sobran'), d === 0 ? '✓' : P(Math.abs(d)), ';color:' + (Math.abs(d) > (r.tolerancia || 2000) ? '#ff6b6b' : '#8fd694')), Math.abs(d) > (r.tolerancia || 2000) ? 'warn' : 'ok') +
-    snCieBox('<b>Tu propina</b>' + snCieRiga('En tarjeta', P(r.propina_tarjeta || 0)) + snCieRiga('En efectivo', P(r.propina_efectivo || 0)) +
-      (r.regimen == null ? '' : '<div style="font-size:13px;opacity:.85;margin-top:4px">' + (r.regimen === 'individual' ? 'Hoy la propina es <b>individual</b>.' : 'Hoy la propina va al <b>pozo común</b>: el JL la reparte al cerrar el turno.') + '</div>'));
+    snCiePropBox(r);   // [v0.15.98 · AUT-1206] il riquadro della propina: netto del bordo, o «Propinas que cobraste» al pozo
   if (r.traspasos && r.traspasos.length) h += snCieBox('<b>🔄 Pasaste ' + r.traspasos.length + ' mesa(s)</b>' + r.traspasos.map(function (t) { return snCieRiga('Mesa ' + snCieEsc(t.mesa) + ' → <b>' + (t.al_jl ? 'el JL' : snCieEsc(t.a)) + '</b>', P(t.consumo || 0)); }).join(''), 'ok');
   if (r.mesas_abiertas && r.mesas_abiertas.length) h += snCieBox('Quedaron ' + r.mesas_abiertas.length + ' mesa(s) abiertas a tu nombre por ' + P(r.monto_abierto || 0) + ': ' + r.mesas_abiertas.map(function (m) { return 'mesa ' + snCieEsc(m.mesa); }).join(', ') + '. El JL ya lo sabe.', 'warn');
   snCieRender(h + '<button type="button" class="vb pieno" ' + SNC_B + ' onclick="snCieListo()">Listo — me voy</button><div style="font-size:13px;opacity:.8">Quedó firmado a tu nombre. Si hay un error, avísale al JL.</div>');
