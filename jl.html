@@ -175,7 +175,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.23.4</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.23.6</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -190,7 +190,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.23.4';
+var JL_VER = 'jl v0.6.23.6';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -370,10 +370,24 @@ function jlModelo(dd, ora) {
     var v = 0; gente.forEach(function (g) { g.mesas.forEach(function (x) { if (x.m === m && x.tot > v) v = x.tot; }); });
     perMesa[m] = { pr: 3, v: v };
   });
+  /* [26-nov · v0.6.23.6 · 🛎 SALA V35 · 🎛 V35 «AUT-1244 NON VALE PER `f10c533`», cura di 🍳 «seconda testa su `f10c533`»] I CHIP NASCONO DAL perMesa DELLA FASCIA.
+     Il bordo mette la stessa mesa nella fetta di chi ha la plaza E di chi l'ha servita (K8), e fra il minuto 10 e il 20 il pedido sta SOLO nei `mios` di chi
+     l'ha preso (l'eredità alla plaza arriva dopo 20′ di quiete): contare dalle card dava 8 contro 5 (94e7593) o 2 contro 5 (f10c533). Ora ogni mesa di
+     perMesa (una volta, lo stato della fetta più urgente, K8b) si conta nella card di chi ha la sua PLAZA; senza plaza, di chi l'ha servita (la card dove la
+     mesa è più urgente; a parità, la prima). Una mesa che nessuna card ha va in `espSin`. ⇒ chip + espSin + «QR sin garzón» = la fascia, per costruzione. */
+  var cuentaDe = {};
+  gente.forEach(function (g) { g.esp = {}; g.plazas.forEach(function (p) { (p.mesas || []).forEach(function (m) { m = String(m); if (!cuentaDe[m]) cuentaDe[m] = g.slug; }); }); });
+  var espSin = [], urgM = {};
+  Object.keys(perMesa).forEach(function (m) {
+    var pr = perMesa[m].pr, s = cuentaDe[m]; urgM[m] = pr;
+    if (!s) { var best = null; gente.forEach(function (g) { g.mesas.forEach(function (x) { if (x.m !== m) return; var q = jlPrioridad(x); q = q === null ? 99 : q; if (!best || q < best.q) best = { q: q, s: g.slug }; }); }); s = best ? best.s : ''; }
+    var g = s ? gente.filter(function (y) { return y.slug === s; })[0] : null;
+    if (g) g.esp[pr] = (g.esp[pr] || 0) + 1; else espSin.push({ m: m, pr: pr });
+  });
   var nT = 0, tot = 0;
   Object.keys(perMesa).forEach(function (m) { nT++; tot += perMesa[m].v; });
   sinDueno.forEach(function (q) { nT++; tot += q.tot; });
-  return { gente: gente, sinDueno: sinDueno, nUrg: nT, enJuego: tot };
+  return { gente: gente, sinDueno: sinDueno, nUrg: nT, enJuego: tot, espSin: espSin, urg: urgM };
 }
 
 /* ═══ LA SESSIONE DEL JL (fase 1: quella che app_jl ha già) ═══ */
@@ -657,9 +671,11 @@ function gzTop(M, pm) {
    Ogni mesa conta UNA volta, col tipo più urgente (lo stesso ordine di jlPrioridad e della fascia), quindi la somma dei chip è il numero di prima.
    Corallo, non più grigio (v0.6.16): Alberto li vuole vedere. Il rosso pieno resta solo alla fascia in cima. */
 var JL_ESP_TXT = { 0: ['QR espera', 'QR esperan'], 1: ['llama', 'llaman'], 2: ['pide cuenta', 'piden cuenta'], 3: ['solicitud', 'solicitudes'], 5: ['pedido demora', 'pedidos demoran'] };
-function gzEsperan(g, pm) { var n = {};
-  g.mesas.forEach(function (x) { var pr = jlPrioridad(x), p = pm && pm[x.m]; if (pr === null && p && (p.min == null || p.min >= JL_ALLARME.solicitud_min)) pr = 3; if (pr === null) return; n[pr] = (n[pr] || 0) + 1; });
+function gzEspN(g) { var e = (g && g.esp) || {}; return Object.keys(e).reduce(function (a, k) { return a + (e[k] || 0); }, 0); }   // [v0.6.23.6]
+function gzEsperan(g, pm) { var n = (g && g.esp) || {};   // [v0.6.23.6] dal perMesa della fascia (jlModelo), una mesa una volta
   return [0, 1, 2, 3, 5].filter(function (k) { return n[k]; }).map(function (k) { return '<span class="tc esp">' + n[k] + ' ' + JL_ESP_TXT[k][n[k] === 1 ? 0 : 1] + '</span>'; }).join(''); }
+/* [v0.6.23.6] una mesa è «della fascia» se il modello la conta (perMesa: urgente in una fetta, o solicitud oltre JL_ALLARME.solicitud_min) */
+function jlEnFascia(x) { var u = VISTA.mod && VISTA.mod.urg; return !!(u && x && u[x.m] != null); }
 function garzon(g, gi, pm) {
   /* [v0.6.18 · 🎛 «SÌ A TUTTE E DUE», nota 1 di 🍳] senza filtro: chiusa, una alla volta (v0.6.16). Col filtro «N esperan tu acción» si apre da sola
      la card della mesa più urgente, e SOLO quella: il filtro serve ad arrivare alla mesa che aspetta, senza un tocco in più. */
@@ -668,7 +684,7 @@ function garzon(g, gi, pm) {
   var abierto = (VISTA.filtro && !VISTA._filtroMano) ? (g.slug === VISTA._gzTop) : !!VISTA.exp[g.slug];
   /* [v0.6.17 · nota di 🍳 su dd830e7] «te esperan» conta anche la mesa con una solicitud pendiente oltre la soglia, come la fascia in cima:
      la somma delle card non resta più bassa del numero in cima */
-  var urg = g.mesas.filter(function (x) { var p = pm && pm[x.m]; return jlUrgente(x) || !!(p && (p.min == null || p.min >= JL_ALLARME.solicitud_min)); }).length;
+  var urg = gzEspN(g);   // [v0.6.23.6] lo stesso numero della fascia, diviso per responsabile
   /* [v0.5.0 · S5 · S6] niente pallino davanti al nome · il chip «N plazas ›» apre le plazas (come la demo, `plazas()`) */
   var chip = g.plazas.length > 1
     ? '<button class="chip" data-a="plazas" data-s="' + esc(g.slug) + '">' + g.plazas.length + ' plazas ›</button>'
@@ -677,7 +693,7 @@ function garzon(g, gi, pm) {
     '<div class="gz-s">' + turnoChip(g) + (urg ? gzEsperan(g, pm) : '') +   // [v0.6.23.4] la cosa che aspetta, corallo (era «N te esperan», grigio)
     '<span class="num">' + gzAbiertas(g) + (gzAbiertas(g) === 1 ? ' mesa' : ' mesas') + ' · ' + (g.venta == null ? 'venta sin dato' : pesos(g.venta)) + '</span></div>';   // senza meta niente «obj.»
   if (abierto) {
-    var ms = g.mesas.filter(function (x) { return !VISTA.filtro || jlUrgente(x) || (pm && pm[x.m]); });
+    var ms = g.mesas.filter(function (x) { return !VISTA.filtro || jlEnFascia(x); });   // [v0.6.23.6] le stesse mesas della fascia
     /* [v0.5.0 · S4 · il punto 1 di Alberto, ven 20] dal garzón si va DIRETTAMENTE ai tavoli: la riga «Aurora A 79 · 81 · 84 | …» non c'è più.
        Le mesas di ogni plaza si leggono toccando «N plazas ›». */
     h += '<div class="mesas">' + juVista(ms, pm).map(function (x) { return tarjeta(x, gi, pm); }).join('') + '</div>';   // [v0.6.23] la junta è una tessera
@@ -891,9 +907,10 @@ function servicio() {
   var h = '', pm = petMesas(), lista = '';
   if (PET.msg) h += '<div class="vetro' + (/^✓/.test(PET.msg) ? '' : ' alerta') + '"><p>' + esc(PET.msg) + '</p></div>';
   if (M.sinDueno.length) h += '<div class="vetro alerta"><h4>QR sin garzón</h4>' + M.sinDueno.map(function (q) { return '<div class="riga"><span><b>Mesa ' + esc(q.m) + '</b><small>AUT QR' + (q.min != null ? ' · ' + q.min + '′' : '') + '</small></span><span class="st">' + (q.tot ? pesos(q.tot) : '—') + '</span></div>'; }).join('') + '</div>';
+  if (M.espSin && M.espSin.length) h += '<div class="vetro alerta"><h4>Sin garzón</h4>' + M.espSin.map(function (q) { return '<div class="riga"><span><b>Mesa ' + esc(q.m) + '</b><small>' + esc(JL_ESP_TXT[q.pr] ? JL_ESP_TXT[q.pr][0] : '') + '</small></span></div>'; }).join('') + '</div>';   // [v0.6.23.6]
   VISTA._gzTop = VISTA.filtro ? gzTop(M, pm) : null;   // [v0.6.18]
   M.gente.forEach(function (g, gi) {
-    if (VISTA.filtro && !g.mesas.some(function (x) { return jlUrgente(x) || pm[x.m]; })) return;
+    if (VISTA.filtro && !gzEspN(g) && !g.mesas.some(jlEnFascia)) return;   // [v0.6.23.6] la card con un chip, o con una mesa della fascia
     lista += garzon(g, gi, pm);
   });
   if (!M.gente.length) return h + '<p class="vacio">No hay garzones en la sala de hoy.</p>';
