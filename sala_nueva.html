@@ -3591,40 +3591,51 @@ document.addEventListener('visibilitychange', function () { if (document.hidden)
    Nomi di ⚙️ («I NOMI DEL POP-UP DEL PAGO»): ogni voce porta `pagos: [{uid, monto, propina, ts, visti}]`, `total`, `propina_total`, SOLO a leva
    PAGO_CLIENTE_POPUP_ON del bordo: senza `pagos` (leva spenta) niente pop-up, la riga verde di ieri. Mai in demo; in modo JL lo mostra `jl.html`.
    Gemello di jl.html v0.6.23.1 (`ppNuovi` è la stessa funzione nei due file). */
-/* ppNuovi: dai pagos Fintoc piatti [{uid, mesa, monto, propina, ts, visti}] il primo gruppo da mostrare, per mesa: i pagos che io (yo) non ho ancora
-   visto (né nel bordo, `visti`, né in questo telefono, `locali`), e la SOMMA di TUTTI i pagos Fintoc di quella mesa (già visti compresi: il garzón deve
-   sapere quanto è già pagato). null = niente da mostrare. Pura. */
+/* ppNuovi: dai pagos Fintoc piatti [{uid, mesa, conto_id, monto, propina, ts, visti, ultimo_conto?}] il primo gruppo da mostrare. Pura.
+   [🎛 V35 «la somma è del CONTO», 🍳 «LA MESA RIUSATA SOMMA IL PAGO DEL CLIENTE DI PRIMA», ⚙️ «IL ROSSO M È CURATO» 0bc2ecc] il gruppo è il CONTO, mai
+   la mesa nel giorno: una mesa riusata è un altro conto e un altro cliente. Il bordo dice quale: nella fetta del garzón ci sono solo i pagos del conto
+   dell'ultimo pago della mesa; in `servicio` (jl.html) ogni voce porta `ultimo_conto`, e una voce con `ultimo_conto: false` è il cliente di prima e NON
+   si mostra né si somma. (Non il «conto vivo»: un Pago Express TOTALE chiude il conto subito, e il pop-up sparirebbe proprio quando serve.)
+   Un pago SENZA `conto_id` non entra in nessuna somma: è un gruppo suo (`sinCuenta`), e il pop-up dice «avisa al JL» invece di indovinare.
+   La somma è di TUTTI i pagos di quel conto (già visti compresi: il garzón deve sapere quanto è già pagato); `uids` = quelli che io (yo) non ho
+   ancora visto (né nel bordo, `visti`, né in questo telefono, `locali`). null = niente da mostrare.
+   [⚙️ «IL CONTO NUOVO NON VEDE MAI «NO LE COBRES»» 1398a4a] `conto_nuevo: true` = dopo quel pago sulla mesa è nato un conto NUOVO (un altro cliente):
+   il gruppo porta `nuevo` e l'ora dell'ultimo pago (`ultTs`), e il pop-up dice «cuenta de las HH:MM · ya pagada» SENZA «no le cobres». */
 function ppNuovi(lista, yo, locali) {
   var io = String(yo || '').trim().toLowerCase(), per = {}, ordine = [];
   (Array.isArray(lista) ? lista : []).forEach(function (p) {
-    if (!p || p.mesa == null) return; var m = String(p.mesa);
-    if (!per[m]) { per[m] = { mesa: m, total: 0, propina: 0, uids: [], ts: 0 }; ordine.push(m); }
-    var g = per[m], mo = Math.round(Number(p.monto) || 0), pr = Math.round(Number(p.propina) || 0);
-    g.total += mo; g.propina += pr;
-    var u = p.uid == null ? '' : String(p.uid);
+    if (!p || p.mesa == null) return; var m = String(p.mesa), u = p.uid == null ? '' : String(p.uid);
+    var ci = p.conto_id == null ? '' : String(p.conto_id).trim(), key;
+    if (!ci) key = m + '|sc|' + u;   // senza conto: da solo
+    else { if (p.ultimo_conto === false) return; key = m + '|' + ci; }   // ultimo_conto false: il cliente di prima
+    if (!per[key]) { per[key] = { mesa: m, conto: ci, sinCuenta: !ci, nuevo: false, ultTs: 0, total: 0, propina: 0, uids: [], ts: 0 }; ordine.push(key); }
+    var g = per[key]; g.total += Math.round(Number(p.monto) || 0); g.propina += Math.round(Number(p.propina) || 0);
+    if (p.conto_nuevo === true) g.nuevo = true; var _tt = Number(p.ts) || Date.parse(p.ts || '') || 0; if (_tt > g.ultTs) g.ultTs = _tt;
     var visto = !u || (locali && locali[u]) || (Array.isArray(p.visti) && io && p.visti.some(function (v) { return String(v || '').trim().toLowerCase() === io; }));
     if (!visto) { g.uids.push(u); var t = Number(p.ts) || Date.parse(p.ts || '') || 0; if (t > g.ts) g.ts = t; }
   });
-  var c = ordine.map(function (m) { return per[m]; }).filter(function (g) { return g.uids.length; });
+  var c = ordine.map(function (k) { return per[k]; }).filter(function (g) { return g.uids.length; });
   c.sort(function (a, b) { return a.ts - b.ts; });   // il più vecchio non visto per primo
   return c[0] || null;
 }
 function ppUid() { return 'pv-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+function ppHora(ms) { if (!(ms > 0)) return ''; try { return new Date(ms).toLocaleTimeString('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hour12: false }); } catch (e) { return ''; } }
 function ppHtml(g, fmt, esc, onTap) {
-  return '<div style="background:#13201a;color:#e9f7ee;border:2px solid rgba(116,201,138,.8);border-radius:20px;padding:22px 20px;max-width:420px;width:100%;text-align:center">' +
-    '<div style="font-size:14px;letter-spacing:.08em;opacity:.85">MESA ' + esc(g.mesa) + '</div>' +
-    '<div style="font-size:19px;font-weight:800;margin:6px 0 2px">💳 El cliente pagó con Fintoc</div>' +
+  var sc = !!g.sinCuenta, nu = !sc && !!g.nuevo, hh = ppHora(g.ultTs);
+  return '<div style="background:' + (sc ? '#2a1f10' : '#13201a') + ';color:#e9f7ee;border:2px solid ' + (sc ? 'rgba(224,169,74,.85)' : 'rgba(116,201,138,.8)') + ';border-radius:20px;padding:22px 20px;max-width:420px;width:100%;text-align:center">' +
+    '<div style="font-size:14px;letter-spacing:.08em;opacity:.85">MESA ' + esc(g.mesa) + (nu && hh ? ' · CUENTA DE LAS ' + esc(hh) : '') + '</div>' +
+    '<div style="font-size:19px;font-weight:800;margin:6px 0 2px">' + (sc ? '💳 Pago del cliente sin cuenta' : '💳 El cliente pagó con Fintoc') + '</div>' +
     '<div style="font-size:34px;font-weight:800;letter-spacing:-.02em;margin:6px 0">' + fmt(g.total) + '</div>' +
     (g.propina > 0 ? '<div style="font-size:15px;opacity:.9">propina ' + fmt(g.propina) + '</div>' : '') +
-    '<div style="font-size:16px;font-weight:700;margin:12px 0 16px">No le cobres de nuevo.</div>' +
-    '<button type="button" class="vb pieno" style="width:100%;padding:14px 12px;font-size:17px;font-weight:800;border:0;border-radius:12px;background:#74c98a;color:#0d1a12" onclick="' + onTap + '">Entendido</button></div>';
+    '<div style="font-size:16px;font-weight:700;margin:12px 0 16px">' + (sc ? 'No está en ninguna cuenta: avisa al JL.' : nu ? 'Esa cuenta ya está pagada. La cuenta nueva de la mesa se cobra normal.' : 'No le cobres de nuevo.') + '</div>' +
+    '<button type="button" class="vb pieno" style="width:100%;padding:14px 12px;font-size:17px;font-weight:800;border:0;border-radius:12px;background:' + (sc ? '#e0a94a' : '#74c98a') + ';color:#0d1a12" onclick="' + onTap + '">Entendido</button></div>';
 }
 var SNPOP = { visto: {}, coda: {}, volo: {}, aperto: null };
 function snPopYo() { return String(VV.nombre || ''); }
 function snPopPagoSync() {
   if (VV.demo || (typeof SNJL !== 'undefined' && SNJL)) return;
   var l = (VV && VV.vista && Array.isArray(VV.vista.pagos_fintoc)) ? VV.vista.pagos_fintoc : [], piatta = [];
-  l.forEach(function (e) { if (e && Array.isArray(e.pagos)) e.pagos.forEach(function (p) { if (p) piatta.push(Object.assign({}, p, { mesa: e.mesa })); }); });
+  l.forEach(function (e) { if (e && Array.isArray(e.pagos)) e.pagos.forEach(function (p) { if (p) piatta.push(Object.assign({ conto_id: e.conto_id, conto_nuevo: e.conto_nuevo }, p, { mesa: e.mesa })); }); });   // [🎛 «la somma è del CONTO»] la fetta è già per conto (⚙️ 0bc2ecc)
   snPopRitenta();
   if (SNPOP.aperto) return;
   var g = ppNuovi(piatta, snPopYo(), SNPOP.visto); if (!g) return;
@@ -3656,12 +3667,19 @@ function snPopRitenta() {
 function snFintocHtml(x, cobro) {
   if (!x || !x.m) return '';
   var av = snFintocDi(x.m); if (!av.length) return '';
+  /* [v0.15.98.1 · 🎛 «la somma è del CONTO» · ⚙️ 0bc2ecc] a leva PAGO_CLIENTE_POPUP_ON la fetta porta i pagos del conto dell'ultimo pago della mesa, uno per uno:
+     si sommano quelli CON conto; un pago senza conto non si somma e la riga lo dice. Senza `pagos` (leva spenta) la riga di ieri. */
+  var _pp = []; av.forEach(function (e) { if (e && Array.isArray(e.pagos)) e.pagos.forEach(function (p) { if (p) _pp.push(Object.assign({ conto_id: e.conto_id }, p)); }); });
+  if (_pp.length) { var _mi = _pp.filter(function (p) { return p.conto_id != null && String(p.conto_id).trim(); });
+    if (!_mi.length) return '<div style="margin:' + (cobro ? '0 0 10px' : '0 0 8px') + ';padding:10px 12px;border-radius:12px;border:1px solid rgba(224,169,74,.6);background:rgba(224,169,74,.12);color:#f3ead8;font-size:14.5px;font-weight:700">💳 Un pago del cliente sin cuenta<small style="display:block;font-weight:500;opacity:.85;margin-top:2px">Avisa al JL.</small></div>';
+    av = _mi; }
   var tot = av.reduce(function (a, z) { return a + (Math.round(Number(z.monto) || 0)); }, 0);
+  var _nu = snFintocDi(x.m).some(function (e) { return e && e.conto_nuevo === true; });   // [⚙️ 1398a4a] un conto nuovo sulla mesa: quel pago è del cliente di prima
   var t = Math.max.apply(null, av.map(function (z) { var v = Number(z.ts); if (!(v > 0) && typeof z.ts === 'string') v = Date.parse(z.ts) || 0; return v > 0 ? v : 0; }));   // [v0.15.32 · 🟡 F3 di 💵] Date.parse(0) è l'anno 2000: un pago senza ts non dice «hace 14 milioni di min»
   var hace = t > 0 ? Math.max(0, Math.round((Date.now() - t) / 60000)) : null;
   return '<div style="margin:' + (cobro ? '0 0 10px' : '0 0 8px') + ';padding:10px 12px;border-radius:12px;border:1px solid rgba(116,201,138,.55);background:rgba(116,201,138,.12);color:#e9f7ee;font-size:14.5px;font-weight:700">' +
     '💳 Pagó con Fintoc ' + P(tot) + (hace != null ? ' · hace ' + hace + ' min' : '') +
-    '<small style="display:block;font-weight:500;opacity:.85;margin-top:2px">' + (cobro ? 'No le cobres de nuevo ese monto. Si la cuenta queda abierta, avisa al JL.' : 'No le cobres de nuevo.') + '</small></div>';
+    '<small style="display:block;font-weight:500;opacity:.85;margin-top:2px">' + (_nu ? 'Era la cuenta anterior, ya pagada. La cuenta nueva se cobra normal.' : cobro ? 'No le cobres de nuevo ese monto. Si la cuenta queda abierta, avisa al JL.' : 'No le cobres de nuevo.') + '</small></div>';
 }
 function snNotaFuera() {
   if (!(typeof snCartaViva === 'function' && snCartaViva())) return '';
