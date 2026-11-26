@@ -174,7 +174,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.23</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.24</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -189,7 +189,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.23';
+var JL_VER = 'jl v0.6.24';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -1656,6 +1656,66 @@ function obTurnoDe(nombre) {
   });
   return ini;
 }
+/* ═══ [26-nov · v0.6.24 · 🛎 SALA V35 · 🎛 V35 AUT-1208 «anche l'obiettivo del JL, dallo stesso calcolo» · i nomi: ⚙️ ARQ «I NOMI DELL'OBIETTIVO DEL JL — LA RIGA DI ⚙️ ARQ»] ═══
+   Alberto: «da questo deve estrapolarsi l'obiettivo del JL nella sua APP, quindi si fa tutto insieme perché sia coerente». UN calcolo, sul bordo.
+   La risposta di `servicio` porta `objetivo` (solo a leva OBJETIVO_PRESUPUESTO_ON e con un presupuesto per il mese):
+     { fonte, turno:'AM'|'PM', corte:'18:30', metas:{ turno, dia, semana, mes: { meta, vendido, esperado_ahora, proyeccion } },
+       meseros:[{ nombre, turno, meta, vendido, esperado_ahora }] }
+   · il turno lo dice il bordo (taglio di caja_parametros_vigentes): con l'obiettivo il 17:30 del vetro NON si usa, né per il turno né per i garzones né
+     per le colonne AM/PM (le franjas del bordo sono tagliate alle 17:30: Día ha la colonna del turno di adesso e il giorno, dai `metas`);
+   · la Meta del turno è `metas.turno.meta`, MAI la somma dei `meseros` (Σ quote = meta del turno lo garantisce il bordo);
+   · `vendido` è il SERVITO, come `resumen_turno.vendido` del vetro del garzón: si scrive «vendido», non «cobrado»;
+   · un numero `null` è «sin dato» (nella prima consegna: vendido di semana e mes, esperado_ahora e proyeccion di tutti);
+   · l'unica aritmetica del vetro è di presentazione su due numeri del bordo: «de la meta» = vendido/meta e «faltan» = meta − vendido.
+   Senza `objetivo` (leva spenta, nessun presupuesto, libro vecchio) o con una forma che non torna: la scheda di ieri. */
+function obObj(r) {
+  var o = r && r.objetivo;
+  if (!o || typeof o !== 'object' || !o.metas || typeof o.metas !== 'object' || (o.turno !== 'AM' && o.turno !== 'PM')) return null;
+  return o;
+}
+function obNum(v) { return (typeof v === 'number' && isFinite(v)) ? v : null; }
+function obPz(v) { v = obNum(v); return v == null ? 'sin dato' : pesos(v); }
+function obDeLaMeta(vd, mt) { vd = obNum(vd); mt = obNum(mt); return (vd != null && mt != null && mt > 0) ? Math.round(100 * vd / mt) + '%' : 'sin dato'; }
+function obConMeta(O, r, sel) {
+  var M = O.metas, hz = OB.hz, t = O.turno, ora = prAhora(), periodo = hz === 'semana' || hz === 'mes';
+  var per = function (k) { var x = M[k]; return (x && typeof x === 'object') ? x : {}; };
+  var fecha = ''; try { fecha = new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', timeZone: 'America/Santiago' }); } catch (e) {}
+  var cab = hz === 'turno' ? 'Turno ' + t + ' · ' + ora : hz === 'dia' ? 'Hoy · ' + fecha + ' · ' + ora : hz === 'semana' ? 'Esta semana' : 'Este mes';
+  var cols = hz === 'turno' ? [['Turno ' + t + ' · ahora', per('turno'), true]]
+    : hz === 'dia' ? [['Turno ' + t + ' · ahora', per('turno'), true], ['Día', per('dia')]]
+    : [[hz === 'semana' ? 'Semana' : 'Mes', per(hz)]];
+  var p0 = hz === 'dia' ? per('dia') : cols[0][1], vd = obNum(p0.vendido), mt = obNum(p0.meta);
+  var lab = hz === 'turno' ? 'El turno ' + t : hz === 'dia' ? 'Hoy' : hz === 'semana' ? 'La semana' : 'El mes';
+  var frase = (vd == null && mt == null) ? lab + ': sin dato todavía.'
+    : mt == null ? lab + ' lleva ' + pesos(vd) + ' vendido · meta sin dato.'
+    : vd == null ? lab + ': meta ' + pesos(mt) + ' · vendido sin dato.'
+    : lab + ' lleva ' + pesos(vd) + ' de ' + pesos(mt) + ' (' + obDeLaMeta(vd, mt) + ').';
+  var cel = function (c, txt, i) { return '<span class="st num" style="min-width:74px;margin-left:' + (i ? '0' : 'auto') + (c[2] ? ';color:var(--oro)' : '') + '">' + txt + '</span>'; };
+  var riga = function (lbl, f) { return '<div class="riga" style="padding:6px 0"><span>' + lbl + '</span>' + cols.map(function (c, i) { return cel(c, f(c[1]), i); }).join('') + '</div>'; };
+  var h = '<div class="vetro">' + sel + '<p style="font-size:12px;color:var(--ink2);margin-bottom:4px">' + esc(cab) + '</p>' +
+    '<p style="font-size:14px;color:var(--ink);font-weight:700">' + frase + '</p>' +
+    '<div class="riga" style="padding:4px 0;font-weight:700"><span></span>' + cols.map(function (c, i) { return cel(c, esc(c[0]), i); }).join('') + '</div>' +
+    riga('Meta', function (x) { return obPz(x.meta); }) +
+    riga('Vendido', function (x) { return obPz(x.vendido); }) +
+    riga('Esperado ahora', function (x) { return obPz(x.esperado_ahora); }) +
+    riga('Si sigues así', function (x) { return obPz(x.proyeccion); }) +
+    riga('de la meta', function (x) { return obDeLaMeta(x.vendido, x.meta); });
+  if (hz === 'dia') h += '<div class="riga" style="padding:5px 0"><span>Ayer (día completo)</span><span class="st num">' + (OB.ayer ? pesos(OB.ayer.venta) : 'sin dato') + '</span></div>' +
+    '<div class="riga" style="padding:5px 0"><span>Mismo día sem. pasada</span><span class="st num">' + (OB.sem ? pesos(OB.sem.venta) : 'sin dato') + '</span></div>' +
+    '<div class="riga" style="padding:5px 0"><span>Cuentas · propina</span><span class="st num">' + (+r.cuentas || 0) + ' · ' + pesos(+r.propinas || 0) + '</span></div>';
+  h += '<p style="font-size:11px;color:var(--ink3);margin-top:4px">Meta del presupuesto del mes' + (/^\d{2}:\d{2}$/.test(String(O.corte || '')) ? ' · el turno PM empieza a las ' + esc(O.corte) : '') + '. Vendido = lo servido, pagado o no.</p></div>';
+  /* i garzones: quelli del turno di adesso li dice il bordo (`meseros`), con la loro quota; niente smistamento a 17:30 */
+  if (periodo) return h + '<div class="vetro"><h4>' + (hz === 'semana' ? 'Garzones · la semana' : 'Garzones · el mes') + '</h4><p class="vacio">La meta por garzón ' + (hz === 'semana' ? 'de la semana' : 'del mes') + ': sin dato todavía.</p></div>';
+  var ms = Array.isArray(O.meseros) ? O.meseros.filter(function (g) { return g && String(g.nombre || '').trim(); }) : [];
+  h += '<div class="vetro"><h4>Garzones · turno ' + t + '</h4>' + (ms.length ? ms.map(function (g) {
+    var gm = obNum(g.meta), gv = obNum(g.vendido), ab = OB.sel === g.nombre;
+    var falta = (gm != null && gv != null) ? (gv >= gm ? '<span style="color:var(--oro)">meta cumplida</span>' : 'faltan ' + pesos(gm - gv)) : 'faltan sin dato';
+    var sub = (gm == null ? 'meta sin dato' : 'meta ' + pesos(gm)) + ' · vendido ' + obPz(gv) + ' · ' + falta + ' · esperado ahora ' + obPz(g.esperado_ahora);
+    return '<div class="riga" data-a="obSel" data-k="' + esc(g.nombre) + '" style="cursor:pointer;flex-wrap:wrap"><span><b>' + esc(g.nombre) + '</b><small>' + sub + '</small></span><span class="st num"><b style="color:var(--ink)">' + obDeLaMeta(gv, gm) + '</b></span>' +
+      (ab ? '<p style="flex-basis:100%;margin-top:6px;font-size:12px">Qué enseñarle: sin dato todavía. El consejo lo escribe 🧠 FARO.</p>' : '') + '</div>';
+  }).join('') : '<p class="vacio">Nadie en el turno ' + t + ' todavía.</p>') + '</div>';
+  return h;
+}
 function objetivo() {
   if (!SES.pin && !DEMO) return '<div class="vetro"><p>Para el objetivo entra con tu PIN desde tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
   obLeggi();
@@ -1663,6 +1723,7 @@ function objetivo() {
   var sel = '<div class="fila2" style="margin:0 0 8px">' + HZ.map(function (x) { return '<button class="azione' + (OB.hz === x[0] ? ' oro' : '') + '" style="margin-top:0;min-height:40px" data-a="obHz" data-k="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
   var r = OB.r;
   if (!r) return '<div class="vetro">' + sel + '<p>' + (OB.err ? '⚠️ No pude leer la venta (' + esc(OB.err) + ').' : 'Leyendo la venta…') + '</p></div>';
+  var OBJ = obObj(r); if (OBJ) return obConMeta(OBJ, r, sel);   // [v0.6.24 · AUT-1208] c'è l'obiettivo del bordo: la scheda con la meta
   var ora = prAhora(), turnoOra = ora < '17:30' ? 'AM' : 'PM', venta = +r.venta || 0, ctas = +r.cuentas || 0, tick = ctas ? venta / ctas : 0;
   var am = obFranja(r, 'AM'), pmv = obFranja(r, 'PM'), gs = obGarzones(), enSala = gs.reduce(function (a, g) { return a + g.sala; }, 0);
   var periodo = OB.hz === 'semana' || OB.hz === 'mes';
