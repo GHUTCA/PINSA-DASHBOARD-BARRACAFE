@@ -184,7 +184,7 @@ body{background:#12121a;color:#e9e9f2;font:14px/1.45 system-ui,-apple-system,Seg
 </div>
 <div id="body"></div>
 <div id="toast"></div>
-<span class="ver" id="ver">app_jl v1.44.10</span>
+<span class="ver" id="ver">app_jl v1.44.11</span>
 
 <div id="gate"><div class="box">
   <h2>👑 Pinsita · JL</h2>
@@ -633,6 +633,25 @@ function cjFlag(n) { try { return new RegExp('"' + n + '"\\s*:\\s*"1"').test(JSO
 const JL_GAS_FRENO = (function () { try { return QS.get('jlgas') === '1'; } catch (e) { return false; } })();
 /* il ricordo è PER LOCALE: un telefono passato da BKS non «sa» la leva di RSC (🟡 ① di 🛎 SALA) */
 function _jlChiave() { return 'jl_senza_gas_v:' + String(LOC_PG[CFG.LOCAL] || CFG.LOCAL || '').toUpperCase(); }
+/* ═══ [26-nov · v1.44.11 · 🛎 SALA V35 · 🎛 V35 AUT-1221 «DA VEN 27 IL TURNO DI BKS SI APRE SOLO DALL'APP JL NUOVA»] ═══
+   Il turno viveva in due case (GAS e bordo): il 26-nov quello del giorno era nato sul GAS e l'app nuova non lo vedeva. Una casa sola: per i locali di
+   `turno_solo_nueva_on` (/salud, elenco di locali, ricordata nel telefono per locale come `jl_senza_gas_on`) «Abrir turno» qui NON apre niente:
+   porta a jl.html, dove il turno si apre sul bordo. Anche `abrirT()` si ferma (nessun `gasPost('abrirTurno')`). Il codice di un turno già aperto si
+   vede come oggi (la lettura passa dal bordo). La guardia dalla parte che riceve è nel GAS: PARAMETROS `turno_solo_borde` (v3.236.0).
+   Leva spenta, o /salud mai letta in questo telefono: come ieri. */
+function _turnoSoloNueva() {
+  const loc = String(LOC_PG[CFG.LOCAL] || CFG.LOCAL || '').toUpperCase(), k = 'turno_solo_nueva_v:' + loc;
+  let v = null;
+  try {
+    const m = /"turno_solo_nueva_on"\s*:\s*"([^"]*)"/.exec(JSON.stringify(STATE.salud || {}));
+    if (m) { const s = m[1].trim().toUpperCase();
+      v = (s === '1' || s === 'TRUE') || (s !== '' && s !== '0' && s !== 'FALSE' && s.split(',').map(function (x) { return x.trim(); }).indexOf(loc) >= 0);
+      try { localStorage.setItem(k, v ? '1' : '0'); } catch (e) {} }
+  } catch (e) {}
+  if (v === null) { try { v = localStorage.getItem(k) === '1'; } catch (e) { v = false; } }
+  return !!v;
+}
+function _jlNuevaUrl() { const loc = String(LOC_PG[CFG.LOCAL] || CFG.LOCAL || '').toLowerCase(); return 'jl.html?loc=' + encodeURIComponent(loc); }
 function _jlSenzaGas() {
   if (JL_GAS_FRENO) return false;
   const loc = String(LOC_PG[CFG.LOCAL] || CFG.LOCAL || '').toUpperCase();
@@ -2238,7 +2257,8 @@ function vTurno() {
   let h = _ayerHtml();   // [22-ott · AUT-0728 ②] all'apertura del turno: le mesas aperte di ieri
   if (!tt) {
     h += '<div class="card ambra"><h4>🔑 Turno <span class="pill off">CERRADO</span></h4>' +
-      '<button class="btn acc" onclick="abrirT()">Abrir turno</button>' +
+      (_turnoSoloNueva() ? '<p><b>El turno se abre en la app nueva.</b></p><a class="btn acc" href="' + esc(_jlNuevaUrl()) + '">Abrir el turno en la app nueva</a>' :   // [v1.44.11 · AUT-1221]
+      '<button class="btn acc" onclick="abrirT()">Abrir turno</button>') +
       '<p class="mini">Al abrir: el borde tarda <b>~3 min</b> en aprender el código (medido) — ábrelo 5 min antes de que llegue la gente.</p></div>';
   } else {
     h += '<div class="card"><h4>🔑 Turno <span class="pill on">ABIERTO' + (tt.desde_iso ? ' · ' + tt.desde_iso.slice(11, 16) : '') + '</span></h4>' +
@@ -2456,6 +2476,7 @@ async function _aperturaPorBordo(uid) {
   return { usado: true, ok: true, codigo: j.codigo, ya: !!j.ya_abierto, por: j.abierto_por || '' };
 }
 async function abrirT() {
+  if (_turnoSoloNueva()) { location.href = _jlNuevaUrl(); return; }   // [v1.44.11 · AUT-1221] il turno si apre solo nell'app nuova
   if (!confirm('¿Abrir el turno de hoy?')) return;
   try {
     const sgA = await cjSaldosGate(); if (sgA.bloquea || sgA.nosabe) { cjSaldosAviso(sgA); if (sgA.bloquea) return; }   // [AUT-0666] abrir el turno nuevo CIERRA el anterior: no con un saldo sin dueño

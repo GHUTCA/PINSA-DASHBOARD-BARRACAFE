@@ -174,7 +174,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.23.1</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.23.2</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -189,7 +189,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.23.1';
+var JL_VER = 'jl v0.6.23.2';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -457,6 +457,11 @@ function jlLevaLocali(v) {
   if (s === '1' || s === 'TRUE') return true;
   return s.split(',').map(function (x) { return x.trim(); }).filter(Boolean).indexOf(String(CFG.LOCAL || '').toUpperCase()) >= 0;
 }
+/* ═══ [26-nov · v0.6.23.2 · 🛎 SALA V35 · 🎛 V35 AUT-1221] da ven 27 il turno di BKS si apre SOLO qui. Leva `turno_solo_nueva_on` (/salud, `flags`):
+   · il `gate_spento` della lettura del turno (nessun turno del bordo oggi) diventa «Turno cerrado» col bottone «Abrir turno», come `turno: null`.
+     SOLO a leva accesa: senza, quel `gate_spento` può voler dire un turno aperto sul GAS, e aprirne uno qui darebbe un secondo codice (26-nov);
+   · i testi che rimandavano all'«app de siempre» (ingresso, sin código, mesa, turno, apertura) dicono la strada di qui. A leva spenta: come ieri. */
+function jlSoloNueva() { return !DEMO && jlLevaLocali(SAL && SAL.turno_solo_nueva_on); }
 async function jlEntraLeva() {
   if (DEMO) return;
   var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 6000);
@@ -493,6 +498,7 @@ async function jlEntra(pin) {
 }
 function pinHtml() {
   /* [v0.4.2] il form solo a leva accesa e confermata: altrimenti la strada che funziona */
+  if (ENTRA.gate !== true && jlSoloNueva()) return '<div class="vetro alerta"><h4>La entrada con PIN no está activa</h4><p>Avisa a Alberto: aquí se entra con tu PIN de JL.</p></div>';   // [v0.6.23.2]
   if (ENTRA.gate !== true) return '<div class="vetro lume"><h4>Entra desde tu app de siempre</h4>' +
     '<p>Abre tu app de JL, entra con tu PIN y espera que lea el turno. Después vuelve aquí en la misma pestaña.</p>' +
     '<a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
@@ -500,7 +506,7 @@ function pinHtml() {
     '<input id="jlPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="••••">' +
     '<div class="err">' + esc(ENTRA.err) + '</div>' +
     '<button class="azione oro" data-a="entra"' + (ENTRA.vuelo ? ' disabled' : '') + '>' + (ENTRA.vuelo ? 'Revisando…' : 'Entrar') + '</button>' +
-    '<a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app de siempre</a></div>';
+    (jlSoloNueva() ? '' : '<a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app de siempre</a>') + '</div>';   // [v0.6.23.2] a leva accesa niente strada indietro
 }
 /* [v0.2.0 · P5] l'86 e i nomi della carta: una lettura al minuto, a parte dal giro della sala */
 async function jl86Leggi() {
@@ -853,6 +859,8 @@ function servicio() {
   var M = VISTA.mod;
   if (!M) {
     if (VISTA.err === 'sin_pin') return pinHtml();
+    if (VISTA.err === 'sin_codigo' && jlSoloNueva()) return '<div class="vetro alerta"><h4>El turno aún no se abre</h4><p>Ábrelo aquí, en Local → Turno: el sistema da el código del día.</p><button class="azione oro" onclick="ir(1)">Abrir el turno</button></div>';   // [v0.6.23.2]
+    if (VISTA.err === 'turno_sin_abrir' && jlSoloNueva()) return '<div class="vetro lume"><h4>Turno sin abrir</h4><p>Ábrelo aquí, en Local → Turno. Cuando se abra, aquí aparece la sala.</p><button class="azione oro" onclick="ir(1)">Abrir el turno</button></div>';   // [v0.6.23.2]
     if (VISTA.err === 'sin_codigo') return '<div class="vetro alerta"><h4>Falta el código del turno</h4><p>Abre primero tu app de siempre: ella lee el turno. Después vuelve aquí.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
     if (VISTA.err === 'turno_sin_abrir') return '<div class="vetro lume"><h4>Turno sin abrir</h4><p>Cuando se abra el turno, aquí aparece la sala.</p></div>';
     if (VISTA.err === 'pin_mal') return '<div class="vetro alerta"><h4>El PIN no vale</h4><p>Entra de nuevo desde tu app.</p><a class="azione oro" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
@@ -900,7 +908,7 @@ function detalle(gi, m) {
   var url = jlSessioneCompleta() ? esc(jlSalaUrl(g, x.m)) : '';
   var bot = url
     ? '<div class="fila2"><a class="azione oro" data-a="sala" href="' + url + '">＋ Pedir</a><a class="azione" data-a="sala" href="' + url + '">Cobrar</a><a class="azione" data-a="sala" href="' + url + '">Mover</a></div>'
-    : '<div class="sub">Para pedir, cobrar o mover: entra desde tu app de siempre.</div>';
+    : '<div class="sub">' + (jlSoloNueva() ? 'Para pedir, cobrar o mover: primero abre el turno en Local → Turno.' : 'Para pedir, cobrar o mover: entra desde tu app de siempre.') + '</div>';   // [v0.6.23.2]
   return '<span class="volver" data-a="volver">‹ Servicio</span>' +
     '<div class="conto"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><b>Mesa ' + esc(x.m) + ' · ' + esc(g.n) + '</b><span class="pill">' + esc(ESTADO[x.st]) + (x.min != null ? ' · ' + x.min + ' min' : '') + '</span></div>' +
     (lin || '<p class="vacio">Sin consumo todavía.</p>') +
@@ -927,7 +935,8 @@ async function tuGiro() {
     var r = await fetch(CFG.BORDE + '/turno/admin/' + encodeURIComponent(LOC_PG[CFG.LOCAL] || CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T },
       body: JSON.stringify({ pin_jl: SES.pin }), signal: ctrl.signal, cache: 'no-store' });
     var j = await r.json().catch(function () { return null; }); clearTimeout(to);
-    if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') TU.err = 'gate_spento';
+    if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento' && jlSoloNueva()) { TU.r = { ok: true, turno: null, plazas: [], asignaciones: [], grupos: [], fuente: 'borde', sin_turno: true }; TU.err = ''; }   // [v0.6.23.2 · AUT-1221]
+    else if (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento') TU.err = 'gate_spento';
     else if (j && j.ok === true && (j.fuente === 'borde' || j.fuente === 'ponte')) { TU.r = j; TU.err = ''; }
     else if (j && j.ok === false && /^pin(_jl)?_bloqueado/.test(String(j.error || ''))) TU.err = 'PIN bloqueado' + (+j.faltan_s ? ' · espera ' + Math.ceil(+j.faltan_s / 60) + ' min' : '');
     else TU.err = (j && j.error) || ('HTTP ' + r.status);
@@ -999,7 +1008,7 @@ async function tuCatena(gs, okMsg) {
     if (gs[i]._salta) continue;
     var g = Object.assign({}, gs[i]); delete g._dopoSust; delete g._salta;
     var r = await tuGesto(g);
-    if (r.spento) { esito = '⛔ El turno no está en el sistema nuevo para este local: hazlo desde tu app de siempre.'; break; }
+    if (r.spento) { esito = jlSoloNueva() ? '⛔ Primero abre el turno aquí, con «Abrir turno».' : '⛔ El turno no está en el sistema nuevo para este local: hazlo desde tu app de siempre.'; break; }   // [v0.6.23.2]
     if (r.dudoso) { esito = '⏳ No sé si llegó' + (i ? ' (iba en el paso ' + (i + 1) + ' de ' + gs.length + ')' : '') + ': toca de nuevo, no se duplica.'; break; }
     if (!r.ok) { esito = '✋ ' + r.err + (i ? ' · se hizo ' + i + ' de ' + gs.length : ''); break; }
     /* [v0.6.4 · Y di 🍳] dopo un timeout il ritocco torna lo stesso uid e il bordo risponde ya_visto SENZA sustituye_franjas: le franjas si mandano
@@ -1085,7 +1094,7 @@ async function tuAbrir() {
   }
   LV.vuelo = false;
   if (!r) { LV.uid[k] = uid; LV.msg = '⏳ El sistema está lento: puede que el turno SÍ se haya abierto. Toca «Abrir turno» otra vez: si ya estaba, te muestra el mismo código.'; }
-  else if (r.status === 404 || r.status === 403 || (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento')) { LV.msg = '⛔ La apertura no está en el sistema nuevo para este local: ábrelo desde tu app de siempre.'; LV.abrir = false; }
+  else if (r.status === 404 || r.status === 403 || (j && j.ok === true && j.scritto === false && j.motivo === 'gate_spento')) { LV.msg = jlSoloNueva() ? '⛔ El sistema no abrió el turno: avisa a Alberto ahora (no lo abras en otra app: serían dos códigos).' : '⛔ La apertura no está en el sistema nuevo para este local: ábrelo desde tu app de siempre.'; LV.abrir = false; }   // [v0.6.23.2]
   else if (j && j.ok === false && j.error) { delete LV.uid[k]; LV.msg = '✋ ' + (/^pin(_jl)?_bloqueado/.test(String(j.error)) ? 'Demasiados intentos con el PIN, espera ' + Math.ceil((+j.faltan_s || 60) / 60) + ' min' : (TU_ERR_G[j.error] || j.error)); LV.abrir = false; }
   else if (!r.ok || !j || j.ok !== true || !j.codigo) { LV.uid[k] = uid; LV.msg = '⏳ El sistema está lento: puede que el turno SÍ se haya abierto. Toca «Abrir turno» otra vez.'; }
   else { delete LV.uid[k]; LV.abrir = false; LV.msg = '✓ Turno abierto · código ' + j.codigo + (j.ya_abierto ? ' (ya estaba' + (j.abierto_por ? ' · abierto por ' + j.abierto_por : '') + ')' : ''); try { sessionStorage.setItem('jl_codigo', String(j.codigo)); SES.codigo = String(j.codigo); } catch (e2) {} }
@@ -1154,6 +1163,7 @@ function plazaEditor() {
   return h + '<p style="font-size:11px;color:var(--ink3);margin-top:6px">Queda firmado a tu nombre.</p></div>';
 }
 function turnoCard() {
+  if (!SES.pin && !DEMO && jlSoloNueva()) return pinHtml();   // [v0.6.23.2] il PIN si scrive qui
   if (!SES.pin && !DEMO) return '<div class="vetro"><h4>Turno</h4><p>Para ver el turno entra con tu PIN desde tu app de siempre.</p><a class="azione" href="' + esc(jlAppUrl()) + '">Ir a mi app</a></div>';
   if (!TU.r) return '<div class="vetro' + (TU.err ? ' alerta' : '') + '"><h4>Turno</h4><p>' + (TU.err ? '⚠️ ' + esc(TU_ERR[TU.err] || ('No pude leer el turno (' + TU.err + ').')) : 'Leyendo el turno…') + '</p></div>';
   staffCarga();
