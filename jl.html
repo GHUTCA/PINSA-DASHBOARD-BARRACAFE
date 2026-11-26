@@ -1713,8 +1713,8 @@ function prsTutte(now) {
     var f = o.finestra, h = f.hasta_oggi || f.hasta;
     /* «activo» = passati i cancelli DELLO STRUMENTO (acceso · oggi · data · orario). Senza la carta la regola arriva alle parti e dice `sin_partes`:
        quale prodotto si vende davvero (e l'86) lo giudica il QR, che ha la carta. Qui si dice se la promo è accesa e in orario. */
-    /* [v0.6.26] un «no» che non è un cancello noto (orario · giorno · data) né delle parti = spento dal JL oggi (`enciende {on:false}`, §4 del contratto) */
-    var st = (o.visible || PRS_PARTI.test(o.perche || '')) ? 'on' : o.perche === 'fuori_orario' ? (f.desde > f.hasta ? (hm >= h && hm < f.desde ? 'abre' : 'termino') : (hm < f.desde ? 'abre' : 'termino')) : (o.perche === 'non_oggi' || o.perche === 'fuori_data' || o.perche === 'grupo_spento') ? 'hoy_no' : 'apagado';
+    /* [v0.6.26] `apagado_jl` = spento dal JL oggi (`enciende {on:false}`, ⚙️ `arq-promos-jl` @7a9eb66, §4 del contratto): l'unico che porta «Activar». Ogni altro no è «hoy no». */
+    var st = (o.visible || PRS_PARTI.test(o.perche || '')) ? 'on' : o.perche === 'fuori_orario' ? (f.desde > f.hasta ? (hm >= h && hm < f.desde ? 'abre' : 'termino') : (hm < f.desde ? 'abre' : 'termino')) : o.perche === 'apagado_jl' ? 'apagado' : 'hoy_no';
     return { id: o.id, n: o.nombre || o.id, tipo: o.tipo, st: st, desde: f.desde, hasta: h, tope: f.hasta_tope || h, ahora: hm };
   });
 }
@@ -1742,7 +1742,8 @@ function prbPush(x, d) {
 }
 var PRB_NO = { tope_activos: 'Ya hay 3 activos: apaga uno primero.', fuera_de_ventana: 'Está fuera del horario de esa promo.', push_fuori_finestra: 'Ese final está fuera de lo que permite el admin.',
   push_en_pasado: 'Ese final ya pasó o está a menos de 15′.', push_no_15: 'El push va de 15 en 15.', valor_invalido: 'El sistema no aceptó el valor.', pin: 'Tu PIN no vale ahora: vuelve a entrar.',
-  cargo: 'Solo el JL puede mover las promos.', ruta_apagada: 'Los botones todavía no están encendidos en el sistema.' };
+  cargo: 'Solo el JL puede mover las promos.', ruta_apagada: 'Los botones todavía no están encendidos en el sistema.', apagado: 'Los botones todavía no están encendidos en el sistema.',
+  apagado_admin: 'Esa promo está apagada desde el admin: no se enciende desde aquí.', tipo_no_jl: 'Esa promo se maneja desde el admin.', accion_sconosciuta: 'El sistema no conoce ese gesto.' };   // [⚙️ 7a9eb66]
 async function prbEnvia(c) {
   if (PRB.vuelo) return;
   var k = c.id + '|' + c.accion + '|' + JSON.stringify(c.valor), uid = PRB.uid[k] || ('pjl-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
@@ -1754,7 +1755,8 @@ async function prbEnvia(c) {
     clearTimeout(to); j = await r.json().catch(function () { return null; }); } catch (e) { r = null; }
   PRB.vuelo = false; PRB.conf = null;
   if (!r || (j && j.error === 'pg_no_responde') || (j && j.error === 'uid_reusado')) { PRB.uid[k] = uid; PRB.msg = '⏳ No sé si cambió: mira el estado antes de tocar de nuevo.'; }
-  else if (!j || j.ok !== true) { delete PRB.uid[k]; PRB.msg = '✋ ' + ((j && (PRB_NO[j.error] || j.mensaje || j.error)) || ('No se pudo (' + r.status + ')')); }
+  else if (!j || j.ok !== true) { delete PRB.uid[k]; PRB.msg = '✋ ' + ((j && (PRB_NO[j.error] || j.mensaje || j.error)) || ('No se pudo (' + r.status + ')'))
+    + ((j && j.error === 'tope_activos' && Array.isArray(j.activos) && j.activos.length) ? ' (' + j.activos.map(function (a) { return (a && (a.nombre || a.id)) || ''; }).filter(Boolean).join(' · ') + ')' : ''); }   // [⚙️] i 3 attivi, per nome
   else {
     delete PRB.uid[k];
     PRS.ts = 0; await prsLeggi();   // lo stato che si dice è quello RILETTO
