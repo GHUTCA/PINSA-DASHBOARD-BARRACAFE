@@ -9,7 +9,9 @@
 <!-- 🎟 LA LISTA V35 · D-567 · CONTRATTO: ATALAYA/4_CANTIERE_MENU/LISTA/CONTRATTO_LISTA_D567_24NOV2026.md §②-③
      Il cliente si registra da solo. Manda POST /miembro/registro/<LOCAL> (p_via 'auto' lo decide il BORDO, non la pagina).
      · uid coniato all'apertura del modulo, UGUALE a ogni ritento.
-     · Freni: uno per telefono (PG, telefono_ya_registrado) · tetto per IP al bordo (rate_limit).
+     · Freni: uno per telefono (PG) · tetto per IP al bordo (rate_limit).
+     · 🔴 [26-nov · 🎛 «SÌ all'id ALIAS»] la pagina pubblica NON dice mai se un celular era già nella Lista: il bordo risponde
+       uguale nei due casi (al già-socio un id ALIAS col solo prezzo), e la pagina dice UNA frase sola.
      · Il telefono ricorda SOLO l'id del member (localStorage `pinsita_member_<LOCAL>`), per riaprire la carta: è una comodità, si può perdere (N4).
        Nessun altro dato resta nel telefono.
      · ?demo=1 → bordo finto, nessuna rete. A leva spenta (ruta_apagada) → «La Lista abre muy pronto».
@@ -108,7 +110,7 @@
     <div class="s">Todavía no puedes unirte desde aquí. Pregunta en el local.</div>
   </section>
 
-  <div class="foot"><span id="ver">unete v0.1.6 · 25nov · ramo</span></div>
+  <div class="foot"><span id="ver">unete v0.1.7 · 26nov · ramo</span></div>
 </div>
 
 <script>
@@ -180,7 +182,7 @@ async function finto(b) {
   await new Promise(r => setTimeout(r, 600));
   if (FINTO.visti[b.uid]) return { ok: true, esito: 'uguale', id: FINTO.visti[b.uid], nombre: String(b.nombre).trim().split(/\s+/)[0] };
   if (++FINTO.n > 5) return { ok: false, error: 'rate_limit', retry_s: 1800 };
-  if (/0000$/.test(b.telefono)) return { ok: false, error: 'telefono_ya_registrado' };
+  /* 0000 = già socio: come il bordo, la STESSA risposta di un nuovo (l'id è un alias) */
   if (!b.fecha_nacimiento) return { ok: false, error: 'fecha_vuota' };
   if (anni(b.fecha_nacimiento) < 18) return { ok: false, error: 'menor_de_edad' };
   const id = 'm' + Array.from(crypto.getRandomValues(new Uint8Array(6)), x => x.toString(16).padStart(2, '0')).join('');
@@ -208,10 +210,9 @@ $('bManda').onclick = async () => {
   ST.vuelo = true; $('bManda').disabled = true; $('bManda').textContent = 'Uniéndote…';
   const r = await post('/miembro/registro/' + encodeURIComponent(LOCAL), { uid: ST.uid, nombre: nombre, telefono: tel, correo: mail, fecha_nacimiento: nac, consenso: CONSENSO, ...($('fOf').checked ? { consenso_ofertas: CONSENSO_OF } : {})   /* non spuntata = campo ASSENTE = «no» (⚙️ «IL SECONDO CONSENSO PASSA DAL BORDO») */ });
   ST.vuelo = false; $('bManda').disabled = false; $('bManda').textContent = 'Unirme a La Lista';
-  if (r && r.ok === true && r.id) { ls(SK_ID, r.id); ls(SK_NOM, String(r.nombre || '')); svuota(); dentro(r.nombre, r.esito === 'uguale' ? 'ya' : 'nuevo'); return; }
+  if (r && r.ok === true && r.id) { ls(SK_ID, r.id); ls(SK_NOM, String(r.nombre || '')); svuota(); dentro(r.nombre, 'nuevo'); return; }
   const e = (r && r.error) || 'red';
   if (e === 'ruta_apagada') { mostra('vPronto'); return; }
-  if (e === 'telefono_ya_registrado') { $('fErr').innerHTML = '<span class="ya">Este celular ya está en La Lista.</span> Si perdiste tu link, pídelo en el local.'; ST.uidUsato = true; return; }
   if (ERR_NOSTRI.includes(e)) { console.warn('[lista] rifiuto nostro:', e); ST.uid = nuovoUid(); $('fErr').textContent = 'No pudimos guardarlo. Toca «Unirme a La Lista» otra vez.'; return; }
   if (e === 'red' || e === 'pg_no_responde') { $('fErr').textContent = MSG.red; return; }   // stesso uid: idempotente
   ST.uidUsato = true;
@@ -222,8 +223,10 @@ function dentro(nombre, come) {
   const id = ls(SK_ID);
   $('bCarta').href = MENU_URL + '?l=' + encodeURIComponent(LOCAL) + (MESA ? '&mesa=' + encodeURIComponent(MESA) : '') + '&member=' + encodeURIComponent(id);
   $('bTarjeta').href = 'mi_tarjeta.html?loc=' + LOCAL.toLowerCase() + '&member=' + encodeURIComponent(id) + (DEMO ? '&demo=1' : '');
-  $('okTit').textContent = come === 'nuevo' ? '¡Bienvenido a La Lista' + (nombre ? ', ' + nombre : '') + '!'
-    : (come === 'ya' ? '¡Ya estás en La Lista' + (nombre ? ', ' + nombre : '') + '!' : '¡Ya estás en La Lista!');
+  /* UNA frase per il nuovo e per il già-socio (🎛 «revisar_celular NON basta»): mai «ya estabas» detto dal sistema */
+  $('okTit').textContent = come === 'nuevo' ? '¡Listo' + (nombre ? ', ' + nombre : '') + '!' : '¡Ya estás en La Lista!';
+  $('okSub').textContent = come === 'nuevo' ? 'Si es tu primera vez, tu tarjeta ya quedó en «Mi tarjeta». Si ya estabas en La Lista, pide tu link en el local.'
+    : 'Ya puedes ver la carta con tu precio de La Lista.';
   mostra('vOk');
 }
 $('bOtro').onclick = () => { ls(SK_ID, null); ls(SK_NOM, null); svuota(); mostra('vForm'); };
@@ -232,7 +235,7 @@ $('bOtro').onclick = () => { ls(SK_ID, null); ls(SK_NOM, null); svuota(); mostra
 $('fAviso').innerHTML = AVISO;
 $('fAvisoOf').innerHTML = AVISO_OF;
 if (TITULAR) { const t = document.createElement('div'); t.style.cssText = 'font-size:10px;color:var(--ink3);margin-top:6px'; t.textContent = 'Responsable de tus datos: ' + TITULAR; document.querySelector('.foot').appendChild(t); }
-if (DEMO) { $('demo').classList.remove('hide'); $('demo').textContent = 'Prueba · datos de ejemplo, no se guarda nada. Un celular que termina en 0000 ya está en La Lista; al sexto intento, «muchos intentos».'; }
+if (DEMO) { $('demo').classList.remove('hide'); $('demo').textContent = 'Prueba · datos de ejemplo, no se guarda nada. Un celular que termina en 0000 ya está en La Lista (la página responde igual); al sexto intento, «muchos intentos».'; }
 svuota();
 if (ls(SK_ID)) dentro('', 'guardado'); else mostra('vForm');
 </script>
