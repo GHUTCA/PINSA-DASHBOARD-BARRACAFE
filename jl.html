@@ -174,7 +174,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.23</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.23.1</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -189,7 +189,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.23';
+var JL_VER = 'jl v0.6.23.1';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -1275,6 +1275,70 @@ async function cjPost(payload) {
     clearTimeout(to); if (!j) throw new Error('http_' + r.status); return j;
   } catch (e) { clearTimeout(to); throw (e && e.name === 'AbortError' ? new Error('timeout') : e); }
 }
+/* ═══ [26-nov · v0.6.23.1 · 🛎 SALA V35 · 🎛 V35 «AUT-1218 · IL POP-UP DEL PAGO DEL CLIENTE»] il JL vede il pago del cliente dal QR, per TUTTE le mesas ═══
+   La risposta di `servicio` porta `pagos_fintoc: [{uid, mesa, monto, propina, ts, visti}]` SOLO a leva PAGO_CLIENTE_POPUP_ON del bordo (⚙️ «I NOMI
+   DEL POP-UP DEL PAGO»); senza la chiave, niente pop-up e niente di diverso da ieri. Un giro leggero ogni JL_POLL_MS a pagina visibile e col PIN.
+   Il pop-up: mesa · la SOMMA dei pagos Fintoc della mesa · la propina · «no le cobres de nuevo»; si chiude solo col tocco «Entendido», e il tocco si
+   scrive (`pago_cliente_visto` su /caja col pin_jl, un uid_gesto per pago coniato all'apertura, ritentato con lo stesso uid). Un pago con la mia
+   sigla in `visti` non torna. Gemello di sala_nueva v0.15.98.1 (`ppNuovi` è la stessa funzione). */
+/* ppNuovi: dai pagos Fintoc piatti [{uid, mesa, monto, propina, ts, visti}] il primo gruppo da mostrare, per mesa: i pagos che io (yo) non ho ancora
+   visto (né nel bordo, `visti`, né in questo telefono, `locali`), e la SOMMA di TUTTI i pagos Fintoc di quella mesa (già visti compresi: il garzón deve
+   sapere quanto è già pagato). null = niente da mostrare. Pura. */
+function ppNuovi(lista, yo, locali) {
+  var io = String(yo || '').trim().toLowerCase(), per = {}, ordine = [];
+  (Array.isArray(lista) ? lista : []).forEach(function (p) {
+    if (!p || p.mesa == null) return; var m = String(p.mesa);
+    if (!per[m]) { per[m] = { mesa: m, total: 0, propina: 0, uids: [], ts: 0 }; ordine.push(m); }
+    var g = per[m], mo = Math.round(Number(p.monto) || 0), pr = Math.round(Number(p.propina) || 0);
+    g.total += mo; g.propina += pr;
+    var u = p.uid == null ? '' : String(p.uid);
+    var visto = !u || (locali && locali[u]) || (Array.isArray(p.visti) && io && p.visti.some(function (v) { return String(v || '').trim().toLowerCase() === io; }));
+    if (!visto) { g.uids.push(u); var t = Number(p.ts) || Date.parse(p.ts || '') || 0; if (t > g.ts) g.ts = t; }
+  });
+  var c = ordine.map(function (m) { return per[m]; }).filter(function (g) { return g.uids.length; });
+  c.sort(function (a, b) { return a.ts - b.ts; });   // il più vecchio non visto per primo
+  return c[0] || null;
+}
+function ppUid() { return 'pv-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+function ppHtml(g, fmt, esc, onTap) {
+  return '<div style="background:#13201a;color:#e9f7ee;border:2px solid rgba(116,201,138,.8);border-radius:20px;padding:22px 20px;max-width:420px;width:100%;text-align:center">' +
+    '<div style="font-size:14px;letter-spacing:.08em;opacity:.85">MESA ' + esc(g.mesa) + '</div>' +
+    '<div style="font-size:19px;font-weight:800;margin:6px 0 2px">💳 El cliente pagó con Fintoc</div>' +
+    '<div style="font-size:34px;font-weight:800;letter-spacing:-.02em;margin:6px 0">' + fmt(g.total) + '</div>' +
+    (g.propina > 0 ? '<div style="font-size:15px;opacity:.9">propina ' + fmt(g.propina) + '</div>' : '') +
+    '<div style="font-size:16px;font-weight:700;margin:12px 0 16px">No le cobres de nuevo.</div>' +
+    '<button type="button" class="vb pieno" style="width:100%;padding:14px 12px;font-size:17px;font-weight:800;border:0;border-radius:12px;background:#74c98a;color:#0d1a12" onclick="' + onTap + '">Entendido</button></div>';
+}
+var JLPOP = { visto: {}, coda: {}, volo: {}, aperto: null, inVolo: false };
+async function jlPopGiro() {
+  if (DEMO || !SES.pin || JLPOP.inVolo) return;
+  JLPOP.inVolo = true; var r = null;
+  try { r = await cjPost({ verbo: 'servicio', pin_jl: SES.pin }); } catch (e) { r = null; }
+  JLPOP.inVolo = false;
+  jlPopRitenta();
+  if (!r || !r.ok || !Array.isArray(r.pagos_fintoc) || JLPOP.aperto) return;
+  var g = ppNuovi(r.pagos_fintoc, SES.user, JLPOP.visto); if (!g) return;
+  JLPOP.aperto = { mesa: g.mesa, uids: g.uids, gesti: g.uids.map(function () { return ppUid(); }) };
+  var o = document.getElementById('jlPopPago'); if (o) o.remove();
+  o = document.createElement('div'); o.id = 'jlPopPago'; o.setAttribute('role', 'alertdialog');
+  o.setAttribute('style', 'position:fixed;inset:0;z-index:9998;background:rgba(10,9,8,.88);display:flex;align-items:center;justify-content:center;padding:16px');
+  o.innerHTML = ppHtml(g, pesos, esc, 'jlPopVisto()');
+  document.body.appendChild(o);
+}
+function jlPopVisto() {
+  var a = JLPOP.aperto; if (!a) return;
+  a.uids.forEach(function (u, i) { JLPOP.visto[u] = 1; JLPOP.coda[u] = a.gesti[i]; });
+  JLPOP.aperto = null; var o = document.getElementById('jlPopPago'); if (o) o.remove();
+  jlPopRitenta(); setTimeout(jlPopGiro, 0);
+}
+function jlPopRitenta() {
+  Object.keys(JLPOP.coda).forEach(function (u) {
+    var g = JLPOP.coda[u]; if (!g || JLPOP.volo[u]) return; JLPOP.volo[u] = 1;
+    cjPost({ verbo: 'pago_cliente_visto', pin_jl: SES.pin, pago_uid: u, uid_gesto: g, quien: SES.user })
+      .then(function (j) { delete JLPOP.volo[u]; if (j && j.ok) delete JLPOP.coda[u]; })
+      .catch(function () { delete JLPOP.volo[u]; });
+  });
+}
 async function cjGiro() {
   if ((!SES.pin && !DEMO) || CJ.inVolo) return;
   CJ.inVolo = true; CJ.tryTs = Date.now();
@@ -2028,6 +2092,7 @@ jlLeggi();
 setInterval(function () { if (!document.hidden) jlLeggi(); }, JL_POLL_MS);
 document.addEventListener('visibilitychange', function () { if (!document.hidden) jlLeggi(); });
 setInterval(jlEdad, 1000);
+jlPopGiro(); setInterval(function () { if (!document.hidden) jlPopGiro(); }, JL_POLL_MS);   // [v0.6.23.1 · AUT-1218] il pop-up del pago del cliente
 /* [v0.3.0] la caja: una lettura all'avvio (il pallino), poi ogni 20 s col tab Caja aperto, ogni 60 s altrimenti; e il cronometro dell'aviso al secondo */
 cjGiro();
 setInterval(function () { if (!document.hidden && (VISTA.tab === 2 || Date.now() - CJ.tryTs > 60000)) cjGiro(); }, JL_POLL_MS);
