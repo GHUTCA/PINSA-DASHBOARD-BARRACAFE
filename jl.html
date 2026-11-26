@@ -174,7 +174,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.23.2</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.23.3</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -189,7 +189,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.23.2';
+var JL_VER = 'jl v0.6.23.3';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -403,7 +403,13 @@ function jlAppUrl() { return 'app_jl.html?loc=' + ({ BKS: 'bks', RIESCO: 'rsc', 
 var VISTA = { mod: null, ts: 0, edadBordeS: null, err: '', filtro: false, exp: {}, tab: 0, aperta: null };
 gzCarica();   // [v0.6.16]
 /* [v0.2.0 · P5] l'86 del bordo (GET /ago86/<local>, token in header) e i nomi dalla carta (/catalogoMesero): una lettura al minuto, non a ogni giro */
-var L86 = { ids: null, apagado: false, err: '', ts: 0 }, CARTA = { nom: {}, ts: 0 };
+var L86 = { ids: null, apagado: false, err: '', ts: 0, soloMenu: {} }, CARTA = { nom: {}, ts: 0 };
+/* [26-nov · v0.6.23.3 · 🛎 SALA V35 · 🎛 V35 AUT-1223 «il tiramisù del menù è UN ALTRO PRODOTTO»] i prodotti «Solo en menú» (attivi, `menu_visible` non vero:
+   «Tiramisu Menu del Dia» BKS-POS-007, il vaso più piccolo, col SUO 86) non arrivano da `/catalogoMesero`, che li salta (bordo `catalogo_pg.js` r.342).
+   Ora li porta `GET /ago86` in `solo_menu: { id: nombre }` (⚙️ 5c980a5): entrano nella cerca dell'86 come gli altri, con l'etichetta «en menú», e il gesto
+   è lo stesso `adminToggle86`. Senza il campo (bordo di ieri, o PG muto: `solo_menu_motivo`) la lista di ieri. */
+function jl86EnMenu(id) { return !!(L86.soloMenu && L86.soloMenu[id]); }
+function jl86Tag(id) { return jl86EnMenu(id) ? ' <small style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;border:1px solid var(--filo);font-size:10.5px;font-weight:600;color:var(--ink2)">en menú</small>' : ''; }
 /* [24-nov · v0.6.12 · Alberto, tab Local: «l'86 mostra BKS-PIZ-011… non so cosa sia, dovremmo mettere il nome»] LA CAUSA: la carta del garzón
    (`/catalogoMesero`) toglie apposta i prodotti in 86 (bordo `catalogo_pg.js` r.343, `if (ago[id]) continue`), quindi proprio i nomi degli esauriti
    non arrivavano mai, e ogni lettura RIMPIAZZAVA la mappa dei nomi. Ora: ① i nomi si SOMMANO (un prodotto visto una volta resta col suo nome);
@@ -522,7 +528,8 @@ async function jl86Leggi() {
     var c1 = new AbortController(), t1 = setTimeout(function () { c1.abort(); }, 6000);
     var r = await fetch(CFG.BORDE + '/ago86/' + encodeURIComponent(CFG.LOCAL), { headers: { 'x-borde-token': CFG.T }, signal: c1.signal, cache: 'no-store' });
     var j = await r.json().catch(function () { return null; }); clearTimeout(t1);
-    if (j && j.ok) { L86.ids = Array.isArray(j.ids) ? j.ids.map(String) : []; L86.apagado = !!j.apagado; L86.err = ''; if (j.nombres && typeof j.nombres === 'object') jlNomiSomma(j.nombres); }   // [v0.6.12] ③
+    if (j && j.ok) { L86.ids = Array.isArray(j.ids) ? j.ids.map(String) : []; L86.apagado = !!j.apagado; L86.err = ''; if (j.nombres && typeof j.nombres === 'object') jlNomiSomma(j.nombres);
+      if (j.solo_menu && typeof j.solo_menu === 'object') { var sm = {}; Object.keys(j.solo_menu).forEach(function (k) { var v = String(j.solo_menu[k] || '').trim(); if (k && v) sm[String(k)] = v; }); L86.soloMenu = sm; jlNomiSomma(sm); } }   // [v0.6.23.3 · AUT-1223] i «Solo en menú»   // [v0.6.12] ③
     else L86.err = (j && j.error) || ('HTTP ' + r.status);
   } catch (e) { L86.err = 'sin conexión'; }
   /* [v0.5.1] la carta serve anche alla RICERCA dell'86 in Local (v50): si legge anche senza agotados, con la stessa cadenza lenta */
@@ -1214,7 +1221,7 @@ function hits86Html() {
   var q = Q86.trim(); if (q.length < 2) return '';
   var hs = hits86();
   if (!hs.length) return '<p style="margin-top:6px">' + (Object.keys(CARTA.nom).length ? 'Nada con ese nombre.' : 'Todavía no tengo la carta: espera un momento.') + '</p>';
-  return hs.map(function (id) { return '<div class="riga"><span><b>' + esc(CARTA.nom[id]) + '</b></span><button class="azione" style="width:auto;margin:0 0 0 auto;min-height:36px;padding:6px 12px" data-a="c86" data-k="' + esc(id) + '">86 hoy</button></div>'; }).join('');
+  return hs.map(function (id) { return '<div class="riga"><span><b>' + esc(CARTA.nom[id]) + '</b>' + jl86Tag(id) + '</span><button class="azione" style="width:auto;margin:0 0 0 auto;min-height:36px;padding:6px 12px" data-a="c86" data-k="' + esc(id) + '">86 hoy</button></div>'; }).join('');
 }
 async function gesto86(id, value) {
   if (E86.vuelo) return;
@@ -1251,7 +1258,7 @@ function card86() {
     '<p style="color:var(--ink2);margin:0">' + (L86.ids.length ? L86.ids.length + (L86.ids.length === 1 ? ' agotado' : ' agotados') : 'Nada agotado') + ' · toca para ' + (L86.ids.length ? 'verlos o sacar otro' : 'sacar un producto') + '</p></div>';
   if (E86.msg) h += '<p style="color:' + (E86.msg.indexOf('🚫') === 0 || E86.msg.indexOf('✓') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin-bottom:4px">' + esc(E86.msg) + '</p>';
   h += L86.ids.map(function (id) {
-    return '<div class="riga"><span>' + (jl86Nome(id) ? '<b>' + esc(jl86Nome(id)) + '</b>' : '<b style="color:var(--oro)">Sin nombre en la carta</b>') + '<small style="display:block;font-size:11px;color:var(--ink3)">' + esc(id) + '</small></span>' + (SES.pin || DEMO ? '<button class="azione" style="width:auto;margin:0 0 0 auto;min-height:36px;padding:6px 12px" data-a="v86" data-k="' + esc(id) + '"' + (E86.vuelo ? ' disabled' : '') + '>volvió</button>' : '') + '</div>';
+    return '<div class="riga"><span>' + (jl86Nome(id) ? '<b>' + esc(jl86Nome(id)) + '</b>' + jl86Tag(id) : '<b style="color:var(--oro)">Sin nombre en la carta</b>') + '<small style="display:block;font-size:11px;color:var(--ink3)">' + esc(id) + '</small></span>' + (SES.pin || DEMO ? '<button class="azione" style="width:auto;margin:0 0 0 auto;min-height:36px;padding:6px 12px" data-a="v86" data-k="' + esc(id) + '"' + (E86.vuelo ? ' disabled' : '') + '>volvió</button>' : '') + '</div>';
   }).join('');
   if (!SES.pin && !DEMO) h += '<p style="margin-top:6px">Para poner o quitar un 86 entra con tu PIN desde tu app.</p>';
   else if (C86) h += '<div class="vetro alerta" style="margin:8px 0 0"><p style="color:var(--ink);font-weight:700">¿Sacar «' + esc(jl86Etiq(C86)) + '» del menú?</p><p>Deja de verse en el QR y en la sala al instante.</p>' +
