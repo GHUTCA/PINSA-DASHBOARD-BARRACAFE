@@ -195,7 +195,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.25.1</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.26</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -210,7 +210,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.25.1';
+var JL_VER = 'jl v0.6.26';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -1939,7 +1939,8 @@ async function prsLeggi() {
   if (VISTA.tab === 3) jlPinta();
 }
 /* le righe di adesso: [{ id, n, st:'on'|'abre'|'termino'|'hoy_no', desde, hasta }] o null (non so) */
-function prsRighe(now) {
+function prsRighe(now) { var t = prsTutte(now); return t ? t.filter(function (x) { return String(x.id).toUpperCase() !== 'MENU-DIA'; }) : null; }   // [v0.6.26] il Menú del Día ha la sua riga
+function prsTutte(now) {
   if (!PRS.j || !PRS.fn || Date.now() - PRS.j.ts > 600000) return null;
   var fop = PRS.fn.giornoOperativo(now).fecha;
   var gesti = PRS.j.gesti.map(function (g) { return g && g.fecha_op ? g : Object.assign({}, g, { fecha_op: fop }); });   // la stessa timbratura del QR (menu v0.10.30)
@@ -1947,13 +1948,88 @@ function prsRighe(now) {
   var R = PRS.fn.strumentiAdesso({ strumenti: Object.keys(vig).map(function (k) { return vig[k]; }).filter(function (x) { return !x.borrado; }), parti: PRS.j.parti, gesti: gesti, carta: {}, ago86: [], local: CFG.LOCAL, now: now });
   if (!R || !R.ok) return null;
   var hm = R.ahora && R.ahora.hhmm || '';
-  return R.strumenti.filter(function (o) { var g = vig[o.id]; return g && g.activo === true && PRS_TIPI.indexOf(o.tipo) >= 0 && o.finestra && String(o.id).toUpperCase() !== 'MENU-DIA'; }).map(function (o) {
+  return R.strumenti.filter(function (o) { var g = vig[o.id]; return g && g.activo === true && PRS_TIPI.indexOf(o.tipo) >= 0 && o.finestra; }).map(function (o) {
     var f = o.finestra, h = f.hasta_oggi || f.hasta;
     /* «activo» = passati i cancelli DELLO STRUMENTO (acceso · oggi · data · orario). Senza la carta la regola arriva alle parti e dice `sin_partes`:
        quale prodotto si vende davvero (e l'86) lo giudica il QR, che ha la carta. Qui si dice se la promo è accesa e in orario. */
-    var st = (o.visible || PRS_PARTI.test(o.perche || '')) ? 'on' : o.perche === 'fuori_orario' ? (f.desde > f.hasta ? (hm >= h && hm < f.desde ? 'abre' : 'termino') : (hm < f.desde ? 'abre' : 'termino')) : 'hoy_no';
-    return { id: o.id, n: o.nombre || o.id, st: st, desde: f.desde, hasta: h };
+    /* [v0.6.26] un «no» che non è un cancello noto (orario · giorno · data) né delle parti = spento dal JL oggi (`enciende {on:false}`, §4 del contratto) */
+    var st = (o.visible || PRS_PARTI.test(o.perche || '')) ? 'on' : o.perche === 'fuori_orario' ? (f.desde > f.hasta ? (hm >= h && hm < f.desde ? 'abre' : 'termino') : (hm < f.desde ? 'abre' : 'termino')) : (o.perche === 'non_oggi' || o.perche === 'fuori_data' || o.perche === 'grupo_spento') ? 'hoy_no' : 'apagado';
+    return { id: o.id, n: o.nombre || o.id, st: st, desde: f.desde, hasta: h, tope: f.hasta_tope || h, ahora: hm };
   });
+}
+/* ═══ [26-nov · v0.6.26 · 🛎 SALA V35 · 🎛 V35 «I BOTTONI DEL PUSH COME NEL MOCKUP: TORNANO A VEN 27», Alberto 19:27 «mancano i bottoni di push»] ═══
+   Il mockup approvato è v50 `instrCard` (4_CANTIERE_SALA/MOCKUP_APP_JL_v50_15NOV2026.html r.630-658); il contratto è di 📖 (4_CANTIERE_MENU/CONTRATTO_PROMOS_JL_24NOV2026.md §3):
+   `POST /propuestasAdmin/<L>` {pin, tabla:'strumento_gesto', uid_gesto, fila:{local, id_strumento, accion, valor}} — `push` {hasta:'HH:MM'} ASSOLUTO
+   (il vetro calcola hasta ± 15 e manda l'ora: un retry con lo stesso uid è `repetido`, due tocchi danno due ore, mai un +30) · `enciende` {on}.
+   Come la leva del Menú del Día: una conferma (vale per tutto il locale), una chiave per gesto, e lo stato che si dice è quello RILETTO dopo, mai
+   quello chiesto. Con la rete morta «no sé si cambió», e la stessa chiave al prossimo tocco. Il +15′ si accende solo fino al tope dell'admin
+   («El JL puede alargar hasta»): senza tope, +15′ resta spento, non è un difetto. Leva: `promos_jl_on` del bordo (PROMOS_JL_ON, elenco dei locali,
+   nasce "") o `?promos=1` su un telefono di prova; `?promos=0` la spegne. Spenta: la scheda di v0.6.25, sola lettura. */
+var PRB = { conf: null, vuelo: false, msg: '', uid: {} };
+function prbOn() { try { var q = new URLSearchParams(location.search).get('promos'); if (q === '0') return false; if (q === '1') return true; } catch (e) {}
+  var v = salFlag('promos_jl_on').trim().toUpperCase(); return v === '1' || v.split(',').map(function (x) { return x.trim(); }).indexOf(String(CFG.LOCAL).toUpperCase()) >= 0; }
+function prbMin(t) { var m = /^(\d{2}):(\d{2})/.exec(String(t || '')); return m ? +m[1] * 60 + +m[2] : null; }
+function prbHm(n) { n = ((n % 1440) + 1440) % 1440; return String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0'); }
+/* il nuovo `hasta` di un push di d minuti, o null se il bordo direbbe di no (§3: fuori `(desde, tope]` · a meno di 15′ da adesso). Le ore si contano dal `desde`, così una finestra che passa la mezzanotte non si rompe. */
+function prbPush(x, d) {
+  var de = prbMin(x.desde), h = prbMin(x.hasta), tp = prbMin(x.tope), now = prbMin(x.ahora); if (de == null || h == null || now == null) return null;
+  var rel = function (m) { return ((m - de) % 1440 + 1440) % 1440; }, nu = h + d;
+  if (rel(nu) === 0 || rel(nu) <= rel(now) + 15) return null;   // push_en_pasado / fuori finestra in basso
+  if (d > 0 && (tp == null || rel(nu) > rel(tp) || rel(tp) <= rel(h))) return null;   // oltre il tope (o tope assente = hasta)
+  return prbHm(nu);
+}
+var PRB_NO = { tope_activos: 'Ya hay 3 activos: apaga uno primero.', fuera_de_ventana: 'Está fuera del horario de esa promo.', push_fuori_finestra: 'Ese final está fuera de lo que permite el admin.',
+  push_en_pasado: 'Ese final ya pasó o está a menos de 15′.', push_no_15: 'El push va de 15 en 15.', valor_invalido: 'El sistema no aceptó el valor.', pin: 'Tu PIN no vale ahora: vuelve a entrar.',
+  cargo: 'Solo el JL puede mover las promos.', ruta_apagada: 'Los botones todavía no están encendidos en el sistema.' };
+async function prbEnvia(c) {
+  if (PRB.vuelo) return;
+  var k = c.id + '|' + c.accion + '|' + JSON.stringify(c.valor), uid = PRB.uid[k] || ('pjl-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+  PRB.vuelo = true; PRB.msg = ''; jlPinta(true);
+  var r = null, j = null;
+  try { var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 10000);
+    r = await fetch(CFG.BORDE + '/propuestasAdmin/' + encodeURIComponent(CFG.LOCAL), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8', 'X-Borde-Token': CFG.T }, signal: ctrl.signal, cache: 'no-store',
+      body: JSON.stringify({ pin: SES.pin, tabla: 'strumento_gesto', uid_gesto: uid, fila: { local: CFG.LOCAL, id_strumento: c.id, accion: c.accion, valor: c.valor } }) });
+    clearTimeout(to); j = await r.json().catch(function () { return null; }); } catch (e) { r = null; }
+  PRB.vuelo = false; PRB.conf = null;
+  if (!r || (j && j.error === 'pg_no_responde') || (j && j.error === 'uid_reusado')) { PRB.uid[k] = uid; PRB.msg = '⏳ No sé si cambió: mira el estado antes de tocar de nuevo.'; }
+  else if (!j || j.ok !== true) { delete PRB.uid[k]; PRB.msg = '✋ ' + ((j && (PRB_NO[j.error] || j.mensaje || j.error)) || ('No se pudo (' + r.status + ')')); }
+  else {
+    delete PRB.uid[k];
+    PRS.ts = 0; await prsLeggi();   // lo stato che si dice è quello RILETTO
+    var t = prsTutte(Date.now()) || [], x = t.filter(function (y) { return y.id === c.id; })[0];
+    if (!x) PRB.msg = '⏳ Guardado, pero no pude releer el estado: mira el QR.';
+    else if (c.accion === 'push') PRB.msg = x.hasta === c.valor.hasta ? '✓ ' + x.n + ' · hasta ' + x.hasta : '⚠️ Pediste hasta ' + c.valor.hasta + ', el sistema dice hasta ' + x.hasta + '.';
+    else PRB.msg = (x.st === 'on') === !!c.valor.on ? '✓ ' + x.n + (c.valor.on ? ' activo' : ' apagado') : '⚠️ El sistema dice que ' + x.n + (x.st === 'on' ? ' sigue activo.' : ' sigue apagado.');
+  }
+  jlPinta(true);
+}
+/* i bottoni di una riga (v50 instrCard): attiva → hasta · quedan · tope, −15′ · +15′ · Desactivar; spenta dal JL → Activar (non oltre il massimo) */
+function prbFila(x, nOn) {
+  if (!prbOn() || !x) return '';
+  var d = PRB.vuelo ? ' disabled' : '';
+  if (x.st === 'on') {
+    var q = (function () { var h = prbMin(x.hasta), n = prbMin(x.ahora); return (h == null || n == null) ? null : ((h - n) % 1440 + 1440) % 1440; })();
+    var m = prbPush(x, -15), p = prbPush(x, 15);
+    return '<p style="margin-top:2px">hasta <b style="color:var(--ink)">' + esc(x.hasta) + '</b>' + (q != null ? ' · quedan <b style="color:var(--ink)">' + q + '′</b>' : '') + ' · tope ' + esc(x.tope) + '</p>' +
+      '<div class="fila2"><button class="azione" data-a="prbConf" data-k="' + esc(x.id) + '" data-v="menos"' + (m ? d : ' disabled') + '>−15′</button>' +
+      '<button class="azione" data-a="prbConf" data-k="' + esc(x.id) + '" data-v="mas"' + (p ? d : ' disabled') + '>+15′</button>' +
+      '<button class="azione rojo" data-a="prbConf" data-k="' + esc(x.id) + '" data-v="off"' + d + '>Desactivar</button></div>';
+  }
+  if (x.st === 'apagado') return nOn >= PR_MAX ? '<p style="font-size:11px;color:var(--ink3)">Ya hay ' + PR_MAX + ' activos: apaga uno primero.</p>'
+    : '<div class="fila2"><button class="azione oro" data-a="prbConf" data-k="' + esc(x.id) + '" data-v="on"' + d + '>Activar</button></div>';
+  return '';
+}
+/* il gesto chiesto da un bottone ⇒ {id, n, accion, valor, tx} per la conferma, o null */
+function prbGesto(id, v) {
+  var x = (prsTutte(Date.now()) || []).filter(function (y) { return y.id === id; })[0]; if (!x) return null;
+  if (v === 'menos' || v === 'mas') { var nu = prbPush(x, v === 'mas' ? 15 : -15); return nu ? { id: id, n: x.n, accion: 'push', valor: { hasta: nu }, tx: x.n + ' hasta las ' + nu } : null; }
+  if (v === 'on' || v === 'off') return { id: id, n: x.n, accion: 'enciende', valor: { on: v === 'on' }, tx: (v === 'on' ? 'Activar ' : 'Apagar ') + x.n };
+  return null;
+}
+function prbConfHtml(id) {
+  if (!PRB.conf || PRB.conf.id !== id) return '';
+  return '<div class="vetro alerta" style="margin:8px 0 0"><p style="color:var(--ink);font-weight:700">¿' + esc(PRB.conf.tx) + ' para TODO el local?</p><p>Se ve en el QR y en la sala al instante.</p>' +
+    '<div class="fila2"><button class="azione" data-a="prbNo">No</button><button class="azione oro" data-a="prbSi"' + (PRB.vuelo ? ' disabled' : '') + '>' + (PRB.vuelo ? '…' : 'Sí') + '</button></div></div>';
 }
 function prAhora() { try { return new Date().toLocaleString('sv-SE', { timeZone: 'America/Santiago' }).slice(11, 16); } catch (e) { var d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); } }
 function prFascia() { var p = salFlag('menu_leva_reloj').split('|'); return (/^\d{2}:\d{2}$/.test(p[1] || '') && /^\d{2}:\d{2}$/.test(p[2] || '')) ? { de: p[1], hasta: p[2] } : { de: '08:00', hasta: '15:00' }; }
@@ -2005,6 +2081,7 @@ function promos() {
   var _prs = prsRighe(Date.now()), _nOn = (on && dentro ? 1 : 0) + (_prs ? _prs.filter(function (x) { return x.st === 'on'; }).length : 0);   // [v0.6.25] gli strumenti veri
   var h = '<div class="vetro"><h4>Menús y 2x1 <span class="pill no">' + _nOn + ' de ' + PR_MAX + ' activos</span><span class="pill no" style="margin-left:auto">ahora ' + ahora + '</span></h4>';
   if (PR.msg) h += '<p style="color:' + (PR.msg.indexOf('✓') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin-bottom:4px">' + esc(PR.msg) + '</p>';
+  if (PRB.msg) h += '<p style="color:' + (PRB.msg.indexOf('✓') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin-bottom:4px">' + esc(PRB.msg) + '</p>';   // [v0.6.26]
   /* il Menú del Día: la riga che funziona */
   var est = !PR.r ? '<span class="ist no">' + (PR.err === 'spento' ? (jlTurnoBordo() ? 'no responde' : 'en tu app') : PR.err ? 'sin conexión' : 'leyendo…') + '</span>'
     : !dentro ? '<span class="ist no">abre ' + f.de + '</span>'
@@ -2014,7 +2091,9 @@ function promos() {
   if (PR.r && dentro && on) {
     var qm = (+f.hasta.slice(0, 2) * 60 + +f.hasta.slice(3)) - (+ahora.slice(0, 2) * 60 + +ahora.slice(3));   // [v0.6.5 · P3] quedan N′, da «hasta» e da «ahora»
     r += '<p style="margin-top:2px">hasta <b style="color:var(--ink)">' + f.hasta + '</b> · quedan <b style="color:var(--ink)">' + Math.max(0, qm) + '′</b> · tope sin dato</p>' +
-      '<div class="fila2"><button class="azione" disabled>−15′</button><button class="azione" disabled>+15′</button><button class="azione rojo" data-a="prConf" data-k="off"' + (PR.vuelo ? ' disabled' : '') + '>Desactivar</button></div>' +
+      (function () { var md = prbOn() ? (prsTutte(Date.now()) || []).filter(function (y) { return String(y.id).toUpperCase() === 'MENU-DIA' && y.st === 'on'; })[0] : null;   // [v0.6.26]
+        var b = function (v, l) { var ok = md && prbPush(md, v === 'mas' ? 15 : -15); return '<button class="azione"' + (ok ? ' data-a="prbConf" data-k="' + esc(md.id) + '" data-v="' + v + '"' + (PRB.vuelo ? ' disabled' : '') : ' disabled') + '>' + l + '</button>'; };
+        return '<div class="fila2">' + b('menos', '−15′') + b('mas', '+15′') + '<button class="azione rojo" data-a="prConf" data-k="off"' + (PR.vuelo ? ' disabled' : '') + '>Desactivar</button></div>' + (md ? prbConfHtml(md.id) : ''); })() +
       '<div class="fila2">' + ['esca', 'estandar'].map(function (k) { return '<button class="azione' + (e === k ? ' oro sel' : '') + '" data-a="prConf" data-k="' + k + '"' + (PR.vuelo || e === k ? ' disabled' : '') + '>' + pesos(prPrecio(k)) + '</button>'; }).join('') + '</div>';
   }
   if (PR.conf) {
@@ -2026,11 +2105,13 @@ function promos() {
   /* [v0.6.25] gli altri strumenti: quelli VERI, accesi nell'admin, con l'orario vero (sola lettura) */
   if (_prs) h += _prs.map(function (x) {
     var st = x.st === 'on' ? '<span class="ist ok">activo · hasta ' + esc(x.hasta) + '</span>' : x.st === 'abre' ? '<span class="ist no">abre ' + esc(x.desde) + '</span>' : x.st === 'termino' ? '<span class="ist no">terminó ' + esc(x.hasta) + '</span>' : '<span class="ist no">hoy no</span>';
+    if (x.st === 'apagado') st = '<span class="ist no">apagado hoy</span>';   // [v0.6.26]
+    var _b = prbFila(x, _nOn);
     return '<div style="border-top:1px solid var(--filo);padding:8px 0 4px"><div style="display:flex;align-items:center;gap:8px;min-height:36px"><b style="font-size:13.5px">' + esc(x.n) + '</b>' + st + '</div>' +
-      '<p style="margin-top:2px">' + esc(x.desde) + ' a ' + esc(x.hasta) + '</p></div>';
+      (_b || '<p style="margin-top:2px">' + esc(x.desde) + ' a ' + esc(x.hasta) + '</p>') + prbConfHtml(x.id) + '</div>';
   }).join('');
   else h += '<p style="margin-top:6px">' + (PRS.err === 'sin conexión' ? 'No pude leer los 2x1 ahora (sin conexión). ' : '') + 'Los 2x1 y los menús están en el admin: lo que se ve en el QR es lo que está activo.</p>';
-  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:4px">El push mueve el final de 15 en 15, siempre dentro del horario. El push y el encendido de los 2x1 desde aquí llegan con 📖 MENU. El horario y los precios se cambian desde el admin.</p></div>';
+  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:4px">El push mueve el final de 15 en 15, siempre dentro del horario. ' + (prbOn() ? 'Alargar llega hasta el tope que pone el admin («El JL puede alargar hasta»).' : 'El push y el encendido de los 2x1 desde aquí llegan con 📖 MENU.') + ' El horario y los precios se cambian desde el admin.</p></div>';
 }
 var PR_DEMO = { escalon: 'esca', esca: { precio: 11990 }, estandar: { precio: 16990 } };
 /* ═══ [v0.6.2 · 🛎 SALA V35 · OBJETIVO COME LA V50 (MOCKUP v47-v49)] ═══
@@ -2403,6 +2484,9 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   else if (a === 'obHz') { OB.hz = el.getAttribute('data-k'); OB.sel = null; jlPinta(true); document.getElementById('body').scrollTop = 0; }
   else if (a === 'obSel') { var on2 = el.getAttribute('data-k'); OB.sel = OB.sel === on2 ? null : on2; jlPinta(true); }
   else if (a === 'prConf') { PR.conf = el.getAttribute('data-k'); PR.msg = ''; jlPinta(true); }
+  else if (a === 'prbConf') { PRB.conf = prbGesto(el.getAttribute('data-k'), el.getAttribute('data-v')); PRB.msg = ''; jlPinta(true); }   // [v0.6.26]
+  else if (a === 'prbNo') { PRB.conf = null; jlPinta(true); }
+  else if (a === 'prbSi') { if (PRB.conf) prbEnvia(PRB.conf); }
   else if (a === 'prNo') { PR.conf = null; jlPinta(true); }
   else if (a === 'prSi') { if (PR.conf) prSet(PR.conf); }
   else if (a === 'cjReg') { CJ.reg = !CJ.reg; updateDock(); }
