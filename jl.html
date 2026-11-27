@@ -1335,14 +1335,17 @@ function card86() {
 var LS = { pre: '56', tel: '', que: '', ok: false, uid: '', vuelo: false, msg: '', fin: '' };
 function lsUid() { return 'jlrc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
 function lsReset() { LS.pre = '56'; LS.tel = ''; LS.que = ''; LS.ok = false; LS.uid = lsUid(); LS.vuelo = false; LS.msg = ''; LS.fin = ''; }
-function lsTelE164(pre, raw) {   // la stessa regola di `telE164` della pagina dell'host: il bordo e PG la rivalidano
+/* il bordo e PG la rivalidano. [27-nov · 🟡 di 💵 «LA REVOCA DI 🖐 `52d9cb9` È VERDE»] il prefisso scritto dentro il numero si toglie SOLO se ciò che
+   resta è un numero valido: un celular brasiliano col DDD 55 (Rio Grande do Sul) scritto senza +55 perdeva il «55» del DDD e veniva rifiutato */
+var LS_TEL_OK = { '56': /^9\d{8}$/, '55': /^\d{11}$/, '54': /^\d{10,11}$/ };
+function lsTelE164(pre, raw) {
+  var re = LS_TEL_OK[pre]; if (!re) return null;
   var d = String(raw || '').replace(/[^0-9]/g, '');
-  if (d.indexOf(pre) === 0 && d.length > 9) d = d.slice(pre.length);
-  if (pre === '56') return /^9\d{8}$/.test(d) ? '+56' + d : null;
-  if (pre === '55') return /^\d{11}$/.test(d) ? '+55' + d : null;
-  if (pre === '54') return /^\d{10,11}$/.test(d) ? '+54' + d : null;
+  if (re.test(d)) return '+' + pre + d;
+  if (d.indexOf(pre) === 0 && re.test(d.slice(pre.length))) return '+' + pre + d.slice(pre.length);
   return null;
 }
+function lsTelMsg(pre) { return pre === '56' ? LS_ERR.telefono_forma : pre === '55' ? 'Revisa el celular: en Brasil son 11 números, con el DDD.' : 'Revisa el celular: en Argentina son 10 u 11 números, con el código de área.'; }
 function lsHostOn() { return DEMO || jlLevaLocali(SAL && SAL.miembro_host_on); }
 function lsProyOn() { return DEMO || jlLevaLocali(SAL && SAL.miembro_proyectos_on); }
 var LS_ERR = { telefono_forma: 'Revisa el celular: en Chile son 9 números y empieza con 9.', uid_forma: 'No se pudo: toca «Hacerlo» otra vez.',
@@ -1369,7 +1372,7 @@ async function lsHacer() {
   if (LS.vuelo) return;
   LS.msg = '';
   var tel = lsTelE164(LS.pre, LS.tel);
-  if (!tel) { LS.msg = LS_ERR.telefono_forma; jlPinta(true); return; }
+  if (!tel) { LS.msg = lsTelMsg(LS.pre); jlPinta(true); return; }
   if (LS.que !== 'ofertas' && !(LS.que === 'proyectos' && lsProyOn())) { LS.msg = 'Elige lo que pide el cliente.'; jlPinta(true); return; }
   if (!LS.ok) { LS.msg = 'Marca la casilla: lo tiene que pedir el cliente.'; jlPinta(true); return; }
   if (!LS.uid) LS.uid = lsUid();
@@ -1396,7 +1399,7 @@ async function lsHacer() {
     if (e === 'ruta_apagada') LS.msg = 'Todavía no se puede hacer desde aquí. Anota la hora y el celular, y avísale a Alberto.';
     else if (e === 'red' || e === 'pg_no_responde') LS.msg = 'Sin conexión. Toca «Hacerlo» otra vez: no se duplica.';   // stesso uid
     else if (/^pin_jl_bloqueado/.test(String(e))) LS.msg = 'PIN bloqueado' + (j && +j.faltan_s ? ' · espera ' + Math.ceil(+j.faltan_s / 60) + ' min' : '');
-    else { LS.msg = LS_ERR[e] || ('No se pudo: ' + e); LS.uid = lsUid(); }   // un rifiuto definitivo: il prossimo tocco è un gesto nuovo
+    else { LS.msg = e === 'telefono_forma' ? lsTelMsg(LS.pre) : (LS_ERR[e] || ('No se pudo: ' + e)); LS.uid = lsUid(); }   // un rifiuto definitivo: il prossimo tocco è un gesto nuovo
   }
   jlPinta(true);
 }
