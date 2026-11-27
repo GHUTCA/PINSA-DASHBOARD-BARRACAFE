@@ -195,7 +195,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.27</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.28</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -210,7 +210,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.27';
+var JL_VER = 'jl v0.6.28';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -1303,8 +1303,8 @@ async function gesto86(id, value) {
 /* [24-nov · v0.6.12 · Alberto, tab Local: «liste interminabili»] Turno e 86 sono card che si aprono e si chiudono con un tocco sul titolo.
    Chiuse mostrano il riassunto («Turno · 14 de 18 plazas · faltan 4» · «86 · 7 agotados»); l'avviso rosso delle plazas senza garzón e il suo
    bottone restano visibili anche a card chiusa, e così il codice del giorno. Nascono CHIUSE; la scelta si ricorda nel telefono (`jl_local_aperte`). */
-var LOC = (function () { var o = null; try { o = JSON.parse(localStorage.getItem('jl_local_aperte') || 'null'); } catch (e) {} return { turno: !!(o && o.turno), a86: !!(o && o.a86), puerta: !!(o && o.puerta) }; })();
-function locSalva() { try { localStorage.setItem('jl_local_aperte', JSON.stringify({ turno: LOC.turno, a86: LOC.a86, puerta: LOC.puerta })); } catch (e) {} }
+var LOC = (function () { var o = null; try { o = JSON.parse(localStorage.getItem('jl_local_aperte') || 'null'); } catch (e) {} return { turno: !!(o && o.turno), a86: !!(o && o.a86), puerta: !!(o && o.puerta), lista: !!(o && o.lista) }; })();
+function locSalva() { try { localStorage.setItem('jl_local_aperte', JSON.stringify({ turno: LOC.turno, a86: LOC.a86, puerta: LOC.puerta, lista: LOC.lista })); } catch (e) {} }
 function locTitolo(a, aperta, html) { return '<h4 data-a="' + a + '" style="cursor:pointer;display:flex;align-items:center;gap:6px">' + html + '<span style="margin-left:auto;color:var(--ink2);font-size:14px">' + (aperta ? '▾' : '▸') + '</span></h4>'; }
 function card86() {
   if (L86.apagado) return '<div class="vetro"><h4>86 · se acabó</h4><p>El 86 del bordo está apagado: ' + (jlTurnoBordo() ? 'avisa a Alberto.' : 'míralo en tu app de siempre.') + '</p></div>';   // [AUT-1221]
@@ -1324,8 +1324,85 @@ function card86() {
       '<div id="l86">' + hits86Html() + '</div>';
   return h + '<p style="font-size:11px;color:var(--ink3);margin-top:6px">Vuelve solo en cada cambio de turno: si sigue agotado, el JL que entra lo vuelve a poner. Para sacarlo por más tiempo: desde el admin.</p></div>';
 }
+/* ═══ [27-nov · 🖐 TERZA V35 · 🎛 «DUE MANI IN PIÙ, SVEGLIATE DA ALBERTO» · condizione ⓐ di ⚖️ «IL GESTO DI REVOCA PER UN CONSENSO SOLO ENTRA PER LUN 30»]
+   LA LISTA · RETIRAR UN CONSENTIMIENTO, SENZA USCIRE DALLA LISTA. Lo stesso gesto della pagina dell'host di 🎟 (`lista_enrolar` «Lo pide el cliente»,
+   ramo `lista-d567-pagine`), con la firma del JL invece del codice del turno. La rotta è di ⚙️ (`arq-lista-rotte`, contratto «LA ROTTA DI REVOCA DI UN
+   CONSENSO C'È GIÀ»): `POST /miembro/ofertas/<LOCAL>` {uid, telefono E.164, consenso:'ofertas'|'proyectos', pin_jl}. Il fatto in PG è di 🚚
+   (`miembro_ofertas` / `miembro_proyectos`, p_acepta false). La risposta è MUTA: `ok:true` anche se il celular non è socio, e il vetro dice lo stesso nei
+   due casi (promessa di lista-v1). Un uid per gesto: nasce quando si apre la card e rinasce a ogni cambio di celular o di scelta; un retry (rete, 503)
+   rimanda lo STESSO uid. LEVE: la card si vede solo con `miembro_host_on` del bordo acceso per il locale; «proyectos» solo con `miembro_proyectos_on`.
+   Spente (oggi) la card non c'è e niente parte. Il celular del cliente non resta nel telefono del JL: si cancella all'esito e al ritorno a Servicio. ═══ */
+var LS = { pre: '56', tel: '', que: '', ok: false, uid: '', vuelo: false, msg: '', fin: '' };
+function lsUid() { return 'jlrc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+function lsReset() { LS.pre = '56'; LS.tel = ''; LS.que = ''; LS.ok = false; LS.uid = lsUid(); LS.vuelo = false; LS.msg = ''; LS.fin = ''; }
+function lsTelE164(pre, raw) {   // la stessa regola di `telE164` della pagina dell'host: il bordo e PG la rivalidano
+  var d = String(raw || '').replace(/[^0-9]/g, '');
+  if (d.indexOf(pre) === 0 && d.length > 9) d = d.slice(pre.length);
+  if (pre === '56') return /^9\d{8}$/.test(d) ? '+56' + d : null;
+  if (pre === '55') return /^\d{11}$/.test(d) ? '+55' + d : null;
+  if (pre === '54') return /^\d{10,11}$/.test(d) ? '+54' + d : null;
+  return null;
+}
+function lsHostOn() { return DEMO || jlLevaLocali(SAL && SAL.miembro_host_on); }
+function lsProyOn() { return DEMO || jlLevaLocali(SAL && SAL.miembro_proyectos_on); }
+var LS_ERR = { telefono_forma: 'Revisa el celular: en Chile son 9 números y empieza con 9.', uid_forma: 'No se pudo: toca «Hacerlo» otra vez.',
+  consenso_forma: 'Eso no se puede retirar desde aquí.', pin_jl_invalido: 'Tu PIN no vale para el sistema ahora: entra de nuevo desde tu app.',
+  pin_jl_requerido: 'Falta tu PIN: entra de nuevo desde tu app.', sesion_invalida: 'Tu sesión se cerró: entra de nuevo desde tu app.' };
+function cardLista() {
+  if (!lsHostOn()) return '';
+  var ap = !!LOC.lista;
+  var h = '<div class="vetro">' + locTitolo('lsT', ap, 'La Lista · retirar consentimiento');
+  if (!ap) return h + '<p style="color:var(--ink2);margin:0">Cuando un cliente ya no quiere ofertas' + (lsProyOn() ? ' o proyectos' : '') + ' · toca para hacerlo</p></div>';
+  if (!SES.pin && !DEMO) return h + '<p>Para hacerlo entra con tu PIN desde tu app.</p></div>';
+  if (LS.fin) return h + '<p style="color:var(--ok);font-weight:700">' + esc(LS.fin) + '</p><button class="azione" data-a="lsOtro">Otro cliente</button></div>';
+  var btn = function (k, txt) { return '<button class="azione' + (LS.que === k ? ' oro' : '') + '" data-a="lsQue" data-k="' + k + '" style="text-align:left">' + (LS.que === k ? '● ' : '○ ') + txt + '</button>'; };
+  h += '<p style="margin-bottom:6px">Sigue en La Lista, con su precio. Para sacarlo de La Lista entera, usa «Olvídame» en la página de La Lista.</p>' +
+    '<div style="display:flex;gap:6px;margin-top:6px"><select id="lsPre" style="flex:0 0 84px;padding:11px 6px;font-size:15px;background:var(--vetro2);border:1px solid var(--filo);border-radius:14px;color:var(--ink)">' +
+    ['56', '55', '54'].map(function (p) { return '<option value="' + p + '"' + (LS.pre === p ? ' selected' : '') + '>+' + p + '</option>'; }).join('') + '</select>' +
+    '<input id="lsTel" type="tel" inputmode="numeric" autocomplete="off" value="' + esc(LS.tel) + '" placeholder="Celular del cliente" style="flex:1;min-width:0;padding:11px;font-size:15px;background:var(--vetro2);border:1px solid var(--filo);border-radius:14px;color:var(--ink)"></div>' +
+    btn('ofertas', '<b>Ya no quiere ofertas.</b>') + (lsProyOn() ? btn('proyectos', '<b>Ya no quiere saber de proyectos.</b>') : '') +
+    '<button class="azione" data-a="lsOk" style="text-align:left">' + (LS.ok ? '☑ ' : '☐ ') + 'Lo pide el cliente.</button>';
+  if (LS.msg) h += '<p style="color:var(--urge);font-weight:700;margin-top:8px">' + esc(LS.msg) + '</p>';
+  return h + '<button class="azione oro" data-a="lsHacer"' + (LS.vuelo ? ' disabled' : '') + '>' + (LS.vuelo ? 'Un momento…' : 'Hacerlo') + '</button></div>';
+}
+async function lsHacer() {
+  if (LS.vuelo) return;
+  LS.msg = '';
+  var tel = lsTelE164(LS.pre, LS.tel);
+  if (!tel) { LS.msg = LS_ERR.telefono_forma; jlPinta(true); return; }
+  if (LS.que !== 'ofertas' && !(LS.que === 'proyectos' && lsProyOn())) { LS.msg = 'Elige lo que pide el cliente.'; jlPinta(true); return; }
+  if (!LS.ok) { LS.msg = 'Marca la casilla: lo tiene que pedir el cliente.'; jlPinta(true); return; }
+  if (!LS.uid) LS.uid = lsUid();
+  var body = { uid: LS.uid, telefono: tel, consenso: LS.que, pin_jl: SES.pin, dispositivo_id: jlDisp() };
+  LS.vuelo = true; jlPinta(true);
+  var j = null, st = 0;
+  if (DEMO) { await new Promise(function (r) { setTimeout(r, 500); }); j = { ok: true }; }
+  else {
+    var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 8000);
+    try {
+      var r = await fetch(CFG.BORDE + '/miembro/ofertas/' + encodeURIComponent(CFG.LOCAL), { method: 'POST', headers: { 'content-type': 'application/json', 'x-borde-token': CFG.T },
+        body: JSON.stringify(body), signal: ctrl.signal, cache: 'no-store' });
+      st = r.status; j = await r.json().catch(function () { return null; });
+    } catch (e) { j = null; }
+    clearTimeout(to);
+  }
+  LS.vuelo = false;
+  if (j && j.ok === true) {
+    var que = LS.que; lsReset();
+    LS.fin = que === 'proyectos' ? 'Si ese celular estaba en La Lista, ya no le contamos de proyectos. Sigue con su precio de La Lista.'
+                                 : 'Si ese celular estaba en La Lista, ya no le llegan ofertas. Sigue con su precio de La Lista.';
+  } else {
+    var e = (j && j.error) || (st === 404 ? 'ruta_apagada' : 'red');
+    if (e === 'ruta_apagada') LS.msg = 'Todavía no se puede hacer desde aquí. Anota la hora y el celular, y avísale a Alberto.';
+    else if (e === 'red' || e === 'pg_no_responde') LS.msg = 'Sin conexión. Toca «Hacerlo» otra vez: no se duplica.';   // stesso uid
+    else if (/^pin_jl_bloqueado/.test(String(e))) LS.msg = 'PIN bloqueado' + (j && +j.faltan_s ? ' · espera ' + Math.ceil(+j.faltan_s / 60) + ' min' : '');
+    else { LS.msg = LS_ERR[e] || ('No se pudo: ' + e); LS.uid = lsUid(); }   // un rifiuto definitivo: il prossimo tocco è un gesto nuovo
+  }
+  jlPinta(true);
+}
+lsReset();
 /* v43 della demo: Local = Turno + 86. L'86, il gesto più frequente in servizio, in fondo vicino al pollice. */
-function local() { tuGiro(); if (LV.ed && LV.ed.modo === 'puerta' && puOn()) return cardPuerta(); return (LV.pl || LV.arm) ? turnoCard() : turnoCard() + cardPuerta() + card86(); }   // [v0.6.27 · P3] la porta fra il turno e l'86   // v45: con una plaza aperta (o armando) si vede solo lei
+function local() { tuGiro(); if (LV.ed && LV.ed.modo === 'puerta' && puOn()) return cardPuerta(); return (LV.pl || LV.arm) ? turnoCard() : turnoCard() + cardPuerta() + card86() + cardLista(); }   // [v0.6.27 · P3] la porta fra il turno e l'86   // v45: con una plaza aperta (o armando) si vede solo lei
 /* ═══ [v0.3.0 · FASE 2 · LA CAJA MINIMA — solo vetro, ordine di Alberto mer 18 «fai programmare app JL appena possibile»] ═══
    Gli STESSI verbi e gli STESSI payload che `app_jl.html` v1.44.x manda oggi (`cajaPost1`, r.663-954), nessuna rotta nuova:
    `POST /caja/<local>?t=` text/plain · `estado` · `ritiro` CONTATO (`monto`, `esperado_ora`, `uid_gesto`, e `confirmo_sobre_esperado:1` dopo il «Sí»)
@@ -2269,7 +2346,7 @@ function jlVolver() {
    (3, deciso da Alberto il 15-nov). Un ritiro in corso NON si perde: CJ.ret resta, e il pallino su Caja lo dice. */
 var IDLE_MIN = 3, _idleT = null;
 function aServicio() { juReset(); if (VISTA.filtro) { VISTA._filtroMano = false; gzCarica(); } VISTA.filtro = false;   // [v0.6.20]
-  PET.msg = ''; LV.pl = null; LV.ed = null; LV.arm = null; LV.abrir = false; LV.msg = ''; CJ.cie = null; OB.sel = null; ir(0); }
+  PET.msg = ''; LV.pl = null; LV.ed = null; LV.arm = null; LV.abrir = false; LV.msg = ''; CJ.cie = null; OB.sel = null; if (!LS.vuelo) lsReset(); ir(0); }   // [27-nov · 🖐] il celular del cliente non resta nel telefono
 function despierta() { clearTimeout(_idleT); _idleT = setTimeout(aServicio, IDLE_MIN * 60000); }
 ['pointerdown', 'keydown'].forEach(function (e) { document.addEventListener(e, despierta, true); });
 document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') aServicio(); });
@@ -2462,6 +2539,12 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   else if (a === 'n86') { C86 = null; jlPinta(true); }
   else if (a === 's86') { if (C86) gesto86(C86, true); }
   else if (a === 'v86') { gesto86(el.getAttribute('data-k'), false); }
+  /* [27-nov · 🖐 TERZA V35] La Lista · retirar consentimiento */
+  else if (a === 'lsT') { LOC.lista = !LOC.lista; if (!LOC.lista) lsReset(); locSalva(); jlPinta(true); }
+  else if (a === 'lsQue') { var q2 = el.getAttribute('data-k'); if (LS.que !== q2) { LS.que = q2; LS.uid = lsUid(); } LS.msg = ''; jlPinta(true); }
+  else if (a === 'lsOk') { LS.ok = !LS.ok; LS.msg = ''; jlPinta(true); }
+  else if (a === 'lsHacer') { var ti = document.getElementById('lsTel'); if (ti) LS.tel = ti.value; lsHacer(); }
+  else if (a === 'lsOtro') { lsReset(); jlPinta(true); }
   /* [v0.5.2] i gesti del turno in Local */
   else if (a === 'lvPl') { LV.pl = el.getAttribute('data-k'); LV.ed = null; LV.msg = ''; jlPinta(true); document.getElementById('body').scrollTop = 0; }
   else if (a === 'lvHora' || a === 'lvMover' || a === 'lvQuitar') { var xi = +el.getAttribute('data-i'), xp = tuPlazas().filter(function (y) { return y.p === LV.pl; })[0], c = xp && xp.chi[xi]; if (c) { var hh = c.f.split('-'); LV.ed = { modo: a === 'lvHora' ? 'hora' : a === 'lvMover' ? 'mover' : 'quitar', i: xi, n: c.n, f: c.f, e: hh[0] || '10:00', s: hh[1] || '18:30' }; LV.msg = ''; jlPinta(true); } }
@@ -2522,6 +2605,8 @@ document.getElementById('body').addEventListener('keydown', function (ev) {
 document.getElementById('body').addEventListener('input', function (ev) {
   var t = ev.target; if (!t) return;
   if (t.id === 'q86') { Q86 = t.value; var l = document.getElementById('l86'); if (l) l.innerHTML = hits86Html(); return; }   // [v0.5.1] la ricerca dell'86 non ridisegna sotto le dita
+  if (t.id === 'lsTel') { if (LS.tel !== t.value) { LS.tel = t.value; LS.uid = lsUid(); } return; }   // [27-nov · 🖐] un celular nuovo è un gesto nuovo
+  if (t.id === 'lsPre') { if (LS.pre !== t.value) { LS.pre = t.value; LS.uid = lsUid(); } return; }
   if (t.id === 'cjMonto' || t.id === 'cjSob') { var d = String(t.value || '').replace(/[^0-9]/g, ''); t.value = d ? Number(d).toLocaleString('es-CL') : ''; }
   if (t.id === 'cjMonto' && CJ.ret) { CJ.ret.monto = t.value; CJ.ret.conf = 0; var f = document.getElementById('cjFalta'); if (f) f.innerHTML = cjFalta(CJ.ret); }
 });
