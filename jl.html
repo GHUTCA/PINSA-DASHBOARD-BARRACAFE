@@ -515,7 +515,7 @@ async function jlEntraLeva() {
     var x = null; (function c(o) { if (!o || typeof o !== 'object' || x != null) return; if (o.jl_entra_on != null) { x = o.jl_entra_on; return; } for (var q in o) c(o[q]); })(j);
     ENTRA.gate = jlLevaLocali(x);
     SAL = (j && j.flags && typeof j.flags === 'object') ? j.flags : {};   // [v0.5.2] le leve del turno, dalla stessa lettura
-    if (typeof CU !== 'undefined') { CU.lev = salLocale('cumple_jl_on'); CU.levPres = SAL.cumple_jl_on != null; }   // [card ⑤] il cumpleaños, nasce spento
+    if (typeof CU !== 'undefined') { CU.lev = salLocale('cumple_on'); CU.levPres = SAL.cumple_on != null; }   // [card ⑤] il regalo di cumpleaños, leva unica col bordo, nasce spenta
     if (typeof cshLeva === 'function') cshLeva(salLocale('como_se_hace_on'), SAL.como_se_hace_on != null);   // [v0.6.25.1 · AUT-1220] «¿Cómo se hace?», nasce spenta
   } catch (e) { /* /salud muto: gate resta null ⇒ si mostra la strada dell'app, che funziona sempre */ }
   clearTimeout(to);
@@ -773,15 +773,14 @@ function petEsce(p, righe) {
 }
 var PET_MOT = { cambio_producto: 'Cambió de producto', no_le_gusto: 'No le gustó', mal_estado: 'En mal estado', error_mesero: 'Error del garzón' };
 function petTitolo(p) {
-  if (cuEs(p)) return '🎂 Cumpleaños' + (cuDati(p).nombre ? ' · ' + cuDati(p).nombre : '');   // [card ⑤]
+  if (cuEs(p)) return 'Regalo de cumpleaños' + (cuNome(p) ? ' · ' + cuNome(p) : '');   // [card ⑤]
   if (p.tipo === 'eliminar') { var e = petEsce(p, PET.ped[String(p.pedido_uuid)]); return 'Eliminar ' + (e.length ? e.map(function (x) { return (x.q > 1 ? x.q + '× ' : '') + x.n; }).join(', ') : (p.items ? 'productos' : 'el pedido')); }
   if (petEsFam(p)) return 'FAM · mesa en $0' + (p.fam && p.fam.para ? ' · para ' + p.fam.para : '');   // [v0.6.10 · AUT-1189 ③]
   return (p.clase === 'convenio' ? 'Convenio ' : 'Descuento ') + (p.etiqueta || p.codigo || '') + (p.pct ? ' ' + p.pct + '%' : '');
 }
-async function petPost(verbo, p, pin, extra) {
+async function petPost(verbo, p, pin) {
   var k = p.id + ':' + verbo, uid = PET.dubbio[k] || ('pet-' + verbo + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7));
   var body = { verbo: verbo, uid_gesto: uid, peticion_id: p.id, pin_jl: pin != null ? pin : SES.pin, codigo: SES.codigo, nombre: SES.user, dispositivo_id: jlDisp() };
-  if (extra) Object.keys(extra).forEach(function (k) { body[k] = extra[k]; });   // [card ⑤] items · vi_carnet · motivo
   if (DEMO) return petDemo(body);
   var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 8000);
   try {
@@ -798,11 +797,11 @@ async function petPost(verbo, p, pin, extra) {
    la sala dopo /peticion né dopo /correccion. Lo uccide la stessa riga di ⚙️ (bacheca «IL GIRO STRETTO È UN TAMPONE»). */
 var JL_DOPO_GESTO_MS = 4000;
 var SOL_OK = { eliminar: ['Eliminar y avisar al garzón', '✓ Eliminado'], descuento: ['Aplicar descuento y avisar al garzón', '✓ Descuento aplicado'],
-  fam: ['Autorizar FAM y avisar al garzón', '✓ FAM autorizada'], cumple: ['Dar el regalo', '✓ Regalo de cumpleaños dado'] };   // [v0.6.10 · AUT-1189 ③]
+  fam: ['Autorizar FAM y avisar al garzón', '✓ FAM autorizada'] };   // [v0.6.10 · AUT-1189 ③]
 /* [v0.6.10 · 🛎 SALA V35 · AUT-1189 ③ · D-563 #9] la FAM arriva come un descuento al 100% col `codigo:'fam'` (⚙️ `arq-fam-peticion`): ha la sua classe,
    il suo bottone e dice di chi è il código (`fam.quien`, mai il código), per chi è la mesa (`fam.para`) e il perché (`motivo`) */
 function petEsFam(p) { return !!(p && p.tipo === 'descuento' && p.codigo === 'fam'); }
-function petTipoOk(p) { if (cuEs(p)) return 'cumple'; return p && p.tipo === 'eliminar' ? 'eliminar' : (petEsFam(p) ? 'fam' : 'descuento'); }
+function petTipoOk(p) { return p && p.tipo === 'eliminar' ? 'eliminar' : (petEsFam(p) ? 'fam' : 'descuento'); }
 /* il titolo accanto alla pill della classe: senza ripetere «Eliminar» (la pill lo dice già) */
 function petCosa(p) { return String(petTitolo(p)).replace(/^Eliminar /, ''); }
 function petClase(p) { if (cuEs(p)) return '🎂 Cumpleaños'; return p && p.tipo === 'eliminar' ? 'Eliminar' : (petEsFam(p) ? 'FAM' : 'Descuento'); }
@@ -821,12 +820,12 @@ function petEsito(r, verbo, tipo) {
 }
 /* [v0.5.3 · D1 di 🎨, decisione del 🎛 «D1: IL PIN SI SCRIVE OGNI VOLTA»] il gesto di denaro lo firma chi è davanti al telefono ADESSO:
    il PIN si scrive nella solicitud ogni volta (come la v50), non si prende dalla sessione. Si legge dal campo e non si conserva. */
-async function petGesto(verbo, extra) {
+async function petGesto(verbo) {
   var p = (PET.lista || []).filter(function (x) { return x.id === PET.aperta; })[0]; if (!p || PET.vuelo) return;
   var el = document.getElementById('petPin'), pin = String((el && el.value) || '').replace(/\D/g, '');
   if (!DEMO && pin.length < 4) { PET.msg = '✋ Escribe tu PIN de JL para ' + (verbo === 'confirmar' ? 'autorizar' : 'rechazar') + '.'; jlPinta(true); return; }
   PET.vuelo = true; PET.msg = ''; jlPinta(true);
-  var r = await petPost(verbo, p, DEMO ? (pin || 'DEMO') : pin, extra); pin = '';
+  var r = await petPost(verbo, p, DEMO ? (pin || 'DEMO') : pin); pin = '';
   PET.vuelo = false; PET.msg = petEsito(r, verbo, petTipoOk(p));
   if (r && r.error === 'pedido_cambio') { jlLeggi(); jlPinta(true); return; }   // [v0.4.1] il dettaglio resta aperto: «Rechazar» è il gesto che serve
   if (r && r.ok && r.scritto !== false) { if (verbo === 'confirmar' && r.foto) PET.msg += ' · ' + (petEsFam(p) ? 'mesa en $0' : (r.foto.monto != null ? 'cobra ' + pesos(r.foto.monto) : '')); PET.aperta = null; jlLeggi(); if (!DEMO) { clearTimeout(PET.rilT); PET.rilT = setTimeout(jlLeggi, JL_DOPO_GESTO_MS); } }   // [v0.6.11] una seconda lettura dopo il gesto
@@ -838,7 +837,7 @@ function petApri(id) {
   if (p && p.stato === 'pendiente' && !p.leida_ts && !PET.letti[id] && SES.pin) { PET.letti[id] = 1; petPost('leer', p); }   // «visto»: una volta, senza aspettare
 }
 /* [v0.5.0 · S3 di 🎨] le solicitudes NON stanno in Servicio: si aprono dal campanello (la demo `solicitudes()`), e da lì si va alla mesa */
-function petMotivo(p) { if (cuEs(p)) return 'Semana de cumpleaños de un socio de La Lista'; if (petEsFam(p)) return 'Código de ' + ((p.fam && p.fam.quien) || '(sin nombre)') + (p.motivo ? ' · ' + p.motivo : '');   // [v0.6.10] di chi è il código, mai il código
+function petMotivo(p) { if (cuEs(p)) return 'Socio de La Lista en su semana de cumpleaños'; if (petEsFam(p)) return 'Código de ' + ((p.fam && p.fam.quien) || '(sin nombre)') + (p.motivo ? ' · ' + p.motivo : '');   // [v0.6.10] di chi è il código, mai il código
   return p.tipo === 'eliminar' ? (PET_MOT[p.motivo] || p.motivo || '') : (p.clase === 'convenio' ? 'Convenio' : 'Descuento') + (p.pct ? ' · ' + p.pct + '%' : ''); }
 function petLista() {
   var pend = petPend();
@@ -852,7 +851,7 @@ function petLista() {
 }
 function petDettaglio() {
   var p = (PET.lista || []).filter(function (x) { return x.id === PET.aperta; })[0]; if (!p) { PET.aperta = null; return servicio(); }
-  if (cuEs(p)) return cuOn() ? '<span class="volver" data-a="petChiudi">‹ Mesa</span>' + cuCard(p) : servicio();   // [card ⑤]
+  if (cuEs(p)) return cuOn() ? '<span class="volver" data-a="petChiudi">‹ Mesa</span>' + cuCard(p, 0) : servicio();   // [card ⑤]
   var h = '<span class="volver" data-a="petChiudi">‹ Mesa</span><div class="conto"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><b><span class="pill bad">' + petClase(p) + '</span> Mesa ' + esc(p.mesa) + ' · ' + esc(p.chi_pide || '') + '</b><span class="pill">' + (p.stato === 'pendiente' ? 'pendiente' : p.stato) + ' · ' + p.min + ' min</span></div>';
   if (p.tipo === 'eliminar') {
     var e = petEsce(p, PET.ped[String(p.pedido_uuid)]);
@@ -873,85 +872,107 @@ function petDettaglio() {
   }
   return h;
 }
-/* ═══ [27-nov · v0.6.29.2 · 🖐 TERZA V35 · 🎛 «PARTI A FARE I TAVOLI SPECIALI» punto 2] LA CARD ⑤ · IL CUMPLEAÑOS DEL SOCIO (mockup 🎨 26-nov) ═══
-   Arriva come una solicitud `tipo:'cumple'` nella stessa lettura (`datos.peticiones`): la propone il BORDO quando il conto è legato a un socio
-   nella sua settimana di cumpleaños («nadie lo pidió»). Il regalo ASPETTA il JL perché la data si guarda sul carnet (decisione del 28-oct).
-   Alberto 27-nov: il regalo sono «3 a scelta» ⇒ il JL tocca fino a `cumple.max` (3) unità fra le righe regalabili del conto.
-   🔴 CONTRATTO PROPOSTO, da confermare con ⚙️ (bacheca «PRESO: IL VETRO DELLA CARD ⑤»):
-     p = { id, tipo:'cumple', stato, mesa, min, chi_pide, leida_ts, conto_id, consumo_total, propina_pct,
-           cumple: { nombre, alias, socio_desde, nacio ('24-nov'), semana_desde, semana_hasta, regalo_12m (true = già usato), via ('telefono'|'tarjeta'),
-                     via_por, max, elegibles: [{ id, n, p, q }] } }
-     il sì: `POST /peticion` verbo `confirmar` + `items:[{id, qty}]` (le unità REGALATE, non le finali) + `vi_carnet:true` · il no: verbo `rechazar` + `motivo`.
-   Guardie del vetro: senza «Vi el carnet», senza almeno una unità, oltre il massimo, con la settimana o i 12 mesi non verdi, o senza `elegibles` dal bordo
-   ⇒ «Dar el regalo» resta spento e dice cosa manca. Nessun totale atteso inventato: «Paga la mesa» = consumo del bordo − regalo scelto.
-   LEVA `cumple_jl_on` (/salud, elenco di locali), `?cumple=1` sul telefono, `?cumple=0` vince; se /salud porta la chiave comanda lei.
-   Spenta: le solicitudes `cumple` NON si vedono (né campanello, né mesa, né «!») — mai trattate come un descuento qualsiasi. */
-var CU = { lev: false, levPres: false, sel: {}, carnet: {}, mot: {} };
+/* ═══ [27-nov · 🖐 TERZA V35 · 🎛 «PARTI A FARE I TAVOLI SPECIALI» punto 2] LA CARD ⑤ · IL REGALO DI CUMPLEAÑOS DEL SOCIO (mockup 🎨 26-nov) ═══
+   Contratto: `4_CANTIERE_MENU/LISTA/CONTRATTO_CUMPLEANOS_27NOV2026.md` §④ (🎟) + la forma di ⚙️ (bacheca «IL ① È GIÀ SUL RAMO: `arq-tipo-mesa`» ②).
+   · arriva come solicitud `tipo:'cumple'` nella lettura che il JL ha già (`datos.peticiones`): la propone il bordo quando il conto è legato a un
+     socio nella sua settimana («nadie lo pidió»). Campi: `id` (= peticion_id) · `mesa` · `conto_id` · `socio:{nombre_visible, id}` · `semana` ·
+     `usado_el` · `reconocido_por` ('tarjeta'|'telefono') · `items:[{uid_riga, id, nombre, precio, rol}]` = le righe REGALABILI del conto
+     (solo il Menú de la Noche e i Cócteles; `rol` 'menu'|'coctel' dal bordo). MAI la data di nascita.
+   · il regalo: al più 1 menú + 3 cócteles (🎟 «GLI items SONO FINO A 4»), almeno una riga. Senza `rol`, fino a 4 righe. L'ultima parola è del bordo.
+   · il gesto: `POST /pedido-staff` `{action:'canjeCumple', uid_gesto, peticion_id, conto_id, mesa, items:[uid_riga…], vi_carnet:true, pin_jl}`.
+     `uid_gesto` lo conia il telefono e si RIPETE uguale nel ritocco dopo una rete incerta. Il PIN si scrive ogni volta (D1).
+   · «Ya usó su regalo el DD-MM» (`usado_el`) o fuori settimana ⇒ grigio, senza bottone. Il JL guarda la data sul carnet: il sistema non la mostra.
+   · niente cifre inventate: «Paga la mesa» = il totale della mesa che il JL vede − le righe scelte; la propina si dice sul totale pieno, senza calcolarla.
+   LEVA UNICA `cumple_on` (/salud, elenco di locali; la stessa del bordo), `?cumple=1` sul telefono, `?cumple=0` vince; se /salud porta la chiave
+   comanda lei. Spenta: le solicitudes `cumple` NON si vedono (né campanello, né mesa, né «!») e nessun gesto parte. */
+var CU = { lev: false, levPres: false, sel: {}, carnet: {}, uid: {}, vuelo: false, msg: {} };
 var CU_QS = (function () { try { var q = new URLSearchParams(location.search).get('cumple'); if (q === '1' || q === '0') localStorage.setItem('jl_cumple_qs', q); return localStorage.getItem('jl_cumple_qs') || ''; } catch (e) { return ''; } })();
 function cuOn() { if (CU_QS === '0') return false; if (CU.levPres) return !!CU.lev; return CU_QS === '1'; }
 function cuEs(p) { return !!(p && p.tipo === 'cumple'); }
-function cuDati(p) { return (p && p.cumple) || {}; }
-function cuMax(p) { var m = parseInt(cuDati(p).max, 10); return m > 0 ? m : 3; }
-function cuEleg(p) { var e = cuDati(p).elegibles; return Array.isArray(e) ? e.filter(function (x) { return x && x.id != null; }) : null; }
+function cuNome(p) { return String((p && p.socio && p.socio.nombre_visible) || '').trim(); }
+function cuItems(p) { return Array.isArray(p && p.items) ? p.items.filter(function (x) { return x && x.uid_riga != null; }) : null; }
 function cuSel(p) { return CU.sel[p.id] || (CU.sel[p.id] = {}); }
-function cuUnita(p) { var s = cuSel(p); return Object.keys(s).reduce(function (a, k) { return a + (s[k] || 0); }, 0); }
-function cuRegalo(p) { var s = cuSel(p), e = cuEleg(p) || []; return e.reduce(function (a, x) { return a + (Number(x.p) || 0) * (s[String(x.id)] || 0); }, 0); }
-function cuConsumo(p) { var c = Number(p && p.consumo_total); return isFinite(c) && c > 0 ? c : null; }
-/* le tre spunte del bordo: ok · no · sin dato */
-function cuChecks(p) { var d = cuDati(p);
-  return [{ ok: true, t: 'Es parte de La Lista', s: [d.alias, d.socio_desde ? 'desde el ' + d.socio_desde : ''].filter(Boolean).join(' · ') },
-    { ok: d.semana_desde ? true : null, t: d.nacio ? 'Nació el ' + d.nacio + ': cae en esta semana' : 'La semana de su cumpleaños', s: d.semana_desde ? d.semana_desde + ' a ' + (d.semana_hasta || '') : 'sin dato del sistema' },
-    { ok: d.regalo_12m === false ? true : d.regalo_12m === true ? false : null, t: d.regalo_12m === true ? 'Ya usó su regalo en los últimos 12 meses' : 'No usó su regalo en los últimos 12 meses', s: d.regalo_12m == null ? 'sin dato del sistema' : '' }]; }
+function cuScelte(p) { var s = cuSel(p); return (cuItems(p) || []).filter(function (x) { return s[String(x.uid_riga)]; }); }
+function cuRegalo(p) { return cuScelte(p).reduce(function (a, x) { return a + (Number(x.precio) || 0); }, 0); }
+/* può entrare questa riga? 1 menú + 3 cócteles; senza `rol`, fino a 4 */
+function cuEntra(p, it) {
+  var sc = cuScelte(p); if (sc.length >= 4) return false;
+  if (it.rol === 'menu') return !sc.some(function (x) { return x.rol === 'menu'; });
+  if (it.rol === 'coctel') return sc.filter(function (x) { return x.rol === 'coctel'; }).length < 3;
+  return true;
+}
+function cuTocca(p, uid) { var it = (cuItems(p) || []).filter(function (x) { return String(x.uid_riga) === String(uid); })[0]; if (!it) return;
+  var s = cuSel(p), k = String(uid); if (s[k]) delete s[k]; else if (cuEntra(p, it)) s[k] = 1; }
+function cuData(d) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? m[3] + '-' + m[2] : String(d || ''); }
 /* cosa manca per dare il regalo (vuoto = si può) */
 function cuFalta(p) {
-  var ch = cuChecks(p); if (ch[1].ok !== true) return 'El sistema no confirma la semana del cumpleaños'; if (ch[2].ok !== true) return ch[2].ok === false ? 'Ya usó su regalo este año' : 'El sistema no confirma los 12 meses';
-  if (!cuEleg(p) || !cuEleg(p).length) return 'El sistema no mandó los productos del regalo';
-  var n = cuUnita(p); if (!n) return 'Elige el regalo: hasta ' + cuMax(p) + ' productos'; if (n > cuMax(p)) return 'Son ' + cuMax(p) + ' como máximo';
+  if (p.usado_el) return 'Ya usó su regalo el ' + cuData(p.usado_el);
+  if (p.semana !== true) return 'No es su semana de cumpleaños';
+  if (!cuItems(p) || !cuItems(p).length) return 'No hay menú ni cócteles en la cuenta para regalar';
+  if (!cuScelte(p).length) return 'Elige el regalo: un menú y hasta 3 cócteles';
   if (!CU.carnet[p.id]) return 'Marca «Vi el carnet»';
   return '';
 }
-function cuPiu(p, id, d) { var e = (cuEleg(p) || []).filter(function (x) { return String(x.id) === String(id); })[0]; if (!e) return;
-  var s = cuSel(p), k = String(id), v = (s[k] || 0) + d, tope = Math.max(0, Number(e.q) || 1);
-  if (v < 0 || v > tope) return; if (d > 0 && cuUnita(p) >= cuMax(p)) return; s[k] = v; }
-function cuCard(p) {
-  var d = cuDati(p), letta = PET.aperta === p.id, via = d.via === 'tarjeta' ? 'tarjeta escaneada' + (d.via_por ? ', ' + d.via_por : '') : d.via === 'telefono' ? 'abrió la mesa con su teléfono' : '';
-  var cons = cuConsumo(p);
-  var h = '<div class="solic"><div class="h"><span class="pill bad">🎂 Cumpleaños</span> ' + esc(d.nombre || '') + ' <small>Mesa ' + esc(p.mesa) + ' · hace ' + (p.min || 0) + '′</small></div>' +
-    '<p>' + esc([via, cons != null ? 'consumo ' + pesos(cons) : ''].filter(Boolean).join(' · ')) + '</p>';
-  if (!letta) return h + '<p>Nadie lo pidió: la cuenta es de un socio en su semana. El regalo espera tu firma.</p><button class="azione" data-a="petApri" data-k="' + esc(p.id) + '">Ver el cumpleaños</button></div>';
-  h += cuChecks(p).map(function (c) { return '<div class="riga" style="min-height:40px"><span><b style="color:' + (c.ok === true ? 'var(--ok)' : c.ok === false ? 'var(--urge)' : 'var(--ink3)') + '">' + (c.ok === true ? '✓' : c.ok === false ? '✗' : '?') + '</b> ' + esc(c.t) + (c.s ? '<small>' + esc(c.s) + '</small>' : '') + '</span></div>'; }).join('');
+var CU_ESITO = { ya_usado: 'Ya usó su regalo', fuera_de_semana: 'No es su semana de cumpleaños', sin_fecha: 'Este socio no tiene fecha de nacimiento: no hay regalo',
+  sin_carnet: 'Marca «Vi el carnet»', no_socio: 'La cuenta no está unida a un socio', sin_socio: 'La cuenta no está unida a un socio',
+  productos_de_mas: 'Son un menú y hasta 3 cócteles', linea_no_vale: 'Esa línea ya no se puede regalar: vuelve a elegir', pg_no_responde: 'No se pudo guardar el regalo: prueba otra vez',
+  ruta_apagada: 'El regalo de cumpleaños está apagado en el sistema' };
+function cuCard(p, tot) {
+  var nom = cuNome(p), letta = PET.aperta === p.id, via = p.reconocido_por === 'tarjeta' ? 'tarjeta escaneada' : p.reconocido_por === 'telefono' ? 'abrió la mesa con su teléfono' : '';
+  var h = '<div class="solic"><div class="h"><span class="pill bad">🎂 Cumpleaños</span> ' + esc(nom || 'Socio') + ' <small>Mesa ' + esc(p.mesa) + (p.min != null ? ' · hace ' + p.min + '′' : '') + '</small></div>' +
+    (via ? '<p>' + esc(via) + '</p>' : '');
+  if (p.usado_el) return h + '<p style="color:var(--ink3)">Ya usó su regalo el ' + esc(cuData(p.usado_el)) + '. No hay regalo esta vez.</p></div>';
+  if (!letta) return h + '<p>Nadie lo pidió: la cuenta es de un socio en su semana de cumpleaños. El regalo espera tu firma.</p><button class="azione" data-a="petApri" data-k="' + esc(p.id) + '">Ver el regalo</button></div>';
+  var ck = [{ ok: !!nom, t: 'Es parte de La Lista' }, { ok: p.semana === true, t: p.semana === true ? 'Está en su semana de cumpleaños' : 'No es su semana de cumpleaños' }, { ok: !p.usado_el, t: 'No usó su regalo en los últimos 12 meses' }];
+  h += ck.map(function (c) { return '<div class="riga" style="min-height:38px"><span><b style="color:' + (c.ok ? 'var(--ok)' : 'var(--urge)') + '">' + (c.ok ? '✓' : '✗') + '</b> ' + esc(c.t) + '</span></div>'; }).join('');
   h += '<div class="riga" data-a="cuCarnet" data-k="' + esc(p.id) + '" style="cursor:pointer;min-height:44px"><span><b style="color:' + (CU.carnet[p.id] ? 'var(--ok)' : 'var(--ink3)') + '">' + (CU.carnet[p.id] ? '☑' : '☐') + '</b> <b>Vi el carnet</b><small>la fecha se mira en la mesa: esto lo marcas tú</small></span></div>';
-  var el = cuEleg(p), s = cuSel(p), n = cuUnita(p), mx = cuMax(p);
-  h += '<div class="sub" style="margin-top:8px">El regalo: ' + n + ' de ' + mx + ' a elección</div>';
-  h += el && el.length ? el.map(function (x) { var k = String(x.id), v = s[k] || 0;
-    return '<div class="riga" style="min-height:44px"><span>' + esc(x.n || k) + '<small>' + pesos(x.p) + (x.q > 1 ? ' · hay ' + x.q : '') + '</small></span>' +
-      '<span style="display:flex;align-items:center;gap:8px"><button class="azione" style="width:36px;min-height:36px;padding:0;margin:0" data-a="cuMenos" data-k="' + esc(k) + '"' + (v ? '' : ' disabled') + '>−</button>' +
-      '<b class="num" style="min-width:16px;text-align:center">' + v + '</b><button class="azione" style="width:36px;min-height:36px;padding:0;margin:0" data-a="cuMas" data-k="' + esc(k) + '"' + (v < (Number(x.q) || 1) && n < mx ? '' : ' disabled') + '>＋</button></span></div>'; }).join('')
-    : '<p class="vacio">El sistema no mandó los productos que se pueden regalar.</p>';
+  var its = cuItems(p), s = cuSel(p);
+  h += '<div class="sub" style="margin-top:8px">El regalo: un menú y hasta 3 cócteles, de lo que ya pidieron</div>';
+  h += its && its.length ? its.map(function (x) { var k = String(x.uid_riga), on = !!s[k], puo = on || cuEntra(p, x);
+    return '<div class="riga" data-a="cuRiga" data-k="' + esc(k) + '" style="min-height:44px;cursor:pointer' + (puo ? '' : ';opacity:.45') + '"><span><b style="color:' + (on ? 'var(--ok)' : 'var(--ink3)') + '">' + (on ? '☑' : '☐') + '</b> ' + esc(x.nombre || x.id || '') +
+      '<small>' + (x.rol === 'menu' ? 'menú' : x.rol === 'coctel' ? 'cóctel' : '') + '</small></span><span class="st num">' + pesos(x.precio) + '</span></div>'; }).join('')
+    : '<p class="vacio">No hay menú ni cócteles en la cuenta para regalar.</p>';
   var reg = cuRegalo(p);
-  if (cons != null) {
-    var pct = Number(p.propina_pct); if (!(pct >= 0)) pct = 10;
-    h += '<div class="riga"><span>🎁 Regalo</span><span class="st num">−' + pesos(reg) + '</span></div>' +
-      '<div class="riga"><span><b>Paga la mesa</b></span><span class="st num"><b>' + pesos(Math.max(0, cons - reg)) + '</b></span></div>' +
-      '<div class="riga"><span><small>+ propina sobre el total lleno (' + pesos(cons) + ')</small></span><span class="st num">' + pesos(Math.round(cons * pct / 100)) + '</span></div>';
-  }
-  var fa = cuFalta(p);
-  h += (PET.msg ? '<p style="color:' + (PET.msg.indexOf('✓') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin-top:6px">' + esc(PET.msg) + '</p>' : '') +
-    '<input id="petPin" class="azione" style="text-align:left;margin-top:8px" type="password" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="PIN del JL"' + (PET.vuelo ? ' disabled' : '') + '>' +
-    '<button class="azione oro" data-a="cuSi"' + (fa || PET.vuelo ? ' disabled' : '') + '>' + (PET.vuelo ? '…' : fa ? esc(fa) : 'Dar el regalo') + '</button>' +
-    '<input id="cuMot" class="azione" style="text-align:left;margin-top:8px" type="text" maxlength="120" autocomplete="off" placeholder="Si no corresponde: ¿por qué? (lo lee ' + esc(p.chi_pide || 'el garzón') + ')" value="' + esc(CU.mot[p.id] || '') + '">' +
-    '<button class="azione" style="min-height:36px;padding:6px;font-size:11.5px;opacity:.8" data-a="cuNo"' + (PET.vuelo ? ' disabled' : '') + '>No corresponde</button></div>';
+  h += '<div class="riga"><span>🎁 Regalo</span><span class="st num">−' + pesos(reg) + '</span></div>';
+  if (tot > 0) h += '<div class="riga"><span><b>Paga la mesa</b></span><span class="st num"><b>' + pesos(Math.max(0, tot - reg)) + '</b></span></div>' +
+    '<div class="riga"><span><small>La propina va sobre el total lleno (' + pesos(tot) + ')</small></span></div>';
+  var fa = cuFalta(p), m = CU.msg[p.id] || '';
+  h += (m ? '<p style="color:' + (m.indexOf('🎁') === 0 ? 'var(--ok)' : 'var(--urge)') + ';font-weight:700;margin-top:6px">' + esc(m) + '</p>' : '') +
+    '<input id="cuPin" class="azione" style="text-align:left;margin-top:8px" type="password" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="PIN del JL"' + (CU.vuelo ? ' disabled' : '') + '>' +
+    '<button class="azione oro" data-a="cuSi"' + (fa || CU.vuelo ? ' disabled' : '') + '>' + (CU.vuelo ? '…' : fa ? esc(fa) : 'Dar el regalo') + '</button></div>';
   return h;
 }
-/* i due gesti: passano da petGesto (stesso PIN, stesso uid ripetuto, stesso esito), con i campi in più */
-function cuGesto(verbo) {
-  var p = (PET.lista || []).filter(function (x) { return x.id === PET.aperta; })[0]; if (!cuEs(p) || !cuOn()) return;
-  if (verbo === 'confirmar') { var fa = cuFalta(p); if (fa) { PET.msg = '✋ ' + fa; jlPinta(true); return; }
-    var s = cuSel(p), items = Object.keys(s).filter(function (k) { return s[k] > 0; }).map(function (k) { return { id: k, qty: s[k] }; });
-    return petGesto('confirmar', { items: items, vi_carnet: true }); }
-  var m = document.getElementById('cuMot'), mot = String((m && m.value) || '').trim(); CU.mot[p.id] = mot;
-  if (mot.length < 4) { PET.msg = '✋ Escribe por qué no corresponde: lo lee el garzón.'; jlPinta(true); return; }
-  return petGesto('rechazar', { motivo: mot });
+async function cuPost(body) {
+  if (DEMO) return { ok: true, esito: 'scritto', monto: body._monto, demo: true };
+  var ctrl = new AbortController(), to = setTimeout(function () { ctrl.abort(); }, 8000);
+  try {
+    var r = await fetch(CFG.BORDE + '/pedido-staff/' + encodeURIComponent(CFG.LOCAL) + '?t=' + encodeURIComponent(CFG.T), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctrl.signal, cache: 'no-store',
+      body: JSON.stringify(Object.assign({ local: CFG.LOCAL, cli_ver: JL_VER, app: 'jl', codigo: SES.codigo, nombre: SES.user, firma: 'jl', dispositivo_id: jlDisp() }, body, { _monto: undefined })) });
+    var j = await r.json().catch(function () { return null; }); clearTimeout(to); return j || { _rete: true };
+  } catch (e) { clearTimeout(to); return { _rete: true }; }
+}
+function cuEsitoTxt(r, monto) {
+  if (r && r._rete) return '⏳ No sé si llegó: toca de nuevo, no se duplica.';
+  var e = r && (r.esito || r.error || r.motivo);
+  if (r && r.ok && (e === 'scritto' || e === 'uguale' || !e)) return '🎁 Regalo aplicado · ' + pesos(r.monto != null ? r.monto : monto);
+  if (e === 'pin_jl_invalido' || e === 'pin_jl_requerido') return '⛔ Tu PIN no vale para el sistema ahora: entra de nuevo desde tu app.';
+  if (/bloqueado/.test(String(e || ''))) return '⛔ PIN bloqueado' + (r.faltan_s ? ' · espera ' + Math.ceil(r.faltan_s / 60) + ' min' : '');
+  if (e === 'ya_usado' && r.usado_el) return '⚠️ Ya usó su regalo el ' + cuData(r.usado_el);
+  return '⚠️ ' + (CU_ESITO[e] || (r && r.mensaje) || 'No se pudo guardar el regalo: prueba otra vez');
+}
+async function cuGesto() {
+  var p = (PET.lista || []).filter(function (x) { return x.id === PET.aperta; })[0]; if (!cuEs(p) || !cuOn() || CU.vuelo) return;
+  var fa = cuFalta(p); if (fa) { CU.msg[p.id] = '✋ ' + fa; jlPinta(true); return; }
+  var el = document.getElementById('cuPin'), pin = String((el && el.value) || '').replace(/\D/g, '');
+  if (!DEMO && pin.length < 4) { CU.msg[p.id] = '✋ Escribe tu PIN de JL para dar el regalo.'; jlPinta(true); return; }
+  var sc = cuScelte(p), uids = sc.map(function (x) { return String(x.uid_riga); }), k = p.id + '|' + uids.slice().sort().join(',');
+  var uid = CU.uid[k] || (CU.uid[k] = 'cu-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8));   // stesso uid nel ritocco della STESSA scelta
+  CU.vuelo = true; CU.msg[p.id] = ''; jlPinta(true);
+  var monto = cuRegalo(p);
+  var r = await cuPost({ action: 'canjeCumple', uid_gesto: uid, peticion_id: p.id, conto_id: p.conto_id, mesa: p.mesa, items: uids, vi_carnet: true, pin_jl: DEMO ? (pin || 'DEMO') : pin, _monto: monto }); pin = '';
+  CU.vuelo = false; CU.msg[p.id] = cuEsitoTxt(r, monto);
+  if (r && r.ok && !r._rete) { delete CU.uid[k]; PET.msg = '✓ ' + CU.msg[p.id].replace(/^🎁 /, ''); PET.aperta = null; if (DEMO) (JL_DEMO.peticiones || []).forEach(function (x) { if (x.id === p.id) x.stato = 'confirmada'; }); jlLeggi(); if (!DEMO) { clearTimeout(PET.rilT); PET.rilT = setTimeout(jlLeggi, JL_DOPO_GESTO_MS); } }
+  jlPinta(true);
 }
 /* la demo: una petición per tipo, e un bordo finto che risponde come `_peticion` */
 function petDemo(b) { if (b.verbo === 'leer') return { ok: true, borde: true, stato: 'pendiente' };
@@ -1043,7 +1064,7 @@ function detalle(gi, m) {
      (cosa esce, il motivo) e sblocca il campo «PIN del JL» e il bottone; prima di leggere sono spenti. «Rechazar» resta, piccolo, sotto
      (decisione del 🎛, differenza dichiarata ad Alberto). */
   var sol = '';
-  if (p && cuEs(p)) sol = cuCard(p);   // [card ⑤] il cumpleaños ha la sua card
+  if (p && cuEs(p)) sol = cuCard(p, x.tot);   // [card ⑤] il cumpleaños ha la sua card e il suo gesto
   else if (p) {
     var letta = PET.aperta === p.id, dentro = '';
     if (letta && p.tipo === 'eliminar') { var es = petEsce(p, PET.ped[String(p.pedido_uuid)]); dentro = es.length ? es.map(function (z) { return '<div class="riga"><span>' + z.q + ' × ' + esc(z.n) + '</span><span class="st">sale</span></div>'; }).join('') : '<p class="vacio">No veo el pedido en la sala de ahora: puede que ya haya cambiado.</p>'; }
@@ -2690,10 +2711,9 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   else if (a === 'petChiudi') { PET.aperta = null; PET.msg = ''; jlPinta(true); }
   else if (a === 'petSi') { petGesto('confirmar'); }
   else if (a === 'petNo') { petGesto('rechazar'); }
-  else if (a === 'cuCarnet') { var cpk = el.getAttribute('data-k'); CU.carnet[cpk] = !CU.carnet[cpk]; PET.msg = ''; jlPinta(true); }   // [card ⑤]
-  else if (a === 'cuMas' || a === 'cuMenos') { var cpp = (PET.lista || []).filter(function (x) { return x.id === PET.aperta; })[0]; if (cuEs(cpp)) { cuPiu(cpp, el.getAttribute('data-k'), a === 'cuMas' ? 1 : -1); PET.msg = ''; jlPinta(true); } }
-  else if (a === 'cuSi') { cuGesto('confirmar'); }
-  else if (a === 'cuNo') { cuGesto('rechazar'); }
+  else if (a === 'cuCarnet') { var cpk = el.getAttribute('data-k'); CU.carnet[cpk] = !CU.carnet[cpk]; CU.msg[cpk] = ''; jlPinta(true); }   // [card ⑤]
+  else if (a === 'cuRiga') { var cpp = (PET.lista || []).filter(function (x) { return x.id === PET.aperta; })[0]; if (cuEs(cpp)) { cuTocca(cpp, el.getAttribute('data-k')); CU.msg[cpp.id] = ''; jlPinta(true); } }
+  else if (a === 'cuSi') { cuGesto(); }
   else if (a === 'cjAbre') { var me = el.getAttribute('data-k'), m = ((CJ.st && CJ.st.meseros) || []).filter(function (x) { return x.mesero === me; })[0];
     if (m) { CJ.msg = ''; CJ.ret = { mesero: m.mesero, att: m, uid: CJ.dubbio[m.mesero] || cjUid('CJ-RIT'), monto: '', conf: 0, confOk: 0 }; jlPinta(); } }
   else if (a === 'cjRet') { if (CJ.ret) { var mi = document.getElementById('cjMonto'); if (mi) CJ.ret.monto = mi.value; } cjRetEnviar(); }
@@ -2747,15 +2767,16 @@ var JL_DEMO = {
   peticiones: [{ id: 'pet-demo-1', tipo: 'eliminar', stato: 'pendiente', mesa: '79', chi_pide: 'Gabriel', ts: _o - 2 * 60000, min: 2, pedido_uuid: 'p1',
       items: [{ id: 'BKS-PIS-001', qty: 1 }, { id: 'BKS-COC-020', qty: 1 }], motivo: 'no_le_gusto' },
     { id: 'pet-demo-2', tipo: 'descuento', stato: 'pendiente', mesa: '61', chi_pide: 'Diego', ts: _o - 1 * 60000, min: 1, codigo: 'falabella', clase: 'convenio', pct: 20, etiqueta: 'Banco Falabella' },
-    { id: 'pet-demo-3', tipo: 'cumple', stato: 'pendiente', mesa: '81', chi_pide: 'Gabriel', ts: _o - 1 * 60000, min: 1, conto_id: 'CONTO-DEMO-81', consumo_total: 14400, propina_pct: 10,   // [card ⑤] numeri d'esempio
-      cumple: { nombre: 'Camila Rojas', alias: 'CR4821', socio_desde: '12-oct', nacio: '24-nov', semana_desde: 'lunes 23', semana_hasta: 'domingo 29', regalo_12m: false, via: 'telefono', max: 3,
-        elegibles: [{ id: 'BKS-BEB-COCAZ', n: 'Coca Zero', p: 2400, q: 2 }, { id: 'BKS-PLA-LOMO', n: 'Lomo Saltado', p: 9600, q: 1 }] } }],
+    { id: 'pet-demo-3', tipo: 'cumple', stato: 'pendiente', mesa: '81', chi_pide: 'Gabriel', ts: _o - 1 * 60000, min: 1, conto_id: 'CONTO-DEMO-81',   // [card ⑤] d'esempio
+      socio: { nombre_visible: 'Camila R.', id: 'demo-cr' }, semana: true, usado_el: null, reconocido_por: 'telefono',
+      items: [{ uid_riga: 'r81-1', id: 'MENU-NOCHE', nombre: 'Menú de la Noche', precio: 20990, rol: 'menu' }, { uid_riga: 'r81-2', id: 'BKS-COC-020', nombre: 'Pisco sour', precio: 5200, rol: 'coctel' },
+        { uid_riga: 'r81-3', id: 'BKS-COC-020', nombre: 'Pisco sour', precio: 5200, rol: 'coctel' }, { uid_riga: 'r81-4', id: 'BKS-COC-031', nombre: 'Mojito', precio: 5900, rol: 'coctel' }, { uid_riga: 'r81-5', id: 'BKS-COC-044', nombre: 'Aperol spritz', precio: 6400, rol: 'coctel' }] }],
   anfitriona: { plazas: [{ plaza: 'Aurora A', mesas: [{ mesa: '79', pax: 2, desde_iso: new Date(_o - 58 * 60000).toISOString() }, { mesa: '81', pax: 4, desde_iso: new Date(_o - 40 * 60000).toISOString() }] }] },
   meseros: {
     gabriel: { ok: true, nombre: 'Gabriel', plazas: ['Aurora A', 'Aurora B'],
       plazas_detalle: [{ plaza: 'Aurora A', mesas: '79, 81, 84' }, { plaza: 'Aurora B', mesas: '107, 300' }],
       mesas: [{ mesa: '79', plaza: 'Aurora A', total: 42400, items: [{ n: 'Schop LOA', q: 3, p: 4500 }, { n: 'Tabla Ganadera', q: 1, p: 18900 }, { n: 'Pisco sour', q: 2, p: 5200 }] },
-              { mesa: '81', plaza: 'Aurora A', total: 14400, items: [{ n: 'Coca Zero', q: 2, p: 2400 }, { n: 'Lomo Saltado', q: 1, p: 9600 }] }],
+              { mesa: '81', plaza: 'Aurora A', total: 58090, items: [{ n: 'Coca Zero', q: 2, p: 2400 }, { n: 'Lomo Saltado', q: 1, p: 9600 }, { n: 'Menú de la Noche', q: 1, p: 20990 }, { n: 'Pisco sour', q: 2, p: 5200 }, { n: 'Mojito', q: 1, p: 5900 }, { n: 'Aperol spritz', q: 1, p: 6400 }] }],
       mios: [{ uuid: 'p1', mesa: '79', plaza: 'Aurora A', estado: 'digitado', total: 29300, hace_s: 12 * 60, items_json: '[{"id":"BKS-COC-020","n":"Tabla Ganadera","q":1},{"id":"BKS-PIS-001","n":"Pisco sour","q":2}]' }],
       por_limpiar: [{ uuid: 'p2', mesa: '81', plaza: 'Aurora A', estado: 'entregado', total: 14400, hace_s: 7 * 60, items_json: '[{"n":"Lomo Saltado","q":1}]' }],
       pendientes: [], llamadas: [], venta_turno: { venta: 56800 } },
