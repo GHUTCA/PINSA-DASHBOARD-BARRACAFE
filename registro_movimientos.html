@@ -566,7 +566,7 @@
   <div class="top">
     <div class="top-row">
       <button class="btn-atras" id="btnAtras" title="Volver a ATALAYA (sin cerrar sesión)"><span class="fl">‹</span>ATALAYA</button>
-      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v110 · Riesco sin Cocina Central · 19nov</span></div>
+      <div class="brand"><svg class="iso" viewBox="0 0 100 100" width="22" height="22" id="isoAtalaya" aria-label="Volver a ATALAYA" role="button" tabindex="0" title="Volver a ATALAYA (sin cerrar sesión)" style="cursor:pointer"><g fill="none" stroke="#D9923F" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28 h6 v8 h8 v-8 h6 v14 H40 Z" fill="#D9923F" stroke="none"/><path d="M42 40 L30 84"/><path d="M58 40 L70 84"/><circle cx="44" cy="60" r="9"/><circle cx="60" cy="60" r="9"/><path d="M40 53 q4 -6 9 -1"/></g><circle cx="44" cy="60" r="3.2" fill="#241F1A"/><circle cx="60" cy="60" r="3.2" fill="#241F1A"/><path d="M50 68 l-3 6 h6 Z" fill="#D9923F"/></svg><span class="opchip" id="opChip">—</span><span class="ver" id="ver">v111 · sin sección no es Cocina Central · 27nov</span></div>
       <span class="ctxchip" id="ctxChip" title="Contexto">—</span>
       <span class="ubic" id="ubic">BLocal · ⛑lista+UTM</span>
       <button id="btnRecibos" title="Mis registros de hoy" style="margin-left:auto;background:none;border:1px solid var(--line);border-radius:10px;padding:4px 8px;min-width:64px;min-height:44px;font-size:19px;cursor:pointer;line-height:1.1;touch-action:manipulation;transition:transform .1s">🧾<small style="display:block;font-size:10px;font-weight:700;margin-top:2px">Mis registros</small></button>
@@ -881,7 +881,9 @@ async function _vocabDesdeRed(){
       nuevo.push({
         sku:sku, nombre:String(r.Descripcion||'').trim(),
         utm:String(r.UTM||'').trim(),
-        secs:secs.length?secs:['cocina central'],
+        // v111 · AUT-1288: sin Seccion en BD el producto queda SIN sección (antes: 'cocina central'
+        // silencioso, la raíz de las filas fantasma). Los gestos que necesitan una sección se paran y lo dicen.
+        secs:secs,
         alias:aliasMap[sku]||[],
         metodo:String(r['Metodo de conteo']||'').trim(),
         factor:String(r['Facor UO UTM']||'').trim(),
@@ -4644,6 +4646,9 @@ function mapaItemsGiro(){
 function confirmarInventarioGiro(){
   var items=mapaItemsGiro();
   if(!items.length){ alert('Todavía no contaste ningún producto del giro.'); return; }
+  // v111 · AUT-1288: un conteo sin sección no se registra en una sección inventada
+  var _sinSecM=items.filter(function(p){ return !p.seccion; }).map(function(p){ return '· '+(p.desc||p.sku); });
+  if(_sinSecM.length){ alert('Sin sección en el catálogo:\n\n'+_sinSecM.join('\n')+'\n\nAvisa a Operaciones para que le pongan su sección, o borra ese conteo para confirmar el resto.'); return; }
   _mapaModalConfirm(items, mapaGaps());
 }
 function _mapaRegistrarGiro(items){
@@ -5093,6 +5098,11 @@ $('btnConfirm').onclick=async function(){
     var _sinSec=ITEMS.filter(function(it){ return it.sku && !secsDeducidas(it.sku).length; }).map(function(it){ return '· '+(it.nombre||it.sku); });
     if(_sinSec.length){ alert('Estos productos no tienen una sección de este local (o viven sólo en Cocina Central):\n\n'+_sinSec.join('\n')+'\n\nIngrésalos a '+BL_NOM+'.'); return; }
   }
+  // v111 · AUT-1288: una entrega sin sección de destino no se escribe en ninguna parte por defecto
+  if(v.id==='Entrega Secc'){
+    var _sinSecE=ITEMS.filter(function(it){ return it.sku && !skuSecInv(it.sku); }).map(function(it){ return '· '+(it.nombre||it.sku); });
+    if(_sinSecE.length){ alert('Sin sección en el catálogo:\n\n'+_sinSecE.join('\n')+'\n\nNo se puede entregar a una sección que no existe. Avisa a Operaciones para que le pongan su sección.'); return; }
+  }
   if(ajusteEnSeccionPosible()){
     if(!AJUSTE_NIVEL){ alert('¿Dónde se perdió?\n\nElige arriba de la lista: '+BL_NOM+' o En su sección.'); return; }
     if(AJUSTE_NIVEL==='seccion'){
@@ -5147,7 +5157,7 @@ $('btnConfirm').onclick=async function(){
       // v94 · R5 (auditoría Riesco 06-oct): la entrega va a la MISMA sección donde el Mapa la cuenta
       // (skuSecInv, sin Cocina Central si hay otra). Con skuSec[0] caía en Cocina Central y el conteo de
       // Barra Alimentos la buscaba en otro lado: 13 SKU, $374.182 entregados donde nadie contaba.
-      if(tipo==='Entrega Secc'){ origen='Bodega Local'; destino=capSec(skuSecInv(it.sku)||_secLocal('cocina central')); }   // v110
+      if(tipo==='Entrega Secc'){ origen='Bodega Local'; destino=capSec(skuSecInv(it.sku)); }   // v111 · sin sección se paró arriba (AUT-1288)
       // v94 · el proveedor entrega directo a la sección (sin bodega) · sección deducida igual que el conteo
       //      ① de la segunda testa: NUNCA Cocina Central (se inventaría aparte; desde un local es la fila fantasma
       //      «Cocina Central|Riesco»). secsDeducidas ya la excluye; sin otra sección el envío se paró arriba.
@@ -5701,6 +5711,24 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
       var r=await callGAS({action:'getSugerenciaReposicion', local:LOCAL_ACTUAL}, 20000);
       if(!r||!r.ok) throw new Error((r&&r.error)||'sin respuesta del sistema');
       SUG=r;
+      // v111 · AUT-1288: la sección que manda el GAS sale de STOCK_POR_NIVEL y no pasaba por _secLocal
+      // (en rsc una fila «Cocina Central» con falta proponía entregar a Cocina Central). Se traduce aquí,
+      // y si dos filas del mismo SKU caen en la misma sección se suman en una sola entrega.
+      (function(){
+        var porClave={}, out=[];
+        (r.entregas||[]).forEach(function(x){
+          var s=_secLocal(String(x.seccion||'').trim().toLowerCase());
+          var sec=(s!==String(x.seccion||'').trim().toLowerCase()) ? capSec(s) : x.seccion;
+          var k=x.sku+'|'+sec;
+          if(porClave[k] && porClave[k].unidad===x.unidad){
+            porClave[k].cantidad=(+porClave[k].cantidad||0)+(+x.cantidad||0);
+            porClave[k].qtyUTM=(+porClave[k].qtyUTM||0)+(+x.qtyUTM||0);
+            return;
+          }
+          var o={}; for(var q in x)o[q]=x[q]; o.seccion=sec; porClave[k]=o; out.push(o);
+        });
+        r.entregas=out;
+      })();
       var P=pickLeer(), enPick={};
       if(P) P.items.forEach(function(x){ enPick[x.sku+'|'+(x.seccion||'')]=1; });
       E=r.entregas.filter(function(x){ return !enPick[x.sku+'|'+x.seccion]; })
@@ -5838,7 +5866,10 @@ if(OPERADOR){ gate.style.display='none'; arrancar(); }
     var it={ sku:String(sku), desc:(t&&t.desc)||v.nombre||String(sku),
       unidad:(esPeso?'UTM':'UO'), cantidad:1, qtyUTM:0,
       uoDesc:v.uo||'', utm:v.utm||'', on:true, val:1, sug:0, manual:true };
-    if(lista==='E'){ it.seccion=capSec(skuSec(sku)||'Cocina Central'); E.push(it); tab='S'; }
+    if(lista==='E'){
+      var _sec=skuSec(sku);   // v111 · AUT-1288: sin sección no se inventa 'Cocina Central'
+      if(!_sec){ alert('«'+it.desc+'» no tiene sección en el catálogo.\n\nNo se puede entregar. Avisa a Operaciones para que le pongan su sección.'); return; }
+      it.seccion=capSec(_sec); E.push(it); tab='S'; }
     else{ it.stockBC=null; it.flag='sin dato'; B.push(it); tab='B'; }
     render();
   }
