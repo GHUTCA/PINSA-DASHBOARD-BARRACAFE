@@ -9,15 +9,20 @@
 <meta name="theme-color" content="#0a0a0e">
 <title>Mi tarjeta · La Lista de Backstage</title>
 <!-- DEVICE-CLASS: 1 · il TELEFONO del cliente, pagina PUBBLICA da aggiungere alla schermata home -->
-<!-- 🎟 LA LISTA V35 · D-567 · «Mi tarjeta», il ripiego del wallet (bacheca «IL WALLET VERO NON REGGE LUN 30»).
-     La tarjeta dice CHI SEI, non un saldo: Backstage · La Lista · il nome (prima parola) · il QR del tuo link (menu.pinsita.cl/menu.html?l=&member=).
-     · l'id: da ?member= oppure dal telefono (`pinsita_member_<LOCAL>`, scritto da unete.html, stesso dominio).
-     · il nome: dal telefono (`pinsita_member_nombre_<LOCAL>`, scritto da unete.html) e, se il bordo risponde, da GET /member/<LOCAL>?id=
-       (la rotta che esiste, leva MEMBER_PG_ON). Nessun altro dato del cliente: mai telefono, correo o data.
-     · Il QR è lo stesso che la Puerta leggerà alla porta («entra sin hacer fila», gio 26).
-     · ?demo=1 → nessuna rete, una tarjeta di prova. Nessuna lettura né scrittura su Google. -->
+<!-- 🎟 LA LISTA V35 · D-567 · «Mi tarjeta».
+     v0.1.1 (25-nov): la tarjeta dice CHI SEI e porta il QR del link (menu.pinsita.cl/menu.html?l=&member=), per la carta e la porta.
+     v0.2.0 (27-nov · D-589 · cupo di Arthur, ramo `lista-mi-tarjeta-cupo`, NON per lun 30):
+       · IL TELEFONO LEGATO. Davanti ad Ale o Alberto (il loro PIN), «Vincular este teléfono» chiama POST /miembro/vincula: il bordo risponde
+         UNA VOLTA il segreto del dispositivo (derivato da lui: HMAC(CHIAVE, local|miembro_id|dispositivo_id|epoca)), che resta solo qui
+         (localStorage). PROPOSTA_RICONOSCERE_IL_SOCIO_CUPO_26NOV2026.md §⑥ n.2 (chiusa con ⚙️).
+       · IL QR CHE CAMBIA. Col segreto, ogni 30 s: L1.<id>.<t>.<firma>, t = blocco di 30 s, firma = HMAC-SHA256(segreto, "id|t") ai primi
+         10 byte in base64url. Tutto nel telefono (WebCrypto), quindi SENZA RETE. Lo legge il garzón (vinculaSocio). Una foto scade.
+       · IL SALDO. POST /miembro/saldo {local, token}: il token nel CORPO, mai nella URL; il bordo non lo brucia. Si chiede all'apertura e
+         quando la pagina torna visibile, mai in poll. Senza rete: l'ultimo valore con la sua ora (N4). §⑧.
+       · Senza segreto la pagina è la v0.1.1: il QR del link e basta.
+     · ?demo=1 → nessuna rete: un segreto di prova, un saldo di prova, il PIN di prova «0000». Nessuna lettura né scrittura su Google. -->
 <style>
-  :root{ --ink:#f7f0e2; --ink2:#c9c0b0; --ink3:#8f8779; --oro:#e0a94a; --oro-hi:#f2c274;
+  :root{ --ink:#f7f0e2; --ink2:#c9c0b0; --ink3:#8f8779; --oro:#e0a94a; --oro-hi:#f2c274; --verde:#7fd6a0; --rojo:#ff8a7a;
     --vetro:rgba(255,255,255,.045); --filo:rgba(255,255,255,.085); --page:#0a0a0e; color-scheme:dark; }
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
   body{background:var(--page);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;min-height:100vh}
@@ -36,30 +41,70 @@
   .chi b{font-size:22px;font-weight:750}
   .qr{background:#fff;border-radius:16px;padding:10px;width:200px;height:200px;margin:18px auto 6px}
   .qr svg{width:100%;height:100%}
+  .qr.chico{width:120px;height:120px;padding:7px;margin:10px auto 4px}
   .sotto{text-align:center;font-size:12px;color:var(--ink2)}
+  .vivo{display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;color:var(--verde);margin-top:4px}
+  .barra{width:120px;height:4px;border-radius:2px;background:rgba(127,214,160,.18);overflow:hidden}
+  .barra i{display:block;height:100%;background:var(--verde);transition:width 1s linear}
+  .saldo{margin-top:14px;padding:13px 14px;border-radius:15px;background:rgba(127,214,160,.07);border:1px solid rgba(127,214,160,.35)}
+  .saldo .t{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--verde);font-weight:700}
+  .saldo .n{font-size:24px;font-weight:800;margin:2px 0}
+  .saldo .s{font-size:12.5px;color:var(--ink2)} .saldo .viejo{font-size:11.5px;color:var(--ink3);margin-top:4px}
+  .aviso{margin-top:14px;padding:12px 14px;border-radius:15px;background:rgba(255,138,122,.08);border:1px solid rgba(255,138,122,.35);font-size:13px;color:var(--ink2)}
   .vb{display:block;width:100%;border:none;border-radius:18px;font-weight:700;font-size:16px;padding:15px 10px;margin-top:12px;text-align:center;text-decoration:none;color:var(--ink);font-family:inherit;cursor:pointer}
   .vb.pieno{background:linear-gradient(180deg,var(--oro-hi),var(--oro));color:#241503}
   .vb.filo{background:#2a2117;color:var(--oro);border:1px solid rgba(224,169,74,.45)}
+  .vb.mudo{background:none;color:var(--ink3);font-size:12.5px;font-weight:600;padding:10px;margin-top:6px}
+  .vb:disabled{opacity:.55}
   .como{margin-top:18px;padding:13px 14px;border-radius:15px;background:var(--vetro);border:1px solid var(--filo);font-size:13.5px;color:var(--ink2)}
   .como b{color:var(--ink)} .como ol{margin:6px 0 0 18px} .como li{margin:3px 0}
+  .vinc{margin-top:14px;padding:14px;border-radius:15px;background:var(--vetro);border:1px solid var(--filo)}
+  .vinc b{display:block;margin-bottom:4px} .vinc span{font-size:13px;color:var(--ink2)}
+  .inp{width:100%;margin-top:10px;padding:13px 14px;border-radius:13px;border:1px solid var(--filo);background:#15111a;color:var(--ink);font:inherit;font-size:20px;letter-spacing:.4em;text-align:center}
+  .err{min-height:18px;margin-top:8px;font-size:13px;color:var(--rojo)}
   .vacia{text-align:center;padding-top:14vh} .vacia .e{font-size:46px} .vacia b{display:block;font-size:20px;margin:10px 0 6px} .vacia span{font-size:13.5px;color:var(--ink2)}
   .foot{margin-top:24px;font-size:10px;color:var(--ink3);text-align:center}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div id="demo" class="demo hide">Prueba · tarjeta de ejemplo.</div>
+  <div id="demo" class="demo hide">Prueba · tarjeta de ejemplo. PIN de prueba: 0000.</div>
 
   <section id="vCard" class="hide">
     <div class="card">
       <div class="marca">Backstage</div>
       <div class="lista">La Lista</div>
       <div class="chi"><div><i>Miembro</i><b id="nom">—</b></div><div style="text-align:right"><i>Local</i><b id="loc" style="font-size:15px"></b></div></div>
+      <!-- col telefono legato: il QR che cambia sopra, il link piccolo sotto · senza: solo il link -->
+      <div id="bloqueVivo" class="hide">
+        <div class="qr" id="qrVivo"></div>
+        <div class="vivo"><span>Código vivo</span><div class="barra"><i id="barra" style="width:100%"></i></div></div>
+        <div class="sotto">Muéstraselo al garzón para unir la cuenta</div>
+      </div>
       <div class="qr" id="qr"></div>
-      <div class="sotto">Muéstrala en la puerta y al pedir</div>
+      <div class="sotto" id="sottoLink">Muéstrala en la puerta y al pedir</div>
     </div>
+
+    <div id="saldo" class="saldo hide">
+      <div class="t">Tu convenio · <span id="sMes"></span></div>
+      <div class="n" id="sQueda">—</div>
+      <div class="s" id="sDe"></div>
+      <div class="viejo hide" id="sViejo"></div>
+    </div>
+    <div id="avisoVinc" class="aviso hide"></div>
+
     <a class="vb pieno" id="bCarta" href="#">Ver la carta con mi precio</a>
     <div class="como" id="como"></div>
+
+    <button class="vb mudo" id="bVaVinc">Vincular este teléfono (en el local)</button>
+    <div id="vVinc" class="vinc hide">
+      <b>Vincular este teléfono</b>
+      <span>Lo hace Ale o Alberto, en el local, con su PIN. Si ya tenías otro teléfono vinculado, ese deja de valer.</span>
+      <input id="fPin" class="inp" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="PIN">
+      <div class="err" id="vErr"></div>
+      <button class="vb pieno" id="bVinc">Vincular</button>
+      <button class="vb mudo" id="bNoVinc">Cancelar</button>
+    </div>
   </section>
 
   <section id="vVacia" class="hide vacia">
@@ -68,7 +113,7 @@
     <a class="vb pieno" id="bUnete" href="#">Unirme a La Lista</a>
   </section>
 
-  <div class="foot"><span id="ver">mi_tarjeta v0.1.1 · 25nov · ramo</span></div>
+  <div class="foot"><span id="ver">mi_tarjeta v0.2.0 · 27nov · ramo cupo</span></div>
 </div>
 <script>
 'use strict';
@@ -77,22 +122,47 @@ const LOCAL = String(QS.get('loc') || QS.get('l') || 'BKS').trim().toUpperCase()
 const DEMO = QS.get('demo') === '1';
 const BORDE = { URL: 'https://pinsita-borde.alberto-agostini.workers.dev', T: '7QvreCN5fzM40GW2Me8vfvNwIwcA9RDnTceXMwgZ' };   // il token di lettura dei vetri
 const MENU_URL = 'https://menu.pinsita.cl/menu.html';
-const SK_ID = 'pinsita_member_' + LOCAL + (DEMO ? '_demo' : ''), SK_NOM = 'pinsita_member_nombre_' + LOCAL + (DEMO ? '_demo' : '');
+const SUF = DEMO ? '_demo' : '';
+const SK_ID = 'pinsita_member_' + LOCAL + SUF, SK_NOM = 'pinsita_member_nombre_' + LOCAL + SUF;
+const SK_SEG = 'pinsita_socio_seg_' + LOCAL + SUF;       // {id, seg (base64url), epoca}: il segreto del dispositivo, solo qui
+const SK_SALDO = 'pinsita_socio_saldo_' + LOCAL + SUF;   // l'ultimo saldo letto, con la sua ora (per la rete morta)
+const BLOCCO_MS = 30000;
 const $ = id => document.getElementById(id);
 const okId = x => /^[A-Za-z0-9_-]{2,30}$/.test(x || '');
-function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k) || ''; localStorage.setItem(k, v); } catch (e) { return ''; } }
+function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k) || ''; if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return ''; } }
 const primaParola = s => String(s || '').trim().split(/\s+/)[0] || '';
+const pesos = n => '$' + Math.round(Number(n) || 0).toLocaleString('es-CL');
 
 let ID = QS.get('member') || '';
 if (okId(ID)) ls(SK_ID, ID); else ID = ls(SK_ID);
 if (DEMO && !okId(ID)) { ID = 'mdemo1234abcd'; ls(SK_NOM, 'Ana'); }
 
-function como() {
-  const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-  $('como').innerHTML = '<b>Tenla siempre a mano:</b>' + (ios
-    ? '<ol><li>Toca <b>Compartir</b> (el cuadrado con la flecha).</li><li>Elige <b>«Agregar a inicio»</b>.</li></ol>'
-    : '<ol><li>Toca el menú <b>⋮</b> del navegador.</li><li>Elige <b>«Agregar a la pantalla de inicio»</b>.</li></ol>') +
-    '<div style="margin-top:6px">Así queda como una app: la abres y muestras tu tarjeta.</div>';
+function dispositivoId() { let d = ls('pinsita_dispositivo'); if (!/^[A-Za-z0-9_-]{8,64}$/.test(d)) { const a = new Uint8Array(12); crypto.getRandomValues(a); d = 'd' + Array.from(a, b => b.toString(16).padStart(2, '0')).join(''); ls('pinsita_dispositivo', d); } return d; }
+
+/* ═══ LA FIRMA (pura: il banco prova queste) ═══ */
+function b64uDecode(s) { s = String(s || '').replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; const bin = atob(s); const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
+function b64uEncode(a) { let bin = ''; for (let i = 0; i < a.length; i++) bin += String.fromCharCode(a[i]); return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function bloqueDe(ms) { return Math.floor(ms / BLOCCO_MS); }
+async function firmaToken(segB64u, id, t) {
+  const key = await crypto.subtle.importKey('raw', b64uDecode(segB64u), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(id + '|' + t)));
+  return 'L1.' + id + '.' + t + '.' + b64uEncode(mac.slice(0, 10));
+}
+
+/* ═══ IL SEGRETO ═══ */
+function segreto() {
+  try { const o = JSON.parse(ls(SK_SEG) || 'null'); return o && o.id === ID && /^[A-Za-z0-9_-]{16,128}$/.test(o.seg || '') ? o : null; } catch (e) { return null; }
+}
+
+/* ═══ RETE ═══ */
+async function post(path, body) {
+  try {
+    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(BORDE.URL + path, { method: 'POST', cache: 'no-store', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', 'X-Borde-Token': BORDE.T }, body: JSON.stringify(body) });
+    clearTimeout(to);
+    try { return await r.json(); } catch (e) { return { ok: false, error: 'http_' + r.status }; }
+  } catch (e) { return { ok: false, error: 'red' }; }
 }
 async function nombreDelBorde() {
   if (DEMO) return '';
@@ -110,17 +180,117 @@ function qrLib() {
   return new Promise((ok, ko) => { const s = document.createElement('script'); s.src = 'shared/qr_pinsita.js'; s.async = true;
     s.onload = () => typeof qrcode === 'function' ? ok(qrcode) : ko(new Error('qr')); s.onerror = () => ko(new Error('qr')); document.head.appendChild(s); });
 }
+async function disegnaQr(el, testo, scala) {
+  try { const q = (await qrLib())(0, 'M'); q.addData(testo); q.make(); el.innerHTML = q.createSvgTag(scala || 6, 0); return true; }
+  catch (e) { el.innerHTML = '<span style="color:#241503;font-size:12px">No pude dibujar el código. Recarga la página.</span>'; return false; }
+}
+
+/* ═══ IL QR CHE CAMBIA ═══ */
+const VIVO = { timer: null, t: null };
+async function ridisegnaVivo() {
+  const s = segreto(); if (!s) return fermaVivo();
+  const ora = Date.now(), t = bloqueDe(ora);
+  if (t !== VIVO.t) { VIVO.t = t; await disegnaQr($('qrVivo'), await firmaToken(s.seg, ID, t), 6); }
+  $('barra').style.width = Math.max(0, 100 - ((ora % BLOCCO_MS) / BLOCCO_MS) * 100).toFixed(1) + '%';
+}
+function avviaVivo() {
+  $('bloqueVivo').classList.remove('hide'); $('qr').classList.add('chico'); $('sottoLink').textContent = 'Para la puerta y la carta';
+  $('bVaVinc').classList.add('hide');
+  if (!VIVO.timer) VIVO.timer = setInterval(ridisegnaVivo, 1000);
+  VIVO.t = null; ridisegnaVivo();
+}
+function fermaVivo() {
+  if (VIVO.timer) { clearInterval(VIVO.timer); VIVO.timer = null; }
+  $('bloqueVivo').classList.add('hide'); $('qr').classList.remove('chico'); $('sottoLink').textContent = 'Muéstrala en la puerta y al pedir';
+  $('bVaVinc').classList.remove('hide');
+}
+
+/* ═══ IL SALDO ═══ */
+const MESI = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+function nomeMese(m) { const x = /^(\d{4})-(\d{2})/.exec(String(m || '')); return x ? MESI[Number(x[2]) - 1] || '' : ''; }
+function fechaCorta(iso) { const x = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return x ? Number(x[3]) + '-' + MESI[Number(x[2]) - 1].slice(0, 3) : ''; }
+function mostraSaldo(d, viejoTs) {
+  if (!d || d.convenio === false) { $('saldo').classList.add('hide'); return; }
+  $('sMes').textContent = nomeMese(d.mes);
+  $('sQueda').textContent = 'Te quedan ' + pesos(d.saldo);
+  $('sDe').textContent = 'de ' + pesos(d.tope) + (d.vence ? ' · vence el ' + fechaCorta(d.vence) : '');
+  if (viejoTs) { const h = new Date(viejoTs); $('sViejo').textContent = 'Sin conexión · actualizado ' + String(h.getHours()).padStart(2, '0') + ':' + String(h.getMinutes()).padStart(2, '0'); $('sViejo').classList.remove('hide'); }
+  else $('sViejo').classList.add('hide');
+  $('saldo').classList.remove('hide');
+}
+const SALDO = { vuelo: false };
+async function leggiSaldo() {
+  const s = segreto(); if (!s || SALDO.vuelo) return;
+  SALDO.vuelo = true;
+  let r;
+  if (DEMO) r = { ok: true, convenio: true, mes: '2026-12', tope: 100000, usado: 34500, saldo: 65500, vence: '2026-12-31' };
+  else r = await post('/miembro/saldo', { local: LOCAL, token: await firmaToken(s.seg, ID, bloqueDe(Date.now())) });
+  SALDO.vuelo = false;
+  if (r && r.ok === true) {
+    $('avisoVinc').classList.add('hide');
+    const d = r.convenio === false ? { convenio: false } : { convenio: true, mes: r.mes, tope: r.tope, usado: r.usado, saldo: r.saldo, vence: r.vence };
+    ls(SK_SALDO, JSON.stringify({ d: d, ts: Date.now(), id: ID })); mostraSaldo(d, 0); return;
+  }
+  const e = (r && r.error) || 'red';
+  if (e === 'no_vinculado') {   // telefono revocato (epoca nuova) o socio sconosciuto: il segreto non vale più
+    ls(SK_SEG, null); ls(SK_SALDO, null); fermaVivo(); $('saldo').classList.add('hide');
+    $('avisoVinc').textContent = 'Este teléfono no está vinculado: pídelo en el local.'; $('avisoVinc').classList.remove('hide'); return;
+  }
+  if (e === 'hora_del_telefono') { $('avisoVinc').textContent = 'La hora de tu teléfono no está bien: ponla en automática y vuelve a abrir.'; $('avisoVinc').classList.remove('hide'); }
+  // rete morta, rotta spenta o altro: l'ultimo valore, con la sua ora
+  try { const o = JSON.parse(ls(SK_SALDO) || 'null'); if (o && o.id === ID && o.d) mostraSaldo(o.d, o.ts); } catch (x) { /* niente */ }
+}
+
+/* ═══ VINCOLARE IL TELEFONO (una volta, davanti ad Ale o Alberto) ═══ */
+const VINC = { uid: null, vuelo: false };
+function nuovoUid() { const a = new Uint8Array(12); crypto.getRandomValues(a); return 'vi-' + Array.from(a, b => b.toString(16).padStart(2, '0')).join(''); }
+const MSG_V = {
+  pin_invalido: 'PIN incorrecto.', pin_bloqueado: 'Demasiados intentos: espera unos minutos.', no_socio: 'Este código no es de un miembro de La Lista.',
+  ruta_apagada: 'Todavía no se puede vincular un teléfono.', pg_no_responde: 'No se pudo guardar: prueba otra vez.', red: 'Sin conexión: prueba otra vez.',
+};
+async function vincula() {
+  if (VINC.vuelo) return;
+  const pin = $('fPin').value.replace(/[^0-9]/g, '');
+  if (pin.length < 4) { $('vErr').textContent = 'Escribe el PIN.'; return; }
+  VINC.vuelo = true; $('bVinc').disabled = true; $('bVinc').textContent = 'Vinculando…'; $('vErr').textContent = '';
+  if (!VINC.uid) VINC.uid = nuovoUid();   // la chiave nasce qui, dal lato che ripete: lo stesso tentativo ripetuto = lo stesso uid
+  let r;
+  if (DEMO) r = pin === '0000' ? { ok: true, segreto: 'ZGVtby1zZWdyZXRvLWRlbC1kaXNwb3NpdGl2by0zMmI', epoca: 1 } : { ok: false, error: 'pin_invalido' };
+  else r = await post('/miembro/vincula', { local: LOCAL, miembro_id: ID, dispositivo_id: dispositivoId(), uid_gesto: VINC.uid, pin: pin });
+  VINC.vuelo = false; $('bVinc').disabled = false; $('bVinc').textContent = 'Vincular';
+  if (r && r.ok === true && /^[A-Za-z0-9_-]{16,128}$/.test(r.segreto || '')) {
+    ls(SK_SEG, JSON.stringify({ id: ID, seg: r.segreto, epoca: r.epoca || 0 }));
+    $('fPin').value = ''; VINC.uid = null; $('vVinc').classList.add('hide'); $('avisoVinc').classList.add('hide');
+    avviaVivo(); leggiSaldo(); return;
+  }
+  if (r && r.ok === true && r.esito === 'ya') { $('vErr').textContent = 'Este teléfono ya estaba vinculado, pero el código no llegó: pide que lo vinculen de nuevo.'; VINC.uid = null; return; }
+  $('vErr').textContent = MSG_V[(r && r.error) || 'red'] || 'No se pudo vincular. Prueba otra vez.';
+  if (r && /^pin_/.test(r.error || '')) { $('fPin').value = ''; VINC.uid = null; }
+}
+$('bVaVinc').onclick = () => { $('vVinc').classList.remove('hide'); $('fPin').focus(); };
+$('bNoVinc').onclick = () => { $('vVinc').classList.add('hide'); $('fPin').value = ''; $('vErr').textContent = ''; VINC.uid = null; };
+$('bVinc').onclick = vincula;
+
+function como() {
+  const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  $('como').innerHTML = '<b>Tenla siempre a mano:</b>' + (ios
+    ? '<ol><li>Toca <b>Compartir</b> (el cuadrado con la flecha).</li><li>Elige <b>«Agregar a inicio»</b>.</li></ol>'
+    : '<ol><li>Toca el menú <b>⋮</b> del navegador.</li><li>Elige <b>«Agregar a la pantalla de inicio»</b>.</li></ol>') +
+    '<div style="margin-top:6px">Así queda como una app: la abres y muestras tu tarjeta.</div>';
+}
+
 (async function avvio() {
   if (DEMO) $('demo').classList.remove('hide');
   if (!okId(ID)) { $('bUnete').href = 'unete.html?loc=' + LOCAL.toLowerCase(); $('vVacia').classList.remove('hide'); return; }
   const link = MENU_URL + '?l=' + encodeURIComponent(LOCAL) + '&member=' + encodeURIComponent(ID);
   $('bCarta').href = link;
-  $('loc').textContent = LOCAL === 'BKS' ? 'BKS' : LOCAL;
+  $('loc').textContent = LOCAL;
   $('nom').textContent = primaParola(ls(SK_NOM)) || 'Tu tarjeta';
   como();
   $('vCard').classList.remove('hide');
-  try { const q = (await qrLib())(0, 'M'); q.addData(link); q.make(); $('qr').innerHTML = q.createSvgTag(6, 0); }
-  catch (e) { $('qr').innerHTML = '<span style="color:#241503;font-size:12px">No pude dibujar el código. Recarga la página.</span>'; }
+  await disegnaQr($('qr'), link, 6);
+  if (segreto()) { avviaVivo(); leggiSaldo(); }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && segreto()) { VIVO.t = null; ridisegnaVivo(); leggiSaldo(); } });
   const n = await nombreDelBorde();
   if (n) { ls(SK_NOM, n); $('nom').textContent = n; }
 })();
