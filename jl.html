@@ -195,7 +195,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.30</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.30.1</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -210,7 +210,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.30';
+var JL_VER = 'jl v0.6.30.1';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -301,6 +301,7 @@ function jlModelo(dd, ora) {
     (v.mesas || []).forEach(function (r) {
       var x = mesa(r.mesa, r.plaza ? String(r.plaza) : ''); x._vivo = true;
       x.tot = Math.round(Number(r.total) || 0);
+      x.socio = (r.socio && r.socio.miembro_id) ? r.socio : null; x.cupo = (x.socio && r.cupo && typeof r.cupo === 'object') ? r.cupo : null;   // [cupo ④] il socio legato e il suo cupo (⚙️)
       if (r.items && r.items.length) { x.items = r.items.map(function (i) { return { n: String(i.n || ''), q: Number(i.q) || 1, p: Number(i.p) || 0 }; }); x._daConto = true; }
     });
     /* le righe dai pedidos vivi quando la vista non porta il conto (stessa regola della sala nueva v0.8.5) */
@@ -515,6 +516,7 @@ async function jlEntraLeva() {
     var x = null; (function c(o) { if (!o || typeof o !== 'object' || x != null) return; if (o.jl_entra_on != null) { x = o.jl_entra_on; return; } for (var q in o) c(o[q]); })(j);
     ENTRA.gate = jlLevaLocali(x);
     SAL = (j && j.flags && typeof j.flags === 'object') ? j.flags : {};   // [v0.5.2] le leve del turno, dalla stessa lettura
+    if (typeof JLCU !== 'undefined') { JLCU.lev = salLocale('cupo_on'); JLCU.pres = SAL.cupo_on != null; }   // [cupo ④] il JL vede il cupo, leva unica col bordo, nasce spenta
     if (typeof cshLeva === 'function') cshLeva(salLocale('como_se_hace_on'), SAL.como_se_hace_on != null);   // [v0.6.25.1 · AUT-1220] «¿Cómo se hace?», nasce spenta
   } catch (e) { /* /salud muto: gate resta null ⇒ si mostra la strada dell'app, che funziona sempre */ }
   clearTimeout(to);
@@ -982,7 +984,7 @@ function detalle(gi, m) {
     (x.pagado > 0 ? '<div class="sub">Pagado ' + pesos(x.pagado) + '</div>' : '') +
     (sent.length ? '<div class="sub">' + esc(sent.join(' · ')) + '</div>' : '') +
     '<div class="sub" style="color:var(--ink3)">Reserva y cliente frecuente: sin dato todavía.</div></div>' +
-    sol + bot;
+    jlCupoCard(x) + sol + bot;   // [cupo ④] la card informativa del cupo, sotto il conto
 }
 /* ═══ [v0.5.1 · 🛎 SALA V35 · LOCAL COME LA V50, PRIMA METÀ] il turno (lettura) e l'86 (lettura e gesto) ═══
    IL TURNO: `POST /turno/admin/<LOC_PG>` {pin_jl} (la stessa lettura di app_jl v1.44.x `_turnoAdminPorBordo`, `turno_abre_borde_on` BKS):
@@ -1967,6 +1969,39 @@ cshRegistra('retiro', {
   ]
 });
 
+/* ═══ [27-nov · v0.6.30.1 · 🖐 TERZA V35 · 🎛 «I VETRI DEI TAVOLI SPECIALI, CHI LI FA»] IL JL VEDE IL CUPO (mockup 🎨 ④) ═══
+   Una card INFORMATIVA nella mesa: senza oro e senza bottone. «Solo para que lo sepas: no tienes que firmar nada.» Dati di ⚙️ («SÌ ALLA TUA FORMA,
+   CON QUATTRO NOMI FISSATI»), sul conto della mesa in `sala_vista`: `socio:{miembro_id, nombre_visible, reconocido_por, por, ts}` ·
+   `cupo:{mes, tope, usado, saldo, vence, cubre, visitas:[{dia, monto, reconocido_por, por}]}`. `usado`/`saldo` sono del mese SENZA questo conto,
+   `cubre` è quanto copre questo conto: la card dice «hoy lo cubre» e «quedarán» = saldo − cubre. Niente cifre ricalcolate oltre questa sottrazione.
+   Leva unica col bordo `cupo_on` (/salud), `?cupo=1|0` sul telefono (0 vince); se /salud porta la chiave comanda lei. Spenta: niente. */
+var JLCU = { lev: false, pres: false };
+var JLCU_QS = (function () { try { var q = new URLSearchParams(location.search).get('cupo'); if (q === '1' || q === '0') localStorage.setItem('jl_cupo_qs', q); return localStorage.getItem('jl_cupo_qs') || ''; } catch (e) { return ''; } })();
+function jlCupoOn() { if (JLCU_QS === '0') return false; if (JLCU.pres) return !!JLCU.lev; return JLCU_QS === '1'; }
+var JL_MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+function jlCupoMes(m) { var k = /^(\d{4})-(\d{2})/.exec(String(m || '')); return k ? JL_MESES[(+k[2] - 1) % 12] : ''; }
+function jlCupoDia(d) { var k = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return k ? k[3] + '-' + k[2] : ''; }
+function jlCupoVia(r, por) { return r === 'tarjeta' ? 'tarjeta' + (por && por !== 'qr' ? ', ' + por : '') : r === 'telefono' ? 'desde su teléfono' : ''; }
+function jlCupoCard(x) {
+  if (!jlCupoOn() || !x || !x.socio || !x.socio.miembro_id) return '';
+  var so = x.socio, ora = so.ts ? cjHora(Number(so.ts)) : '';
+  var via = so.reconocido_por === 'tarjeta' ? 'reconocido por su tarjeta' + (so.por && so.por !== 'qr' ? ' (' + so.por + (ora ? ', ' + ora : '') + ')' : '') : so.reconocido_por === 'telefono' ? 'abrió la mesa con su teléfono' + (ora ? ' (' + ora + ')' : '') : '';
+  var c = x.cupo;
+  var h = '<div class="vetro"><h4 style="justify-content:space-between">' + (c ? '🗓 Cupo · Mesa ' : '🎟 Socio · Mesa ') + esc(x.m) + '</h4>' +
+    '<p>' + esc(so.nombre_visible || 'Socio') + (via ? ' · <b style="color:var(--ok)">' + esc(via) + '</b>' : '') + '</p>';
+  if (!c) return h + '<p class="sub">Es parte de La Lista, sin cupo: se reconoce, no se descuenta.</p></div>';
+  var tope = Math.round(Number(c.tope) || 0), saldo = Math.round(Number(c.saldo) || 0), cubre = Math.round(Number(c.cubre) || 0), usado = Math.round(Number(c.usado) || 0);
+  var queda = Math.max(0, saldo - cubre), pct = tope > 0 ? Math.min(100, Math.round((tope - queda) / tope * 100)) : 0, vis = Array.isArray(c.visitas) ? c.visitas : [];
+  h += '<div class="sub" style="text-transform:capitalize">' + esc(jlCupoMes(c.mes)) + '</div>' +
+    '<div style="display:flex;align-items:baseline;justify-content:space-between"><span class="gran num" style="font-size:28px;color:var(--oro)">' + pesos(queda) + '</span><span class="sub">quedan de ' + pesos(tope) + '</span></div>' +
+    '<div style="height:6px;border-radius:3px;background:rgba(243,234,216,.12);margin:6px 0"><i style="display:block;height:6px;border-radius:3px;width:' + pct + '%;background:var(--oro)"></i></div>' +
+    '<div class="sub" style="display:flex;justify-content:space-between"><span>usado ' + pesos(usado + cubre) + ' · ' + (vis.length + (cubre > 0 ? 1 : 0)) + ' visitas</span><span>' + (jlCupoDia(c.vence) ? 'vence ' + esc(jlCupoDia(c.vence)) : '') + '</span></div>' +
+    (cubre > 0 ? '<div class="riga"><span>Hoy lo cubre el cupo</span><span class="st num">' + pesos(cubre) + '</span></div>' +
+      (x.tot > 0 ? '<div class="riga"><span>Paga la mesa</span><span class="st num">' + pesos(Math.max(0, x.tot - cubre)) + '</span></div>' : '') : '<p class="sub">Hoy el cupo no cubre esta cuenta.</p>') +
+    '<p class="sub">Solo para que lo sepas: no tienes que firmar nada.</p>' +
+    (vis.length ? '<div class="sub" style="margin-top:6px"><b>Visitas de ' + esc(jlCupoMes(c.mes)) + '</b>' + vis.map(function (v) { return '<br>' + esc(jlCupoDia(v.dia)) + ' · ' + pesos(v.monto) + (jlCupoVia(v.reconocido_por, v.por) ? ' · ' + esc(jlCupoVia(v.reconocido_por, v.por)) : ''); }).join('') + '</div>' : '') + '</div>';
+  return h;
+}
 /* la caja finta della demo [v0.6.0]: risponde come il bordo (estado · ritiro · sobre) e RICORDA i ritiri, così il giro si vede da capo a fondo:
    l'avviso aperto → i ritiri uno per uno → il sobre → la lista dei cierres. Numeri d'esempio. */
 var CJ_DEMO = { ritiri: [], aviso: true, sobres: [{ sobre_nro: '1114', ts_hecho: '2026-11-20T23:18:00', suma_ritiri: 0 }, { sobre_nro: '1113', ts_hecho: '2026-11-20T23:02:00', suma_ritiri: 0, conteo: { contado: 3000 } }],
