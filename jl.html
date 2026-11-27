@@ -195,7 +195,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.29.1</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.30</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -210,7 +210,7 @@
 </div>
 <script>
 'use strict';
-var JL_VER = 'jl v0.6.29.1';
+var JL_VER = 'jl v0.6.30';
 var QS = new URLSearchParams(location.search);
 var CFG = {
   BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev',
@@ -2356,7 +2356,7 @@ function jlPinta(forza) {
   /* [v0.3.0] mai ridisegnare sotto le dita: un giro di lettura non cancella il monto o il conteo che il JL sta scrivendo (app_jl r.~2758) */
   var ae = document.activeElement; if (!forza && ae && ae.tagName === 'INPUT' && b.contains(ae)) return;
   var t0 = VISTA.tab === 0;
-  b.innerHTML = puBanda() + ((t0 && VISTA.aperta) ? detalle(VISTA.aperta.g, VISTA.aperta.m) : (t0 && PET.aperta) ? petDettaglio() : (t0 && VISTA.plz) ? plazasVista(VISTA.plz) : (t0 && VISTA.sol) ? petLista() : VIS[VISTA.tab]());   // [v0.6.27 · P3] la fascia della porta dopo il tocco
+  b.innerHTML = puEntroHtml() + puBanda() + ((t0 && VISTA.aperta) ? detalle(VISTA.aperta.g, VISTA.aperta.m) : (t0 && PET.aperta) ? petDettaglio() : (t0 && VISTA.plz) ? plazasVista(VISTA.plz) : (t0 && VISTA.sol) ? petLista() : VIS[VISTA.tab]());   // [v0.6.27 · P3] la fascia della porta dopo il tocco
   b.classList.toggle('su', !!(t0 && VISTA.filtro && !VISTA.aperta && !PET.aperta && !VISTA.plz && !VISTA.sol));   // [v0.6.24 · 🎨] col filtro la lista in alto
   b.scrollTop = y;
   updateDock(); jlPallini(); juBarPinta();   // [v0.6.22]
@@ -2567,6 +2567,7 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   else if (a === 'puE') { if (LV.ed && LV.ed.modo === 'puerta') { LV.ed.ent = el.getAttribute('data-k'); jlPinta(true); } }
   else if (a === 'puNo') { LV.ed = null; PU.msg = ''; jlPinta(true); }
   else if (a === 'puOk') { puGuardar(); }
+  else if (a === 'puVisto') { puVisto(); }   // [v0.6.30 · AUT-1273] «Entró X como anfitriona»
   else if (a === 'puQuitar') { var qk = el.getAttribute('data-k') + '|' + el.getAttribute('data-n') + '|' + el.getAttribute('data-f'); if (PU.qx === qk) { PU.qx = null; puQuitar(el.getAttribute('data-k'), el.getAttribute('data-n'), el.getAttribute('data-f')); } else { PU.qx = qk; jlPinta(true); } }   // due tocchi: il primo chiede
   else if (a === 'loc86') { LOC.a86 = !LOC.a86; if (!LOC.a86) { C86 = null; Q86 = ''; } locSalva(); jlPinta(true); }
   else if (a === 'c86') { C86 = el.getAttribute('data-k'); Q86 = ''; E86.msg = ''; jlPinta(true); }
@@ -2695,7 +2696,10 @@ jlLeggi();
    nella lettura (chiesto a ⚙️). Leva del vetro: le leve del bordo lette da /salud, o `?puerta=1` su un telefono. */
 var PU = { r: null, ts: 0, err: '', inVolo: false, aperto: null, coda: {}, volo: {}, tocco: null, msg: '' };
 var PU_ENT = { principal: 'Plaza Principal', entrada_2: 'Entrada 2' };   // 🟡 i nomi delle entradas di BKS (codici di ⚙️); un codice nuovo si vede col suo codice
-function puEnt(c) { return PU_ENT[c] || String(c || '').replace(/_/g, ' '); }
+function puEntSalud() { var o = {}, v = salFlag('puerta_entradas'), L = String(LOC_PG[CFG.LOCAL] || CFG.LOCAL).toUpperCase();   // [v0.6.30] il 🟡 delle entradas scritte nel vetro: le dice il bordo
+  v.split(';').forEach(function (blk) { var i = blk.indexOf(':'); if (i < 0 || blk.slice(0, i).trim().toUpperCase() !== L) return;
+    blk.slice(i + 1).split('|').forEach(function (kv) { var j = kv.indexOf('='); if (j > 0) o[kv.slice(0, j).trim()] = kv.slice(j + 1).trim(); }); }); return o; }
+function puEnt(c) { return puEntSalud()[c] || PU_ENT[c] || String(c || '').replace(/_/g, ' '); }
 function puOn() { return QS.get('puerta') === '1' || salLocale('anfitrionas_jl_on'); }
 function puMin(k, d) { var n = parseInt(salFlag(k), 10); return n > 0 ? n : d; }
 function puHace(ms) { var m = Math.max(0, Math.floor((Date.now() - ms) / 60000)); return m < 1 ? 'recién' : m < 60 ? 'hace ' + m + ' min' : 'hace ' + Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; }
@@ -2720,6 +2724,12 @@ async function puGiro() {
 }
 /* il riquadro: si apre sull'avviso del bordo; un avviso diverso (il livello 2, o un altro motivo) lo sostituisce con un gesto nuovo; null lo chiude */
 function puAviso(av) {
+  /* [v0.6.30 · AUT-1273] `entro` è informativo: non apre il riquadro che ferma l'app. Uno per tutti i telefoni: lo chiude il primo «Visto» (il bordo poi non lo manda più). */
+  var eP = PU.entro ? PU.entro.av.uid : null;
+  if (av && av.motivo === 'entro') { if (PU.aperto) puChiudi();
+    if (PU.coda[av.uid]) PU.entro = null; else if (PU.entro && PU.entro.av.uid === av.uid) PU.entro.av = av; else PU.entro = { av: av, gesto: puUid() };
+    if ((PU.entro ? PU.entro.av.uid : null) !== eP) jlPinta(); return; }
+  if (PU.entro) { PU.entro = null; jlPinta(); }
   var a = PU.aperto;
   if (!av || !av.uid || PU.coda[av.uid] || (PU.tocco && PU.tocco.uid === av.uid)) { if (a && (!av || av.uid !== a.av.uid)) puChiudi(); return; }   // già toccato da me: il bordo lo saprà al ritento
   if (a && a.av.uid === av.uid) { a.av = av; puRiquadro(false); return; }   // lo stesso: aggiorno i minuti senza tremare
@@ -2803,6 +2813,14 @@ function puRitenta() {
   });
 }
 /* LA FASCIA, in cima al corpo: oro fino alla revisione, verde quando la lettura mostra che la porta è ripartita (poi se ne va da sola) */
+function puEntroHtml() {
+  var e = PU.entro; if (!e || !puOn()) return '';
+  var av = e.av, hh = ppHora(av.desde_ts);
+  return '<div id="puEntro" style="display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.28);color:var(--ink);border-radius:12px;padding:9px 12px;margin:0 0 10px">' +
+    '<span style="flex:1">🚪 Entró <b>' + esc(av.anfitriona || '(sin nombre)') + '</b> como anfitriona' + (av.entrada ? ' · ' + esc(puEnt(av.entrada)) : '') + (hh ? ' · ' + esc(hh) : '') + '</span>' +
+    '<button type="button" class="azione" style="width:auto;margin:0;min-height:34px;padding:4px 14px" data-a="puVisto">Visto</button></div>';
+}
+function puVisto() { var e = PU.entro; if (!e) return; PU.coda[e.av.uid] = e.gesto; PU.entro = null; puRitenta(); jlPinta(true); }
 function puBanda() {
   var t = PU.tocco; if (!t || !puOn()) return '';
   var V = puMin('anfitrionas_verifica_min', 10) * 60000, rev = t.ts + V, r = PU.r || {}, now = Date.now(), ok = false, quando = 0;
@@ -2842,27 +2860,30 @@ function cardPuerta() {
   var r = PU.r;
   if (!r) return '<div class="vetro"><h4>🚪 La puerta</h4><p>' + (PU.err ? '⚠️ ' + esc(PU.err === 'anfitrionas_spento' ? 'La puerta todavía no está encendida en el sistema.' : PU.err === 'pg_no_responde' ? 'El sistema no responde: no invento números.' : 'No pude leer la puerta (' + PU.err + ').') : 'Leyendo la puerta…') + '</p></div>';
   var pr = Array.isArray(r.programadas) ? r.programadas : null, ul = r.ultimo;
+  var sh = !!pr && !pr.length, ep = r.en_puerta || [];   // [v0.6.30 · AUT-1273] «sin horario»: l'anfitriona entra col suo login (Alberto 27-nov), nessun turno alla porta
   var h = '<div class="vetro">' + locTitolo('puT', LOC.puerta, '🚪 La puerta' + (r.total ? '<span class="pill no">' + r.total.mesas + ' mesas · ' + r.total.pax + ' pax</span>' : ''));
   h += puMsg();
-  if (r.sin_anfitriona === true) h += '<p style="margin:2px 0 6px"><b style="color:var(--ink)">Hoy sin anfitriona</b> · nadie tiene turno en la puerta ahora. No hay avisos.</p>';
+  if (sh ? !ep.length : r.sin_anfitriona === true) h += '<p style="margin:2px 0 6px"><b style="color:var(--ink)">Hoy sin anfitriona</b> · ' + (sh ? 'nadie marcó la puerta.' : 'nadie tiene turno en la puerta ahora. No hay avisos.') + '</p>';
   h += '<p style="margin:2px 0 6px">último registro ' + (ul ? '<b style="color:var(--ink)">' + esc(ppHora(ul.ts)) + '</b> · ' + esc(puHace(ul.ts)) + (ul.anfitriona ? ' · ' + esc(ul.anfitriona) : '') : '<b style="color:var(--ink)">nadie registró hoy</b>') + '</p>';
-  if (!LOC.puerta) return h + '<p style="color:var(--ink2);margin:2px 0 0">' + (pr ? pr.length + (pr.length === 1 ? ' anfitriona en el horario' : ' anfitrionas en el horario') : 'horario sin dato') + ' · toca para ver</p></div>';
+  if (!LOC.puerta) return h + '<p style="color:var(--ink2);margin:2px 0 0">' + (sh ? (ep.length ? ep.length + ' en la puerta' : 'nadie en la puerta') : pr ? pr.length + (pr.length === 1 ? ' anfitriona en el horario' : ' anfitrionas en el horario') : 'horario sin dato') + ' · toca para ver</p></div>';
   h += '<p style="margin:8px 0 2px"><b style="color:var(--ink)">Hoy en la puerta</b></p>';
   if (pr === null) h += '<p>⚠️ No pude leer el horario de la puerta: no digo «sin anfitriona» a ciegas.</p>';
-  else if (!pr.length) h += '<p class="vacio">Nadie tiene turno en la puerta hoy.</p>';
+  else if (sh) h += ep.length ? ep.map(function (e) { return '<div class="riga" style="align-items:flex-start"><span><b>' + esc(e.anfitriona || '(sin nombre)') + '</b><small>' + esc(puEnt(e.entrada)) + (e.desde_ts ? ' · desde las ' + esc(ppHora(e.desde_ts)) : '') + '</small></span>' +
+      '<span style="margin-left:auto;text-align:right;font-size:12px"><span style="color:var(--ok);font-weight:700">en la puerta</span><small style="display:block;color:var(--ink2)">' + puMesasDe(r, e.anfitriona) + ' mesas</small></span></div>'; }).join('')
+    : '<p class="vacio">Nadie marcó la puerta hoy.</p>';
   else h += pr.map(function (p) {
     return '<div class="riga" style="align-items:flex-start;' + (p.presente ? '' : 'border-style:dashed') + '"><span><b>' + esc(p.anfitriona || '(sin nombre)') + '</b><small>turno ' + esc(String(p.franja || '').replace('-', '–')) + ' · ' + esc(puEnt(p.entrada)) + '</small></span>' +
       '<span style="margin-left:auto;text-align:right;font-size:12px">' + puStato(p) + '<small style="display:block;color:var(--ink2)">' + puMesasDe(r, p.anfitriona) + ' mesas</small></span>' +
       (p.anfitriona ? '<button class="azione rojo" style="width:auto;margin:0 0 0 8px;min-height:34px;padding:4px 10px;font-size:12px" data-a="puQuitar" data-k="' + esc(p.entrada) + '" data-n="' + esc(p.anfitriona) + '" data-f="' + esc(p.franja) + '"' + (LV.vuelo ? ' disabled' : '') + '>' +
         (PU.qx === p.entrada + '|' + p.anfitriona + '|' + p.franja ? '¿Seguro? Quitar' : 'Quitar') + '</button>' : '') + '</div>';
   }).join('');
-  var fuori = (r.en_puerta || []).filter(function (e) { return !(pr || []).some(function (p) { return p.entrada === e.entrada && String(p.anfitriona || '').trim().toLowerCase() === String(e.anfitriona || '').trim().toLowerCase(); }); });
+  var fuori = sh ? [] : (r.en_puerta || []).filter(function (e) { return !(pr || []).some(function (p) { return p.entrada === e.entrada && String(p.anfitriona || '').trim().toLowerCase() === String(e.anfitriona || '').trim().toLowerCase(); }); });
   if (fuori.length) h += fuori.map(function (e) { return '<div class="riga"><span><b>' + esc(e.anfitriona || '(sin nombre)') + '</b><small>en ' + esc(puEnt(e.entrada)) + (e.desde_ts ? ' desde las ' + esc(ppHora(e.desde_ts)) : '') + ' · sin turno en el horario</small></span></div>'; }).join('');
-  h += '<button class="azione oro" style="margin:8px 0 4px" data-a="puAdd">＋ Agregar anfitriona</button>';
+  if (!sh) h += '<button class="azione oro" style="margin:8px 0 4px" data-a="puAdd">＋ Agregar anfitriona</button>';   // [v0.6.30] senza turni le anfitrionas entrano da sole
   if ((r.por_hora || []).length) h += '<p style="margin:10px 0 2px"><b style="color:var(--ink)">Lo que anotó la puerta, hora por hora</b></p>' +
     r.por_hora.map(function (o) { return '<div class="riga"><span class="num">' + esc(o.hora) + ':00</span><span class="st">' + o.mesas + (o.mesas === 1 ? ' mesa' : ' mesas') + ' · ' + o.pax + ' pax</span></div>'; }).join('');
   if (r.fila) h += '<p style="margin:8px 0 0">en la fila: <b style="color:var(--ink)">' + ((+r.fila.esperando || 0) + (+r.fila.avisados || 0)) + '</b> esperando</p>';
-  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:6px">La puerta se compara con el horario: sin anfitriona en el horario, no hay avisos.</p></div>';
+  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:6px">' + (sh ? 'Las anfitrionas entran con el código del turno. Los avisos salen de quien marcó la puerta.' : 'La puerta se compara con el horario: sin anfitriona en el horario, no hay avisos.') + '</p></div>';
 }
 function puEditor(E) {
   var ents = Object.keys(PU_ENT);
