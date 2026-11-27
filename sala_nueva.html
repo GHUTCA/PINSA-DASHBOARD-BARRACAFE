@@ -2021,7 +2021,7 @@ function cbCentro(){
       '<div class="dom">'+(CB.pagos.length?'¿Cómo pagan lo que falta?':'¿Cómo paga la mesa?')+'</div><div class="scelte">'+
       '<button type="button" class="sc pri" data-a="chi" data-k="tel"><span class="ic">📱</span><span><b>Con su teléfono</b><i>le muestras el QR de la cuenta '+idC()+'</i></span></button>'+
       '<button type="button" class="sc" data-a="chi" data-k="yo"><span class="ic">🧾</span><span><b>Conmigo</b><i>no tiene teléfono o prefiere pagarte a ti</i></span></button></div>'+
-      (CB.pagos.length?'':'<button type="button" class="mini" data-a="vaiDto">'+(CB.solic?'⏳ Convenio pedido al JL · esperando':(CB.dto&&CB.pin?'Quitar el convenio':'¿Convenio Falabella?'))+'</button>');
+      (CB.pagos.length?'':'<button type="button" class="mini" data-a="vaiDto">'+(CB.solic?'⏳ Convenio pedido al JL · esperando':(CB.dto&&CB.pin?'Quitar el convenio':'¿Convenio Falabella?'))+'</button>')+snSocioCobro();
   case 'dto':
     return '<div class="dom">Convenio</div><div class="grid2">'+MOTIVOS.filter(function(m){ return m[0]==='conv'; }).map(function(m){ return '<button type="button" class="ch'+(CB.dto===m[0]?' on':'')+'" data-a="dto" data-k="'+m[0]+'">'+m[1]+'<i>−'+m[2]+'%</i></button>'; }).join('')+'</div>'+
       (CB.dto==='otro'?'<input class="otro" id="dtoTxt" placeholder="¿Qué pasó? (al menos 12 letras)" value="'+CB.dtoTxt.replace(/"/g,'&quot;')+'">':'')+
@@ -2191,11 +2191,147 @@ function atras(){
 }
 function scrollCampo(){ var f=document.querySelector('#centro .campo.on'); if(!f) return; var c=$('centro'); c.scrollTop=Math.max(0,f.offsetTop-c.offsetTop-110); }
 
+/* ═══ [27-nov · 🖐 TERZA V35 · 🎛 «PARTI A FARE I TAVOLI SPECIALI» ③ · mockup 🎨 «② escanear la tarjeta · sala»] ¿ES SOCIO DE LA LISTA? ═══
+   Il garzón scansiona «Mi tarjeta» del socio al cobro e il conto resta legato a lui: il cupo e il cumpleaños compaiono dal conto, non da una scelta.
+   Il garzón ESCANEA, non decide. Contratto proposto a ⚙️ (bacheca «PRESO: IL VETRO «📷 ESCANEAR TARJETA»», da confermare):
+   `/pedido-staff` {action:'vinculaSocio', codigo, nombre, mesa, token, uid_gesto} → {ok, esito:'vinculado'|'ya', socio:{nombre_visible}}.
+   Il token è `L1.<id>.<t>.<firma>` (PROPOSTA §③-§⑥): il vetro ne controlla solo la FORMA, firma e orologio li verifica il bordo.
+   · Lo scanner è quello a due motori della Puerta (puerta.html r.743-800, registro v62): BarcodeDetector dove c'è, `shared/zxing.min.js` su iPhone.
+   · Vive in una finestra SOPRA l'app, fuori da pinta(): il giro di lettura ridisegna il cobro e staccherebbe la camera.
+   · Un uid per token: il ritocco dopo una rete caduta o un 503 manda lo STESSO uid; un token nuovo, un uid nuovo. Il token non si conserva.
+   · LEVA: `vincula_socio_on` di /salud (SN.vinculaSocio). Spenta: niente bottone e niente chiamata. In ?demo=1 risponde un bordo finto. */
+var SNS = { stream: null, det: null, timer: null, uid: {}, vuelo: false, tok: '', msg: '', ok: null };
+function snsEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }   // il nome viene dal bordo
+function snSocioOn() { return !!(SN && SN.vinculaSocio) || !!(typeof VV !== 'undefined' && VV.demo); }
+function snSocioCobro() {
+  if (!snSocioOn() || !CB) return '';
+  if (CB.socio) return '<div class="sotto" style="color:var(--ok,#5fd39b);font-weight:700;margin-top:10px">✓ ' + snsEsc(CB.socio.nombre) + ' · socio de La Lista<br><span style="font-weight:400;color:inherit;opacity:.8">reconocido por su tarjeta · ' + snsEsc(CB.socio.por || '') + ' · ' + CB.socio.hora + '</span></div>';
+  return '<button type="button" class="mini" data-a="vaiSocio">📷 ¿Es socio de La Lista? Escanea su tarjeta</button>';
+}
+var SNS_TOKEN = /^L1\.([A-Za-z0-9_-]{1,64})\.(\d{1,12})\.([A-Za-z0-9_-]{8,48})$/;
+var SNS_ERR = {
+  token_forma: 'Ese código no es de una tarjeta de La Lista.',
+  hora_del_telefono: 'La hora de su teléfono no está bien. Que la ponga en automática y abra de nuevo su tarjeta.',
+  no_vinculado: 'Esta tarjeta no está vinculada a un teléfono. El cupo y el cumpleaños se piden en el local.',
+  t_usado: 'Ese código ya se usó en otra mesa. Que cierre y abra de nuevo su tarjeta.',
+  mesa_sin_cuenta: 'Esta mesa no tiene una cuenta abierta en el sistema.',
+  codigo_invalid: 'Tu turno se cerró o el código cambió: entra de nuevo.', sesion_invalida: 'Tu turno se cerró o el código cambió: entra de nuevo.',
+  ruta_apagada: 'Todavía no se puede desde aquí. Cobra como siempre.'
+};
+function snsEl() {
+  var o = document.getElementById('snSocio'); if (o) return o;
+  o = document.createElement('div'); o.id = 'snSocio';
+  o.setAttribute('style', 'position:fixed;inset:0;z-index:9000;background:rgba(10,8,12,.96);display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px 16px calc(20px + env(safe-area-inset-bottom,0px));color:#f3ead8;font:inherit;text-align:center;overflow:auto');
+  o.innerHTML = '<div style="font-size:17px;font-weight:800;margin-top:6px">¿Es socio de La Lista?</div>' +
+    '<div style="font-size:13px;opacity:.8">Apunta al QR de «Mi tarjeta» en su teléfono</div>' +
+    '<video id="snSocioVid" playsinline muted style="width:min(320px,100%);aspect-ratio:1/1;object-fit:cover;border-radius:18px;border:2px solid rgba(224,169,74,.7);background:#000"></video>' +
+    '<div id="snSocioMsg" style="min-height:40px;font-size:14px;font-weight:700;max-width:340px"></div>' +
+    '<div id="snSocioBtn" style="display:flex;gap:8px;width:min(340px,100%)"></div>';
+  o.addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-s]'); if (!b) return;
+    var k = b.getAttribute('data-s');
+    if (k === 'no') snSocioCierra();
+    else if (k === 'otra') { SNS.tok = ''; SNS.msg = ''; snsPintaO(); snSocioCamara(); }
+    else if (k === 'reintenta') { if (SNS.tok) snSocioManda(SNS.tok); }
+  });
+  document.body.appendChild(o); return o;
+}
+function snsPintaO() {
+  var m = document.getElementById('snSocioMsg'), bt = document.getElementById('snSocioBtn'); if (!m || !bt) return;
+  m.textContent = SNS.vuelo ? 'Un momento…' : SNS.msg;
+  m.style.color = SNS.ok === false ? '#ffb1aa' : '#f3ead8';
+  var b = function (k, t, oro) { return '<button type="button" data-s="' + k + '" style="flex:1;min-height:48px;border-radius:14px;font:inherit;font-weight:800;' + (oro ? 'background:#e0a94a;color:#1a140c;border:0' : 'background:transparent;color:#f3ead8;border:1.5px solid rgba(243,234,216,.45)') + '">' + t + '</button>'; };
+  bt.innerHTML = b('no', 'Cancelar') + (SNS.vuelo ? '' : SNS.tok ? b('reintenta', 'Probar de nuevo', true) : SNS.ok === false ? b('otra', 'Escanear de nuevo', true) : '');
+}
+function snSocioApri() {
+  if (!snSocioOn() || !CB) return;
+  SNS.tok = ''; SNS.msg = ''; SNS.ok = null; SNS.vuelo = false;
+  snsEl(); snsPintaO(); snSocioCamara();   // getUserMedia parte dentro il tocco (Safari lo vuole lì)
+}
+function snSocioParaCam() {
+  clearTimeout(SNS.timer); SNS.timer = null;
+  if (SNS.stream) { try { SNS.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} }
+  SNS.stream = null;
+  var v = document.getElementById('snSocioVid'); if (v) { try { v.srcObject = null; } catch (e) {} }
+}
+function snSocioCierra() { snSocioParaCam(); SNS.tok = ''; SNS.msg = ''; SNS.vuelo = false; var o = document.getElementById('snSocio'); if (o) o.remove(); }
+function snsCargarZX() {
+  if (window.ZXing) return Promise.resolve();
+  return new Promise(function (res, rej) { var s = document.createElement('script'); s.src = 'shared/zxing.min.js';
+    s.onload = function () { window.ZXing ? res() : rej(new Error('lector vacío')); }; s.onerror = function () { rej(new Error('sin conexión')); }; document.head.appendChild(s); });
+}
+async function snsLector() {
+  if (typeof window.BarcodeDetector === 'function') { var d = new BarcodeDetector({ formats: ['qr_code'] }); return { detect: function (v) { return d.detect(v); } }; }
+  await snsCargarZX();
+  var hints = new Map(); hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.QR_CODE]); hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  var reader = new ZXing.MultiFormatReader(); reader.setHints(hints);
+  var cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
+  return { detect: async function (vid) {
+    var vw = vid.videoWidth || 0, vh = vid.videoHeight || 0; if (!vw || !vh) return [];
+    var e = Math.min(1, 1280 / vw), w = Math.round(vw * e), h = Math.round(vh * e);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    cx.drawImage(vid, 0, 0, w, h);
+    try { var px = cx.getImageData(0, 0, w, h).data, lum = new Uint8ClampedArray(w * h);
+      for (var i = 0, j = 0; j < lum.length; i += 4, j++) lum[j] = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) | 0;
+      var r = reader.decode(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.RGBLuminanceSource(lum, w, h)))); return [{ rawValue: r.getText() }];
+    } catch (err) { return []; } finally { try { reader.reset(); } catch (e2) {} }
+  } };
+}
+async function snSocioCamara() {
+  if (SNS.stream) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { SNS.ok = false; SNS.msg = 'Este teléfono no abre la cámara desde el navegador. Cobra como siempre.'; snsPintaO(); return; }
+  try {
+    SNS.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    var v = document.getElementById('snSocioVid'); if (!v) { snSocioParaCam(); return; }
+    v.srcObject = SNS.stream; await v.play();
+    try { SNS.det = SNS.det || await snsLector(); } catch (eL) { snSocioParaCam(); SNS.ok = false; SNS.msg = 'No pude preparar el lector de QR. Cobra como siempre.'; snsPintaO(); return; }
+    var giro = async function () {
+      if (!SNS.stream) return;
+      try { var r = await SNS.det.detect(v); if (r && r.length && snSocioLeido(String(r[0].rawValue || ''))) return; } catch (e) {}
+      if (SNS.stream) SNS.timer = setTimeout(giro, 250);
+    };
+    giro();
+  } catch (e) { snSocioParaCam(); SNS.ok = false; SNS.msg = 'No pude abrir la cámara. Revisa el permiso, o cobra como siempre.'; snsPintaO(); }
+}
+/* true = la lettura è finita (la camera si ferma); false = si continua a guardare */
+function snSocioLeido(txt) {
+  txt = txt.trim();
+  if (/[?&]member=|mi_tarjeta\.html/i.test(txt)) { SNS.ok = false; SNS.msg = 'Ese es el QR de la carta. Pídele que abra «Mi tarjeta».'; snsPintaO(); return false; }
+  if (!SNS_TOKEN.test(txt)) { SNS.ok = false; SNS.msg = SNS_ERR.token_forma; snsPintaO(); return false; }
+  snSocioParaCam(); snSocioManda(txt); return true;
+}
+async function snSocioManda(tok) {
+  if (SNS.vuelo || !CB) return;
+  var cbs = CB, x = X(), uid = SNS.uid[tok] || (SNS.uid[tok] = 'sns-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8));
+  SNS.tok = tok; SNS.vuelo = true; SNS.ok = null; snsPintaO();
+  var j = null;
+  try {
+    if (VV.demo) { await new Promise(function (r) { setTimeout(r, 500); }); var id = tok.split('.')[1]; j = id === 'NOVINC' ? { ok: false, error: 'no_vinculado' } : { ok: true, borde: true, esito: 'vinculado', socio: { nombre_visible: id === 'AM2210' ? 'Arthur M.' : 'Socio ' + id } }; }
+    else j = await snPost('vinculaSocio', { codigo: VV.codigo, nombre: VV.nombre, mesa: x.m, token: tok, uid_gesto: uid });
+  } catch (e) { j = { ok: false, error: (e && e.name === 'AbortError') ? 'red' : 'red' }; }
+  SNS.vuelo = false;
+  if (j && j.ok === true) {
+    delete SNS.uid[tok];
+    var d = new Date(), nom = (j.socio && j.socio.nombre_visible) || 'Socio';
+    cbs.socio = { nombre: nom, por: VV.nombre || '', hora: ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) };
+    snSocioCierra(); flash('✓ ' + nom + ' · socio de La Lista'); pinta(); return;
+  }
+  var e = (j && j.error) || 'red';
+  if (e === 'red' || e === 'pg_no_responde') { SNS.ok = false; SNS.msg = 'Sin conexión. Toca «Probar de nuevo»: no se duplica.'; snsPintaO(); return; }   // stesso token ⇒ stesso uid
+  delete SNS.uid[tok]; SNS.tok = ''; SNS.ok = false; SNS.msg = SNS_ERR[e] || ('No se pudo: ' + e); snsPintaO();
+}
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' || !SNS.stream) return;
+  snSocioParaCam();   // in background la camera si chiude; tornando, un tocco la riapre (il permesso vuole un tocco)
+  if (document.getElementById('snSocio') && !SNS.vuelo && !SNS.tok) { SNS.ok = false; SNS.msg = 'La cámara se cerró. Toca «Escanear de nuevo».'; snsPintaO(); }
+});
+
 $('tel').addEventListener('click', function(ev){
   var b=ev.target.closest('[data-a]'); if(!b||!CB) return;
   var a=b.dataset.a, k=b.dataset.k;
   if(a==='chi'){ CB.chi=k; if(k==='tel'){ CB.paso='qr'; if(CL.c==='pagado') clNuevo(CB.pagos.length); } else CB.paso=CB.pagos.length?'que':'pre'; }
   else if(a==='vaiDto'){ CB.ritorno=CB.paso; CB.paso='dto'; }
+  else if(a==='vaiSocio'){ snSocioApri(); return; }   // [27-nov · 🖐 TERZA] la finestra dello scanner sta fuori da pinta(): la camera si apre DENTRO il tocco
   else if(a==='dto'){ CB.dto=k; CB.pin=false; }
   else if(a==='senzaDto'){ CB.dto=null; CB.pin=false; CB.solic=false; CB.paso=CB.ritorno; }
   else if(a==='pinOk'){ if(CB.dto==='conv'){ CB.solic=true; CB.pin=false; CB.paso=CB.ritorno; var cbs=CB; flash('Pedido al JL · te avisa cuando lo apruebe');
@@ -3208,7 +3344,7 @@ $('simLl').onclick=function(){ var s=SIMLL[llI++%SIMLL.length], x=M2(s.m); if(x.
       in un gruppo `multiple` · un'opzione senza prezzo (vuoto ≠ zero, come la sala viva).
    ⚠️ `app:'sala'` NON è un'etichetta: il bordo applica le guardie del mesero (`_soloAsignados`, r.22280 di a8b50d8) SOLO ai gesti con
       `app:'sala'`. Mandare un altro nome le salterebbe. La versione della sala nueva viaggia in `cli_ver`. */
-var SN_VER = 'sala_nueva v0.15.98.22';
+var SN_VER = 'sala_nueva v0.15.98.22.1';
 var SN = { cartaOk: false, cartaErr: '', catalogo: [], porNombre: {}, fuera: {}, plazasSalud: null, cola: [], enVuelo: false };
 var SN_MODS2_ON = false, SN_MODS2_VOC = null, SN_MODS2_RECARGO = null, SN_TERMINO_OPS = [];
 (function () {
@@ -3297,6 +3433,7 @@ function snLeggiSalud() {
     SN.atto1 = leva('caja_atto1_on') === '1';                    /* [v0.15.29] MI CORTE: il contante è la somma dei ritiri firmati (ATTO I) */
     SN.corteBorde = leva('corte_borde_on') === '1';              /* il corte lo calcola il bordo (CERRARMESERO_BORDE_ON e CAJA_ATTO1_ON) */
     SN.corteTras = leva('corte_traspaso_borde_on') === '1';      /* il corte CON mesas da passare al bordo */
+    SN.vinculaSocio = snSoloPlazaLeva(leva('vincula_socio_on'));   /* [27-nov · 🖐 TERZA] «📷 ¿Es socio de La Lista?»: "" spenta (nessun bottone) · "1" · elenco di locali */
     SN.corteJl = leva('corte_senza_erede_jl_on') === '1';        /* la mesa senza erede va al JL */
     SN.dtoAut = snSoloPlazaLeva(leva('descuento_aut_on'));   /* [v0.15.27 · AUT-1109] il descuento autorizzato dal JL (DESCUENTO_AUT_ON: elenco di locali) */
     SN.jlJunta = snSoloPlazaLeva(leva('jl_junta_on'));   /* [v0.15.74 · D-566] il JL junta e separa firmato col suo PIN (⚙️ JL_JUNTA_ON, elenco di locali) */
