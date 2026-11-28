@@ -195,7 +195,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.32</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.33</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -1735,10 +1735,13 @@ var CP = { ts: 0, volo: false, r: null, err: '', sel: null, para: '', mot: '', c
 var CP_PARA = ['Daniela', 'Elisa', 'Ale', 'Kele', 'Nea', 'Alberto'];   // la stessa lista della sala (sala_nueva SN_FAM_PARA, sala.html DTO_FAMILIA)
 var CP_ERR = { codigo_fam_invalido: 'El código FAM no vale.', conto_de_hoy: 'Esa cuenta es de hoy: se cobra desde la mesa.', conto_muerto: 'Esa cuenta ya estaba cerrada.',
   motivo_corto: 'El motivo es muy corto (mínimo 8 letras).', pin_jl_invalido: 'Tu PIN no vale ahora: vuelve a entrar.', pg_no_responde: 'El sistema no responde: inténtalo en un minuto.', apagado: 'Todavía no está activo.' };
-function cpOn() { return !DEMO && salLocale('cuentas_pasadas_on'); }
+function cpOn() { return !DEMO && salLocale('conti_pasados_on'); }   // [v0.6.33] il nome di ⚙️ (CONTI_PASADOS_ON)
+function cpLista(r) { var l = r && (Array.isArray(r.conti) ? r.conti : Array.isArray(r.cuentas) ? r.cuentas : null); return l; }   // ⚙️: «per riga conto_id, giorno, mesa, meseros, consumo…»
+function cpDia(c) { return String((c && (c.giorno || c.dia || c.giorno_operativo)) || '').slice(0, 10); }
+function cpMes(c) { return c ? (Array.isArray(c.meseros) ? c.meseros.join(', ') : String(c.mesero || c.meseros || '')) : ''; }
 async function cpCarga() {
   if (CP.volo) return; CP.volo = true;
-  try { var r = await cjPost({ verbo: 'cuentas_pasadas', pin_jl: SES.pin }); if (r && r.ok && Array.isArray(r.cuentas)) { CP.r = r; CP.err = ''; } else CP.err = (r && (r.error || r.motivo)) || 'pg_no_responde'; }
+  try { var r = await cjPost({ verbo: 'conti_pasados', pin_jl: SES.pin }); if (r && r.ok && cpLista(r)) { CP.r = r; CP.err = ''; } else CP.err = (r && (r.error || r.motivo)) || 'pg_no_responde'; }
   catch (e) { CP.err = e && e.message === 'timeout' ? 'pg_no_responde' : 'pg_no_responde'; }
   CP.volo = false; CP.ts = Date.now(); jlPinta(true);
 }
@@ -1747,11 +1750,11 @@ function cpCard() {
   if (!CP.volo && Date.now() - CP.ts > 60000) setTimeout(cpCarga, 0);
   var h = '<div class="vetro"><h4>Cuentas abiertas de días pasados</h4>' + (CP.msg ? '<p' + (/^✓/.test(CP.msg) ? '' : ' style="color:var(--urge)"') + '>' + esc(CP.msg) + '</p>' : '');
   if (!CP.r) return h + '<p class="vacio">' + (CP.err ? '⚠️ ' + esc(CP_ERR[CP.err] || CP.err) : 'Cargando…') + '</p></div>';
-  var cs = CP.r.cuentas || [];
+  var cs = cpLista(CP.r) || [];
   if (!cs.length) return h + '<p class="vacio">No hay cuentas abiertas de días pasados.</p></div>';
   cs.forEach(function (c) { var id = String(c.conto_id || ''); if (!id) return; var sel = CP.sel === id;
     h += '<div style="border-top:1px solid var(--filo);margin-top:8px;padding-top:6px"><div class="riga" style="border:0;padding:2px 0"><span><b>Mesa ' + esc(c.mesa) + '</b>' + (c.prueba ? ' · prueba' : '') +
-      '<small>' + esc(c.dia || '') + (c.mesero ? ' · ' + esc(c.mesero) : '') + '</small></span><span class="st num">' + pesos(c.consumo || 0) + '</span></div>';
+      '<small>' + esc(cpDia(c)) + (cpMes(c) ? ' · ' + esc(cpMes(c)) : '') + '</small></span><span class="st num">' + pesos(c.consumo || 0) + '</span></div>';
     if (!sel) { h += '<div class="fila2"><button class="azione" style="margin-top:4px" data-a="cpAbre" data-k="' + esc(id) + '">Cerrar como FAM</button></div></div>'; return; }
     h += '<p style="font-size:13px;margin:6px 0 4px">¿Para quién?</p><div class="fila2" style="flex-wrap:wrap">' + CP_PARA.map(function (p) {
         return '<button class="azione' + (CP.para === p ? ' oro' : '') + '" style="margin:2px;flex:0 0 auto" data-a="cpPara" data-k="' + esc(p) + '">' + esc(p) + '</button>'; }).join('') + '</div>' +
@@ -1762,7 +1765,7 @@ function cpCard() {
 }
 async function cpCierra() {
   var id = CP.sel; if (!id || CP.invio) return;
-  var c = ((CP.r && CP.r.cuentas) || []).filter(function (x) { return String(x.conto_id) === id; })[0]; if (!c) { CP.sel = null; jlPinta(true); return; }
+  var c = (cpLista(CP.r) || []).filter(function (x) { return String(x.conto_id) === id; })[0]; if (!c) { CP.sel = null; jlPinta(true); return; }
   if (!CP.para && !c.prueba) { CP.msg = '⚠️ Elige para quién es.'; jlPinta(true); return; }
   if (String(CP.mot || '').trim().length < 8) { CP.msg = '⚠️ ' + CP_ERR.motivo_corto; jlPinta(true); return; }
   if (!String(CP.cod || '').trim()) { CP.msg = '⚠️ Falta el código FAM.'; jlPinta(true); return; }
@@ -1770,7 +1773,7 @@ async function cpCierra() {
   CP.invio = true; CP.msg = ''; jlPinta(true); var r = null;
   try { r = await cjPost({ verbo: 'fam_conto_pasado', pin_jl: SES.pin, conto_id: id, para: CP.para, motivo: String(CP.mot).trim(), codigo_fam: String(CP.cod).trim(), uid_gesto: CP.uid[id], prueba: !!c.prueba }); } catch (e) { r = null; }
   CP.invio = false; CP.cod = '';   // il código non resta nel telefono, nemmeno dopo un no
-  if (r && r.ok) { CP.msg = '✓ Mesa ' + c.mesa + ' del ' + (c.dia || '') + ' cerrada como FAM'; CP.sel = null; CP.para = ''; CP.mot = ''; delete CP.uid[id]; CP.ts = 0; }
+  if (r && r.ok) { CP.msg = '✓ Mesa ' + c.mesa + ' del ' + cpDia(c) + ' cerrada como FAM'; CP.sel = null; CP.para = ''; CP.mot = ''; delete CP.uid[id]; CP.ts = 0; }
   else CP.msg = '⚠️ ' + (r ? (r.mensaje || CP_ERR[r.error] || r.error || 'No se pudo') : 'No llegó al sistema: vuelve a tocar, no se cierra dos veces');
   jlPinta(true);
 }
