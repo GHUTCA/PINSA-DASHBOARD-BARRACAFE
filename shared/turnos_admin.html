@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Turnos — PINSA</title>
+<meta name="ver" content="turnos_admin v2.1 · 28-nov · i dati del personale solo in POST col token della sesión (TURNOS_TOKEN_ON del GAS)">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -1620,6 +1621,21 @@ const GAS_URL = 'https://script.google.com/macros/s/AKfycbxV1iza1ee0keqQAqfwysVW
 
 // Cervello condiviso dei turni (struttura: locali, skills, cobertura, params globali).
 // Separato dal GAS_URL dei dati: PERSONAL/TURNOS restano sul GAS de arriba.
+/* [28-nov · ⚙️ ARQ V35 · 🎛 V35 «LA PORTA getPersonal SI CHIUDE»] le letture e le scritture con RUT o teléfono vanno in POST col token della
+   sesión (PinsitaAuth.firma()): il GAS TURNOS le rifiuta in GET e senza un cargo di gestión. Il token non va mai nell'URL. */
+function tokTurnos() { try { return (window.PinsitaAuth && PinsitaAuth.firma && PinsitaAuth.firma()) || ''; } catch (e) { return ''; } }
+let _avisoNoAut = false;
+function avisoNoAutorizado(d) {
+  if (d && d.ok === false && /no_autorizado/.test(String(d.error || '')) && !_avisoNoAut) {
+    _avisoNoAut = true;
+    try { mostrarToast('Tu sesión no permite ver los datos del personal: entra de nuevo con tu PIN.', 'error'); } catch (e) {}
+  }
+  return d;
+}
+function postTurnos(payload) {
+  return fetch(GAS_URL, { method: 'POST', body: JSON.stringify(Object.assign({ local: LOCAL }, payload, { token: tokTurnos() })) })
+    .then(function (r) { return r.json(); }).then(avisoNoAutorizado);
+}
 const GAS_MAESTRO_URL = 'https://script.google.com/macros/s/AKfycbwBoGwoe9_BADNlzxZnwzrlsSZNTTHvoAuj82KN3X1xiocnhGVViwomp4Yyd-AIztvgKA/exec';
 
 const MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -1978,7 +1994,7 @@ async function cargarTurnosMes() {
     const anioNext = mesActual === 12 ? anioActual + 1 : anioActual;
 
     const [resPersonal, resTurnos, resPrev, resNext] = await Promise.all([
-      fetch(`${GAS_URL}?local=${LOCAL}&accion=getPersonal`).then(r=>r.json()),
+      postTurnos({ accion: 'getPersonal' }),
       fetch(`${GAS_URL}?local=${LOCAL}&accion=getTurnos&mes=${mesActual}&anio=${anioActual}`).then(r=>r.json()),
       fetch(`${GAS_URL}?local=${LOCAL}&accion=getTurnos&mes=${mesPrev}&anio=${anioPrev}`).then(r=>r.json()),
       fetch(`${GAS_URL}?local=${LOCAL}&accion=getTurnos&mes=${mesNext}&anio=${anioNext}`).then(r=>r.json())
@@ -2373,8 +2389,7 @@ function compartirSemana() {
 // ══════════════════════════════════════
 async function cargarPersonal() {
   try {
-    const res  = await fetch(`${GAS_URL}?local=${LOCAL}&accion=getPersonal`);
-    const data = await res.json();
+    const data = await postTurnos({ accion: 'getPersonal' });
     personal   = data.personal || [];
     renderPersonal();
   } catch(e) {
@@ -3017,6 +3032,7 @@ async function guardarRegistro() {
   };
 
   try {
+    payload.token = tokTurnos();   // [28-nov · TURNOS_TOKEN_ON]
     const res  = await fetch(GAS_URL, { method:'POST', body: JSON.stringify(payload) });
     const data = await res.json();
     if (data.ok) {
@@ -3048,9 +3064,7 @@ async function cargarRegistros() {
   const filtroId = selF ? selF.value : '';
 
   try {
-    const url = `${GAS_URL}?local=${LOCAL}&accion=getRegistros${filtroId ? '&id_personal='+filtroId : ''}`;
-    const res = await fetch(url);
-    const data = await res.json();
+    const data = await postTurnos(filtroId ? { accion: 'getRegistros', id_personal: filtroId } : { accion: 'getRegistros' });
     registrosCache = data.registros || [];
     pintarRegistros(registrosCache);
   } catch(e) {
@@ -3139,10 +3153,7 @@ BORRADOR generado por el sistema. Revisar antes de enviar.`;
 async function marcarCartaEnviada(idRegistro) {
   if (!confirm('¿Marcar la carta como enviada a la DT? Esto solo actualiza el registro.')) return;
   try {
-    const res = await fetch(GAS_URL, { method:'POST', body: JSON.stringify({
-      local: LOCAL, accion: 'guardarRegistro', id_registro: idRegistro, carta_dt: true
-    })});
-    const data = await res.json();
+    const data = await postTurnos({ accion: 'guardarRegistro', id_registro: idRegistro, carta_dt: true });
     if (data.ok) { mostrarToast('Marcado ✓', 'ok'); cargarRegistros(); }
     else mostrarToast(data.error || 'Error', 'err');
   } catch(e) { mostrarToast('Error de conexión', 'err'); }
@@ -3421,8 +3432,9 @@ async function guardarPersonal() {
   }
 
   try {
+    payload.token = tokTurnos();   // [28-nov · TURNOS_TOKEN_ON]
     const res  = await fetch(GAS_URL, { method:'POST', body: JSON.stringify(payload) });
-    const data = await res.json();
+    const data = avisoNoAutorizado(await res.json());
     if (data.ok) {
       let msg = data.accion === 'creado' ? 'Persona agregada ✓' : 'Actualizado ✓';
       if (!activo) {
@@ -3455,7 +3467,7 @@ async function cargarSkills() {
   try {
     // personal puede no estar cargado si se entra directo a la tab
     if (!personal || personal.length === 0) {
-      const rp = await fetch(`${GAS_URL}?local=${LOCAL}&accion=getPersonal`).then(r=>r.json());
+      const rp = await postTurnos({ accion: 'getPersonal' });
       personal = rp.personal || [];
     }
     const res  = await fetch(`${GAS_MAESTRO_URL}?local=${LOCAL}&accion=getSkills`);
@@ -3715,7 +3727,7 @@ async function cargarGenerar() {
   // personal para las excepciones
   if (!personal || personal.length === 0) {
     try {
-      const rp = await fetch(`${GAS_URL}?local=${LOCAL}&accion=getPersonal`).then(r=>r.json());
+      const rp = await postTurnos({ accion: 'getPersonal' });
       personal = rp.personal || [];
     } catch(e) {}
   }
@@ -4463,7 +4475,7 @@ async function generarBorrador() {
 async function asegurarInputsMotor(periodo) {
   // personal
   if (!personal || personal.length === 0) {
-    const rp = await fetch(`${GAS_URL}?local=${LOCAL}&accion=getPersonal`).then(r=>r.json());
+    const rp = await postTurnos({ accion: 'getPersonal' });
     personal = rp.personal || [];
   }
   // parametros + turnosDef
