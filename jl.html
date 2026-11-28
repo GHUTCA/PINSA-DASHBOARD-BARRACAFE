@@ -195,7 +195,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.31</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.32</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -1724,7 +1724,55 @@ function caja() {
   if (cjEnRetiro() && cjListaRet().length) return h + cjRetiro(st);
   if (CJ.fin && !cjListaRet().length) CJ.fin = false;
   var sob = cjSobre(st);
-  return h + (sob ? cjEsitiLista() + sob : cjCierres());
+  return h + (sob ? cjEsitiLista() + sob : cjCierres()) + cpCard();   // [v0.6.32] le cuentas dei giorni passati
+}
+/* ═══ [28-nov · jl v0.6.32 · 🛎 SALA V35 · 🎛 V35 «I CONTI DEI GIORNI PASSATI SONO VIVI IN PG MA IL JL NON LI VEDE»] ═══
+   Cinque conti vivi del 24-26 nov sulle mesas della casa (194-196, 82) e le prove 997/998: il JL non li vedeva e non poteva chiuderli. Qui una riga per
+   CONTO (`conto_id`), mai per mesa: la 194 ne ha due vivi, del 25 e del 26. «Cerrar como FAM» chiude QUEL conto a $0 col medio FAM (il consumo resta
+   scritto): per chi (la lista FAM della sala), il perché (≥ 8) e il código FAM, col PIN del JL della sessione. La chiave del gesto la conia il vetro
+   una volta per riga (un ritento non chiude due volte). Il código non resta nel telefono. Leva `cuentas_pasadas_on` spenta ⇒ la card non c'è. */
+var CP = { ts: 0, volo: false, r: null, err: '', sel: null, para: '', mot: '', cod: '', uid: {}, msg: '', invio: false };
+var CP_PARA = ['Daniela', 'Elisa', 'Ale', 'Kele', 'Nea', 'Alberto'];   // la stessa lista della sala (sala_nueva SN_FAM_PARA, sala.html DTO_FAMILIA)
+var CP_ERR = { codigo_fam_invalido: 'El código FAM no vale.', conto_de_hoy: 'Esa cuenta es de hoy: se cobra desde la mesa.', conto_muerto: 'Esa cuenta ya estaba cerrada.',
+  motivo_corto: 'El motivo es muy corto (mínimo 8 letras).', pin_jl_invalido: 'Tu PIN no vale ahora: vuelve a entrar.', pg_no_responde: 'El sistema no responde: inténtalo en un minuto.', apagado: 'Todavía no está activo.' };
+function cpOn() { return !DEMO && salLocale('cuentas_pasadas_on'); }
+async function cpCarga() {
+  if (CP.volo) return; CP.volo = true;
+  try { var r = await cjPost({ verbo: 'cuentas_pasadas', pin_jl: SES.pin }); if (r && r.ok && Array.isArray(r.cuentas)) { CP.r = r; CP.err = ''; } else CP.err = (r && (r.error || r.motivo)) || 'pg_no_responde'; }
+  catch (e) { CP.err = e && e.message === 'timeout' ? 'pg_no_responde' : 'pg_no_responde'; }
+  CP.volo = false; CP.ts = Date.now(); jlPinta(true);
+}
+function cpCard() {
+  if (!cpOn()) return '';
+  if (!CP.volo && Date.now() - CP.ts > 60000) setTimeout(cpCarga, 0);
+  var h = '<div class="vetro"><h4>Cuentas abiertas de días pasados</h4>' + (CP.msg ? '<p' + (/^✓/.test(CP.msg) ? '' : ' style="color:var(--urge)"') + '>' + esc(CP.msg) + '</p>' : '');
+  if (!CP.r) return h + '<p class="vacio">' + (CP.err ? '⚠️ ' + esc(CP_ERR[CP.err] || CP.err) : 'Cargando…') + '</p></div>';
+  var cs = CP.r.cuentas || [];
+  if (!cs.length) return h + '<p class="vacio">No hay cuentas abiertas de días pasados.</p></div>';
+  cs.forEach(function (c) { var id = String(c.conto_id || ''); if (!id) return; var sel = CP.sel === id;
+    h += '<div style="border-top:1px solid var(--filo);margin-top:8px;padding-top:6px"><div class="riga" style="border:0;padding:2px 0"><span><b>Mesa ' + esc(c.mesa) + '</b>' + (c.prueba ? ' · prueba' : '') +
+      '<small>' + esc(c.dia || '') + (c.mesero ? ' · ' + esc(c.mesero) : '') + '</small></span><span class="st num">' + pesos(c.consumo || 0) + '</span></div>';
+    if (!sel) { h += '<div class="fila2"><button class="azione" style="margin-top:4px" data-a="cpAbre" data-k="' + esc(id) + '">Cerrar como FAM</button></div></div>'; return; }
+    h += '<p style="font-size:13px;margin:6px 0 4px">¿Para quién?</p><div class="fila2" style="flex-wrap:wrap">' + CP_PARA.map(function (p) {
+        return '<button class="azione' + (CP.para === p ? ' oro' : '') + '" style="margin:2px;flex:0 0 auto" data-a="cpPara" data-k="' + esc(p) + '">' + esc(p) + '</button>'; }).join('') + '</div>' +
+      '<input id="cpMot" placeholder="Motivo (mínimo 8 letras)" autocomplete="off" value="' + esc(CP.mot) + '" oninput="CP.mot=this.value" style="width:100%;margin-top:6px">' +
+      '<input id="cpCod" type="password" placeholder="Código FAM" autocomplete="off" data-1p-ignore data-lpignore="true" value="' + esc(CP.cod) + '" oninput="CP.cod=this.value" style="width:100%;margin-top:6px">' +
+      '<div class="fila2"><button class="azione" style="margin-top:6px" data-a="cpNo">Volver</button><button class="azione oro" style="margin-top:6px" data-a="cpSi"' + (CP.invio ? ' disabled' : '') + '>' + (CP.invio ? '…' : 'Cerrar como FAM · ' + pesos(c.consumo || 0)) + '</button></div></div>'; });
+  return h + '<p style="font-size:11px;color:var(--ink3);margin-top:6px">Una cuenta a la vez. Se cierra en $0 como FAM: lo consumido queda escrito, sin boleta ni propina.</p></div>';
+}
+async function cpCierra() {
+  var id = CP.sel; if (!id || CP.invio) return;
+  var c = ((CP.r && CP.r.cuentas) || []).filter(function (x) { return String(x.conto_id) === id; })[0]; if (!c) { CP.sel = null; jlPinta(true); return; }
+  if (!CP.para && !c.prueba) { CP.msg = '⚠️ Elige para quién es.'; jlPinta(true); return; }
+  if (String(CP.mot || '').trim().length < 8) { CP.msg = '⚠️ ' + CP_ERR.motivo_corto; jlPinta(true); return; }
+  if (!String(CP.cod || '').trim()) { CP.msg = '⚠️ Falta el código FAM.'; jlPinta(true); return; }
+  if (!CP.uid[id]) CP.uid[id] = 'cp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);   // la chiave dal lato che ripete
+  CP.invio = true; CP.msg = ''; jlPinta(true); var r = null;
+  try { r = await cjPost({ verbo: 'fam_conto_pasado', pin_jl: SES.pin, conto_id: id, para: CP.para, motivo: String(CP.mot).trim(), codigo_fam: String(CP.cod).trim(), uid_gesto: CP.uid[id], prueba: !!c.prueba }); } catch (e) { r = null; }
+  CP.invio = false; CP.cod = '';   // il código non resta nel telefono, nemmeno dopo un no
+  if (r && r.ok) { CP.msg = '✓ Mesa ' + c.mesa + ' del ' + (c.dia || '') + ' cerrada como FAM'; CP.sel = null; CP.para = ''; CP.mot = ''; delete CP.uid[id]; CP.ts = 0; }
+  else CP.msg = '⚠️ ' + (r ? (r.mensaje || CP_ERR[r.error] || r.error || 'No se pudo') : 'No llegó al sistema: vuelve a tocar, no se cierra dos veces');
+  jlPinta(true);
 }
 /* ═══ CSH · IL MOTORE «¿CÓMO SE HACE?» v1 · 🖐 TERZA V35 · 27-nov-2026 · AUT-1220 (dettato da Alberto 26-nov, storyboard 🎨 n. 1 e n. 2) ═══
    COPIA IDENTICA in sala_nueva.html e jl.html: chi la cambia la cambia in tutte e due (md5 dichiarato in bacheca).
@@ -2625,6 +2673,10 @@ document.querySelector('.app').addEventListener('click', function (ev) {
   else if (a === 'prNo') { PR.conf = null; jlPinta(true); }
   else if (a === 'prSi') { if (PR.conf) prSet(PR.conf); }
   else if (a === 'cjReg') { CJ.reg = !CJ.reg; updateDock(); }
+  else if (a === 'cpAbre') { CP.sel = el.getAttribute('data-k'); CP.para = ''; CP.mot = ''; CP.cod = ''; CP.msg = ''; jlPinta(true); }   // [v0.6.32]
+  else if (a === 'cpPara') { CP.para = el.getAttribute('data-k'); jlPinta(true); }
+  else if (a === 'cpNo') { CP.sel = null; CP.cod = ''; CP.msg = ''; jlPinta(true); }
+  else if (a === 'cpSi') { cpCierra(); }
   else if (a === 'cjCie') { CJ.cie = el.getAttribute('data-k'); CJ.msg = ''; jlPinta(true); document.getElementById('body').scrollTop = 0; }
   else if (a === 'cjFin') { CJ.fin = true; CJ.ret = null; CJ.msg = ''; jlPinta(true); document.getElementById('body').scrollTop = 0; }
   else if (a === 'sala') { try { if (SES.codigo) sessionStorage.setItem('jl_codigo', SES.codigo); if (SES.pin) sessionStorage.setItem('jl_pin', SES.pin); if (SES.user) sessionStorage.setItem('jl_user', SES.user); if (SES.nombre) sessionStorage.setItem('jl_nombre', SES.user + '|' + SES.nombre); else sessionStorage.removeItem('jl_nombre'); } catch (e) {} }   // la nueva legge la sessione: si scrive prima di uscire
