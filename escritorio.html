@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- DEVICE-CLASS: 2 · lavoro da scrivania (PC) -->
-<!-- ═══ [28-nov-2026 · v0.1.0 · 🖐 TERZA V35 · 🎛 «LA SCRIVANIA DI MAYRA CORRE DA ORA» ⑤] TU ESCRITORIO · la scrivania di Mayra ═══
+<!-- ═══ [28-nov-2026 · v0.2.0 · 🖐 TERZA V35 · 🎛 «LA SCRIVANIA DI MAYRA CORRE DA ORA» ⑤] TU ESCRITORIO · la scrivania di Mayra ═══
      Dal mockup di 🎨 (`4_CANTIERE_ADMINISTRACION/MOCKUP_SCRIVANIA_MAYRA_28NOV2026.html`) e dal brief di 🧾 (`BRIEF_SCRIVANIA_MAYRA_28NOV2026.md`).
      Ogni mattina: cosa manca da caricare, in ordine di denaro. Mayra lascia cadere il file SULLA RIGA e vede subito una di quattro risposte
      (Llegó · Ya estaba · Rechazado · Leyendo). Una riga sparisce quando la sua fonte diventa automatica.
@@ -77,24 +77,30 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
 <div id="app"></div>
 <script>
 'use strict';
-var ESC_VER = 'escritorio v0.1.0';
+var ESC_VER = 'escritorio v0.2.0';
 var CFG = { BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev' };
 var QS = new URLSearchParams(location.search);
 var DEMO = QS.get('demo') === '1';
-/* ═══ ESC_API · i nomi dei contratti, in un posto solo ═══
-   · login: `POST /auth/login` {pin, rol:'carga'} → {ok, token, nombre}  (PROPOSTO, ⚙️ dice il nome vero: ramo `auth.js` mar 1)
-   · lista: `GET /carga/pendientes` (Authorization: Bearer) → {ok, datos_al, filas:[…], hoy:{archivos, filas}, proximos:[texto]}  (PROPOSTO, 🖐 QUARTA/⚙️)
-       fila = {id, grupo:'cartolas'|'casa', empresa, en_juego, sub, tipo, cartella, cuenta4, titulo, desde, hasta, ultimo, dias, urgencia:'r'|'a',
-               por_mes:[…], detalle, se_carga_solo, espera, ejemplo, acepta:'archivo'|'foto'}
-   · carga: `POST /carga/<cartella>` {nombre, sha256, bytes, filas, cuenta4} → {esito:'caricato'|'gia_caricato'|'rifiutato', nuove, gia, scarto, motivo, mensaje, desde, hasta}
-       (⚙️ 21-nov + 🚚; `cuenta4`, `desde`/`hasta` e `mensaje` sono la mia domanda a 🖐 QUARTA) */
+/* ═══ ESC_API · i contratti, in un posto solo ═══
+   · `/auth` (⚙️, bacheca «PER LA PAGINA DI MAYRA: IL CONTRATTO», letto in `src/auth.js` @c33af2f): `POST /auth` JSON con `accion`.
+       lista_usuarios {local:'todos'} → {usuarios:[{persona_id, nombre, cargo, foto, tiene_pin, local}]} (senza token) ·
+       login {persona_id, pin, local:'todos', dispositivo} → {ok, primer_acceso, cargo, token, pid} · primer_acceso:true ⇒ set_pin
+       {persona_id, codigo (6), pin_nuevo, dispositivo}. Errori: pin_errado · bloqueado(hasta) · inactivo · no_existe · pin_invalido · codigo_invalido ·
+       pin_no_disponible · 503 auth_pg_off (spento). Il token va in `Authorization: Bearer`, in sessionStorage. Mai PIN o codice salvati.
+   · la lista: `GET /carga/pendientes` (🖐 QUARTA, Bearer) = il JSON di `lista_mattina.mjs --json` (🧾, contratto in fondo a quel file):
+       {generado, pie, saludo, filas:[{orden, empresa, en_juego, tipo, cartella, cuenta_ult4, titulo, dias, ultimo, desde, hasta, detalle, auto, urgencia}],
+        casa:[{empresa, tipo, cartella, titulo, detalle, sin_medida, por_que}]}. Si accetta anche dentro `{ok, …}`.
+   · il carico: `POST /carga/<cartella>` (⚙️ 21-nov + correzioni 28-nov, 🖐 QUARTA): Bearer · {nombre, sha256, bytes, filas, cuenta4} →
+       {esito:'caricato'|'gia_caricato'|'rifiutato', nuove, gia, scarto, motivo, mensaje, desde, hasta}. `cuenta4` e `desde/hasta`: sì del 🎛.
+       Rifiuti noti: cartella_no_permitida · archivo_grande (2 MB / 20.000 righe) · cuenta_otra. */
 var ESC_API = {
-  login: function () { return CFG.BORDE + '/auth/login'; },
+  auth: function () { return CFG.BORDE + '/auth'; },
   lista: function () { return CFG.BORDE + '/carga/pendientes'; },
   carga: function (cartella) { return CFG.BORDE + '/carga/' + encodeURIComponent(cartella); },
   salud: function () { return CFG.BORDE + '/salud'; }
 };
-var S = { token: '', nombre: '', lev: null, lista: null, err: '', res: {}, hoy: { archivos: 0, filas: 0 }, cargando: false, pinErr: '', entrando: false };
+var ESC_MAX_BYTES = 2 * 1024 * 1024, ESC_MAX_FILAS = 20000;   // i tetti di ⚙️ per chiamata: si dicono prima, non si scoprono dopo
+var S = { token: '', nombre: '', lev: null, lista: null, err: '', res: {}, hoy: { archivos: 0, filas: 0 }, cargando: false, pinErr: '', entrando: false, usuarios: null, chi: null, primo: false };
 try { S.token = sessionStorage.getItem('esc_token') || ''; S.nombre = sessionStorage.getItem('esc_nombre') || ''; } catch (e) {}
 var CARGA_QS = (function () { var q = QS.get('carga'); try { if (q === '1' || q === '0') localStorage.setItem('esc_carga_qs', q); return localStorage.getItem('esc_carga_qs') || ''; } catch (e) { return q || ''; } })();
 function escLevaOn() { if (DEMO) return true; if (CARGA_QS === '0') return false; if (S.lev != null) return S.lev; return CARGA_QS === '1'; }
@@ -120,13 +126,52 @@ async function escLeva() {
   var v = j.flags && j.flags.carga_cartelle_on; if (v == null) return;   // senza la chiave decide `?carga=`
   v = String(v).trim().toUpperCase(); S.lev = !!v && v !== '0' && v !== 'FALSE';
 }
-async function escEntra(pin) {
-  if (DEMO) return { ok: true, token: 'demo', nombre: 'Mayra' };
-  return escFetch(ESC_API.login(), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pin: pin, rol: 'carga' }) }, 8000);
+function escDisp() { try { var d = localStorage.getItem('esc_disp'); if (!d) { d = 'pc-escritorio-' + Math.random().toString(36).slice(2, 8); localStorage.setItem('esc_disp', d); } return d; } catch (e) { return 'pc-escritorio'; } }
+function escAuthPost(body) {
+  if (DEMO) return Promise.resolve(escDemoAuth(body));
+  return escFetch(ESC_API.auth(), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, 8000);
+}
+async function escUsuarios() {
+  var r = await escAuthPost({ accion: 'lista_usuarios', local: 'todos' });
+  if (r && r.ok && Array.isArray(r.usuarios)) {
+    var u = r.usuarios.filter(function (x) { return x && x.cargo === 'carga'; });   // la scrivania è di chi carica: se non c'è nessuno col ruolo, si vedono tutti
+    S.usuarios = u.length ? u : r.usuarios; S.pinErr = '';
+  } else S.pinErr = escAuthErr(r);
+  if (S.usuarios && S.usuarios.length === 1) S.chi = S.usuarios[0];
+}
+var ESC_AUTH_ERR = { pin_errado: 'Ese PIN no es. Escríbelo de nuevo: después de varios intentos se bloquea.', inactivo: 'Tu usuario no está activo. Avísale a Alberto.',
+  no_existe: 'No te encontramos. Avísale a Alberto.', nombre_ambiguo: 'Hay dos personas con ese nombre. Avísale a Alberto.', persona_id_invalido: 'No te encontramos. Avísale a Alberto.',
+  pin_invalido: 'El PIN nuevo tiene que tener 4 números.', codigo_invalido: 'Ese código no sirve o ya venció (dura 24 horas). Pídele uno nuevo a Alberto.',
+  pin_no_disponible: 'Ese PIN no se puede usar. Elige otro.', auth_pg_off: 'La entrada todavía no está encendida. Alberto te avisa cuando puedas entrar.' };
+function escAuthErr(r) {
+  if (!r || r._rete) return 'Sin conexión: inténtalo de nuevo.';
+  var e = r.error || '';
+  if (e === 'bloqueado') return 'Tu PIN quedó bloqueado por muchos intentos' + (r.hasta ? ' hasta las ' + hora(r.hasta) : '') + '. Si no puedes esperar, avísale a Alberto.';
+  return ESC_AUTH_ERR[e] || 'No pudimos entrar. Inténtalo de nuevo; si vuelve a pasar, avísale a Alberto.';
+}
+/* la sessione di /auth: il token in sessionStorage (il PC è del locale), il nome per il saluto */
+function escDentro(r) {
+  S.token = String(r.token); S.nombre = String((S.chi && S.chi.nombre) || r.nombre || ''); S.primo = false; S.pinErr = '';
+  try { sessionStorage.setItem('esc_token', S.token); sessionStorage.setItem('esc_nombre', S.nombre); } catch (e) {}
 }
 async function escLista() {
-  if (DEMO) return JSON.parse(JSON.stringify(ESC_DEMO.lista));
-  return escFetch(ESC_API.lista(), { headers: escAuth() }, 10000);
+  var j = DEMO ? JSON.parse(JSON.stringify(ESC_DEMO.lista)) : await escFetch(ESC_API.lista(), { headers: escAuth() }, 10000);
+  return escNormalizza(j);
+}
+/* la lista di 🧾 (`lista_mattina.mjs --json`) → le righe della pagina. Un posto solo: se cambia un nome, cambia qui. */
+function escNormalizza(j) {
+  if (!j || j._rete || j._status === 401 || j._status === 403 || !Array.isArray(j.filas)) return j;
+  var out = { _status: j._status, pie: j.pie || '', generado: j.generado || '', filas: [] };
+  j.filas.forEach(function (f) {
+    out.filas.push({ id: [f.cartella, f.empresa, f.cuenta_ult4 || f.tipo].join('|'), grupo: 'cartolas', orden: f.orden, empresa: f.empresa, en_juego: f.en_juego,
+      tipo: f.tipo, cartella: f.cartella, cuenta4: f.cuenta_ult4 || null, titulo: f.titulo, dias: f.dias, ultimo: f.ultimo, desde: f.desde, hasta: f.hasta,
+      detalle: f.detalle, se_carga_solo: f.auto || null, urgencia: f.urgencia === 'alta' ? 'r' : 'a', nunca: f.dias == null });
+  });
+  (j.casa || []).forEach(function (f, i) {
+    out.filas.push({ id: ['casa', f.cartella, f.empresa, i].join('|'), grupo: 'casa', orden: 1000 + i, empresa: f.empresa, sub: f.tipo === 'estado_mp' ? 'Mercado Pago' : '',
+      tipo: f.tipo, cartella: f.cartella, titulo: f.titulo, detalle: f.detalle, sin_medida: !!f.sin_medida, acepta: f.tipo === 'caja' ? 'foto' : 'archivo' });
+  });
+  return out;
 }
 async function escCarga(cartella, body) {
   if (DEMO) return escDemoCarga(cartella, body);
@@ -177,7 +222,9 @@ async function escLeggi(file) {
 var ESC_MOTIVO = {
   formato: ['No pudimos leerlo', 'Súbelo como Excel (.xlsx) o CSV, como lo baja el banco o el SII.'],
   vacio: ['No pudimos leerlo', 'El archivo no tiene filas. ¿Es el archivo correcto? Inténtalo de nuevo; si vuelve a fallar, avísale a Alberto.'],
+  archivo_grande: ['El archivo es muy grande', 'Bájalo por mes (un archivo por mes) y suelta cada uno en esta fila. No se guardó nada.'],
   cuenta_otra: ['No es la cuenta de esta fila', 'Bájalo de nuevo desde la cuenta que dice la fila.'],
+  cartella_no_permitida: ['Esta fila no es tuya', 'Tu usuario no puede subir aquí. Avísale a Alberto. No se guardó nada.'],
   cartella_sin_tabla: ['Esta fila todavía no recibe archivos', 'Avísale a Alberto: no se guardó nada.'],
   columnas: ['No pudimos leerlo', 'Faltan columnas que esperamos. ¿Lo bajaste en Excel desde el banco? Inténtalo de nuevo; si vuelve a fallar, avísale a Alberto.'],
   sesion: ['Tu sesión se cerró', 'Vuelve a entrar con tu PIN y suelta el archivo de nuevo.'],
@@ -189,63 +236,55 @@ function escResDe(r, f, lido) {
   var e = r.esito || (r.ok === false ? 'rifiutato' : '');
   if (e === 'caricato') {
     var per = (r.desde || r.hasta) ? ' · del ' + fdia(r.desde) + ' al ' + fdia(r.hasta) : '';
-    return { k: 'ok', t: '✓ Llegó · ' + (Number(r.nuove) || 0).toLocaleString('es-CL') + ' filas' + (Number(r.gia) > 0 ? ' · ' + Number(r.gia).toLocaleString('es-CL') + ' ya estaban' : ''), s: lido.nombre + ' · ' + hora() + per, n: Number(r.nuove) || 0 };
+    return { k: 'ok', t: '✓ Llegó · ' + (Number(r.nuove) || 0).toLocaleString('es-CL') + (Number(r.nuove) === 1 ? ' fila' : ' filas') + (Number(r.gia) > 0 ? ' · ' + Number(r.gia).toLocaleString('es-CL') + ' ya estaban' : ''), s: lido.nombre + ' · ' + hora() + per, n: Number(r.nuove) || 0 };
   }
   if (e === 'gia_caricato') return { k: 'ya', t: 'Ya estaba', s: 'Ese mismo archivo ya lo subiste' + (r.caricato_ts ? ' a las ' + hora(r.caricato_ts) : '') + '. No se cargó dos veces.' };
-  var m = ESC_MOTIVO[r.motivo] || null;
-  if (r.motivo === 'cuenta_otra' && f && f.cuenta4) m = ['No es la cuenta ···' + f.cuenta4, r.mensaje || ESC_MOTIVO.cuenta_otra[1]];
-  return { k: 'no', t: '✗ ' + (m ? m[0] : 'No pudimos guardarlo'), s: (m && !r.mensaje) ? m[1] : (r.mensaje || 'Inténtalo de nuevo; si vuelve a fallar, avísale a Alberto. No se guardó nada.') };
+  var mo = r.motivo || r.error, m = ESC_MOTIVO[mo] || null;
+  if (mo === 'cuenta_otra' && f && f.cuenta4) m = ['No es la cuenta ···' + f.cuenta4, ESC_MOTIVO.cuenta_otra[1]];
+  return { k: 'no', t: '✗ ' + (m ? m[0] : 'No pudimos guardarlo'), s: r.mensaje || (m ? m[1] : 'Inténtalo de nuevo; si vuelve a fallar, avísale a Alberto. No se guardó nada.') };
 }
 async function escSuelta(id, files) {
-  var f = (S.lista && S.lista.filas || []).filter(function (x) { return String(x.id) === String(id); })[0]; if (!f || f.espera || f.acepta === 'foto') return;
+  var f = (S.lista && S.lista.filas || []).filter(function (x) { return String(x.id) === String(id); })[0]; if (!f || f.acepta === 'foto') return;
   if (!escLevaOn()) { S.res[id] = { k: 'no', t: '✗ ' + ESC_MOTIVO.apagado[0], s: ESC_MOTIVO.apagado[1] }; pinta(); return; }
   for (var i = 0; i < files.length; i++) {
     var file = files[i]; S.res[id] = { k: 'va', t: 'Leyendo el archivo…', s: file.name + ' · no cierres la página' }; pinta();
     var lido; try { lido = await escLeggi(file); } catch (e) { lido = { ok: false, motivo: 'formato' }; }
-    if (!lido.ok) { S.res[id] = { k: 'no', t: '✗ ' + ESC_MOTIVO[lido.motivo][0], s: ESC_MOTIVO[lido.motivo][1] }; pinta(); continue; }
-    if (!lido.filas.length) { S.res[id] = { k: 'no', t: '✗ ' + ESC_MOTIVO.vacio[0], s: ESC_MOTIVO.vacio[1] }; pinta(); continue; }
-    var body = { nombre: lido.nombre, sha256: lido.sha256, bytes: lido.bytes, filas: lido.filas }; if (f.cuenta4) body.cuenta4 = String(f.cuenta4);
-    var r = await escCarga(f.cartella, body);
-    var res = escResDe(r, f, lido); if (res.k === 'ok') { S.hoy.archivos++; S.hoy.filas += res.n; }
+    var res;
+    if (!lido.ok) res = { k: 'no', t: '✗ ' + ESC_MOTIVO[lido.motivo][0], s: ESC_MOTIVO[lido.motivo][1] };
+    else if (!lido.filas.length) res = { k: 'no', t: '✗ ' + ESC_MOTIVO.vacio[0], s: ESC_MOTIVO.vacio[1] };
+    else if (lido.bytes > ESC_MAX_BYTES || lido.filas.length > ESC_MAX_FILAS) res = { k: 'no', t: '✗ ' + ESC_MOTIVO.archivo_grande[0], s: ESC_MOTIVO.archivo_grande[1] };   // il tetto si dice prima, senza chiamare
+    else {
+      var body = { nombre: lido.nombre, sha256: lido.sha256, bytes: lido.bytes, filas: lido.filas }; if (f.cuenta4) body.cuenta4 = String(f.cuenta4);
+      res = escResDe(await escCarga(f.cartella, body), f, lido);
+      if (res.k === 'ok') { S.hoy.archivos++; S.hoy.filas += res.n; }
+    }
     if (files.length > 1) res.s = (i + 1) + ' de ' + files.length + ' · ' + res.s;
     S.res[id] = res; pinta();
   }
 }
 
 /* ── il disegno ── */
-function escDettaglio(f) {
-  if (f.detalle) return esc(f.detalle);
-  var verbo = /cartola/i.test(f.titulo || '') ? 'Bájala' : 'Bájalo';
-  var h = '';
-  if (f.por_mes && f.por_mes.length) h = verbo + ' por mes: <b>' + lista3(f.por_mes.map(fmes)) + '</b>.';
-  else if (f.mes) h = 'Baja el registro de compras de <b>' + fmes(f.mes) + '</b>.';
-  else if (f.desde) h = verbo + ' del <b>' + fdia(f.desde) + '</b> al <b>' + fdia(f.hasta) + '</b>.';
-  if (f.ultimo) h += ' Lo último que tenemos es del ' + fdia(f.ultimo) + '.';
-  return h;
-}
 function escZona(f) {
-  if (f.espera) return '<div class="zona off">Esperando a ' + esc(f.espera) + '</div>';
   if (f.acepta === 'foto') return '<div class="zona off">Pronto: las fotos y los PDF todavía no se suben aquí</div>';
   var r = S.res[f.id];
   if (r) return '<div class="res ' + r.k + '" data-elige="' + esc(f.id) + '" title="' + (r.k === 'va' ? '' : 'Soltar otro archivo') + '"><b>' + esc(r.t) + '</b><small>' + esc(r.s) + '</small></div>';
-  var cosa = /cartola/i.test(f.titulo || '') ? 'la cartola' : /RCV|compras/i.test(f.titulo || '') ? 'el RCV' : 'el archivo';
-  return '<div class="zona" data-elige="' + esc(f.id) + '">Arrastra aquí ' + cosa + (f.por_mes && f.por_mes.length > 1 ? '<br>(puedes soltar varias juntas)' : '<br>o <b>elige el archivo</b>') + '</div>';
+  var cosa = f.tipo === 'cartola' ? 'la cartola' : f.tipo === 'rcv_compras' ? 'el RCV' : 'el archivo';
+  return '<div class="zona" data-elige="' + esc(f.id) + '">Arrastra aquí ' + cosa + (/por mes/i.test(f.detalle || '') ? '<br>(puedes soltar varias juntas)' : '<br>o <b>elige el archivo</b>') + '</div>';
 }
 function escFila(f) {
-  var urg = f.espera ? '' : (f.urgencia || (Number(f.dias) >= 14 ? 'r' : 'a'));
-  var dias = f.ejemplo ? '<span class="dias a">ejemplo</span>' : (f.dias != null ? '<span class="dias ' + (urg === 'r' ? 'r' : 'a') + '">' + Number(f.dias) + ' días</span>' : '');
-  var tit = esc(f.titulo || '') + (f.cuenta4 ? ' ···' + esc(f.cuenta4) : '');
-  return '<div class="tarea ' + (f.espera ? 'espera' : urg === 'r' ? 'urg' : 'med') + '" data-fila="' + esc(f.id) + '">' +
+  var urg = f.grupo === 'casa' ? 'a' : (f.urgencia || 'a');
+  var dias = f.sin_medida ? '<span class="dias a">sin medir</span>' : f.nunca ? '<span class="dias r">nunca</span>' : (f.dias != null ? '<span class="dias ' + urg + '">' + Number(f.dias) + ' días</span>' : '');
+  return '<div class="tarea ' + (urg === 'r' ? 'urg' : 'med') + '" data-fila="' + esc(f.id) + '">' +
     '<div class="emp">' + esc(f.empresa || '') + '<small>' + (f.en_juego != null ? pesos(f.en_juego) + ' en juego' : esc(f.sub || '')) + '</small></div>' +
-    '<div class="que"><b>' + tit + '</b>' + dias + '<div class="det">' + escDettaglio(f) + '</div>' + (f.se_carga_solo ? '<span class="auto">' + esc(f.se_carga_solo) + '</span>' : '') + '</div>' +
+    '<div class="que"><b>' + esc(f.titulo || '') + '</b>' + dias + '<div class="det">' + esc(f.detalle || '') + '</div>' + (f.se_carga_solo ? '<span class="auto">' + esc(f.se_carga_solo) + '</span>' : '') + '</div>' +
     escZona(f) + '</div>';
 }
-/* l'ordine è il denaro (regola 2): per empresa il saldo «en juego», dentro l'empresa le righe più vecchie prima; quelle che aspettano in fondo */
+/* l'ordine è il denaro (regola 2) e lo dà la lista (`orden`); senza `orden`, lo stesso criterio qui: saldo, poi la più vecchia */
 function escOrdina(a) {
   return a.slice().sort(function (x, y) {
-    if (!!x.espera !== !!y.espera) return x.espera ? 1 : -1;
+    if (x.orden != null && y.orden != null) return x.orden - y.orden;
     var d = (Number(y.en_juego) || 0) - (Number(x.en_juego) || 0); if (d) return d;
-    return (Number(y.dias) || 0) - (Number(x.dias) || 0);
+    return (y.dias == null ? 9999 : Number(y.dias)) - (x.dias == null ? 9999 : Number(x.dias));
   });
 }
 function escBarra() {
@@ -253,37 +292,41 @@ function escBarra() {
     (S.token ? '<span class="yo">' + esc(S.nombre || 'Tú') + ' · carga de archivos · <a data-a="salir">Salir</a></span>' : '<span class="yo"></span>') +
     '<span class="ver" id="ver">' + ESC_VER + '</span></div>' + (DEMO ? '<div class="prueba">Prueba · datos de ejemplo del 28-nov · nada sale de este computador</div>' : '');
 }
+/* la porta: ① chi sei (la lista di /auth) ② il PIN ③ la prima volta, il codice di 6 cifre e il PIN nuovo */
 function escLogin() {
-  return '<div class="pantalla login">' + escBarra() + '<div class="cuerpo">' +
-    '<div style="font-weight:700;font-size:17px">Tu escritorio</div><div style="color:var(--soft);font-size:13px;margin-top:4px">Escribe tu PIN</div>' +
-    '<form data-a="entrar"><input id="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" autofocus><br>' +
+  var h = '<div class="pantalla login">' + escBarra() + '<div class="cuerpo"><div style="font-weight:700;font-size:17px">Tu escritorio</div>';
+  if (!S.usuarios) h += '<div style="color:var(--soft);font-size:13px;margin-top:8px">' + (S.pinErr ? '' : 'Un momento…') + '</div>' + (S.pinErr ? '<p><a data-a="usuarios" style="color:var(--azul);cursor:pointer">Intentar de nuevo</a></p>' : '');
+  else if (!S.chi) h += '<div style="color:var(--soft);font-size:13px;margin:4px 0 12px">¿Quién eres?</div>' + S.usuarios.map(function (u, i) { return '<button class="btn" style="display:block;width:100%;margin:6px 0;background:#fff;color:var(--ink);border:1px solid var(--line)" data-a="chi" data-k="' + i + '">' + esc(u.nombre) + '</button>'; }).join('');
+  else if (!S.primo) h += '<div style="color:var(--soft);font-size:13px;margin-top:4px">' + esc(S.chi.nombre) + ' · escribe tu PIN</div>' +
+    '<form data-a="entrar"><input id="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8"><br>' +
     '<button class="btn" type="submit"' + (S.entrando ? ' disabled' : '') + '>' + (S.entrando ? 'Entrando…' : 'Entrar') + '</button></form>' +
-    '<div class="aviso">' + esc(S.pinErr) + '</div>' +
-    '<div style="color:var(--soft);font-size:12px;margin-top:14px">¿Olvidaste tu PIN? Pídele uno nuevo a Alberto.</div></div></div>';
+    (S.usuarios.length > 1 ? '<p style="font-size:12px"><a data-a="otro" style="color:var(--azul);cursor:pointer">No soy ' + esc(S.chi.nombre) + '</a></p>' : '');
+  else h += '<div style="color:var(--soft);font-size:13px;margin-top:4px">Es tu primera vez. Escribe el código de 6 números que te dio Alberto y elige tu PIN.</div>' +
+    '<form data-a="setpin"><input id="codigo" type="text" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="código" style="letter-spacing:.2em"><br>' +
+    '<input id="pinNuevo" type="password" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="PIN nuevo" style="margin-top:0"><br>' +
+    '<button class="btn" type="submit"' + (S.entrando ? ' disabled' : '') + '>' + (S.entrando ? 'Entrando…' : 'Guardar y entrar') + '</button></form>';
+  return h + '<div class="aviso">' + esc(S.pinErr) + '</div><div style="color:var(--soft);font-size:12px;margin-top:14px">¿Olvidaste tu PIN? Pídele uno nuevo a Alberto.</div></div></div>';
 }
 function pinta() {
   var app = document.getElementById('app');
-  if (!S.token) { app.innerHTML = escLogin(); var p = document.getElementById('pin'); if (p) p.focus(); return; }
+  if (!S.token) { app.innerHTML = escLogin(); var p = document.getElementById('pin') || document.getElementById('codigo'); if (p) p.focus(); return; }
   var h = '<div class="pantalla">' + escBarra() + '<div class="cuerpo">';
   if (!escLevaOn()) { app.innerHTML = h + '<div class="vacio"><div class="ic">⏸</div><div style="font-weight:700;font-size:16px;margin-top:6px">Tu escritorio todavía no está encendido</div><div style="color:var(--soft);font-size:13px;margin-top:6px">Alberto te avisa cuando puedas subir archivos aquí.</div></div></div></div>'; return; }
   if (!S.lista) { app.innerHTML = h + '<p class="leyenda">' + (S.err ? esc(S.err) : 'Leyendo lo que falta…') + '</p>' + (S.err ? '<p class="pie"><a data-a="recarga">Intentar de nuevo</a></p>' : '') + '</div></div>'; return; }
-  var L = S.lista, fil = escOrdina(L.filas || []), act = fil.filter(function (f) { return !f.espera && (f.grupo || 'cartolas') === 'cartolas'; });   // si contano le righe che il presidio dà sopra soglia; «lo de la casa» c'è sempre
-  var hoyA = (Number(L.hoy && L.hoy.archivos) || 0) + S.hoy.archivos, hoyF = (Number(L.hoy && L.hoy.filas) || 0) + S.hoy.filas;
-  var nom = String(S.nombre || '').split(' ')[0];
+  var L = S.lista, fil = escOrdina(L.filas || []), act = fil.filter(function (f) { return f.grupo === 'cartolas'; }), casa = fil.filter(function (f) { return f.grupo === 'casa'; });   // si contano le righe del presidio; «lo de la casa» c'è sempre
+  var hoyA = S.hoy.archivos, hoyF = S.hoy.filas, nom = String(S.nombre || '').split(' ')[0];
   if (!act.length) {
     h += '<div class="vacio"><div class="ic">✓</div><div style="font-weight:700;font-size:16px;margin-top:6px">Hoy no te falta nada</div>' +
       '<div style="color:var(--soft);font-size:13px;margin-top:6px">Las empresas tienen cartolas de hasta 3 días y compras de hasta 7.</div>' +
       (hoyA ? '<div style="color:var(--soft);font-size:12px;margin-top:14px">Subiste hoy: ' + hoyA + (hoyA === 1 ? ' archivo' : ' archivos') + ' · ' + hoyF.toLocaleString('es-CL') + ' filas</div>' : '') + '</div>';
-    var casa = fil.filter(function (f) { return f.grupo === 'casa'; }); if (casa.length) h += '<div class="bloque"><h3>Lo de la casa · esto siempre es tuyo</h3>' + casa.map(escFila).join('') + '</div>';
   } else {
     h += '<div class="saludo"><h2>Buenos días' + (nom ? ', ' + esc(nom) : '') + '</h2><span class="cuenta">Te quedan <b>' + act.length + (act.length === 1 ? ' fila' : ' filas') + '</b>. Empieza por arriba: es donde hay más plata en juego.</span></div>' +
-      '<p class="leyenda">Cada fila dice qué bajar y desde qué fecha. Arrastra el archivo a su fila: te decimos al tiro si llegó. Cuando una fila se carga sola, desaparece de aquí.</p>';
-    var gr = [['cartolas', 'Cartolas y compras · hasta que Emisso las lea solo'], ['casa', 'Lo de la casa · esto siempre es tuyo']];
-    gr.forEach(function (g) { var fs = fil.filter(function (f) { return (f.grupo || 'cartolas') === g[0]; }); if (fs.length) h += '<div class="bloque"><h3>' + g[1] + '</h3>' + fs.map(escFila).join('') + '</div>'; });
+      '<p class="leyenda">Cada fila dice qué bajar y desde qué fecha. Arrastra el archivo a su fila: te decimos al tiro si llegó. Cuando una fila se carga sola, desaparece de aquí.</p>' +
+      '<div class="bloque"><h3>Cartolas y compras · hasta que LUPA las lea solo</h3>' + act.map(escFila).join('') + '</div>';
   }
+  if (casa.length) h += '<div class="bloque"><h3>Lo de la casa · esto siempre es tuyo</h3>' + casa.map(escFila).join('') + '</div>';
   h += '<div class="pie">' + (hoyA ? '<span class="hecho">✓ Hoy subiste ' + hoyA + (hoyA === 1 ? ' archivo' : ' archivos') + ' · ' + hoyF.toLocaleString('es-CL') + ' filas</span>' : '') +
-    (L.proximos || []).map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') +
-    (L.datos_al ? '<span>Datos al ' + fdia(L.datos_al) + ', ' + esc(String(L.datos_al).slice(11, 16)) + '</span>' : '') + '<span><a data-a="recarga">Actualizar</a></span></div>';
+    (L.pie ? '<span>' + esc(L.pie) + '</span>' : '') + '<span><a data-a="recarga">Actualizar</a></span></div>';
   app.innerHTML = h + '</div></div><input id="archivo" type="file" accept=".csv,.txt,.xlsx,.xls" multiple hidden>';
 }
 async function escCarica() {
@@ -293,61 +336,90 @@ async function escCarica() {
   if (!j || j._rete || !Array.isArray(j.filas)) { S.err = 'No pudimos leer lo que falta. Revisa la conexión e inténtalo de nuevo.'; pinta(); return; }
   S.lista = j; pinta();
 }
-function escEsci(msg) { S.token = ''; S.nombre = ''; S.lista = null; S.res = {}; S.pinErr = msg || ''; try { sessionStorage.removeItem('esc_token'); sessionStorage.removeItem('esc_nombre'); } catch (e) {} pinta(); }
+function escEsci(msg) { S.token = ''; S.nombre = ''; S.lista = null; S.res = {}; S.pinErr = msg || ''; S.primo = false; try { sessionStorage.removeItem('esc_token'); sessionStorage.removeItem('esc_nombre'); } catch (e) {} pinta(); if (!S.usuarios) escUsuarios().then(pinta); }
 
 /* ── i gesti ── */
 var ESC_SCELTA = null;
 document.addEventListener('submit', async function (ev) {
-  if (!ev.target || ev.target.getAttribute('data-a') !== 'entrar') return; ev.preventDefault();
-  var pin = String((document.getElementById('pin') || {}).value || '').replace(/\D/g, '');
-  if (pin.length < 4) { S.pinErr = 'El PIN tiene al menos 4 números.'; pinta(); return; }
+  var k = ev.target && ev.target.getAttribute('data-a'); if (k !== 'entrar' && k !== 'setpin') return; ev.preventDefault();
+  if (!S.chi || S.entrando) return;
+  var body;
+  if (k === 'entrar') {
+    var pin = String((document.getElementById('pin') || {}).value || '').replace(/\D/g, '');
+    if (pin.length < 4) { S.pinErr = 'El PIN tiene 4 números.'; pinta(); return; }
+    body = { accion: 'login', persona_id: S.chi.persona_id, pin: pin, local: 'todos', dispositivo: escDisp() };
+  } else {
+    var cod = String((document.getElementById('codigo') || {}).value || '').replace(/\D/g, ''), nu = String((document.getElementById('pinNuevo') || {}).value || '').replace(/\D/g, '');
+    if (cod.length !== 6) { S.pinErr = 'El código tiene 6 números.'; pinta(); return; }
+    if (nu.length !== 4) { S.pinErr = 'El PIN nuevo tiene que tener 4 números.'; pinta(); return; }
+    body = { accion: 'set_pin', persona_id: S.chi.persona_id, codigo: cod, pin_nuevo: nu, dispositivo: escDisp() };
+  }
   S.entrando = true; S.pinErr = ''; pinta();
-  var r = await escEntra(pin); pin = '';
+  var r = await escAuthPost(body); body = null;   // il PIN e il codice non restano da nessuna parte
   S.entrando = false;
-  if (r && r.ok && r.token) { S.token = String(r.token); S.nombre = String(r.nombre || ''); try { sessionStorage.setItem('esc_token', S.token); sessionStorage.setItem('esc_nombre', S.nombre); } catch (e) {} await escLeva(); escCarica(); return; }
-  S.pinErr = r && r._rete ? 'Sin conexión: inténtalo de nuevo.' : 'Ese PIN no entra. ¿Lo escribiste bien? Si lo olvidaste, pídele uno nuevo a Alberto.'; pinta();
+  if (r && r.ok && r.primer_acceso && !r.token) { S.primo = true; pinta(); return; }
+  if (r && r.ok && r.token) { escDentro(r); await escLeva(); escCarica(); return; }
+  S.pinErr = escAuthErr(r); pinta();
 });
 document.addEventListener('click', function (ev) {
-  var a = ev.target.closest && ev.target.closest('[data-a]'); if (a) { var k = a.getAttribute('data-a'); if (k === 'salir') escEsci(''); else if (k === 'recarga') { S.res = {}; escCarica(); } return; }
+  var a = ev.target.closest && ev.target.closest('[data-a]');
+  if (a) { var k = a.getAttribute('data-a');
+    if (k === 'salir') escEsci('');
+    else if (k === 'recarga') { S.res = {}; escCarica(); }
+    else if (k === 'usuarios') { S.pinErr = ''; pinta(); escUsuarios().then(pinta); }
+    else if (k === 'chi') { S.chi = S.usuarios[+a.getAttribute('data-k')]; S.primo = false; S.pinErr = ''; pinta(); }
+    else if (k === 'otro') { S.chi = null; S.primo = false; S.pinErr = ''; pinta(); }
+    return; }
   var z = ev.target.closest && ev.target.closest('[data-elige]'); if (!z) return;
   var id = z.getAttribute('data-elige'); if (S.res[id] && S.res[id].k === 'va') return;
   ESC_SCELTA = id; var inp = document.getElementById('archivo'); if (inp) { inp.value = ''; inp.click(); }
 });
 document.addEventListener('change', function (ev) { if (ev.target && ev.target.id === 'archivo' && ESC_SCELTA && ev.target.files.length) escSuelta(ESC_SCELTA, Array.from(ev.target.files)); });
 /* il file si lascia cadere SULLA RIGA (regola 4): fuori da una riga non succede niente, e il browser non apre il file */
-function escRigaDi(ev) { var t = ev.target.closest && ev.target.closest('[data-fila]'); return t; }
-document.addEventListener('dragover', function (ev) { ev.preventDefault(); document.querySelectorAll('.tarea.sobre').forEach(function (x) { x.classList.remove('sobre'); }); var t = escRigaDi(ev); if (t && !t.classList.contains('espera')) t.classList.add('sobre'); });
+function escRigaDi(ev) { return ev.target.closest ? ev.target.closest('[data-fila]') : null; }
+document.addEventListener('dragover', function (ev) { ev.preventDefault(); document.querySelectorAll('.tarea.sobre').forEach(function (x) { x.classList.remove('sobre'); }); var t = escRigaDi(ev); if (t) t.classList.add('sobre'); });
 document.addEventListener('dragleave', function (ev) { var t = escRigaDi(ev); if (t && !t.contains(ev.relatedTarget)) t.classList.remove('sobre'); });
 document.addEventListener('drop', function (ev) { ev.preventDefault(); document.querySelectorAll('.tarea.sobre').forEach(function (x) { x.classList.remove('sobre'); }); var t = escRigaDi(ev); if (!t || !ev.dataTransfer || !ev.dataTransfer.files.length) return; var id = t.getAttribute('data-fila'); if (S.res[id] && S.res[id].k === 'va') return; escSuelta(id, Array.from(ev.dataTransfer.files)); });
 
-/* ── il bordo finto (demo): i numeri del presidio dell'età del 28-nov 17:20, come il mockup ── */
+/* ── il bordo finto (demo): la lista di 🧾 come l'ha stampata `lista_mattina.mjs --json` il 28-nov 17:31, e /auth come lo descrive ⚙️ ── */
 var ESC_DEMO = {
   visti: {},
-  lista: { ok: true, datos_al: '2026-11-28T07:00', hoy: { archivos: 0, filas: 0 }, proximos: ['Sueldos de noviembre (KAME): llega el viernes 4-dic, te avisamos aquí'],
+  lista: { generado: '2026-11-28 17:31', zona: 'America/Santiago', pie: 'Datos al 28-nov, 17:31',
     filas: [
-      { id: 'kele-cart', grupo: 'cartolas', empresa: 'KELE', en_juego: 210922919, tipo: 'cartola', cartella: 'santander', cuenta4: '8280', titulo: 'Cartola Santander', desde: '2026-11-19', hasta: '2026-11-27', ultimo: '2026-11-18', dias: 10, urgencia: 'r', se_carga_solo: 'Se carga sola cuando Emisso lea Santander' },
-      { id: 'kele-mp', grupo: 'cartolas', empresa: 'KELE', en_juego: 210922919, tipo: 'mp', cartella: 'mp', titulo: 'Estado de cuenta Mercado Pago', desde: '2026-11-15', hasta: '2026-11-27', ultimo: '2026-11-14', dias: 14, urgencia: 'r' },
-      { id: 'kele-rcv', grupo: 'cartolas', empresa: 'KELE', en_juego: 210922919, tipo: 'rcv', cartella: 'rcv', titulo: 'Compras del SII (RCV)', mes: '2026-11', ultimo: '2026-11-16', dias: 12, urgencia: 'a', se_carga_solo: 'Se carga solo cuando Emisso lea el SII' },
-      { id: 'pinsa-cart', grupo: 'cartolas', empresa: 'PINSA', en_juego: 147039696, tipo: 'cartola', cartella: 'santander', cuenta4: '6547', titulo: 'Cartola Santander', desde: '2026-10-03', hasta: '2026-11-27', ultimo: '2026-10-02', dias: 57, urgencia: 'r', detalle: 'Bájala del 3-oct al 27-nov. Si el banco no deja tanto, bájala por mes: octubre y noviembre.', se_carga_solo: 'Se carga sola cuando Emisso lea Santander' },
-      { id: 'momi-cart', grupo: 'cartolas', empresa: 'MOMI', en_juego: 123298464, tipo: 'cartola', cartella: 'santander', cuenta4: '5929', titulo: 'Cartola Santander', desde: '2026-11-19', hasta: '2026-11-27', dias: 10, urgencia: 'r', se_carga_solo: 'Se carga sola cuando Emisso lea Santander' },
-      { id: 'momi-rcv', grupo: 'cartolas', empresa: 'MOMI', en_juego: 123298464, tipo: 'rcv', cartella: 'rcv', titulo: 'Compras del SII (RCV)', mes: '2026-11', dias: 12, urgencia: 'a' },
-      { id: 'exo-cart', grupo: 'cartolas', empresa: 'EXO', en_juego: 88551548, tipo: 'cartola', cartella: 'santander', cuenta4: '5790', titulo: 'Cartola Santander', por_mes: ['2026-09', '2026-10', '2026-11'], ultimo: '2026-09-10', dias: 79, urgencia: 'r' },
-      { id: 'exo-rcv', grupo: 'cartolas', empresa: 'EXO', en_juego: 88551548, tipo: 'rcv', cartella: 'rcv', titulo: 'Compras del SII (RCV)', detalle: 'Baja octubre y noviembre. Lo último es una factura del 10-oct.', dias: 49, urgencia: 'r' },
-      { id: 'dae', grupo: 'cartolas', empresa: 'DAE', en_juego: 40436, tipo: 'cartola', cartella: 'santander', cuenta4: '3635', titulo: 'Cartola Santander y RCV', detalle: 'Cartola del 17-nov al 27-nov. RCV: DAE tiene una sola factura (27-ago); si no hubo compras, no hay nada que bajar.', dias: 12, urgencia: 'a' },
-      { id: 'pinsa-mp', grupo: 'casa', empresa: 'PINSA', sub: 'Mercado Pago', tipo: 'mp', cartella: 'mp', titulo: 'Estado de cuenta Mercado Pago', detalle: 'Cada mañana, el de ayer.', ejemplo: true },
-      { id: 'caja', grupo: 'casa', empresa: 'Caja', sub: 'Riesco', tipo: 'caja', titulo: 'Cortes del POS y sobres de anoche', detalle: 'La foto o el PDF del corte de cada turno.', ejemplo: true, acepta: 'foto' },
-      { id: 'pagos', grupo: 'casa', empresa: 'Pagos', sub: 'a proveedores', titulo: 'Comprobantes «Realizada» de los pagos', detalle: 'Los hace quien paga (Alberto o Ale): aquí no tienes que subirlos.', espera: 'Alberto' }
-    ] }
+      { orden: 1, empresa: 'KELE', en_juego: 210922919, tipo: 'estado_mp', cartella: 'mp_estado', cuenta_ult4: null, titulo: 'Estado de cuenta Mercado Pago', dias: 14, ultimo: '2026-11-14', desde: '2026-11-15', hasta: '2026-11-27', detalle: 'Bájalo del 15-nov al 27-nov. Lo último que tenemos es del 14-nov.', auto: null, urgencia: 'alta' },
+      { orden: 2, empresa: 'KELE', en_juego: 210922919, tipo: 'rcv_compras', cartella: 'sii', cuenta_ult4: null, titulo: 'Compras del SII (RCV)', dias: 12, ultimo: '2026-11-16', desde: '2026-11-17', hasta: '2026-11-28', detalle: 'Baja el registro de compras de noviembre. Lo último es una factura del 16-nov.', auto: 'Se carga solo cuando LUPA lea el SII', urgencia: 'media' },
+      { orden: 3, empresa: 'KELE', en_juego: 210922919, tipo: 'cartola', cartella: 'bancos', cuenta_ult4: '8280', titulo: 'Cartola Santander ···8280', dias: 10, ultimo: '2026-11-18', desde: '2026-11-19', hasta: '2026-11-27', detalle: 'Bájala del 19-nov al 27-nov. Lo último que tenemos es del 18-nov.', auto: 'Se carga sola cuando LUPA lea Santander', urgencia: 'alta' },
+      { orden: 4, empresa: 'PINSA', en_juego: 147039696, tipo: 'cartola', cartella: 'bancos', cuenta_ult4: '6547', titulo: 'Cartola Santander ···6547', dias: 57, ultimo: '2026-10-02', desde: '2026-10-03', hasta: '2026-11-27', detalle: 'Bájala por mes: octubre y noviembre. Lo último que tenemos es del 2-oct.', auto: 'Se carga sola cuando LUPA lea Santander', urgencia: 'alta' },
+      { orden: 5, empresa: 'MOMI', en_juego: 123298464, tipo: 'rcv_compras', cartella: 'sii', cuenta_ult4: null, titulo: 'Compras del SII (RCV)', dias: 12, ultimo: '2026-11-16', desde: '2026-11-17', hasta: '2026-11-28', detalle: 'Baja el registro de compras de noviembre. Lo último es una factura del 16-nov.', auto: 'Se carga solo cuando LUPA lea el SII', urgencia: 'media' },
+      { orden: 6, empresa: 'MOMI', en_juego: 123298464, tipo: 'cartola', cartella: 'bancos', cuenta_ult4: '5929', titulo: 'Cartola Santander ···5929', dias: 10, ultimo: '2026-11-18', desde: '2026-11-19', hasta: '2026-11-27', detalle: 'Bájala del 19-nov al 27-nov. Lo último que tenemos es del 18-nov.', auto: 'Se carga sola cuando LUPA lea Santander', urgencia: 'alta' },
+      { orden: 7, empresa: 'EXO', en_juego: 88551548, tipo: 'cartola', cartella: 'bancos', cuenta_ult4: '5790', titulo: 'Cartola Santander ···5790', dias: 79, ultimo: '2026-09-10', desde: '2026-09-11', hasta: '2026-11-27', detalle: 'Bájala por mes: septiembre, octubre y noviembre. Lo último que tenemos es del 10-sep.', auto: 'Se carga sola cuando LUPA lea Santander', urgencia: 'alta' },
+      { orden: 8, empresa: 'EXO', en_juego: 88551548, tipo: 'rcv_compras', cartella: 'sii', cuenta_ult4: null, titulo: 'Compras del SII (RCV)', dias: 49, ultimo: '2026-10-10', desde: '2026-10-11', hasta: '2026-11-28', detalle: 'Baja el registro de compras de octubre y noviembre. Lo último es una factura del 10-oct.', auto: 'Se carga solo cuando LUPA lea el SII', urgencia: 'alta' },
+      { orden: 9, empresa: 'DAE', en_juego: 40436, tipo: 'rcv_compras', cartella: 'sii', cuenta_ult4: null, titulo: 'Compras del SII (RCV)', dias: 93, ultimo: '2026-08-27', desde: '2026-08-28', hasta: '2026-11-28', detalle: 'Baja el registro de compras de agosto, septiembre, octubre y noviembre. Lo último es una factura del 27-ago.', auto: 'Se carga solo cuando LUPA lea el SII', urgencia: 'alta' },
+      { orden: 10, empresa: 'DAE', en_juego: 40436, tipo: 'cartola', cartella: 'bancos', cuenta_ult4: '3635', titulo: 'Cartola Santander ···3635', dias: 12, ultimo: '2026-11-16', desde: '2026-11-17', hasta: '2026-11-27', detalle: 'Bájala del 17-nov al 27-nov. Lo último que tenemos es del 16-nov.', auto: 'Se carga sola cuando LUPA lea Santander', urgencia: 'alta' }
+    ],
+    casa: [
+      { empresa: 'PINSA', tipo: 'estado_mp', cartella: 'mp_estado', titulo: 'Estado de cuenta Mercado Pago', detalle: 'Cada mañana, el de ayer.', sin_medida: true },
+      { empresa: 'Caja', tipo: 'caja', cartella: 'caja', titulo: 'Cortes del POS y sobres de anoche', detalle: 'La foto o el PDF del corte de cada turno.', sin_medida: true }
+    ] },
+  usuarios: [{ persona_id: 'demo-mayra', nombre: 'Mayra', cargo: 'carga', tiene_pin: true, local: '*' }]
 };
-/* risponde come `pinsita.carga`: stesso sha ⇒ gia_caricato; un file vuoto o senza la colonna «Fecha» in una cartola ⇒ rifiutato */
+/* /auth finto: il PIN della demo è 1234; «0000» fa vedere il primo accesso (codigo 123456) */
+function escDemoAuth(b) {
+  if (b.accion === 'lista_usuarios') return { ok: true, usuarios: ESC_DEMO.usuarios };
+  if (b.accion === 'login') { if (b.pin === '1234') return { ok: true, primer_acceso: false, cargo: 'carga', local: '*', token: 'demo-token', pid: b.persona_id };
+    if (b.pin === '0000') return { ok: true, primer_acceso: true, cargo: 'carga', pid: b.persona_id }; return { ok: false, error: 'pin_errado' }; }
+  if (b.accion === 'set_pin') return b.codigo === '123456' ? { ok: true, primer_acceso: false, cargo: 'carga', token: 'demo-token', via: 'set_pin' } : { ok: false, error: 'codigo_invalido' };
+  return { ok: false, error: 'excepcion' };
+}
+/* risponde come `pinsita.carga`: stesso sha ⇒ gia_caricato; una cartola senza la colonna «Fecha» ⇒ rifiutato */
 function escDemoCarga(cartella, b) {
   if (ESC_DEMO.visti[b.sha256]) return { esito: 'gia_caricato', nuove: 0, gia: b.filas.length, caricato_ts: ESC_DEMO.visti[b.sha256] };
-  if (cartella === 'santander' && b.filas.length && !Object.keys(b.filas[0]).some(function (k) { return /fecha/i.test(k); })) return { esito: 'rifiutato', motivo: 'columnas', mensaje: 'Falta la columna «Fecha». ¿Lo bajaste en Excel desde el banco? Inténtalo de nuevo; si vuelve a fallar, avísale a Alberto.' };
+  if (cartella === 'bancos' && !Object.keys(b.filas[0]).some(function (k) { return /fecha/i.test(k); })) return { esito: 'rifiutato', motivo: 'columnas' };
   ESC_DEMO.visti[b.sha256] = Date.now();
   return { esito: 'caricato', nuove: b.filas.length, gia: 0, scarto: 0 };
 }
 
-escLeva().then(function () { if (S.token) escCarica(); else pinta(); });
+escLeva().then(function () { if (S.token) escCarica(); else escUsuarios().then(pinta); });
 pinta();
 </script>
 </body>
