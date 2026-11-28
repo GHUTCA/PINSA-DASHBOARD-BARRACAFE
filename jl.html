@@ -195,7 +195,7 @@
     <div class="yo"><b id="yo">—</b><em>JL</em></div>
     <div class="dockrow" id="dockRow"></div>
   </div>
-  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.32</span></div>
+  <div class="edad" id="edad"><span id="edadT">leyendo la sala…</span><span class="ver" id="ver">jl v0.6.34</span></div>
   <div id="tiraSlot"></div>
   <div class="body" id="body"></div>
   <div class="dock">
@@ -1731,7 +1731,7 @@ function caja() {
    CONTO (`conto_id`), mai per mesa: la 194 ne ha due vivi, del 25 e del 26. «Cerrar como FAM» chiude QUEL conto a $0 col medio FAM (il consumo resta
    scritto): per chi (la lista FAM della sala), il perché (≥ 8) e il código FAM, col PIN del JL della sessione. La chiave del gesto la conia il vetro
    una volta per riga (un ritento non chiude due volte). Il código non resta nel telefono. Leva `cuentas_pasadas_on` spenta ⇒ la card non c'è. */
-var CP = { ts: 0, volo: false, r: null, err: '', sel: null, para: '', mot: '', cod: '', uid: {}, msg: '', invio: false };
+var CP = { ts: 0, volo: false, r: null, err: '', sel: null, para: '', mot: '', cod: '', uid: {}, msg: '', invio: false, chiusi: {} };   // [v0.6.34] chiusi: conto_id ⇒ ora del sì
 var CP_PARA = ['Daniela', 'Elisa', 'Ale', 'Kele', 'Nea', 'Alberto'];   // la stessa lista della sala (sala_nueva SN_FAM_PARA, sala.html DTO_FAMILIA)
 var CP_ERR = { codigo_fam_invalido: 'El código FAM no vale.', conto_de_hoy: 'Esa cuenta es de hoy: se cobra desde la mesa.', conto_muerto: 'Esa cuenta ya estaba cerrada.',
   motivo_corto: 'El motivo es muy corto (mínimo 8 letras).', pin_jl_invalido: 'Tu PIN no vale ahora: vuelve a entrar.', pg_no_responde: 'El sistema no responde: inténtalo en un minuto.', apagado: 'Todavía no está activo.' };
@@ -1749,6 +1749,11 @@ function cpCard() {
   if (!CP.r) return h + '<p class="vacio">' + (CP.err ? '⚠️ ' + esc(CP_ERR[CP.err] || CP.err) : 'Cargando…') + '</p></div>';
   var cs = CP.r.cuentas || [];
   if (!cs.length) return h + '<p class="vacio">No hay cuentas abiertas de días pasados.</p></div>';
+  /* [v0.6.34 · 🔴 P6 di 🍳 «LO STESSO CONTO SI CHIUDE DUE VOLTE»] dopo il sì PG non sa ancora la morte (la coda drena in minuti): la riga restava e un secondo
+     tocco, con una chiave nuova, chiudeva di nuovo. La cura vera è nel bordo (⚙️, `famcpc:`); qui, in più, la riga chiusa sparisce subito su questo telefono
+     e la sua chiave NON si butta: se tornasse, il gesto riparte con la chiave di prima e il bordo risponde quello di allora. */
+  cs = cs.filter(function (c) { return !CP.chiusi[String(c.conto_id || '')]; });
+  if (!cs.length) return h + '<p class="vacio">No hay cuentas abiertas de días pasados.</p></div>';
   cs.forEach(function (c) { var id = String(c.conto_id || ''); if (!id) return; var sel = CP.sel === id;
     h += '<div style="border-top:1px solid var(--filo);margin-top:8px;padding-top:6px"><div class="riga" style="border:0;padding:2px 0"><span><b>Mesa ' + esc(c.mesa) + '</b>' + (c.prueba ? ' · prueba' : '') +
       '<small>' + esc(c.dia || '') + (c.mesero ? ' · ' + esc(c.mesero) : '') + '</small></span><span class="st num">' + pesos(c.consumo || 0) + '</span></div>';
@@ -1761,7 +1766,7 @@ function cpCard() {
   return h + '<p style="font-size:11px;color:var(--ink3);margin-top:6px">Una cuenta a la vez. Se cierra en $0 como FAM: lo consumido queda escrito, sin boleta ni propina.</p></div>';
 }
 async function cpCierra() {
-  var id = CP.sel; if (!id || CP.invio) return;
+  var id = CP.sel; if (!id || CP.invio || CP.chiusi[id]) return;   // [v0.6.34] mai due volte lo stesso conto da questo telefono
   var c = ((CP.r && CP.r.cuentas) || []).filter(function (x) { return String(x.conto_id) === id; })[0]; if (!c) { CP.sel = null; jlPinta(true); return; }
   if (!CP.para && !c.prueba) { CP.msg = '⚠️ Elige para quién es.'; jlPinta(true); return; }
   if (String(CP.mot || '').trim().length < 8) { CP.msg = '⚠️ ' + CP_ERR.motivo_corto; jlPinta(true); return; }
@@ -1770,7 +1775,7 @@ async function cpCierra() {
   CP.invio = true; CP.msg = ''; jlPinta(true); var r = null;
   try { r = await cjPost({ verbo: 'fam_conto_pasado', pin_jl: SES.pin, conto_id: id, para: CP.para, motivo: String(CP.mot).trim(), codigo_fam: String(CP.cod).trim(), uid_gesto: CP.uid[id], prueba: !!c.prueba }); } catch (e) { r = null; }
   CP.invio = false; CP.cod = '';   // il código non resta nel telefono, nemmeno dopo un no
-  if (r && r.ok) { CP.msg = '✓ Mesa ' + c.mesa + ' del ' + (c.dia || '') + ' cerrada como FAM'; CP.sel = null; CP.para = ''; CP.mot = ''; delete CP.uid[id]; CP.ts = 0; }
+  if (r && r.ok) { CP.msg = '✓ Mesa ' + c.mesa + ' del ' + (c.dia || '') + ' cerrada como FAM'; CP.sel = null; CP.para = ''; CP.mot = ''; CP.chiusi[id] = Date.now(); CP.ts = 0; }   // [v0.6.34] la chiave resta (CP.uid[id]), la riga sparisce
   else CP.msg = '⚠️ ' + (r ? (r.mensaje || CP_ERR[r.error] || r.error || 'No se pudo') : 'No llegó al sistema: vuelve a tocar, no se cierra dos veces');
   jlPinta(true);
 }
