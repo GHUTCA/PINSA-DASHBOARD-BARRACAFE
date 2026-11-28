@@ -77,7 +77,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
 <div id="app"></div>
 <script>
 'use strict';
-var ESC_VER = 'escritorio v0.2.0';
+var ESC_VER = 'escritorio v0.3.0';
 var CFG = { BORDE: 'https://pinsita-borde.alberto-agostini.workers.dev' };
 var QS = new URLSearchParams(location.search);
 var DEMO = QS.get('demo') === '1';
@@ -159,17 +159,19 @@ async function escLista() {
   return escNormalizza(j);
 }
 /* la lista di 🧾 (`lista_mattina.mjs --json`) → le righe della pagina. Un posto solo: se cambia un nome, cambia qui. */
+var ESC_CARTELLA = { mp_estado: 'mp' };   // 🚚 «ⓐ, GIÀ DENTRO 73ab45d144»: le cartelle della porta sono bancos · sii · mp · caja · rrhh
+function escCart(c) { return ESC_CARTELLA[c] || c; }
 function escNormalizza(j) {
   if (!j || j._rete || j._status === 401 || j._status === 403 || !Array.isArray(j.filas)) return j;
   var out = { _status: j._status, pie: j.pie || '', generado: j.generado || '', filas: [] };
   j.filas.forEach(function (f) {
     out.filas.push({ id: [f.cartella, f.empresa, f.cuenta_ult4 || f.tipo].join('|'), grupo: 'cartolas', orden: f.orden, empresa: f.empresa, en_juego: f.en_juego,
-      tipo: f.tipo, cartella: f.cartella, cuenta4: f.cuenta_ult4 || null, titulo: f.titulo, dias: f.dias, ultimo: f.ultimo, desde: f.desde, hasta: f.hasta,
+      tipo: f.tipo, cartella: escCart(f.cartella), cuenta4: f.cuenta_ult4 || null, titulo: f.titulo, dias: f.dias, ultimo: f.ultimo, desde: f.desde, hasta: f.hasta,
       detalle: f.detalle, se_carga_solo: f.auto || null, urgencia: f.urgencia === 'alta' ? 'r' : 'a', nunca: f.dias == null });
   });
   (j.casa || []).forEach(function (f, i) {
     out.filas.push({ id: ['casa', f.cartella, f.empresa, i].join('|'), grupo: 'casa', orden: 1000 + i, empresa: f.empresa, sub: f.tipo === 'estado_mp' ? 'Mercado Pago' : '',
-      tipo: f.tipo, cartella: f.cartella, titulo: f.titulo, detalle: f.detalle, sin_medida: !!f.sin_medida, acepta: f.tipo === 'caja' ? 'foto' : 'archivo' });
+      tipo: f.tipo, cartella: escCart(f.cartella), titulo: f.titulo, detalle: f.detalle, sin_medida: !!f.sin_medida, acepta: f.tipo === 'caja' ? 'foto' : 'archivo' });
   });
   return out;
 }
@@ -206,14 +208,19 @@ function escXlsxLib() {
   if (window.XLSX) return Promise.resolve(window.XLSX);
   return new Promise(function (ok, ko) { var s = document.createElement('script'); s.src = XLSX_URL; s.onload = function () { window.XLSX ? ok(window.XLSX) : ko(new Error('xlsx')); }; s.onerror = function () { ko(new Error('xlsx')); }; document.head.appendChild(s); });
 }
+function escFechaIso(v) { v = String(v || '').trim(); var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v); if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})\b/.exec(v); if (m && +m[2] >= 1 && +m[2] <= 12 && +m[1] >= 1 && +m[1] <= 31) return m[3] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[1]).padStart(2, '0'); return null; }
+function escPeriodo(filas) {   // la prima colonna che si chiama «Fecha…»: il giorno più vecchio e il più recente. Senza colonna o senza date chiare: niente
+  var k = filas.length ? Object.keys(filas[0]).filter(function (h) { return /fecha/i.test(h); })[0] : null; if (!k) return {};
+  var ds = filas.map(function (r) { return escFechaIso(r[k]); }).filter(Boolean).sort(); return ds.length ? { desde: ds[0], hasta: ds[ds.length - 1] } : {}; }
 async function escLeggi(file) {
   var buf = await file.arrayBuffer(), nome = String(file.name || ''), ext = (/\.([a-z0-9]+)$/i.exec(nome) || [])[1];
   ext = String(ext || '').toLowerCase();
   var sha = await escSha(buf), filas;
   if (ext === 'csv' || ext === 'txt') filas = escCsv(new TextDecoder('utf-8').decode(buf));
   else if (ext === 'xlsx' || ext === 'xls') {
-    var X = await escXlsxLib(), wb = X.read(new Uint8Array(buf), { type: 'array' }), ws = wb.Sheets[wb.SheetNames[0]];
-    filas = escOggetti(X.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }));
+    var X = await escXlsxLib(), wb = X.read(new Uint8Array(buf), { type: 'array', cellDates: true }), ws = wb.Sheets[wb.SheetNames[0]];
+    filas = escOggetti(X.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', dateNF: 'yyyy-mm-dd' }));
   } else return { ok: false, motivo: 'formato', sha: sha };
   return { ok: true, nombre: nome, sha256: sha, bytes: buf.byteLength, filas: filas };
 }
@@ -235,7 +242,7 @@ function escResDe(r, f, lido) {
   if (r._status === 401 || r._status === 403) return { k: 'no', t: '✗ ' + ESC_MOTIVO.sesion[0], s: ESC_MOTIVO.sesion[1] };
   var e = r.esito || (r.ok === false ? 'rifiutato' : '');
   if (e === 'caricato') {
-    var per = (r.desde || r.hasta) ? ' · del ' + fdia(r.desde) + ' al ' + fdia(r.hasta) : '';
+    var p0 = (r.desde || r.hasta) ? r : escPeriodo(lido.filas), per = p0.desde ? ' · del ' + fdia(p0.desde) + ' al ' + fdia(p0.hasta) : '';
     return { k: 'ok', t: '✓ Llegó · ' + (Number(r.nuove) || 0).toLocaleString('es-CL') + (Number(r.nuove) === 1 ? ' fila' : ' filas') + (Number(r.gia) > 0 ? ' · ' + Number(r.gia).toLocaleString('es-CL') + ' ya estaban' : ''), s: lido.nombre + ' · ' + hora() + per, n: Number(r.nuove) || 0 };
   }
   if (e === 'gia_caricato') return { k: 'ya', t: 'Ya estaba', s: 'Ese mismo archivo ya lo subiste' + (r.caricato_ts ? ' a las ' + hora(r.caricato_ts) : '') + '. No se cargó dos veces.' };
@@ -255,6 +262,7 @@ async function escSuelta(id, files) {
     else if (lido.bytes > ESC_MAX_BYTES || lido.filas.length > ESC_MAX_FILAS) res = { k: 'no', t: '✗ ' + ESC_MOTIVO.archivo_grande[0], s: ESC_MOTIVO.archivo_grande[1] };   // il tetto si dice prima, senza chiamare
     else {
       var body = { nombre: lido.nombre, sha256: lido.sha256, bytes: lido.bytes, filas: lido.filas }; if (f.cuenta4) body.cuenta4 = String(f.cuenta4);
+      var per = escPeriodo(lido.filas); if (per.desde) { body.desde = per.desde; body.hasta = per.hasta; }   // 🚚: dal corpo, il bordo non legge il file
       res = escResDe(await escCarga(f.cartella, body), f, lido);
       if (res.k === 'ok') { S.hoy.archivos++; S.hoy.filas += res.n; }
     }
